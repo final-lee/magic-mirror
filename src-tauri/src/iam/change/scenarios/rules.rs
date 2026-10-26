@@ -181,10 +181,14 @@ fn gaining_permissions_never_trips_the_caller_rule() {
 
 #[test]
 fn the_warning_says_when_the_caller_could_no_longer_undo_the_change() {
+    // P3: 확인 문구가 "이 자격 증명으로는 되돌릴 수 없어요"라고 하니 미리보기도 되돌릴 수 있다고 하지 않는다
     let s = snapshot();
     let p = preview(&s, &detach(ADMINS, ADMIN_POLICY), None);
     let message = only(&p, WarnLevel::Confirm);
     assert!(message.contains("되돌") && message.contains("iam:AttachGroupPolicy"), "{message}");
+    assert!(!p.reversible);
+    // 기록에는 역변경이 남는다: 권한이 있는 다른 자격 증명으로는 되돌릴 수 있다
+    assert_eq!(inverse(&s, &detach(ADMINS, ADMIN_POLICY), None), Some(attach(ADMINS, ADMIN_POLICY)));
 }
 
 #[test]
@@ -195,6 +199,7 @@ fn the_warning_stays_quiet_about_undoing_when_the_caller_keeps_the_needed_rights
     let message = only(&p, WarnLevel::Confirm);
     assert!(!message.contains("되돌"), "{message}");
     assert_eq!(p.confirm_text.as_deref(), Some("admins"));
+    assert!(p.reversible);
 }
 
 #[test]

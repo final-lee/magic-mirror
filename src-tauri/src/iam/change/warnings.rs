@@ -174,14 +174,29 @@ pub(super) fn notices(s: &Snapshot, c: &IamChange, facts: &Facts, badges: &[Badg
     out
 }
 
-/// 이 변경 뒤에도 앱이 쓰는 주체(`caller`)가 `inverse`를 실행할 IAM 권한을 갖고 있지 않으면 그 이유.
-fn undo_problem(after: &Snapshot, caller: &str, inverse: Option<&IamChange>) -> Option<String> {
-    let missing: Vec<String> = calls(after, inverse?)
-        .into_iter()
-        .map(|call| call.api)
-        .filter(|api| !matches!(evaluate_action(after, caller, api, None).map(|eval| eval.status), Some(Status::Allowed | Status::Conditional)))
-        .collect();
-    (!missing.is_empty()).then(|| format!("이 변경을 되돌리는 데 필요한 권한({})도 없어져서 이 자격 증명으로는 되돌릴 수 없어요", missing.join(", ")))
+/// 이 변경 뒤에 앱이 쓰는 주체(`caller`)가 `inverse`를 실행할 IAM 권한을 갖고 있지 않거나, 조건 없이 갖고 있던 그 권한이 조건부가 되면
+/// (예: MFA가 없으면 거부) 그 이유. 원래부터 조건부였던 권한은 이 변경 탓이 아니라서 말하지 않는다.
+fn undo_problem(before: &Snapshot, after: &Snapshot, caller: &str, inverse: Option<&IamChange>) -> Option<String> {
+    let status = |s: &Snapshot, api: &str| evaluate_action(s, caller, api, None).map(|eval| eval.status);
+    let (mut gone, mut conditional) = (Vec::new(), Vec::new());
+    for api in calls(after, inverse?).into_iter().map(|call| call.api) {
+        match status(after, &api) {
+            Some(Status::Allowed) => {}
+            Some(Status::Conditional) => {
+                if status(before, &api) == Some(Status::Allowed) {
+                    conditional.push(api);
+                }
+            }
+            _ => gone.push(api),
+        }
+    }
+    if !gone.is_empty() {
+        Some(format!("이 변경을 되돌리는 데 필요한 권한({})도 없어져서 이 자격 증명으로는 되돌릴 수 없어요", gone.join(", ")))
+    } else if !conditional.is_empty() {
+        Some(format!("이 변경을 되돌리는 데 필요한 권한({})도 조건부가 돼서 이 자격 증명으로는 되돌리지 못할 수 있어요", conditional.join(", ")))
+    } else {
+        None
+    }
 }
 
 fn names(s: &Snapshot, arns: &[String]) -> String {
@@ -191,9 +206,11 @@ fn names(s: &Snapshot, arns: &[String]) -> String {
 
 /// 영향 계산에서 나오는 확인·주의: 문서를 읽지 못한 정책이 붙거나 떨어짐(증감을 다 계산하지 못했다), 앱 자격 증명의 권한 축소(잃거나
 /// 조건부로 바뀜), 새 관리자급·권한 상승, 카탈로그에 없는 작업, 다른 주체의 권한이 조건부로 바뀜, 그대로 계산에서 빠진 정책, 영향받는 주체 수.
-/// `inverse`는 되돌리는 변경이다(적용 뒤에도 되돌릴 권한이 남는지 본다).
-pub(super) fn from_analysis(before: &Snapshot, after: &Snapshot, c: &IamChange, a: &Analysis, inverse: Option<&IamChange>) -> Vec<Warning> {
+/// `inverse`는 되돌리는 변경이다(적용 뒤에도 되돌릴 권한이 남는지 본다). 두 번째 값은 앱이 쓰는 자격 증명이 되돌릴 권한을 잃거나
+/// 그 권한이 조건부가 되는지다(그러면 미리보기는 되돌릴 수 없다고 말한다).
+pub(super) fn from_analysis(before: &Snapshot, after: &Snapshot, c: &IamChange, a: &Analysis, inverse: Option<&IamChange>) -> (Vec<Warning>, bool) {
     let mut out = Vec::new();
+    let mut undo_lost = false;
     // 읽지 못한 정책이 주던 권한을 잃는지(앱의 자격 증명이 관리자 권한을 잃는 것일 수도 있다), 그런 정책으로 무엇을 얻는지 모른다.
     // 계산한 증감이 비어 보여도 확인받는다
     if !a.unreadable_changed.is_empty() {
@@ -201,7 +218,8 @@ pub(super) fn from_analysis(before: &Snapshot, after: &Snapshot, c: &IamChange, 
     }
     if let (true, Some(caller)) = (a.caller_lost || a.caller_restricted, before.caller_principal_arn.as_deref()) {
         // 되돌릴 권한이 없다는 말은 앞의 확인 하나에만 붙인다
-        let mut undo = undo_problem(after, caller, inverse);
+        let mut undo = undo_problem(before, after, caller, inverse);
+        undo_lost = undo.is_some();
         let mut with_undo = |mut message: String| {
             if let Some(problem) = undo.take() {
                 message.push_str(". ");
@@ -239,5 +257,5 @@ pub(super) fn from_analysis(before: &Snapshot, after: &Snapshot, c: &IamChange, 
     if a.impacts.len() >= MANY_IMPACTS {
         out.push(warn(format!("영향받는 주체가 {}개예요", a.impacts.len())));
     }
-    out
+    (out, undo_lost)
 }

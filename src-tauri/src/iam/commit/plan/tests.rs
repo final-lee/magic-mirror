@@ -88,6 +88,32 @@ fn one_preview_allows_at_most_one_apply() {
 }
 
 #[test]
+fn a_summary_that_changed_after_the_preview_is_refused() {
+    // 미리보기 때는 bob에게 인라인 정책 extra가 없어서 "추가하기"였는데, 그 사이 누군가 같은 이름으로 만들었다: 같은 호출이 덮어쓰기가 된다
+    let change = IamChange::PutInlinePolicy { target: BOB.into(), name: "extra".into(), document: doc(&["sqs:SendMessage"]) };
+    let seen = snapshot();
+    let mut now = snapshot();
+    now.users[1].inline.push(inline("extra", policy(json!([{ "Effect": "Allow", "Action": "sqs:SendMessage", "Resource": "*" }]))));
+    let (before, after) = (plan_of(&seen, &change), plan_of(&now, &change));
+    assert_eq!((&before.calls, &before.checks, before.reversible), (&after.calls, &after.checks, after.reversible));
+    assert_ne!(before.summary, after.summary);
+    let mut store = PlanStore::default();
+    assert_eq!(apply_after_preview(&mut store, &seen, &now, &change), Err(AppError::other(DRIFTED)));
+}
+
+#[test]
+fn a_change_that_can_no_longer_be_undone_is_refused() {
+    // 미리보기 때는 키가 활성이라 되돌릴 수 있었는데, 그 사이 누군가 꺼서 지금은 되돌릴 것이 없다
+    let change = IamChange::SetAccessKeyStatus { user_name: "bob".into(), access_key_id: "AKIA1".into(), status: "Inactive".into() };
+    let s = snapshot();
+    let plan_with = |status: &str| Plan::of(&s.account_id, &preview(&s, &change, &Facts::with_key_status(Some(status))));
+    let (seen, now) = (plan_with("Active"), plan_with("Inactive"));
+    assert_eq!((&seen.summary, &seen.calls, &seen.checks), (&now.summary, &now.calls, &now.checks));
+    assert!(seen.reversible && !now.reversible);
+    assert_eq!(check(Some(&seen), &now), Err(AppError::other(DRIFTED)));
+}
+
+#[test]
 fn a_preview_of_another_account_is_refused() {
     let s = snapshot();
     let mut elsewhere = snapshot();

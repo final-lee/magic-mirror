@@ -38,7 +38,11 @@ fn a_deny_unless_mfa_on_the_callers_group_needs_confirmation() {
     let mfa = deny_without_mfa(&mut s);
     let p = preview(&s, &attach(ADMINS, &mfa), None);
 
-    assert_eq!(only(&p, WarnLevel::Confirm), CALLER_RESTRICTED, "잃은 것은 없으니 권한 축소 문구는 없어요: {:?}", p.warnings);
+    let message = only(&p, WarnLevel::Confirm);
+    assert!(message.starts_with(CALLER_RESTRICTED) && !message.contains("권한이 줄어요"), "잃은 것은 없으니 권한 축소 문구는 없어요: {message}");
+    // 되돌리는 데 쓸 iam:DetachGroupPolicy도 MFA가 없으면 막힌다: 키로 쓰는 이 앱은 되돌리지 못할 수 있다
+    assert!(message.contains("iam:DetachGroupPolicy") && message.contains("조건부"), "{message}");
+    assert!(!p.reversible);
     assert_eq!(p.confirm_text.as_deref(), Some("admins"));
     assert!(!has_level(&p, WarnLevel::Block));
     // 그룹은 로그인하지 않으므로 "다른 사람" 수에 들지 않는다
@@ -68,6 +72,29 @@ fn the_restriction_warning_says_when_the_caller_could_not_undo_it() {
     assert!(message.starts_with(CALLER_RESTRICTED), "{message}");
     assert!(message.contains("iam:DetachGroupPolicy") && message.contains("되돌릴 수 없어요"), "{message}");
     assert_eq!(p.confirm_text.as_deref(), Some("ops"));
+}
+
+#[test]
+fn an_undo_permission_that_was_already_conditional_is_not_blamed_on_the_change() {
+    // dave(앱이 쓰는 주체)는 S3를 조건 없이 쓰고, IAM 작업은 처음부터 MFA가 있어야 쓸 수 있다
+    let mut s = called_by(snapshot(), None);
+    let deny_s3 = add_policy(&mut s, "deny-s3", json!([{ "Effect": "Deny", "Action": "s3:*", "Resource": "*" }]));
+    s.groups.push(group_rec("ops", &[]));
+    let dave = member(
+        "dave",
+        "ops",
+        json!([
+            { "Effect": "Allow", "Action": "s3:*", "Resource": "*" },
+            { "Effect": "Allow", "Action": "iam:*", "Resource": "*", "Condition": { "Bool": { "aws:MultiFactorAuthPresent": "true" } } }
+        ]),
+    );
+    s.caller_principal_arn = Some(dave.arn.clone());
+    s.users.push(dave);
+
+    let p = preview(&s, &attach(&account_arn("group/ops"), &deny_s3), None);
+    let message = only(&p, WarnLevel::Confirm);
+    assert!(message.contains("권한이 줄어요") && !message.contains("되돌"), "{message}");
+    assert!(p.reversible);
 }
 
 #[test]
