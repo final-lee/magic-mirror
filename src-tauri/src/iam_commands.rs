@@ -386,7 +386,8 @@ fn policy_check_of(result: &ValidationResult) -> PolicyCheck {
 }
 
 /// 미리보기와 적용이 똑같이 읽는 재료: 최신 스냅숏(붙일 정책의 문서를 채운 것)과 스냅숏 밖의 사실들(키 상태, 이 앱이 쓰는 키,
-/// 버전을 지워야 하는 편집이면 새 문서의 검사 결과). 적용은 이것을 다시 읽어 미리보기를 다시 계산하고 사용자가 본 계획과 견준다.
+/// 버전을 지워야 하는 편집이면 새 문서의 검사 결과, 붙일 정책을 읽지 못했으면 그 이유). 적용은 이것을 다시 읽어 미리보기를 다시 계산하고
+/// 사용자가 본 계획과 견준다.
 async fn gather(state: &AppState, iam: &IamState, profile: &str, change: &IamChange) -> Result<(Arc<Snapshot>, Facts, aws_sdk_iam::Client), AppError> {
     let s = fresh_snapshot(state, iam, profile).await?;
     let cfg = state.ctx.config(profile, GLOBAL_REGION).await?;
@@ -396,12 +397,12 @@ async fn gather(state: &AppState, iam: &IamState, profile: &str, change: &IamCha
         IamChange::SetAccessKeyStatus { .. } | IamChange::DeleteAccessKey { .. } => own_key_id(&cfg).await,
         _ => None,
     };
-    let s = ensure_policy(&client, s, change).await;
+    let (s, policy_error) = ensure_policy(&client, s, change).await?;
     let policy_check = match change {
         IamChange::UpdateManagedPolicy { document, .. } if deletes_policy_version(&s, change) => policy_check_of(&checks::validate(&cfg, document).await?),
         _ => PolicyCheck::NotRun,
     };
-    Ok((s, Facts { key_status, own_key_id, policy_check }, client))
+    Ok((s, Facts { key_status, own_key_id, policy_check, policy_error }, client))
 }
 
 /// 변경 미리보기. 적용할 때와 같은 재료로 계산하고, 사용자가 본 계획을 기억해 둔다. 권한 계산은 CPU를 쓰는 일이라 따로 돌린다.

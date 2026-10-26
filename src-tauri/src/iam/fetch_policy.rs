@@ -54,18 +54,20 @@ pub(crate) async fn fetch_policy(client: &aws_sdk_iam::Client, arn: &str) -> Res
 }
 
 /// 변경이 붙이려는 정책의 문서가 스냅숏에 없으면 읽어서 넣은 스냅숏을 돌려준다(캐시된 스냅숏은 건드리지 않는다).
-/// 읽지 못하면 스냅숏을 그대로 돌려준다: 미리보기가 "문서를 읽지 못했어요" 주의와 함께 영향 계산 없이 나온다.
-pub(crate) async fn ensure_policy(client: &aws_sdk_iam::Client, s: Arc<Snapshot>, c: &IamChange) -> Arc<Snapshot> {
+/// 읽지 못하면 스냅숏을 그대로 두고 그 이유를 함께 돌려준다: 미리보기는 그 정책을 "문서를 읽지 못한 정책"으로 보고 확인을 받는다.
+/// SSO 만료·요청 제한은 다시 로그인하거나 잠시 뒤에 하면 되는 오류라 그대로 오류다(스냅숏을 읽을 때의 `fill_missing`과 같다).
+pub(crate) async fn ensure_policy(client: &aws_sdk_iam::Client, s: Arc<Snapshot>, c: &IamChange) -> Result<(Arc<Snapshot>, Option<String>), AppError> {
     let Some(arn) = missing_policy(&s, c) else {
-        return s;
+        return Ok((s, None));
     };
     match fetch_policy(client, arn).await {
         Ok(rec) => {
             let mut owned = (*s).clone();
             owned.policies.insert(arn.to_string(), rec);
-            Arc::new(owned)
+            Ok((Arc::new(owned), None))
         }
-        Err(_) => s,
+        Err(e @ (AppError::SsoExpired | AppError::Throttled)) => Err(e),
+        Err(e) => Ok((s, Some(e.to_string()))),
     }
 }
 
@@ -200,7 +202,8 @@ mod tests {
     async fn a_missing_policy_is_fetched_into_a_copy_of_the_snapshot() {
         let recorder = serving(ADMIN_DOC);
         let original = Arc::new(fixtures::snapshot());
-        let enriched = ensure_policy(&recorder.client(), original.clone(), &attach_absent()).await;
+        let (enriched, reason) = ensure_policy(&recorder.client(), original.clone(), &attach_absent()).await.unwrap();
+        assert_eq!(reason, None);
         assert!(!Arc::ptr_eq(&original, &enriched));
         assert!(enriched.policies[ABSENT].document.is_some());
         assert!(!original.policies.contains_key(ABSENT), "캐시된 스냅숏은 그대로예요");
@@ -216,18 +219,29 @@ mod tests {
         let detach = IamChange::DetachPolicy { target: BOB.into(), policy_arn: ABSENT.into() };
         let key = IamChange::DeleteAccessKey { user_name: "bob".into(), access_key_id: "AKIA1".into() };
         for change in [have, detach, key] {
-            let same = ensure_policy(&recorder.client(), original.clone(), &change).await;
+            let (same, reason) = ensure_policy(&recorder.client(), original.clone(), &change).await.unwrap();
             assert!(Arc::ptr_eq(&original, &same), "{change:?}");
+            assert_eq!(reason, None);
         }
         assert!(recorder.sent().is_empty());
     }
 
     #[tokio::test]
-    async fn a_policy_that_cannot_be_read_leaves_the_snapshot_as_it_was() {
+    async fn a_policy_that_cannot_be_read_leaves_the_snapshot_as_it_was_and_says_why() {
         let recorder = Recorder::new(|_| (403, error_xml("AccessDenied", "no")));
         let original = Arc::new(fixtures::snapshot());
-        let same = ensure_policy(&recorder.client(), original.clone(), &attach_absent()).await;
+        let (same, reason) = ensure_policy(&recorder.client(), original.clone(), &attach_absent()).await.unwrap();
         assert!(Arc::ptr_eq(&original, &same));
+        assert_eq!(reason.as_deref(), Some("권한 없음 (iam:GetPolicy)"));
+    }
+
+    #[tokio::test]
+    async fn sso_expiry_and_throttling_while_reading_the_policy_are_errors() {
+        for (code, expected) in [("ExpiredToken", AppError::SsoExpired), ("Throttling", AppError::Throttled)] {
+            let recorder = Recorder::new(move |_| (400, error_xml(code, "no")));
+            let failed = ensure_policy(&recorder.client(), Arc::new(fixtures::snapshot()), &attach_absent()).await;
+            assert_eq!(failed.err(), Some(expected), "{code}");
+        }
     }
 
     #[tokio::test]
@@ -236,12 +250,14 @@ mod tests {
         let original = Arc::new(fixtures::snapshot());
         let change = attach_absent();
 
-        let blind = preview(&original, &change, &Facts::default());
+        // 읽지 못한 정책을 붙이는 미리보기: 영향은 계산하지 못하지만 확인은 받는다
+        let blind = preview(&original, &change, &Facts { policy_error: Some("권한 없음 (iam:GetPolicy)".into()), ..Facts::default() });
         assert!(blind.impacts.is_empty());
-        assert!(blind.warnings.iter().any(|w| w.level == WarnLevel::Warn && w.message == "정책 문서를 읽지 못해 권한 변화를 계산하지 못했어요"));
-        assert_eq!(blind.confirm_text, None);
+        assert!(blind.warnings.iter().any(|w| w.level == WarnLevel::Confirm && w.message == "문서를 읽지 못한 정책이 있어 권한 변화를 다 계산하지 못했어요: FullAdminClone"));
+        assert!(blind.warnings.iter().any(|w| w.level == WarnLevel::Warn && w.message == "FullAdminClone 정책을 읽지 못했어요: 권한 없음 (iam:GetPolicy)"));
+        assert_eq!(blind.confirm_text.as_deref(), Some("bob"));
 
-        let enriched = ensure_policy(&recorder.client(), original, &change).await;
+        let (enriched, _) = ensure_policy(&recorder.client(), original, &change).await.unwrap();
         let seen = preview(&enriched, &change, &Facts::default());
         assert_eq!(seen.impacts.len(), 1);
         assert_eq!(seen.impacts[0].principal.name, "bob");

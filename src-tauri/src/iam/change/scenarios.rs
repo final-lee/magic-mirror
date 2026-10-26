@@ -14,6 +14,7 @@ mod rules;
 mod shape;
 mod sizes;
 mod state;
+mod unreadable;
 mod wording;
 
 use std::collections::BTreeMap;

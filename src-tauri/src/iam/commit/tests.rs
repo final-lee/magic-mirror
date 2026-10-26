@@ -327,6 +327,27 @@ async fn a_confirmation_that_does_not_match_is_refused_without_writing() {
 }
 
 #[tokio::test]
+async fn removing_the_caller_from_a_group_whose_admin_policy_could_not_be_read_needs_the_name_before_writing() {
+    // 리뷰 I1 P7: 읽은 정책만 보면 아무 권한도 달라지지 않지만, 적용하면 이 앱이 관리자 권한을 잃을 수 있다
+    let dir = tempfile::tempdir().unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut s = snapshot();
+    s.policies.remove(ADMIN_POLICY);
+    let change = IamChange::RemoveFromGroup { user_name: "alice".into(), group_name: "admins".into() };
+    let req = previewed(Request { snapshot: Arc::new(s.clone()), ..request(dir.path(), change.clone()) });
+    assert_eq!(req.seen.as_ref().unwrap().confirm_text.as_deref(), Some("alice"));
+    let committed = commit(req, succeeding(&calls)).await;
+    assert!(refusal(&committed).contains("확인 문구"));
+    assert!(!committed.wrote);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    let mut req = previewed(Request { snapshot: Arc::new(s), ..request(dir.path(), change) });
+    req.confirm_text = Some("alice".into());
+    assert!(commit(req, succeeding(&calls)).await.result.is_ok());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn a_change_that_cannot_hold_in_the_current_state_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let calls = Arc::new(AtomicUsize::new(0));

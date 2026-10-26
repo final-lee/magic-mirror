@@ -20,7 +20,8 @@ const MANY_IMPACTS: usize = 5;
 /// 알려 줄 때 이름을 보여 주는 개수.
 const SHOWN_NAMES: usize = 5;
 const CFN_STACK_TAG: &str = "aws:cloudformation:stack-name";
-const UNREADABLE_POLICY: &str = "정책 문서를 읽지 못해 권한 변화를 계산하지 못했어요";
+const UNREADABLE_CHANGED: &str = "문서를 읽지 못한 정책이 있어 권한 변화를 다 계산하지 못했어요";
+const UNREADABLE_KEPT: &str = "문서를 읽지 못한 정책은 계산에서 뺐어요";
 const CALLER_RESTRICTED: &str = "조건에 따라 이 앱의 자격 증명이 막힐 수 있어요 (예: MFA·IP 조건)";
 const OWN_KEY: &str = "적용하면 이 앱이 바로 AWS에 접근하지 못하고, 여기서는 되돌릴 수 없어요";
 const POLICY_UNCHECKED: &str = "정책 검사를 할 수 없어 버전 삭제 뒤 저장이 실패할 수 있어요";
@@ -127,7 +128,8 @@ fn cfn_warning(stack: &str) -> Warning {
 }
 
 /// 가상 스냅숏 없이 알 수 있는 확인·주의: 키·인라인 정책 삭제, 이 앱이 쓰는 키 끄기, 검사하지 못한 문서로 버전 지우기,
-/// CloudFormation 스택 대상, 버전이 가득 찬 정책, 이미 그 상태인 변경, 읽지 못한 정책 문서. `badges`는 `target_badges`다.
+/// CloudFormation 스택 대상, 버전이 가득 찬 정책, 이미 그 상태인 변경, 붙일 정책을 읽지 못한 이유. `badges`는 `target_badges`다.
+/// 읽지 못한 정책이 붙거나 떨어지는 것 자체는 영향 계산에서 확인으로 나온다(`from_analysis`).
 pub(super) fn notices(s: &Snapshot, c: &IamChange, facts: &Facts, badges: &[Badge]) -> Vec<Warning> {
     let key_status = facts.key_status.as_deref();
     let mut out = Vec::new();
@@ -165,10 +167,9 @@ pub(super) fn notices(s: &Snapshot, c: &IamChange, facts: &Facts, badges: &[Badg
         IamChange::SetAccessKeyStatus { status, .. } if key_status == Some(status.as_str()) => out.push(warn(format!("이미 {status} 상태라서 달라지는 게 없어요"))),
         _ => {}
     }
-    if let IamChange::AttachPolicy { policy_arn, .. } | IamChange::DetachPolicy { policy_arn, .. } = c {
-        if s.policies.get(policy_arn).and_then(|rec| rec.document.as_ref()).is_none() {
-            out.push(warn(UNREADABLE_POLICY));
-        }
+    // 붙일 정책을 따로 읽다가 실패했으면 그 이유(빠진 권한 등)를 알려 준다
+    if let (IamChange::AttachPolicy { policy_arn, .. }, Some(reason)) = (c, facts.policy_error.as_deref()) {
+        out.push(warn(format!("{} 정책을 읽지 못했어요: {reason}", policy_name(s, policy_arn))));
     }
     out
 }
@@ -188,10 +189,16 @@ fn names(s: &Snapshot, arns: &[String]) -> String {
     shortened(&labels, SHOWN_NAMES)
 }
 
-/// 영향 계산에서 나오는 확인·주의: 앱 자격 증명의 권한 축소(잃거나 조건부로 바뀜), 새 관리자급·권한 상승, 카탈로그에 없는 작업,
-/// 다른 주체의 권한이 조건부로 바뀜, 영향받는 주체 수. `inverse`는 되돌리는 변경이다(적용 뒤에도 되돌릴 권한이 남는지 본다).
+/// 영향 계산에서 나오는 확인·주의: 문서를 읽지 못한 정책이 붙거나 떨어짐(증감을 다 계산하지 못했다), 앱 자격 증명의 권한 축소(잃거나
+/// 조건부로 바뀜), 새 관리자급·권한 상승, 카탈로그에 없는 작업, 다른 주체의 권한이 조건부로 바뀜, 그대로 계산에서 빠진 정책, 영향받는 주체 수.
+/// `inverse`는 되돌리는 변경이다(적용 뒤에도 되돌릴 권한이 남는지 본다).
 pub(super) fn from_analysis(before: &Snapshot, after: &Snapshot, c: &IamChange, a: &Analysis, inverse: Option<&IamChange>) -> Vec<Warning> {
     let mut out = Vec::new();
+    // 읽지 못한 정책이 주던 권한을 잃는지(앱의 자격 증명이 관리자 권한을 잃는 것일 수도 있다), 그런 정책으로 무엇을 얻는지 모른다.
+    // 계산한 증감이 비어 보여도 확인받는다
+    if !a.unreadable_changed.is_empty() {
+        out.push(confirm(format!("{UNREADABLE_CHANGED}: {}", shortened(&a.unreadable_changed, SHOWN_NAMES))));
+    }
     if let (true, Some(caller)) = (a.caller_lost || a.caller_restricted, before.caller_principal_arn.as_deref()) {
         // 되돌릴 권한이 없다는 말은 앞의 확인 하나에만 붙인다
         let mut undo = undo_problem(after, caller, inverse);
@@ -222,6 +229,9 @@ pub(super) fn from_analysis(before: &Snapshot, after: &Snapshot, c: &IamChange, 
     }
     if a.restricted_others > 0 {
         out.push(warn(format!("{}명의 일부 권한이 조건부로 바뀌어요", a.restricted_others)));
+    }
+    if !a.unreadable_kept.is_empty() {
+        out.push(warn(format!("{UNREADABLE_KEPT}: {}", shortened(&a.unreadable_kept, SHOWN_NAMES))));
     }
     if a.truncated {
         out.push(warn(format!("영향받는 대상이 많아 처음 {MAX_AFFECTED}개만 계산했어요")));

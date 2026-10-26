@@ -95,9 +95,9 @@
 - 미리보기: 호출할 API와 인자, 영향받는 주체별 권한 증감(서비스·접근 수준 단위), 경고.
 - 경고 규칙:
   - block: 대상이 서비스 연결 역할(path `/aws-service-role/`), Identity Center 역할(path `/aws-reserved/sso.amazonaws.com/` 또는 이름 `AWSReservedSSO_*`), AWS 관리형 정책 편집, 잘못된 JSON, 정책 문서 6,144자(관리형)/2,048자(사용자 인라인)/5,120자(그룹 인라인)/10,240자(역할 인라인) 초과
-  - confirm(대상 이름 입력): 앱이 지금 쓰는 자격 증명의 주체(호출자 사용자/역할, 또는 호출자가 속한 그룹)에 대한 권한 축소(허용 → 조건부도 포함), 변경 결과 영향받는 주체가 새로 adminLike/privesc가 됨, deleteAccessKey, deleteInlinePolicy, 앱이 쓰는 액세스 키를 끄거나 지움(되돌릴 수 없음, 확인 문구는 키 ID), 버전을 지워야 하는 관리형 편집인데 Access Analyzer로 문서를 검사하지 못함
+  - confirm(대상 이름 입력): 앱이 지금 쓰는 자격 증명의 주체(호출자 사용자/역할, 또는 호출자가 속한 그룹)에 대한 권한 축소(허용 → 조건부도 포함), 변경 결과 영향받는 주체가 새로 adminLike/privesc가 됨, deleteAccessKey, deleteInlinePolicy, 앱이 쓰는 액세스 키를 끄거나 지움(되돌릴 수 없음, 확인 문구는 키 ID), 버전을 지워야 하는 관리형 편집인데 Access Analyzer로 문서를 검사하지 못함, 문서를 읽지 못한 정책(신원 정책·권한 경계, 또는 스냅숏에 없는 소속 그룹)이 영향받는 주체에게 새로 적용되거나 더는 적용되지 않음(그 정책이 주던 권한을 몰라 증감을 다 계산하지 못함. 붙일 정책을 그 자리에서 읽다가 SSO 만료·요청 제한이 나면 미리보기도 오류)
   - block 추가: 버전을 지워야 하는 관리형 편집에서 Access Analyzer가 ERROR를 냄(적용 때도 다시 검사해 거부)
-  - warn: 태그 `aws:cloudformation:stack-name`이 있는 대상(스택이 되돌릴 수 있음), 버전 5개라 가장 오래된 버전 삭제, 영향받는 주체가 5명 이상, 다른 사용자·역할의 일부 권한이 조건부로 바뀜
+  - warn: 태그 `aws:cloudformation:stack-name`이 있는 대상(스택이 되돌릴 수 있음), 버전 5개라 가장 오래된 버전 삭제, 영향받는 주체가 5명 이상, 다른 사용자·역할의 일부 권한이 조건부로 바뀜, 문서를 읽지 못해 계산에서 뺀 정책이 그대로 남음, 붙일 정책을 읽지 못한 이유(빠진 권한 등)
 - 변경 기록: 앱 데이터 폴더 `iam-changes.jsonl`(한 줄 = 한 변경). 되돌리기용 역변경 저장: attach↔detach, add↔remove, 키 상태 반대, 인라인 put/delete는 이전 문서로 복원(없었으면 delete), 관리형 편집은 이전 기본 버전 문서로 다시 편집. deleteAccessKey는 되돌릴 수 없음.
 - 적용 후 스냅숏 캐시 무효화. IAM 반영 지연을 고려해 화면은 3초 뒤 강제 새로고침.
 - IAM 쓰기 API 호출은 `src-tauri/src/iam/write.rs`에만 둔다. 리소스 브라우저 어댑터는 읽기 전용 유지.

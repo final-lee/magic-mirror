@@ -1,6 +1,7 @@
 //! 영향 계산: 변경 전후의 권한(`evaluate`)을 영향받는 주체마다 비교해 서비스·접근 수준 단위의 증감으로 모은다.
 //! 작업 하나가 "허용"인지는 판정(`Status`)만 본다: 허용·조건부 허용이면 쓸 수 있는 것이고, 거부·권한 경계 차단이거나 허용 문장이 없으면 못 쓰는 것이다.
 //! 허용이던 작업이 조건부가 되면(예: MFA가 없으면 거부하는 Deny) 잃은 것은 아니지만 조건에 따라 막힐 수 있으니 따로 센다(`restricted`).
+//! 문서를 읽지 못한 정책은 계산에서 빠지므로, 그런 정책이 붙거나 떨어지면 증감을 다 계산하지 못한 것으로 따로 모은다(`unreadable_changed`).
 //! 화면으로 보내는 양은 줄인다: 증감마다 작업이 많은 줄 `MAX_ROWS`개, 주체는 `MAX_SHOWN`명까지 자세히 보내고 나머지는 수만 센다.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -10,7 +11,7 @@ use serde::Serialize;
 use super::IamChange;
 use crate::iam::catalog::AccessLevel;
 use crate::iam::danger::privesc_reasons;
-use crate::iam::eval::{evaluate, ActionEval, PrincipalEval, Status};
+use crate::iam::eval::{evaluate, policy_sources, ActionEval, PrincipalEval, Status};
 use crate::iam::model::Snapshot;
 use crate::iam::summary::principal_summary;
 use crate::iam::view::PrincipalSummary;
@@ -75,6 +76,11 @@ pub(super) struct Analysis {
     pub caller_restricted: bool,
     /// 그 밖에 조건 없이 쓰던 작업이 조건부가 되는 사용자·역할 수. 그룹은 세지 않는다(로그인하지 않고, 구성원이 따로 세어진다)
     pub restricted_others: usize,
+    /// 문서를 읽지 못해 계산에서 빠지는 정책(`unreadable_of`) 가운데 이 변경으로 영향받는 주체에게 새로 적용되거나 더는 적용되지 않는 것의 이름.
+    /// 그 정책이 주던(또는 줄) 권한을 몰라서 증감을 다 계산하지 못했다
+    pub unreadable_changed: Vec<String>,
+    /// 문서를 읽지 못해 계산에서 빠지는데 변경 전후에 그대로 적용되는 정책의 이름(`unreadable_changed`에 든 것은 뺀다)
+    pub unreadable_kept: Vec<String>,
     /// 영향받는 주체가 한도를 넘어 일부만 계산했다
     pub truncated: bool,
 }
@@ -123,6 +129,54 @@ impl Ordered {
             }
         }
     }
+}
+
+/// 순서를 지키면서 키마다 처음 나온 (키, 이름) 하나만 모은다.
+#[derive(Default)]
+struct Labels {
+    items: Vec<(String, String)>,
+    keys: HashSet<String>,
+}
+
+impl Labels {
+    fn push(&mut self, key: &str, label: &str) {
+        if self.keys.insert(key.to_string()) {
+            self.items.push((key.to_string(), label.to_string()));
+        }
+    }
+
+    /// `except`에 든 키를 뺀 이름들.
+    fn names_except(self, except: &HashSet<String>) -> Vec<String> {
+        self.items.into_iter().filter(|(key, _)| !except.contains(key)).map(|(_, label)| label).collect()
+    }
+}
+
+/// 주체에게 적용되는데 문서를 읽지 못해 계산에서 빠지는 것: 문서가 없는 신원 정책과 권한 경계, 그리고 스냅숏에 없는 소속 그룹(그 그룹의
+/// 정책을 모른다). (구별 키, 화면 이름) 목록이다. 같은 정책이 직접과 그룹으로 겹쳐 적용돼도 키는 하나다(같은 문서라 하나만 빠져도 같다).
+fn unreadable_of(s: &Snapshot, arn: &str) -> Vec<(String, String)> {
+    let (sources, boundary) = policy_sources(s, arn);
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut add = |key: String, label: String| {
+        if !out.iter().any(|(seen, _)| *seen == key) {
+            out.push((key, label));
+        }
+    };
+    for src in sources.iter().filter(|src| src.document.is_none()) {
+        let label = match &src.via {
+            Some(group) => format!("{} ({group} 그룹)", src.name),
+            None => src.name.clone(),
+        };
+        add(src.id.clone(), label);
+    }
+    if let Some(b) = boundary.filter(|b| b.document.is_none()) {
+        add(format!("boundary:{}", b.id), format!("{} (권한 경계)", b.name));
+    }
+    if let Some(user) = s.users.iter().find(|u| u.arn == arn) {
+        for name in user.groups.iter().filter(|name| s.group(name).is_none()) {
+            add(format!("group:{name}"), format!("{name} 그룹의 정책"));
+        }
+    }
+    out
 }
 
 /// 변경으로 권한이 달라질 수 있는 주체(ARN)를 직접 영향받는 것부터 순서대로.
@@ -253,7 +307,17 @@ pub(super) fn analyze(before: &Snapshot, after: &Snapshot, mut affected: Vec<Str
 
     let mut out = Analysis { truncated, ..Default::default() };
     let mut unknown = BTreeSet::new();
+    let (mut unreadable_changed, mut unreadable_kept) = (Labels::default(), Labels::default());
     for arn in &affected {
+        // 읽지 못한 정책은 아래 권한 계산에서 빠진다. 그런 정책이 붙거나 떨어지면 계산한 증감이 전부가 아니다
+        let (was_unreadable, now_unreadable) = (unreadable_of(before, arn), unreadable_of(after, arn));
+        for (key, label) in &was_unreadable {
+            let bucket = if now_unreadable.iter().any(|(other, _)| other == key) { &mut unreadable_kept } else { &mut unreadable_changed };
+            bucket.push(key, label);
+        }
+        for (key, label) in now_unreadable.iter().filter(|(key, _)| !was_unreadable.iter().any(|(other, _)| other == key)) {
+            unreadable_changed.push(key, label);
+        }
         let (Some(was), Some(now)) = (evaluate(before, arn), evaluate(after, arn)) else {
             continue;
         };
@@ -284,5 +348,8 @@ pub(super) fn analyze(before: &Snapshot, after: &Snapshot, mut affected: Vec<Str
         }
     }
     out.new_unknown = unknown.into_iter().collect();
+    // 어떤 주체에게는 그대로이고 다른 주체에게는 새로 붙는 정책(그룹에 붙이는데 구성원 하나는 이미 직접 받았다 등)은 바뀐 쪽으로만 센다
+    out.unreadable_kept = unreadable_kept.names_except(&unreadable_changed.keys);
+    out.unreadable_changed = unreadable_changed.names_except(&HashSet::new());
     out
 }
