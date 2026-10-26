@@ -19,11 +19,12 @@ interface Props {
   account: string | undefined;
   filter: string;
   onOpenBucket: (loc: S3Location) => void;
+  onOpenVpc?: (vpc: { vpcId: string; name: string; region: string }) => void;
   onRefresh: () => void;
   active: boolean;
 }
 
-export function ResourceArea({ service, type, profile, region, account, filter, onOpenBucket, onRefresh, active }: Props) {
+export function ResourceArea({ service, type, profile, region, account, filter, onOpenBucket, onOpenVpc, onRefresh, active }: Props) {
   const q = useResources(profile, region, service, type.id);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
@@ -32,9 +33,13 @@ export function ResourceArea({ service, type, profile, region, account, filter, 
   useCopyShortcut(active ? (selected?.id ?? null) : null);
 
   const open = (id: string) => {
-    if (service.id !== "s3" || type.id !== "buckets") return;
-    const bucket = items.find((r) => r.id === id);
-    if (bucket) onOpenBucket({ bucket: bucket.id, region: bucket.values.region || region, prefix: "" });
+    const item = items.find((r) => r.id === id);
+    if (!item) return;
+    if (service.id === "s3" && type.id === "buckets") {
+      onOpenBucket({ bucket: item.id, region: item.values.region || region, prefix: "" });
+    } else if (service.id === "vpc" && type.id === "vpcs") {
+      onOpenVpc?.({ vpcId: item.id, name: item.name, region });
+    }
   };
 
   return (

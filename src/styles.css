@@ -140,3 +140,19 @@ tbody tr.on td { background: var(--accent) !important; color: #fff; }
 .meta-compare th { text-align: left; color: var(--dim); width: 80px; position: static; }
 .update-banner { display: flex; align-items: center; gap: 8px; padding: 6px 14px; background: #0a84ff22; color: #fff; font-size: 12px; border-bottom: 1px solid var(--line); }
 .update-banner span { flex: 1; }
+
+/* VPC 구조도 */
+.vpcmap { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+.vm-toolbar { display: flex; align-items: center; gap: 12px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.vm-title { font-weight: 600; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vm-zoom, .vm-toolbar .sp { display: flex; align-items: center; gap: 4px; }
+.vm-toolbar .sp { margin-left: auto; gap: 6px; }
+.vm-pct { width: 44px; text-align: right; color: var(--dim); font: 11px ui-monospace, Menlo, monospace; }
+.vm-warnings { list-style: none; margin: 0; padding: 4px 14px; background: #ffd60a1a; color: var(--yellow); font-size: 12px; }
+.vm-canvas { flex: 1; min-height: 0; position: relative; overflow: hidden; background: #1b1b1e; cursor: grab; touch-action: none; user-select: none; }
+.vm-canvas:active { cursor: grabbing; }
+.vm-canvas svg text { user-select: none; }
+.vm-canvas [role="button"]:focus-visible rect { stroke: var(--accent); }
+.vm-legend { position: absolute; right: 12px; bottom: 10px; display: flex; gap: 12px; padding: 5px 10px; background: #2b2b2ecc; border: 1px solid var(--line); border-radius: 6px; font-size: 11px; color: var(--dim); pointer-events: none; }
+.vm-leg { display: flex; align-items: center; gap: 5px; }
+.vm-leg i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
