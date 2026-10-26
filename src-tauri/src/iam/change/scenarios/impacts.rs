@@ -1,8 +1,8 @@
 //! 영향 계산: 누가 영향받고, 서비스·접근 수준 단위로 무엇이 늘고 줄어드는지.
 
 use super::*;
-use crate::iam::catalog::{catalog, AccessLevel};
-use crate::iam::change::impact::{affected, MAX_AFFECTED};
+use crate::iam::catalog::{catalog, AccessLevel, LEVELS};
+use crate::iam::change::impact::{affected, MAX_AFFECTED, MAX_ROWS, MAX_SHOWN, SAMPLE};
 use crate::iam::eval::{evaluate, Status};
 use crate::iam::view::{BadgeKind, PrincipalKind};
 
@@ -25,20 +25,36 @@ fn detaching_admin_from_a_group_lists_the_group_and_its_member_with_lost_counts(
     assert_eq!(p.impacts[1].principal.kind, PrincipalKind::User);
 
     let alice = &p.impacts[1];
-    assert!(alice.gained.is_empty());
-    let s3_read = delta(&alice.lost, "s3", AccessLevel::Read).expect("s3 읽기를 잃어요");
-    assert_eq!(s3_read.count, catalog().total("s3", AccessLevel::Read));
-    assert_eq!(s3_read.sample.len(), 5);
-    assert!(s3_read.sample.iter().all(|a| a.starts_with("s3:")));
-    // 작업 이름순으로 앞의 5개
-    let mut sorted = s3_read.sample.clone();
-    sorted.sort();
-    assert_eq!(sorted, s3_read.sample);
-    // 관리자 정책을 잃으면 카탈로그의 모든 작업을 잃는다
-    assert_eq!(alice.lost.iter().map(|d| d.count).sum::<usize>(), catalog().all_count());
-    // 증감은 서비스 접두어순, 같은 서비스에서는 접근 수준 순서다
+    assert!(alice.gained.is_empty() && alice.restricted.is_empty());
+    // 관리자 정책을 잃으면 카탈로그의 모든 (서비스, 접근 수준) 줄을 잃는다. 작업이 많은 20줄만 보내고 나머지는 줄 수만 센다
+    let rows = catalog_rows();
+    assert_eq!(alice.lost.len(), MAX_ROWS);
+    assert_eq!(alice.lost_omitted, rows.len() - MAX_ROWS);
+    let mut counts: Vec<usize> = rows.iter().map(|(_, _, total)| *total).collect();
+    counts.sort_unstable_by(|a, b| b.cmp(a));
+    let mut kept: Vec<usize> = alice.lost.iter().map(|d| d.count).collect();
+    kept.sort_unstable_by(|a, b| b.cmp(a));
+    assert_eq!(kept, counts[..MAX_ROWS], "작업이 가장 많은 줄들이에요");
+    for d in &alice.lost {
+        assert_eq!(d.count, catalog().total(&d.prefix, d.level), "{}", d.prefix);
+        assert_eq!(d.sample.len(), SAMPLE.min(d.count));
+        assert!(d.sample.iter().all(|a| a.starts_with(&format!("{}:", d.prefix))));
+        // 작업 이름순으로 앞의 5개
+        let mut sorted = d.sample.clone();
+        sorted.sort();
+        assert_eq!(sorted, d.sample);
+    }
+    // 남긴 줄도 서비스 접두어순, 같은 서비스에서는 접근 수준 순서다
     assert!(alice.lost.windows(2).all(|w| (&w[0].prefix, w[0].level) < (&w[1].prefix, w[1].level)));
-    assert!(alice.lost.iter().all(|d| d.count > 0 && d.sample.len() <= 5 && d.sample.len() <= d.count));
+}
+
+/// 카탈로그의 (서비스, 접근 수준, 작업 수) 가운데 작업이 하나라도 있는 줄.
+fn catalog_rows() -> Vec<(String, AccessLevel, usize)> {
+    let cat = catalog();
+    cat.services()
+        .flat_map(|(prefix, _)| LEVELS.iter().map(move |level| (prefix.to_string(), *level, cat.total(prefix, *level))))
+        .filter(|(_, _, total)| *total > 0)
+        .collect()
 }
 
 #[test]
@@ -185,9 +201,19 @@ fn conditional_access_still_counts_as_access() {
         "Effect": "Allow", "Action": ["s3:Get*", "s3:List*"], "Resource": "arn:aws:s3:::prod-assets*",
         "Condition": { "Bool": { "aws:SecureTransport": "true" } }
     }]));
-    // 허용 → 조건부는 잃은 것도 얻은 것도 아니다
+    // 허용 → 조건부는 잃은 것도 얻은 것도 아니지만, 조건이 맞지 않으면 막히니 "조건부로 바뀜"으로 따로 센다
     let p = preview(&s, &put_inline(BOB, "assets-read", with_condition), None);
-    assert!(p.impacts.is_empty(), "{:?}", p.impacts);
+    assert_eq!(impact_names(&p), vec!["bob"]);
+    let bob = &p.impacts[0];
+    assert!(bob.gained.is_empty() && bob.lost.is_empty(), "{bob:?}");
+    assert!(bob.restricted.iter().all(|d| d.prefix == "s3"));
+    let get_or_list = catalog().actions("s3").iter().filter(|(name, _)| name.starts_with("Get") || name.starts_with("List")).count();
+    assert_eq!(bob.restricted.iter().map(|d| d.count).sum::<usize>(), get_or_list);
+    let read = delta(&bob.restricted, "s3", AccessLevel::Read).expect("s3 읽기가 조건부로 바뀌어요");
+    assert!(read.sample.iter().all(|a| a.starts_with("s3:Get") || a.starts_with("s3:List")), "{:?}", read.sample);
+    // 앱이 쓰는 주체가 아니니 확인은 필요 없고 주의만 한다
+    assert_eq!(only(&p, WarnLevel::Warn), "1명의 일부 권한이 조건부로 바뀌어요");
+    assert!(!has_level(&p, WarnLevel::Confirm));
 
     // 조건부로라도 새로 허용되면 얻은 것이다
     let conditional_sqs = doc(json!([{
@@ -230,7 +256,8 @@ fn at_most_fifty_principals_are_computed_and_the_caller_is_always_one_of_them() 
     let change = detach(&account_arn("group/many"), &reader);
     assert_eq!(affected(&s, &change).len(), 62);
     let p = preview(&s, &change, None);
-    assert_eq!(p.impacts.len(), MAX_AFFECTED);
+    // 50명을 계산해서 30명은 자세히, 나머지 20명은 수만 보낸다
+    assert_eq!((p.impacts.len(), p.impacts_omitted), (MAX_SHOWN, MAX_AFFECTED - MAX_SHOWN));
     assert_eq!(p.impacts[0].principal.name, "zed");
     assert_eq!(messages(&p, WarnLevel::Warn).iter().filter(|m| **m == "영향받는 대상이 많아 처음 50개만 계산했어요").count(), 1);
     // 앱이 쓰는 주체가 권한을 잃으니 확인이 필요하다
@@ -248,6 +275,6 @@ fn exactly_fifty_principals_are_not_truncated() {
         s.users.push(member_of(&format!("u{i:02}"), "many"));
     }
     let p = preview(&s, &detach(&account_arn("group/many"), &reader), None);
-    assert_eq!(p.impacts.len(), 50);
+    assert_eq!(p.impacts.len() + p.impacts_omitted, 50);
     assert!(!messages(&p, WarnLevel::Warn).iter().any(|m| m.contains("처음 50개")));
 }

@@ -3,9 +3,13 @@
 //! 역할 deploy(CloudFormation 스택 대상, 인라인 정책 deploy-inline), 서비스 연결 역할과 Identity Center 역할.
 
 mod calls;
+mod checks;
 mod impacts;
 mod inverse;
+mod limits;
 mod notices;
+mod own_key;
+mod restricted;
 mod rules;
 mod shape;
 mod sizes;
@@ -21,6 +25,15 @@ use super::*;
 use crate::iam::fixtures::*;
 use crate::adapters::util::url_encode as url_encoded;
 use crate::iam::model::{GroupRec, Scope, Snapshot, VersionRec};
+
+/// 키 상태만 아는 미리보기(대부분의 시나리오). 다른 사실이 필요하면 `super::preview`에 `Facts`를 직접 넣는다.
+fn preview(s: &Snapshot, c: &IamChange, key_status: Option<&str>) -> ChangePreview {
+    super::preview(s, c, &Facts::with_key_status(key_status))
+}
+
+fn inverse(s: &Snapshot, c: &IamChange, key_status: Option<&str>) -> Option<IamChange> {
+    super::inverse(s, c, &Facts::with_key_status(key_status))
+}
 
 fn attach(target: &str, policy: &str) -> IamChange {
     IamChange::AttachPolicy { target: target.into(), policy_arn: policy.into() }

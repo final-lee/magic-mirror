@@ -1,12 +1,20 @@
 //! IAM을 바꾸는 호출은 이 파일에만 있다(리소스 브라우저 어댑터와 읽기 코드는 읽기 전용이다).
-//! `change::calls`가 만든 호출 목록, 곧 미리보기에 보인 호출을 순서대로 그대로 실행하므로 보인 것과 실제 호출이 달라질 수 없다.
+//! `commit`이 넘겨주는 호출 목록, 곧 적용 직전에 다시 계산해 미리보기에서 본 것과 같음을 확인한 `change::calls`를
+//! 순서대로 그대로 실행하므로 보인 것과 실제 호출이 달라질 수 없다.
 //! 액세스 키는 만들지 않는다(비밀 키를 다루지 않는다).
 
 use aws_sdk_iam::types::StatusType;
 
-use super::change::{calls, ApiCall, IamChange};
-use super::model::Snapshot;
+use super::change::ApiCall;
 use crate::error::{from_sdk, AppError};
+
+/// 실행 결과. 실패해도 그 앞까지 성공한 호출은 이미 IAM에 반영됐으므로 함께 돌려준다(변경 기록에 남긴다).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Applied {
+    /// 성공한 호출, 실행한 순서대로
+    pub done: Vec<ApiCall>,
+    pub result: Result<(), AppError>,
+}
 
 fn param<'a>(call: &'a ApiCall, key: &str) -> Result<&'a str, AppError> {
     call.params.get(key).map(String::as_str).ok_or_else(|| AppError::other(format!("{} 호출에 {key} 인자가 없어요", call.api)))
@@ -59,19 +67,20 @@ async fn run(client: &aws_sdk_iam::Client, call: &ApiCall) -> Result<(), AppErro
     }
 }
 
-/// 변경이 부르는 IAM API를 순서대로 실행하고 부른 API 이름(`iam:AttachUserPolicy` …)을 돌려준다.
-/// 하나라도 실패하면 거기서 멈추고 그 오류를 돌려준다(이미 부른 호출은 되돌리지 않는다).
-pub async fn apply(client: &aws_sdk_iam::Client, s: &Snapshot, c: &IamChange) -> Result<Vec<String>, AppError> {
-    let plan = calls(s, c);
+/// 호출 목록을 순서대로 실행한다. 하나라도 실패하면 거기서 멈추고 그 오류와, 그 앞까지 성공한 호출을 돌려준다
+/// (이미 부른 호출은 되돌리지 않는다). 빈 목록이면 아무것도 보내지 않고 실패한다.
+pub async fn apply(client: &aws_sdk_iam::Client, plan: &[ApiCall]) -> Applied {
     if plan.is_empty() {
-        return Err(AppError::other("부를 IAM 호출을 만들지 못했어요. 대상이 있는지 확인해 주세요"));
+        return Applied { done: Vec::new(), result: Err(AppError::other("부를 IAM 호출을 만들지 못했어요. 대상이 있는지 확인해 주세요")) };
     }
     let mut done = Vec::with_capacity(plan.len());
-    for call in &plan {
-        run(client, call).await?;
-        done.push(call.api.clone());
+    for call in plan {
+        if let Err(e) = run(client, call).await {
+            return Applied { done, result: Err(e) };
+        }
+        done.push(call.clone());
     }
-    Ok(done)
+    Applied { done, result: Ok(()) }
 }
 
 #[cfg(test)]

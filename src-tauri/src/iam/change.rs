@@ -2,6 +2,7 @@
 //! 점검 항목의 빠른 조치(`FindingItem::fix`)도 이 값을 가리키므로 읽기 쪽에서도 쓴다.
 //!
 //! - `calls`: 변경이 부르는 API와 인자(미리보기에 보이고 `write`가 그대로 실행한다)
+//! - `facts`: 스냅숏 밖에서 읽어 오는 재료(키 상태, 이 앱이 쓰는 키, 정책 문서 검사 결과)
 //! - `state`: 변경을 적용한 뒤의 가상 스냅숏(`apply_to_snapshot`)
 //! - `impact`: 영향받는 주체와 권한 증감
 //! - `warnings`·`document`: 막힘·확인·주의 규칙과 정책 문서 검사
@@ -12,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 mod calls;
 mod document;
+mod facts;
 mod impact;
 mod inverse;
 mod preview;
@@ -23,6 +25,7 @@ mod warnings;
 mod scenarios;
 
 pub use calls::{calls, ApiCall};
+pub use facts::{deletes_policy_version, Facts, PolicyCheck};
 pub use impact::Impact;
 pub use inverse::inverse;
 pub use preview::{preview, ChangePreview};

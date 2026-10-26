@@ -1,5 +1,7 @@
 //! 영향 계산: 변경 전후의 권한(`evaluate`)을 영향받는 주체마다 비교해 서비스·접근 수준 단위의 증감으로 모은다.
 //! 작업 하나가 "허용"인지는 판정(`Status`)만 본다: 허용·조건부 허용이면 쓸 수 있는 것이고, 거부·권한 경계 차단이거나 허용 문장이 없으면 못 쓰는 것이다.
+//! 허용이던 작업이 조건부가 되면(예: MFA가 없으면 거부하는 Deny) 잃은 것은 아니지만 조건에 따라 막힐 수 있으니 따로 센다(`restricted`).
+//! 화면으로 보내는 양은 줄인다: 증감마다 작업이 많은 줄 `MAX_ROWS`개, 주체는 `MAX_SHOWN`명까지 자세히 보내고 나머지는 수만 센다.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -17,6 +19,10 @@ use crate::iam::view::PrincipalSummary;
 pub(super) const MAX_AFFECTED: usize = 50;
 /// 증감마다 보여 주는 작업 이름 수.
 pub(super) const SAMPLE: usize = 5;
+/// 주체 하나의 증감(얻음·잃음·조건부로 바뀜)마다 보내는 (서비스, 접근 수준) 줄 수의 한도.
+pub(super) const MAX_ROWS: usize = 20;
+/// 증감을 자세히 보내는 주체 수의 한도. 넘는 주체는 수만 보낸다(`ChangePreview::impacts_omitted`).
+pub(super) const MAX_SHOWN: usize = 30;
 
 /// 한 서비스(`prefix`)의 한 접근 수준에서 허용·조건부가 된(또는 안 된) 작업 수와 그 일부.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -29,12 +35,27 @@ pub struct PermDelta {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Impact {
     pub principal: PrincipalSummary,
     /// 새로 허용(또는 조건부 허용)된 작업
     pub gained: Vec<PermDelta>,
     /// 더는 허용되지 않는 작업
     pub lost: Vec<PermDelta>,
+    /// 조건 없이 허용되다가 조건부가 된 작업. 없으면 보내지 않는다(계약에 더한 선택 필드)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub restricted: Vec<PermDelta>,
+    /// 한도(`MAX_ROWS`)를 넘어 빼고 보낸 줄 수. 0이면 보내지 않는다
+    #[serde(skip_serializing_if = "is_zero")]
+    pub gained_omitted: usize,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub lost_omitted: usize,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub restricted_omitted: usize,
+}
+
+pub(super) fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 /// 영향 계산 결과. 경고 규칙이 쓰는 값을 함께 모았다.
@@ -50,6 +71,10 @@ pub(super) struct Analysis {
     pub new_unknown: Vec<String>,
     /// 앱이 쓰는 자격 증명의 주체가 권한을 잃는다
     pub caller_lost: bool,
+    /// 앱이 쓰는 자격 증명의 주체가 조건 없이 쓰던 작업이 조건부가 된다
+    pub caller_restricted: bool,
+    /// 그 밖에 조건 없이 쓰던 작업이 조건부가 되는 사용자·역할 수. 그룹은 세지 않는다(로그인하지 않고, 구성원이 따로 세어진다)
+    pub restricted_others: usize,
     /// 영향받는 주체가 한도를 넘어 일부만 계산했다
     pub truncated: bool,
 }
@@ -145,12 +170,32 @@ fn usable(entry: Option<&(AccessLevel, ActionEval)>) -> bool {
     entry.is_some_and(|(_, eval)| matches!(eval.status, Status::Allowed | Status::Conditional))
 }
 
-/// (얻은 것, 잃은 것). 작업 이름은 `evaluate`의 순서(접두어, 작업)대로 훑으므로 `sample`은 이름순 앞쪽이다.
-fn deltas(before: &PrincipalEval, after: &PrincipalEval) -> (Vec<PermDelta>, Vec<PermDelta>) {
-    let (mut gained, mut lost) = (Buckets::default(), Buckets::default());
+fn status_of(entry: Option<&(AccessLevel, ActionEval)>) -> Option<Status> {
+    entry.map(|(_, eval)| eval.status)
+}
+
+/// 주체 하나의 증감. 줄은 (접두어, 접근 수준) 순서다.
+struct Deltas {
+    gained: Vec<PermDelta>,
+    lost: Vec<PermDelta>,
+    restricted: Vec<PermDelta>,
+}
+
+impl Deltas {
+    fn is_empty(&self) -> bool {
+        self.gained.is_empty() && self.lost.is_empty() && self.restricted.is_empty()
+    }
+}
+
+/// 얻은 것, 잃은 것, 허용에서 조건부로 바뀐 것. 작업 이름은 `evaluate`의 순서(접두어, 작업)대로 훑으므로 `sample`은 이름순 앞쪽이다.
+fn deltas(before: &PrincipalEval, after: &PrincipalEval) -> Deltas {
+    let (mut gained, mut lost, mut restricted) = (Buckets::default(), Buckets::default(), Buckets::default());
     for (key, entry) in &before.actions {
-        if usable(Some(entry)) && !usable(after.actions.get(key)) {
+        let now = after.actions.get(key);
+        if usable(Some(entry)) && !usable(now) {
             lost.add(key, entry.0);
+        } else if entry.1.status == Status::Allowed && status_of(now) == Some(Status::Conditional) {
+            restricted.add(key, entry.0);
         }
     }
     for (key, entry) in &after.actions {
@@ -158,7 +203,41 @@ fn deltas(before: &PrincipalEval, after: &PrincipalEval) -> (Vec<PermDelta>, Vec
             gained.add(key, entry.0);
         }
     }
-    (gained.finish(), lost.finish())
+    Deltas { gained: gained.finish(), lost: lost.finish(), restricted: restricted.finish() }
+}
+
+/// 줄이 한도(`MAX_ROWS`)를 넘으면 작업이 많은 줄만 남기고(같으면 앞선 줄) 뺀 줄 수를 센다. 남긴 줄은 원래 순서를 지킨다.
+pub(super) fn capped(rows: Vec<PermDelta>) -> (Vec<PermDelta>, usize) {
+    if rows.len() <= MAX_ROWS {
+        return (rows, 0);
+    }
+    let omitted = rows.len() - MAX_ROWS;
+    let mut ranked: Vec<(usize, PermDelta)> = rows.into_iter().enumerate().collect();
+    ranked.sort_by(|(i, a), (j, b)| b.count.cmp(&a.count).then(i.cmp(j)));
+    ranked.truncate(MAX_ROWS);
+    ranked.sort_by_key(|(i, _)| *i);
+    (ranked.into_iter().map(|(_, row)| row).collect(), omitted)
+}
+
+/// 화면으로 보낼 영향: 앞에서부터 `MAX_SHOWN`명. 앱이 쓰는 주체가 그 뒤에 있으면 맨 앞으로 옮긴다. (보낼 것, 뺀 주체 수)
+pub(super) fn shown(mut impacts: Vec<Impact>, caller: Option<&str>) -> (Vec<Impact>, usize) {
+    if impacts.len() <= MAX_SHOWN {
+        return (impacts, 0);
+    }
+    if let Some(at) = caller.and_then(|c| impacts.iter().position(|i| i.principal.arn == c)).filter(|at| *at >= MAX_SHOWN) {
+        let first = impacts.remove(at);
+        impacts.insert(0, first);
+    }
+    let omitted = impacts.len() - MAX_SHOWN;
+    impacts.truncate(MAX_SHOWN);
+    (impacts, omitted)
+}
+
+fn impact(principal: PrincipalSummary, d: Deltas) -> Impact {
+    let (gained, gained_omitted) = capped(d.gained);
+    let (lost, lost_omitted) = capped(d.lost);
+    let (restricted, restricted_omitted) = capped(d.restricted);
+    Impact { principal, gained, lost, restricted, gained_omitted, lost_omitted, restricted_omitted }
 }
 
 /// `affected` 주체마다 `before`와 `after`의 권한을 비교한다. 앱이 쓰는 주체(`caller`)는 한도를 넘어도 반드시 계산한다.
@@ -178,7 +257,7 @@ pub(super) fn analyze(before: &Snapshot, after: &Snapshot, mut affected: Vec<Str
         let (Some(was), Some(now)) = (evaluate(before, arn), evaluate(after, arn)) else {
             continue;
         };
-        let (gained, lost) = deltas(&was, &now);
+        let d = deltas(&was, &now);
         // 관리자급은 `evaluate`가 최종 판정까지 본 값이다. 관리자급이 되면 권한 상승은 따로 말하지 않는다
         if !was.admin_like && now.admin_like {
             out.newly_admin.push(arn.clone());
@@ -186,14 +265,22 @@ pub(super) fn analyze(before: &Snapshot, after: &Snapshot, mut affected: Vec<Str
             out.newly_privesc.push(arn.clone());
         }
         unknown.extend(now.unknown.iter().filter(|pattern| !was.unknown.contains(pattern)).cloned());
-        if caller == Some(arn.as_str()) && !lost.is_empty() {
+        let is_caller = caller == Some(arn.as_str());
+        if is_caller && !d.lost.is_empty() {
             out.caller_lost = true;
         }
-        if gained.is_empty() && lost.is_empty() {
+        if !d.restricted.is_empty() {
+            if is_caller {
+                out.caller_restricted = true;
+            } else if before.principal_kind(arn) != Some("group") {
+                out.restricted_others += 1;
+            }
+        }
+        if d.is_empty() {
             continue;
         }
         if let Some(principal) = principal_summary(before, arn) {
-            out.impacts.push(Impact { principal, gained, lost });
+            out.impacts.push(impact(principal, d));
         }
     }
     out.new_unknown = unknown.into_iter().collect();

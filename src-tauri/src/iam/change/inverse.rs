@@ -1,5 +1,6 @@
 //! 되돌리기용 역변경. 변경을 적용하기 전의 스냅숏으로 구하고, 변경 기록에 함께 남긴다.
 
+use super::facts::{stops_own_key, Facts};
 use super::state::{inline_policy, is_attached, is_member};
 use super::IamChange;
 use crate::iam::eval::find_principal;
@@ -23,11 +24,15 @@ fn restore(target: &str, old: &InlinePolicy) -> Option<IamChange> {
 
 /// 변경을 되돌리는 변경. 되돌릴 수 없으면 None이다.
 /// - 붙이기 ↔ 떼기, 그룹에 넣기 ↔ 빼기. 이미 그 상태라 바뀐 것이 없으면 되돌릴 것도 없다(None)
-/// - 키 상태: `key_status`(지금 상태)로 되돌린다. 모르면 반대 상태로 본다
+/// - 키 상태: `facts.key_status`(지금 상태)로 되돌린다. 모르면 반대 상태로 본다. 이 앱이 쓰는 키를 끄면 이 앱으로는 되돌릴 수 없다
 /// - 인라인 정책: 덮어썼으면 이전 문서로, 새로 만들었으면 삭제, 삭제했으면 이전 문서로 다시 만든다
 /// - 관리형 정책 편집: 이전 기본 버전 문서로 다시 편집한다
 /// - 액세스 키 삭제는 되돌릴 수 없다
-pub fn inverse(s: &Snapshot, c: &IamChange, key_status: Option<&str>) -> Option<IamChange> {
+pub fn inverse(s: &Snapshot, c: &IamChange, facts: &Facts) -> Option<IamChange> {
+    if stops_own_key(s, c, facts) {
+        return None;
+    }
+    let key_status = facts.key_status.as_deref();
     match c {
         IamChange::AttachPolicy { target, policy_arn } => {
             let attachable = find_principal(s, target).is_some() && !is_attached(s, target, policy_arn);

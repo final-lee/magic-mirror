@@ -232,10 +232,23 @@ export interface ChangePreview {
   change: IamChange;
   summary: string;
   calls: { api: string; params: Record<string, string> }[];
-  impacts: { principal: PrincipalSummary; gained: PermDelta[]; lost: PermDelta[] }[];
+  impacts: Impact[]; // 최대 30명
+  /** impacts에 넣지 못한 주체 수. 없으면 0 */
+  impactsOmitted?: number;
   warnings: { level: "block" | "confirm" | "warn"; message: string }[];
   confirmText: string | null; // confirm 경고가 있으면 입력해야 할 문자열(대상 이름)
   reversible: boolean;
+}
+export interface Impact {
+  principal: PrincipalSummary;
+  gained: PermDelta[]; // 방향마다 작업이 많은 줄 최대 20개
+  lost: PermDelta[];
+  /** 조건 없이 허용되다가 조건부가 된 작업. 없으면 [] */
+  restricted?: PermDelta[];
+  /** 한도를 넘어 빠진 줄 수. 없으면 0 */
+  gainedOmitted?: number;
+  lostOmitted?: number;
+  restrictedOmitted?: number;
 }
 export interface PermDelta {
   prefix: string;

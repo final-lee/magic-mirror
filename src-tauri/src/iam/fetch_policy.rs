@@ -76,7 +76,7 @@ mod tests {
     use super::*;
     use crate::adapters::util::url_encode;
     use crate::error::AppError;
-    use crate::iam::change::{preview, WarnLevel};
+    use crate::iam::change::{preview, Facts, WarnLevel};
     use crate::iam::fixtures::{self, ADMIN_POLICY, BOB};
     use crate::iam::mock_aws::{error_xml, ok_with, Recorder, Sent};
     use crate::iam::model::Scope;
@@ -236,13 +236,13 @@ mod tests {
         let original = Arc::new(fixtures::snapshot());
         let change = attach_absent();
 
-        let blind = preview(&original, &change, None);
+        let blind = preview(&original, &change, &Facts::default());
         assert!(blind.impacts.is_empty());
         assert!(blind.warnings.iter().any(|w| w.level == WarnLevel::Warn && w.message == "정책 문서를 읽지 못해 권한 변화를 계산하지 못했어요"));
         assert_eq!(blind.confirm_text, None);
 
         let enriched = ensure_policy(&recorder.client(), original, &change).await;
-        let seen = preview(&enriched, &change, None);
+        let seen = preview(&enriched, &change, &Facts::default());
         assert_eq!(seen.impacts.len(), 1);
         assert_eq!(seen.impacts[0].principal.name, "bob");
         assert!(seen.warnings.iter().any(|w| w.level == WarnLevel::Confirm && w.message.contains("관리자급")));
