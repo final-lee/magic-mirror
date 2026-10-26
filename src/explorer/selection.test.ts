@@ -67,3 +67,14 @@ test("compare: folders or wrong counts give null", () => {
   expect(compareTargets({ local: [lf("/a")], s3: [], s3Location: loc, focused: "local" })).toBeNull();
   expect(compareTargets({ local: [lf("/a")], s3: [sf("x")], s3Location: null, focused: "s3" })).toBeNull();
 });
+
+test("shift with clicked id or anchor missing from order falls back to plain click", () => {
+  expect(nextSelection({ selected: ["a"], anchor: "a" }, "zzz", order, { meta: false, shift: true })).toEqual({
+    selected: ["zzz"],
+    anchor: "zzz",
+  });
+  expect(nextSelection({ selected: ["x"], anchor: "x" }, "c", order, { meta: false, shift: true })).toEqual({
+    selected: ["c"],
+    anchor: "c",
+  });
+});

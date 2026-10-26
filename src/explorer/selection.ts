@@ -12,7 +12,7 @@ export function nextSelection(
   order: string[],
   mods: { meta: boolean; shift: boolean },
 ): SelectionState {
-  if (mods.shift && state.anchor && order.includes(state.anchor)) {
+  if (mods.shift && state.anchor && order.includes(state.anchor) && order.includes(clicked)) {
     const a = order.indexOf(state.anchor);
     const b = order.indexOf(clicked);
     const [from, to] = a <= b ? [a, b] : [b, a];
