@@ -129,3 +129,63 @@ test("local path change is persisted to settings", async () => {
   fireEvent.click(await within(local).findByRole("button", { name: "상위 폴더" }));
   await waitFor(() => expect(m.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ explorerLocalPath: "/home" })));
 });
+
+// 탐색기 탭들도 같은 버킷 목록을 그리므로, 리소스 탭(DOM 첫 번째 패널)의 행만 고른다.
+async function resourceBucket() {
+  return (await screen.findAllByText("assets"))[0];
+}
+
+async function openAssetsBucket() {
+  fireEvent.click((await screen.findAllByText("S3"))[0]);
+  fireEvent.click(screen.getByText("Buckets"));
+  fireEvent.doubleClick(await resourceBucket());
+}
+
+describe("bucket explorer tabs", () => {
+  beforeEach(() => {
+    m.getSettings.mockResolvedValue({ enabledServices: ["ec2", "iam", "s3"], favorites: [], lastProfile: "prod", lastRegion: null });
+    m.listResources.mockResolvedValue({ items: [makeResource("assets", { name: "assets", region: "us-west-2" })], truncated: false });
+    m.listS3Objects.mockResolvedValue({
+      entries: [{ name: "a.txt", key: "a.txt", isFolder: false, size: 1, lastModified: null, storageClass: null }],
+      nextToken: null,
+    });
+  });
+
+  test("double clicking a bucket opens an active S3: tab showing its objects", async () => {
+    renderWithClient(<App />);
+    await openAssetsBucket();
+    const tab = await screen.findByRole("tab", { name: /S3: assets/ });
+    expect(tab).toHaveAttribute("aria-selected", "true");
+    const pane = await screen.findByText("📄 a.txt", { selector: "[data-pane=s3] *" });
+    expect(pane).toBeVisible();
+    expect(m.listS3Objects).toHaveBeenCalledWith("prod", "us-west-2", "assets", "", null);
+  });
+
+  test("opening the same bucket again reuses the tab", async () => {
+    renderWithClient(<App />);
+    await openAssetsBucket();
+    await screen.findByRole("tab", { name: /S3: assets/ });
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    fireEvent.doubleClick(await resourceBucket());
+    expect(screen.getAllByRole("tab", { name: /S3: assets/ })).toHaveLength(1);
+    expect(screen.getByRole("tab", { name: /S3: assets/ })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("closing a bucket tab removes it", async () => {
+    renderWithClient(<App />);
+    await openAssetsBucket();
+    const tab = await screen.findByRole("tab", { name: /S3: assets/ });
+    fireEvent.click(within(tab.parentElement as HTMLElement).getByRole("button", { name: /닫기/ }));
+    expect(screen.queryByRole("tab", { name: /S3: assets/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "S3 탐색기" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("changing profile closes bucket tabs", async () => {
+    renderWithClient(<App />);
+    await openAssetsBucket();
+    await screen.findByRole("tab", { name: /S3: assets/ });
+    fireEvent.change(screen.getByRole("combobox", { name: "프로필" }), { target: { value: "dev" } });
+    expect(screen.queryByRole("tab", { name: /S3: assets/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
+  });
+});
