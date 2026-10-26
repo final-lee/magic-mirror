@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use serde_json::{json, Value};
 
-use super::draft::{compress, verb};
+use super::draft::{compress, size_notes, verb};
 use super::*;
 use crate::iam::catalog::catalog;
 use crate::iam::clock::{iso, parse_iso, DAY_SECS};
@@ -11,7 +11,10 @@ use crate::iam::fixtures::{self, inline, managed, policy, user};
 use crate::iam::model::{GroupRec, Scope};
 
 mod draft;
+mod sizes;
+mod unreadable;
 mod unused;
+mod variables;
 
 /// 사용 기록을 만든 시각. 이 시각에 쓴 서비스는 "최근에 쓴" 서비스다.
 fn used() -> Option<i64> {
@@ -63,6 +66,10 @@ fn world(inlines: &[(&str, Value)], managed_policies: &[(&str, Value)]) -> World
 
 fn allow(action: Value, resource: &str) -> Value {
     json!({ "Effect": "Allow", "Action": action, "Resource": resource })
+}
+
+fn deny(action: Value, resource: Value) -> Value {
+    json!({ "Effect": "Deny", "Action": action, "Resource": resource })
 }
 
 fn run(w: &World, raw: &LastAccessedRaw) -> (Vec<UnusedPolicy>, Option<String>, Vec<String>) {

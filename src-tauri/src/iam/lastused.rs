@@ -236,7 +236,7 @@ pub fn least_privilege(eval: &PrincipalEval, la: &LastAccessedRaw, s: &Snapshot,
             Vec::new()
         }
     };
-    let (draft, draft_notes) = draft::draft(eval, &sources, &usage, s);
+    let (draft, draft_notes) = draft::draft(eval, &sources, &usage, s, arn);
     notes.extend(draft_notes);
     (unused, draft, notes)
 }
