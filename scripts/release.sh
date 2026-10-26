@@ -44,7 +44,7 @@ lipo -archs "$APP/Contents/MacOS/magic-mirror"
 rm -rf release && mkdir -p release
 cp "$BUNDLE"/dmg/*.dmg "release/${NAME}.dmg"
 cp "$BUNDLE/macos/Magic Mirror.app.tar.gz" "release/${UPDATE_NAME}"
-cp docs/INSTALL.md "release/설치 방법.md"
+cp docs/INSTALL.md release/INSTALL.md  # GitHub 첨부 파일 이름은 ASCII만 유지된다
 (cd release && shasum -a 256 "${NAME}.dmg" > "${NAME}.dmg.sha256")
 
 SIG=$(cat "$BUNDLE/macos/Magic Mirror.app.tar.gz.sig")
@@ -64,7 +64,7 @@ echo "→ release/${NAME}.dmg, release/${UPDATE_NAME}, release/latest.json"
 
 if $PUBLISH; then
   gh release create "$TAG" --repo "$REPO" --target main --title "Magic Mirror ${VERSION}" \
-    --notes "macOS 유니버설(Intel·Apple Silicon). 처음 설치할 때는 '설치 방법.md'를 참고하세요. 이미 설치했다면 앱이 자동으로 업데이트를 알려줘요." \
-    "release/${NAME}.dmg" "release/${NAME}.dmg.sha256" "release/${UPDATE_NAME}" "release/latest.json" "release/설치 방법.md"
+    --notes "macOS 유니버설(Intel·Apple Silicon). 처음 설치할 때는 INSTALL.md를 참고하세요. 이미 설치했다면 앱이 자동으로 업데이트를 알려줘요." \
+    "release/${NAME}.dmg" "release/${NAME}.dmg.sha256" "release/${UPDATE_NAME}" "release/latest.json" release/INSTALL.md
   echo "→ https://github.com/${REPO}/releases/tag/${TAG}"
 fi
