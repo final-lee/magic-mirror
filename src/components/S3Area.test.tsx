@@ -19,7 +19,7 @@ test("lists entries, navigates into folders and via breadcrumb", async () => {
   const onNavigate = vi.fn();
   const onBack = vi.fn();
   renderWithClient(
-    <S3Area profile="prod" account="1" location={location} filter="" onNavigate={onNavigate} onBack={onBack} onRefresh={() => {}} />,
+    <S3Area profile="prod" account="1" location={location} filter="" active onNavigate={onNavigate} onBack={onBack} onRefresh={() => {}} />,
   );
   expect(api.listS3Objects).toHaveBeenCalledWith("prod", "ap-northeast-2", "assets", "images/", null);
   fireEvent.doubleClick(await screen.findByText("📁 products"));
@@ -45,7 +45,7 @@ test("loads more pages", async () => {
       nextToken: null,
     });
   renderWithClient(
-    <S3Area profile="prod" account="1" location={location} filter="" onNavigate={() => {}} onBack={() => {}} onRefresh={() => {}} />,
+    <S3Area profile="prod" account="1" location={location} filter="" active onNavigate={() => {}} onBack={() => {}} onRefresh={() => {}} />,
   );
   fireEvent.click(await screen.findByRole("button", { name: "더 보기" }));
   await waitFor(() => expect(screen.getByText("📄 b")).toBeInTheDocument());
@@ -62,7 +62,7 @@ test("keeps loaded entries and shows an inline banner when the next page fails",
     .mockRejectedValueOnce({ kind: "network", message: "timeout" });
   const onRefresh = vi.fn();
   renderWithClient(
-    <S3Area profile="prod" account="1" location={location} filter="" onNavigate={() => {}} onBack={() => {}} onRefresh={onRefresh} />,
+    <S3Area profile="prod" account="1" location={location} filter="" active onNavigate={() => {}} onBack={() => {}} onRefresh={onRefresh} />,
   );
   fireEvent.click(await screen.findByRole("button", { name: "더 보기" }));
   expect(await screen.findByText("네트워크 오류: timeout")).toBeInTheDocument();

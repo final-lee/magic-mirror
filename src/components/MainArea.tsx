@@ -13,9 +13,10 @@ interface Props {
   s3: S3Location | null;
   onS3Change: (loc: S3Location | null) => void;
   onRefresh: () => void;
+  active: boolean;
 }
 
-export function MainArea({ services, selection, profile, region, account, filter, s3, onS3Change, onRefresh }: Props) {
+export function MainArea({ services, selection, profile, region, account, filter, s3, onS3Change, onRefresh, active }: Props) {
   const service = services.find((s) => s.id === selection?.service);
   const type = service?.types.find((t) => t.id === selection?.type);
   if (!profile || !service || !type) {
@@ -35,6 +36,7 @@ export function MainArea({ services, selection, profile, region, account, filter
         onNavigate={(prefix) => onS3Change({ ...s3, prefix })}
         onBack={() => onS3Change(null)}
         onRefresh={onRefresh}
+        active={active}
       />
     );
   }
@@ -48,6 +50,7 @@ export function MainArea({ services, selection, profile, region, account, filter
       filter={filter}
       onOpenBucket={onS3Change}
       onRefresh={onRefresh}
+      active={active}
     />
   );
 }

@@ -1,4 +1,5 @@
 import type { ServiceInfo } from "../api/types";
+import type { DiffTool } from "../explorer/types";
 import { ServiceBadge } from "./ServiceBadge";
 
 interface Props {
@@ -6,9 +7,18 @@ interface Props {
   enabled: string[];
   onChange: (ids: string[]) => void;
   onClose: () => void;
+  diffTool?: DiffTool;
+  diffToolCommand?: string | null;
+  onDiffToolChange?: (tool: DiffTool, command: string | null) => void;
 }
 
-export function ServiceSettings({ services, enabled, onChange, onClose }: Props) {
+const TOOLS: { id: DiffTool; label: string }[] = [
+  { id: "filemerge", label: "FileMerge" },
+  { id: "vscode", label: "VS Code" },
+  { id: "custom", label: "직접 입력" },
+];
+
+export function ServiceSettings({ services, enabled, onChange, onClose, diffTool, diffToolCommand, onDiffToolChange }: Props) {
   const toggle = (id: string, on: boolean) => onChange(on ? [...enabled, id] : enabled.filter((x) => x !== id));
   return (
     <div
@@ -29,6 +39,34 @@ export function ServiceSettings({ services, enabled, onChange, onClose }: Props)
             </label>
           ))}
         </div>
+        {onDiffToolChange && (
+          <>
+            <h4>비교 도구</h4>
+            <p>S3 탐색기 비교 탭의 "외부 도구로 열기"에 써요.</p>
+            <div className="tools">
+              {TOOLS.map((t) => (
+                <label key={t.id}>
+                  <input
+                    type="radio"
+                    name="diff-tool"
+                    checked={(diffTool ?? "filemerge") === t.id}
+                    onChange={() => onDiffToolChange(t.id, t.id === "custom" ? (diffToolCommand ?? null) : null)}
+                  />
+                  {t.label}
+                </label>
+              ))}
+            </div>
+            {diffTool === "custom" && (
+              <input
+                className="field-input mono"
+                aria-label="비교 명령"
+                placeholder="ksdiff {left} {right}"
+                value={diffToolCommand ?? ""}
+                onChange={(e) => onDiffToolChange("custom", e.target.value)}
+              />
+            )}
+          </>
+        )}
         <div className="foot">
           <button className="btn primary" onClick={onClose}>
             완료

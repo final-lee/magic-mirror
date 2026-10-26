@@ -7,7 +7,13 @@ import { MainArea } from "./components/MainArea";
 import { NoProfiles } from "./components/NoProfiles";
 import { ServiceSettings } from "./components/ServiceSettings";
 import { Sidebar } from "./components/Sidebar";
+import { TabBar, type TabInfo } from "./components/TabBar";
 import { Toolbar } from "./components/Toolbar";
+import { DiffTab } from "./explorer/DiffTab";
+import { ExplorerTab } from "./explorer/ExplorerTab";
+import { refKey, refName } from "./explorer/rows";
+import type { DiffTool, FileRef, TransferRequest } from "./explorer/types";
+import { useTransfers } from "./explorer/useTransfers";
 import type { S3Location } from "./lib/s3";
 
 const sameFav = (a: Favorite, b: Favorite) => a.service === b.service && a.type === b.type;
@@ -25,6 +31,17 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const filterRef = useRef<HTMLInputElement>(null);
   const account = useAccount(profile);
+  const [activeTab, setActiveTab] = useState<string>("resources");
+  const [diffTabs, setDiffTabs] = useState<{ id: string; left: FileRef; right: FileRef }[]>([]);
+  const onTransferSettled = useCallback(
+    (_req: TransferRequest) => {
+      void qc.invalidateQueries({ queryKey: ["s3"] });
+      void qc.invalidateQueries({ queryKey: ["local"] });
+      void qc.invalidateQueries({ queryKey: ["diff"] });
+    },
+    [qc],
+  );
+  const transfers = useTransfers(profile, onTransferSettled);
 
   // 첫 로드: 마지막 프로필/리전 복원
   useEffect(() => {
@@ -39,6 +56,8 @@ export default function App() {
     void qc.invalidateQueries({ queryKey: ["resources", profile] });
     void qc.invalidateQueries({ queryKey: ["s3", profile] });
     void qc.invalidateQueries({ queryKey: ["account", profile] });
+    void qc.invalidateQueries({ queryKey: ["local"] });
+    void qc.invalidateQueries({ queryKey: ["diff", profile] });
   }, [qc, profile]);
 
   useEffect(() => {
@@ -76,6 +95,29 @@ export default function App() {
   if (!services.data || !settings || !profiles.data) return <div className="empty full">불러오는 중…</div>;
 
   const enabled = services.data.filter((s) => settings.enabledServices.includes(s.id));
+
+  const s3Service = services.data.find((s) => s.id === "s3");
+
+  const openDiff = (left: FileRef, right: FileRef) => {
+    const id = `diff:${refKey(left)}|${refKey(right)}`;
+    setDiffTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs : [...tabs, { id, left, right }]));
+    setActiveTab(id);
+  };
+  const closeTab = (id: string) => {
+    setDiffTabs((tabs) => tabs.filter((t) => t.id !== id));
+    if (activeTab === id) setActiveTab("explorer");
+  };
+  const activate = (id: string) => {
+    setActiveTab(id);
+    setFilter("");
+  };
+  const diffTitle = (l: FileRef, r: FileRef) => (refName(l) === refName(r) ? `⇄ ${refName(l)}` : `⇄ ${refName(l)} ↔ ${refName(r)}`);
+  const tabs: TabInfo[] = [
+    { id: "resources", title: "리소스", closable: false },
+    { id: "explorer", title: "S3 탐색기", closable: false },
+    ...diffTabs.map((t) => ({ id: t.id, title: diffTitle(t.left, t.right), closable: true })),
+  ];
+  const diffTool: DiffTool = settings.diffTool ?? "filemerge";
 
   const changeProfile = (name: string) => {
     const info = profiles.data?.find((p) => p.name === name);
@@ -119,7 +161,8 @@ export default function App() {
         onRefresh={refresh}
         onOpenSettings={() => setShowSettings(true)}
       />
-      <div className="main">
+      <TabBar tabs={tabs} active={activeTab} onActivate={activate} onClose={closeTab} />
+      <div className="tabpane main" hidden={activeTab !== "resources"}>
         <Sidebar
           services={enabled}
           profile={profile}
@@ -140,14 +183,45 @@ export default function App() {
           s3={s3}
           onS3Change={setS3}
           onRefresh={refresh}
+          active={activeTab === "resources"}
         />
       </div>
+      <div className="tabpane" hidden={activeTab !== "explorer"}>
+        <ExplorerTab
+          profile={profile}
+          region={region}
+          s3Service={s3Service}
+          filter={activeTab === "explorer" ? filter : ""}
+          active={activeTab === "explorer"}
+          initialLocalPath={settings.explorerLocalPath ?? null}
+          onLocalPathChange={(path) => update({ explorerLocalPath: path })}
+          transfers={transfers}
+          onOpenDiff={openDiff}
+          onRefresh={refresh}
+        />
+      </div>
+      {diffTabs.map((t) => (
+        <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
+          <DiffTab
+            profile={profile}
+            left={t.left}
+            right={t.right}
+            active={activeTab === t.id}
+            transfers={transfers}
+            diffTool={diffTool}
+            diffToolCommand={settings.diffToolCommand ?? null}
+          />
+        </div>
+      ))}
       {showSettings && (
         <ServiceSettings
           services={services.data}
           enabled={settings.enabledServices}
           onChange={(ids) => update({ enabledServices: ids })}
           onClose={() => setShowSettings(false)}
+          diffTool={diffTool}
+          diffToolCommand={settings.diffToolCommand ?? null}
+          onDiffToolChange={(tool, command) => update({ diffTool: tool, diffToolCommand: command })}
         />
       )}
     </div>
