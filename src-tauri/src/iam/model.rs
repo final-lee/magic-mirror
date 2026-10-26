@@ -59,7 +59,6 @@ pub struct RoleRec {
     pub name: String,
     pub path: String,
     pub created_at: Option<String>,
-    pub description: Option<String>,
     pub inline: Vec<InlinePolicy>,
     /// 붙은 관리형 정책 ARN
     pub attached: Vec<String>,

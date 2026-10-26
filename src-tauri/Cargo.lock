@@ -345,6 +345,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-accessanalyzer"
+version = "1.126.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e05324f0d0d18a360ebaa249908f9cb2f541b00484521285f5278acc40077ec8"
+dependencies = [
+ "arc-swap",
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-schema",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 1.5.0",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-cloudfront"
 version = "1.139.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3463,6 +3488,7 @@ dependencies = [
  "async-trait",
  "aws-config",
  "aws-credential-types",
+ "aws-sdk-accessanalyzer",
  "aws-sdk-cloudfront",
  "aws-sdk-cloudwatchlogs",
  "aws-sdk-dynamodb",
