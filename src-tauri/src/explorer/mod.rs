@@ -3,6 +3,7 @@ pub mod keys;
 pub mod local;
 pub mod s3ops;
 pub mod textfile;
+pub mod transfer;
 
 use serde::{Deserialize, Serialize};
 
