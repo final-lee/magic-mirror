@@ -2,6 +2,7 @@ mod adapters;
 mod aws;
 mod commands;
 mod error;
+mod explorer;
 mod model;
 mod settings;
 
