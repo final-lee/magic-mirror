@@ -30,6 +30,10 @@ pub const FRESH_SECS: i64 = 60;
 pub struct ApplyResult {
     pub log_id: String,
     pub summary: String,
+    /// IAM은 바꿨지만 그 뒤에 하지 못한 일(변경 기록을 저장하지 못함, 되돌린 기록에 표시하지 못함). 화면은 닫을 때까지 보여 준다.
+    /// 비면 보내지 않는다(계약에 더한 선택 필드)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 /// 적용 요청. 스냅숏은 적용 직전에 읽은(또는 60초 안에 읽은) 것이어야 한다.
@@ -199,7 +203,7 @@ async fn finish(req: Request, checked: ChangePreview, undo: Option<IamChange>, a
     };
     let notes = record(req.log_path, entry, if ok { req.undo_of } else { None }).await;
     let result = match outcome {
-        Ok(()) => Ok(ApplyResult { log_id: req.log_id, summary: noted(summary, &notes) }),
+        Ok(()) => Ok(ApplyResult { log_id: req.log_id, summary, notes }),
         Err((e, _)) if deleted.is_none() && notes.is_empty() => Err(e),
         // 지운 버전이나 기록하지 못한 일도 알려야 해서 한 문구로 모은다
         Err((_, text)) => Err(AppError::other(noted(text, &notes))),
@@ -209,7 +213,7 @@ async fn finish(req: Request, checked: ChangePreview, undo: Option<IamChange>, a
 
 /// 미리보기를 다시 계산해 거를 것을 거르고, `write`에 확인한 호출 목록을 넘겨 적용하고, 결과를 기록에 남긴다.
 /// 거부되면 `write`를 부르지 않고 기록도 남기지 않는다. 적용에 실패하면 실패한 기록(`ok=false`)을 남기고 그 오류를 돌려준다.
-/// 기록을 저장하지 못한 것은 이미 적용된 변경을 가리지 않도록 오류가 아니라 요약에 덧붙인다(적용도 실패했으면 오류 문구에 함께 적는다).
+/// 기록을 저장하지 못한 것은 이미 적용된 변경을 가리지 않도록 오류가 아니라 결과의 `notes`로 알린다(적용도 실패했으면 오류 문구에 함께 적는다).
 pub async fn commit<W, Fut>(req: Request, write: W) -> Committed
 where
     W: FnOnce(Vec<ApiCall>) -> Fut,
