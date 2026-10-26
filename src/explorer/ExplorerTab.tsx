@@ -5,7 +5,7 @@ import { errorMessage } from "../api/errors";
 import { useS3Objects } from "../api/queries";
 import type { ServiceInfo } from "../api/types";
 import type { S3Location } from "../lib/s3";
-import { explorerApi } from "./api";
+import { explorerApi, onMouseNav } from "./api";
 import { ConfirmDialog, type DialogAction } from "./ConfirmDialog";
 import { LocalPane } from "./LocalPane";
 import { useLocalHome, useLocalList } from "./queries";
@@ -58,6 +58,8 @@ export function ExplorerTab(p: Props) {
   const [localSel, setLocalSel] = useState<SelectionState>(EMPTY);
   const [s3Sel, setS3Sel] = useState<SelectionState>(EMPTY);
   const [focused, setFocused] = useState<Pane>("local");
+  const focusedRef = useRef<Pane>(focused);
+  focusedRef.current = focused;
   const [dialog, setDialogState] = useState<DialogState | null>(null);
   const dialogRef = useRef<DialogState | null>(null);
   const dialogSeq = useRef(0);
@@ -293,21 +295,48 @@ export function ExplorerTab(p: Props) {
   const handlers = useRef({ uploadPaths, compare, remove, go });
   handlers.current = { uploadPaths, compare, remove, go };
 
-  // 마우스 뒤로(3)/앞으로(4) 버튼: 포인터가 있는 패널에 적용
+  // 마우스 뒤로/앞으로 버튼: 포인터가 있는 패널(없으면 포커스된 패널)에 적용.
+  // WKWebView는 3·4번 버튼을 DOM으로 넘기지 않아 네이티브 "mouse-nav" 이벤트가 주 경로이고,
+  // DOM mouseup(button 3/4)은 이를 넘겨주는 환경을 위한 보조 경로다.
+  const lastPointer = useRef<{ x: number; y: number } | null>(null);
   useEffect(() => {
     if (!p.active) return;
+    const navigate = (pane: Pane | null, dir: "back" | "fwd") => {
+      if (dialogRef.current) return;
+      const target = pane ?? focusedRef.current;
+      setFocused(target);
+      handlers.current.go(target, dir);
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      lastPointer.current = { x: e.clientX, y: e.clientY };
+    };
     const onMouseUp = (e: MouseEvent) => {
       if (e.button !== 3 && e.button !== 4) return;
       const el = (e.target as Element | null)?.closest?.("[data-pane]");
       const pane = el?.getAttribute("data-pane");
       if (pane !== "local" && pane !== "s3") return;
       e.preventDefault();
-      if (dialogRef.current) return;
-      setFocused(pane);
-      handlers.current.go(pane, e.button === 3 ? "back" : "fwd");
+      navigate(pane, e.button === 3 ? "back" : "fwd");
     };
+    window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("mouseup", onMouseUp);
-    return () => window.removeEventListener("mouseup", onMouseUp);
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    onMouseNav((dir) => {
+      const pt = lastPointer.current;
+      navigate(pt ? paneAt(pt.x, pt.y) : null, dir === "back" ? "back" : "fwd");
+    })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      unlisten?.();
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
   }, [p.active]);
 
   useEffect(() => {

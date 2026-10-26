@@ -5,6 +5,7 @@ mod error;
 mod explorer;
 mod explorer_commands;
 mod model;
+mod mouse_nav;
 mod settings;
 
 use tauri::Manager;
@@ -25,6 +26,7 @@ pub fn run() {
             });
             app.manage(explorer_commands::ExplorerState::default());
             std::thread::spawn(explorer::external::sweep_stale);
+            mouse_nav::install(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
