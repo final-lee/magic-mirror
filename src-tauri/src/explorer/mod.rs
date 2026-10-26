@@ -1,4 +1,5 @@
 pub mod keys;
+pub mod local;
 
 use serde::{Deserialize, Serialize};
 
