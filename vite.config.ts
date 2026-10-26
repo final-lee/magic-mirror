@@ -9,5 +9,7 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
+    // agent worktrees under .claude/ are full repo copies; never collect their tests
+    exclude: ["**/node_modules/**", "**/dist/**", ".claude/**"],
   },
 });
