@@ -81,3 +81,12 @@ test("no profiles shows setup guide", async () => {
   renderWithClient(<App />);
   expect(await screen.findByText(/aws configure sso/)).toBeInTheDocument();
 });
+
+test("startup load failure shows error with retry", async () => {
+  m.listServices.mockRejectedValue({ kind: "other", message: "boom" });
+  renderWithClient(<App />);
+  expect(await screen.findByText("boom")).toBeInTheDocument();
+  m.listServices.mockResolvedValue(sampleServices);
+  fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+  expect(await screen.findByText("EC2")).toBeInTheDocument();
+});

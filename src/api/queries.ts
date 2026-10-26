@@ -58,5 +58,5 @@ export function useSettings() {
     qc.setQueryData(["settings"], next);
     void api.saveSettings(next);
   };
-  return { settings: query.data, update };
+  return { settings: query.data, update, isError: query.isError, error: query.error, refetch: query.refetch };
 }
