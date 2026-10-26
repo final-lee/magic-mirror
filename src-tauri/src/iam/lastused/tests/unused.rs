@@ -48,7 +48,7 @@ fn reasons_tell_never_used_and_long_unused_services_apart() {
 }
 
 #[test]
-fn a_young_principal_gets_no_detach_suggestions_but_a_note() {
+fn a_young_principal_gets_a_note_instead_of_suggestions() {
     let mut w = ec2_world();
     let report = raw(vec![svc("s3", used()), svc("ec2", None)]);
     w.s.users[0].created_at = days_before(30).map(iso);
