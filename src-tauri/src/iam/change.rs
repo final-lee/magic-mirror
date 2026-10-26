@@ -1,7 +1,33 @@
-//! 변경 종류(계약의 `IamChange`). 점검 항목의 빠른 조치(`FindingItem::fix`)가 가리키는 값이라 읽기 쪽에서도 쓴다.
-//! 미리보기·역변경·적용은 이 값을 받아서 다루는 변경 쪽 코드에 있다.
+//! 변경 종류(계약의 `IamChange`)와 변경 미리보기·경고·영향 계산·역변경. 모두 순수 코드다: IAM을 바꾸는 호출은 `write`에만 있다.
+//! 점검 항목의 빠른 조치(`FindingItem::fix`)도 이 값을 가리키므로 읽기 쪽에서도 쓴다.
+//!
+//! - `calls`: 변경이 부르는 API와 인자(미리보기에 보이고 `write`가 그대로 실행한다)
+//! - `state`: 변경을 적용한 뒤의 가상 스냅숏(`apply_to_snapshot`)
+//! - `impact`: 영향받는 주체와 권한 증감
+//! - `warnings`·`document`: 막힘·확인·주의 규칙과 정책 문서 검사
+//! - `inverse`: 되돌리기용 역변경
+//! - `preview`: 위 조각을 모은 `ChangePreview`
 
 use serde::{Deserialize, Serialize};
+
+mod calls;
+mod document;
+mod impact;
+mod inverse;
+mod preview;
+mod state;
+mod text;
+mod warnings;
+
+#[cfg(test)]
+mod scenarios;
+
+pub use calls::{calls, ApiCall};
+pub use impact::Impact;
+pub use inverse::inverse;
+pub use preview::{preview, ChangePreview};
+pub use state::{apply_to_snapshot, missing_policy};
+pub use warnings::{WarnLevel, Warning};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase", rename_all_fields = "camelCase")]
