@@ -69,3 +69,44 @@ test("favorite of a disabled service is hidden", () => {
   renderWithClient(<Sidebar {...base} favorites={[{ service: "lambda", type: "functions" }]} />);
   expect(screen.queryByText("즐겨찾기")).not.toBeInTheDocument();
 });
+
+describe("IAM 관리 entry", () => {
+  test("is the first row under an expanded IAM group and opens the IAM tab", () => {
+    const onOpenIam = vi.fn();
+    renderWithClient(<Sidebar {...base} onOpenIam={onOpenIam} />);
+    expect(screen.queryByText("🔐 IAM 관리")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("IAM"));
+    const entry = screen.getByText("🔐 IAM 관리");
+    // 다른 타입 행(Users)보다 앞에 놓인다
+    expect(entry.compareDocumentPosition(screen.getByText("Users")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(entry);
+    expect(onOpenIam).toHaveBeenCalledTimes(1);
+  });
+
+  test("collapsing the IAM group hides it again", () => {
+    renderWithClient(<Sidebar {...base} onOpenIam={vi.fn()} />);
+    fireEvent.click(screen.getByText("IAM"));
+    fireEvent.click(screen.getByText("IAM"));
+    expect(screen.queryByText("🔐 IAM 관리")).not.toBeInTheDocument();
+  });
+
+  test("other services do not get it", () => {
+    renderWithClient(<Sidebar {...base} onOpenIam={vi.fn()} />);
+    fireEvent.click(screen.getByText("EC2"));
+    expect(screen.queryByText("🔐 IAM 관리")).not.toBeInTheDocument();
+  });
+
+  test("is not shown when the app gives no handler", () => {
+    renderWithClient(<Sidebar {...base} />);
+    fireEvent.click(screen.getByText("IAM"));
+    expect(screen.queryByText("🔐 IAM 관리")).not.toBeInTheDocument();
+  });
+
+  test("clicking it does not select a resource type", () => {
+    const onSelect = vi.fn();
+    renderWithClient(<Sidebar {...base} onSelect={onSelect} onOpenIam={vi.fn()} />);
+    fireEvent.click(screen.getByText("IAM"));
+    fireEvent.click(screen.getByText("🔐 IAM 관리"));
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+});

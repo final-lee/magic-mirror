@@ -1,6 +1,8 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import App from "./App";
 import { api } from "./api/client";
+import { iamApi } from "./iam/api";
+import { ACCOUNT, alice, aliceView, bob, sampleOverview } from "./iam/fixtures";
 import { vpcApi } from "./vpcmap/api";
 import { sampleTopology } from "./vpcmap/fixtures";
 import { makeResource, renderWithClient, sampleServices } from "./test/utils";
@@ -28,6 +30,9 @@ vi.mock("./explorer/api", () => ({
   onMouseNav: vi.fn(async () => () => {}),
 }));
 vi.mock("./vpcmap/api", () => ({ vpcApi: { topology: vi.fn(), savePng: vi.fn() } }));
+vi.mock("./iam/api", () => ({
+  iamApi: { overview: vi.fn(), principal: vi.fn(), principalActions: vi.fn(), policy: vi.fn(), accessKeys: vi.fn() },
+}));
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: vi.fn(async () => () => {}) }),
 }));
@@ -237,5 +242,143 @@ describe("VPC 구조도 탭", () => {
     await screen.findByRole("tab", { name: /🗺 prod-vpc/ });
     fireEvent.change(screen.getByRole("combobox", { name: "프로필" }), { target: { value: "dev" } });
     expect(screen.queryByRole("tab", { name: /🗺/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("IAM 작업 공간 탭", () => {
+  const IAM_TAB = `🔐 IAM · ${ACCOUNT}`;
+  const iam = vi.mocked(iamApi);
+  beforeEach(() => {
+    iam.overview.mockResolvedValue(sampleOverview());
+    iam.principal.mockImplementation(async (_profile, arn) => aliceView(arn === bob.arn ? { summary: bob } : {}));
+    iam.principalActions.mockResolvedValue([]);
+    m.listResources.mockResolvedValue({ items: [makeResource("alice", { name: "alice" }, { arn: alice.arn })], truncated: false });
+  });
+  const openFromSidebar = async () => {
+    renderWithClient(<App />);
+    fireEvent.click(await screen.findByText("IAM"));
+    fireEvent.click(await screen.findByText("🔐 IAM 관리"));
+  };
+  const openUserFromList = async () => {
+    fireEvent.click(await screen.findByText("IAM"));
+    fireEvent.click(screen.getByText("Users"));
+    fireEvent.doubleClick(await screen.findByText("alice"));
+  };
+  const iamTabs = () => screen.queryAllByRole("tab", { name: /🔐 IAM/ });
+
+  test("the sidebar entry opens an active IAM tab titled with the account id", async () => {
+    await openFromSidebar();
+    const tab = await screen.findByRole("tab", { name: IAM_TAB });
+    expect(tab).toHaveAttribute("aria-selected", "true");
+    expect(iam.overview).toHaveBeenCalledWith("prod", false);
+    const list = await screen.findByTestId("iam-list");
+    expect(list).toBeVisible();
+    expect(within(list).getByText("alice")).toBeInTheDocument();
+  });
+
+  test("the title is just 🔐 IAM until the overview has loaded", async () => {
+    let resolve!: (v: ReturnType<typeof sampleOverview>) => void;
+    iam.overview.mockReturnValue(new Promise((r) => (resolve = r)));
+    await openFromSidebar();
+    expect(await screen.findByRole("tab", { name: "🔐 IAM" })).toBeInTheDocument();
+    resolve(sampleOverview());
+    expect(await screen.findByRole("tab", { name: IAM_TAB })).toBeInTheDocument();
+  });
+
+  test("opening it again reuses the tab", async () => {
+    await openFromSidebar();
+    await screen.findByRole("tab", { name: IAM_TAB });
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    expect(screen.getByRole("tab", { name: IAM_TAB })).toHaveAttribute("aria-selected", "false");
+    fireEvent.click(screen.getByText("🔐 IAM 관리"));
+    expect(iamTabs()).toHaveLength(1);
+    expect(screen.getByRole("tab", { name: IAM_TAB })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("double-clicking an IAM user opens the tab on that user", async () => {
+    renderWithClient(<App />);
+    await openUserFromList();
+    expect(await screen.findByRole("heading", { name: "alice" })).toBeVisible();
+    expect(iam.principal).toHaveBeenCalledWith("prod", alice.arn);
+    expect(screen.getByRole("tab", { name: IAM_TAB })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("an open tab moves to the target of a later double click", async () => {
+    await openFromSidebar();
+    await screen.findByTestId("iam-list");
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    fireEvent.click(screen.getByText("Users"));
+    fireEvent.doubleClick(await screen.findByText("alice", { selector: "[data-testid=resource-table] *" }));
+    expect(await screen.findByRole("heading", { name: "alice" })).toBeVisible();
+    expect(iamTabs()).toHaveLength(1);
+  });
+
+  test("closing the tab returns to the resources tab", async () => {
+    await openFromSidebar();
+    const tab = await screen.findByRole("tab", { name: IAM_TAB });
+    fireEvent.click(within(tab.parentElement as HTMLElement).getByRole("button", { name: /닫기/ }));
+    expect(iamTabs()).toHaveLength(0);
+    expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByTestId("iam-list")).not.toBeInTheDocument();
+  });
+
+  test("changing the profile closes the IAM tab", async () => {
+    await openFromSidebar();
+    await screen.findByRole("tab", { name: IAM_TAB });
+    fireEvent.change(screen.getByRole("combobox", { name: "프로필" }), { target: { value: "dev" } });
+    expect(iamTabs()).toHaveLength(0);
+    expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("the IAM tab sits right after the resources tab, before bucket tabs", async () => {
+    m.getSettings.mockResolvedValue({ enabledServices: ["ec2", "iam", "s3"], favorites: [], lastProfile: "prod", lastRegion: null });
+    m.listResources.mockImplementation(async (_p, _r, service) =>
+      service === "s3"
+        ? { items: [makeResource("assets", { name: "assets", region: "us-west-2" })], truncated: false }
+        : { items: [makeResource("alice", { name: "alice" }, { arn: alice.arn })], truncated: false },
+    );
+    m.listS3Objects.mockResolvedValue({ entries: [], nextToken: null });
+    renderWithClient(<App />);
+    await openAssetsBucket();
+    await screen.findByRole("tab", { name: /S3: assets/ });
+    fireEvent.click(screen.getByText("IAM"));
+    fireEvent.click(await screen.findByText("🔐 IAM 관리"));
+    await screen.findByRole("tab", { name: IAM_TAB });
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["리소스", IAM_TAB, "S3: assets"]);
+  });
+
+  test("the toolbar filter narrows the IAM list only while that tab is active", async () => {
+    await openFromSidebar();
+    const list = await screen.findByTestId("iam-list");
+    expect(within(list).getByText("alice")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText(/필터/), { target: { value: "bob" } });
+    expect(within(list).queryByText("alice")).not.toBeInTheDocument();
+    expect(within(list).getByText("bob")).toBeInTheDocument();
+    // 다른 탭으로 갔다 오면 필터가 지워진다(다른 탭과 같은 동작)
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    fireEvent.click(screen.getByRole("tab", { name: IAM_TAB }));
+    expect(within(screen.getByTestId("iam-list")).getByText("alice")).toBeInTheDocument();
+  });
+
+  test("⌘R rebuilds the IAM snapshot with a forced overview call", async () => {
+    await openFromSidebar();
+    await screen.findByTestId("iam-list");
+    fireEvent.keyDown(window, { key: "r", metaKey: true });
+    await waitFor(() => expect(iam.overview).toHaveBeenLastCalledWith("prod", true));
+  });
+
+  test("history keys only act while the IAM tab is the active one", async () => {
+    renderWithClient(<App />);
+    await openUserFromList();
+    await screen.findByRole("heading", { name: "alice" });
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    fireEvent.keyDown(window, { key: "[", metaKey: true });
+    fireEvent.click(screen.getByRole("tab", { name: IAM_TAB }));
+    expect(screen.getByRole("heading", { name: "alice" })).toBeVisible();
+    fireEvent.keyDown(window, { key: "[", metaKey: true });
+    expect(await screen.findByTestId("iam-list")).toBeVisible();
+    // 목록에서 다른 행으로 열면 새 기록이 쌓인다
+    fireEvent.doubleClick(within(screen.getByTestId("iam-list")).getByText(bob.name));
+    expect(await screen.findByRole("heading", { name: "bob" })).toBeVisible();
   });
 });

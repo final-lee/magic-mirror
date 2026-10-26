@@ -11,9 +11,11 @@ interface Props {
   favorites: Favorite[];
   onSelect: (sel: Favorite) => void;
   onToggleFavorite: (sel: Favorite) => void;
+  /** IAM 작업 공간 탭을 연다. 주면 IAM 서비스 아래 첫 항목으로 "IAM 관리"가 보인다. */
+  onOpenIam?: () => void;
 }
 
-export function Sidebar({ services, profile, region, selection, favorites, onSelect, onToggleFavorite }: Props) {
+export function Sidebar({ services, profile, region, selection, favorites, onSelect, onToggleFavorite, onOpenIam }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(selection ? [selection.service] : []));
 
   const toggle = (id: string) =>
@@ -67,10 +69,18 @@ export function Sidebar({ services, profile, region, selection, favorites, onSel
             <ServiceBadge service={svc} />
             {svc.name}
           </div>
-          {expanded.has(svc.id) &&
-            svc.types.map((t) => (
-              <TypeRow key={t.id} label={t.name} service={svc} type={t} fetch selected={isSelected(svc, t)} {...rowProps} />
-            ))}
+          {expanded.has(svc.id) && (
+            <>
+              {svc.id === "iam" && onOpenIam && (
+                <div className="typ iam-open" role="button" onClick={() => onOpenIam()}>
+                  <span>🔐 IAM 관리</span>
+                </div>
+              )}
+              {svc.types.map((t) => (
+                <TypeRow key={t.id} label={t.name} service={svc} type={t} fetch selected={isSelected(svc, t)} {...rowProps} />
+              ))}
+            </>
+          )}
         </div>
       ))}
     </nav>

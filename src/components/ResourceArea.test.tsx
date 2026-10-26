@@ -66,3 +66,49 @@ test("keeps loaded rows and shows an inline banner when a refetch fails", async 
   fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
   expect(props.onRefresh).toHaveBeenCalled();
 });
+
+describe("IAM workspace entry", () => {
+  const iamService = {
+    id: "iam",
+    name: "IAM",
+    global: true,
+    types: ["users", "roles", "policies"].map((id) => ({ id, name: id, columns: [{ key: "name", label: "Name", kind: "text" as const }] })),
+  };
+  const typeOf = (id: string) => iamService.types.find((t) => t.id === id)!;
+  const arn = "arn:aws:iam::123456789012:thing/target";
+  const mockRows = (extra = {}) =>
+    vi.mocked(api.listResources).mockResolvedValue({ items: [makeResource("target", { name: "target" }, { arn, ...extra })], truncated: false });
+
+  test.each(["users", "roles", "policies"])("double clicking an IAM %s row opens the IAM workspace on its ARN", async (typeId) => {
+    mockRows();
+    const onOpenIam = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenIam={onOpenIam} service={iamService} type={typeOf(typeId)} />);
+    fireEvent.doubleClick(await screen.findByText("target"));
+    expect(onOpenIam).toHaveBeenCalledWith(arn);
+  });
+
+  test("Enter on the selected row opens it too", async () => {
+    mockRows();
+    const onOpenIam = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenIam={onOpenIam} service={iamService} type={typeOf("roles")} />);
+    fireEvent.click(await screen.findByText("target"));
+    fireEvent.keyDown(screen.getByTestId("resource-table"), { key: "Enter" });
+    expect(onOpenIam).toHaveBeenCalledWith(arn);
+  });
+
+  test("a row without an ARN still opens the workspace, just without a target", async () => {
+    mockRows({ arn: null });
+    const onOpenIam = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenIam={onOpenIam} service={iamService} type={typeOf("users")} />);
+    fireEvent.doubleClick(await screen.findByText("target"));
+    expect(onOpenIam).toHaveBeenCalledWith(null);
+  });
+
+  test("other services do not call it", async () => {
+    mockRows();
+    const onOpenIam = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenIam={onOpenIam} service={ec2} type={ec2.types[0]} />);
+    fireEvent.doubleClick(await screen.findByText("target"));
+    expect(onOpenIam).not.toHaveBeenCalled();
+  });
+});

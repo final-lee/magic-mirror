@@ -20,11 +20,15 @@ interface Props {
   filter: string;
   onOpenBucket: (loc: S3Location) => void;
   onOpenVpc?: (vpc: { vpcId: string; name: string; region: string }) => void;
+  /** IAM 사용자·역할·정책을 열 때 IAM 작업 공간으로 보낸다. arn이 없으면 대상 없이 탭만 연다. */
+  onOpenIam?: (arn: string | null) => void;
   onRefresh: () => void;
   active: boolean;
 }
 
-export function ResourceArea({ service, type, profile, region, account, filter, onOpenBucket, onOpenVpc, onRefresh, active }: Props) {
+const IAM_OPENABLE = ["users", "roles", "policies"];
+
+export function ResourceArea({ service, type, profile, region, account, filter, onOpenBucket, onOpenVpc, onOpenIam, onRefresh, active }: Props) {
   const q = useResources(profile, region, service, type.id);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
@@ -39,6 +43,8 @@ export function ResourceArea({ service, type, profile, region, account, filter, 
       onOpenBucket({ bucket: item.id, region: item.values.region || region, prefix: "" });
     } else if (service.id === "vpc" && type.id === "vpcs") {
       onOpenVpc?.({ vpcId: item.id, name: item.name, region });
+    } else if (service.id === "iam" && IAM_OPENABLE.includes(type.id)) {
+      onOpenIam?.(item.arn);
     }
   };
 

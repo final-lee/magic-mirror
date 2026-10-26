@@ -14,6 +14,8 @@ import { ExplorerTab } from "./explorer/ExplorerTab";
 import { refKey, refName } from "./explorer/rows";
 import type { DiffTool, FileRef, TransferRequest } from "./explorer/types";
 import { useTransfers } from "./explorer/useTransfers";
+import { IamTab } from "./iam/IamTab";
+import { refreshIam, useIamOverview } from "./iam/queries";
 import type { S3Location } from "./lib/s3";
 import { getVersion } from "@tauri-apps/api/app";
 import { VpcMapTab } from "./vpcmap/VpcMapTab";
@@ -38,6 +40,9 @@ export default function App() {
   const [explorerTabs, setExplorerTabs] = useState<{ id: string; location: S3Location }[]>([]);
   const [diffTabs, setDiffTabs] = useState<{ id: string; left: FileRef; right: FileRef }[]>([]);
   const [vpcTabs, setVpcTabs] = useState<{ id: string; vpcId: string; name: string; region: string }[]>([]);
+  // IAM 탭은 하나뿐이다(id "iam"). focus는 리소스 목록에서 넘어온 대상 ARN, nonce는 열 때마다 올라가 같은 대상도 다시 이동시킨다.
+  const [iamTab, setIamTab] = useState<{ focus: string | null; nonce: number } | null>(null);
+  const iamOverview = useIamOverview(iamTab ? profile : null);
   const onTransferSettled = useCallback(
     (_req: TransferRequest) => {
       void qc.invalidateQueries({ queryKey: ["s3"] });
@@ -70,6 +75,7 @@ export default function App() {
     void qc.invalidateQueries({ queryKey: ["local"] });
     void qc.invalidateQueries({ queryKey: ["diff", profile] });
     void qc.invalidateQueries({ queryKey: ["vpc-topology", profile] });
+    void refreshIam(qc, profile);
   }, [qc, profile]);
 
   useEffect(() => {
@@ -127,7 +133,13 @@ export default function App() {
     setActiveTab(id);
     setFilter("");
   };
+  const openIam = (focus: string | null = null) => {
+    setIamTab((t) => ({ focus, nonce: (t?.nonce ?? 0) + 1 }));
+    setActiveTab("iam");
+    setFilter("");
+  };
   const closeTab = (id: string) => {
+    if (id === "iam") setIamTab(null);
     setVpcTabs((tabs) => tabs.filter((t) => t.id !== id));
     setExplorerTabs((tabs) => tabs.filter((t) => t.id !== id));
     setDiffTabs((tabs) => tabs.filter((t) => t.id !== id));
@@ -143,6 +155,7 @@ export default function App() {
   const diffTitle = (l: FileRef, r: FileRef) => (refName(l) === refName(r) ? `⇄ ${refName(l)}` : `⇄ ${refName(l)} ↔ ${refName(r)}`);
   const tabs: TabInfo[] = [
     { id: "resources", title: "리소스", closable: false },
+    ...(iamTab ? [{ id: "iam", title: iamOverview.data ? `🔐 IAM · ${iamOverview.data.accountId}` : "🔐 IAM", closable: true }] : []),
     ...explorerTabs.map((t) => ({ id: t.id, title: `S3: ${t.location.bucket}`, closable: true })),
     ...vpcTabs.map((t) => ({ id: t.id, title: `🗺 ${t.name}`, closable: true })),
     ...diffTabs.map((t) => ({ id: t.id, title: diffTitle(t.left, t.right), closable: true })),
@@ -154,11 +167,12 @@ export default function App() {
     const nextRegion = info?.region ?? region;
     setProfile(name);
     setRegion(nextRegion);
-    // 버킷은 계정에 속하므로 버킷 탭과 비교 탭을 모두 닫는다.
+    // 버킷과 IAM은 계정에 속하므로 버킷 탭, 비교 탭, IAM 탭을 모두 닫는다.
     setExplorerTabs([]);
     setDiffTabs([]);
     setVpcTabs([]);
-    if (activeTab.startsWith("s3:") || activeTab.startsWith("vpc:") || activeTab.startsWith("diff:")) setActiveTab("resources");
+    setIamTab(null);
+    if (activeTab.startsWith("s3:") || activeTab.startsWith("vpc:") || activeTab.startsWith("diff:") || activeTab === "iam") setActiveTab("resources");
     update({ lastProfile: name, lastRegion: nextRegion });
   };
 
@@ -204,6 +218,7 @@ export default function App() {
           favorites={settings.favorites}
           onSelect={select}
           onToggleFavorite={toggleFavorite}
+          onOpenIam={() => openIam()}
         />
         <MainArea
           key={mainKey}
@@ -215,10 +230,16 @@ export default function App() {
           filter={filter}
           onOpenBucket={openExplorer}
           onOpenVpc={openVpc}
+          onOpenIam={openIam}
           onRefresh={refresh}
           active={activeTab === "resources"}
         />
       </div>
+      {profile && iamTab && (
+        <div className="tabpane" hidden={activeTab !== "iam"}>
+          <IamTab profile={profile} active={activeTab === "iam"} filter={activeTab === "iam" ? filter : ""} focus={iamTab.focus} nonce={iamTab.nonce} />
+        </div>
+      )}
       {explorerTabs.map((t) => (
         <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
           <ExplorerTab
