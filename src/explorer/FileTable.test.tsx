@@ -88,3 +88,40 @@ test("click following a drag does not change the selection", () => {
   fireEvent.click(row("📄 a.txt"));
   expect(p.onSelectionChange).not.toHaveBeenCalled();
 });
+
+describe("deselect", () => {
+  afterEach(() => vi.useRealTimers());
+
+  test("clicking empty space clears the selection, but not rows or header", () => {
+    const p = setup({ selected: ["/p/a.txt"], anchor: "/p/a.txt" });
+    fireEvent.click(screen.getByText(/크기|Size|이름/, { selector: "th" }));
+    expect(p.onSelectionChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("file-table"));
+    expect(p.onSelectionChange).toHaveBeenCalledWith({ selected: [], anchor: null });
+  });
+
+  test("re-clicking the only selected row deselects after the delay", () => {
+    vi.useFakeTimers();
+    const p = setup({ selected: ["/p/a.txt"], anchor: "/p/a.txt" });
+    fireEvent.click(row("📄 a.txt"), { detail: 1 });
+    expect(p.onSelectionChange).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(300);
+    expect(p.onSelectionChange).toHaveBeenCalledWith({ selected: [], anchor: null });
+  });
+
+  test("double click after re-click opens without deselecting", () => {
+    vi.useFakeTimers();
+    const p = setup({ selected: ["/p/a.txt"], anchor: "/p/a.txt" });
+    fireEvent.click(row("📄 a.txt"), { detail: 1 });
+    fireEvent.doubleClick(row("📄 a.txt"));
+    vi.advanceTimersByTime(500);
+    expect(p.onOpen).toHaveBeenCalledWith("/p/a.txt");
+    expect(p.onSelectionChange).not.toHaveBeenCalled();
+  });
+
+  test("meta-click on the selected row still toggles immediately", () => {
+    const p = setup({ selected: ["/p/a.txt"], anchor: "/p/a.txt" });
+    fireEvent.click(row("📄 a.txt"), { metaKey: true, detail: 1 });
+    expect(p.onSelectionChange).toHaveBeenCalledWith({ selected: [], anchor: "/p/a.txt" });
+  });
+});

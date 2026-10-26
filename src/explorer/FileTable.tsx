@@ -5,6 +5,8 @@ import { compareValues } from "../lib/format";
 import { nextSelection, type SelectionState } from "./selection";
 
 const DRAG_THRESHOLD = 5;
+const DESELECT_DELAY_MS = 300;
+const NONE: SelectionState = { selected: [], anchor: null };
 
 interface Props {
   columns: Column[];
@@ -23,6 +25,13 @@ export function FileTable({ columns, rows, filter, selection, onSelectionChange,
   const press = useRef<{ id: string; x: number; y: number; started: boolean } | null>(null);
 
   const justDragged = useRef(false);
+  const deselectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelDeselect = () => {
+    if (deselectTimer.current !== null) clearTimeout(deselectTimer.current);
+    deselectTimer.current = null;
+  };
+  // 선택이 바뀌거나 언마운트되면 대기 중인 해제 타이머를 정리한다.
+  useEffect(() => cancelDeselect, [selection]);
 
   useEffect(() => {
     const reset = () => {
@@ -59,6 +68,7 @@ export function FileTable({ columns, rows, filter, selection, onSelectionChange,
   const onPointerDown = (id: string, e: PointerEvent) => {
     if (e.button !== 0) return;
     justDragged.current = false;
+    cancelDeselect();
     press.current = { id, x: e.clientX, y: e.clientY, started: false };
   };
 
@@ -74,7 +84,19 @@ export function FileTable({ columns, rows, filter, selection, onSelectionChange,
   };
 
   return (
-    <div className="tbl" tabIndex={0} onKeyDown={onKeyDown} data-testid="file-table" onPointerUp={() => (press.current = null)}>
+    <div className="tbl" tabIndex={0} onKeyDown={onKeyDown} data-testid="file-table" 
+      onPointerUp={() => (press.current = null)}
+      onClick={(e) => {
+        const t = e.target as Element;
+        if (t.closest("tbody tr") || t.closest("thead")) return;
+        if (justDragged.current) {
+          justDragged.current = false;
+          return;
+        }
+        cancelDeselect();
+        if (selection.selected.length > 0) onSelectionChange(NONE);
+      }}
+    >
       <table>
         <thead>
           <tr>
@@ -101,9 +123,21 @@ export function FileTable({ columns, rows, filter, selection, onSelectionChange,
                     justDragged.current = false;
                     return;
                   }
+                  cancelDeselect();
+                  if (!e.metaKey && !e.shiftKey && e.detail === 1 && selection.selected.length === 1 && selection.selected[0] === r.id) {
+                    // 이미 선택된 행을 천천히 다시 클릭하면 해제한다. 더블클릭이면 dblclick에서 취소된다.
+                    deselectTimer.current = setTimeout(() => {
+                      deselectTimer.current = null;
+                      onSelectionChange(NONE);
+                    }, DESELECT_DELAY_MS);
+                    return;
+                  }
                   onSelectionChange(nextSelection(selection, r.id, order, { meta: e.metaKey, shift: e.shiftKey }));
                 }}
-                onDoubleClick={() => onOpen(r.id)}
+                onDoubleClick={() => {
+                  cancelDeselect();
+                  onOpen(r.id);
+                }}
                 onPointerDown={(e) => onPointerDown(r.id, e)}
                 onPointerMove={onPointerMove}
               >

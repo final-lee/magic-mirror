@@ -46,6 +46,8 @@ interface DialogState extends DialogInput {
 
 const DIALOG_BUSY = "확인 창을 먼저 닫아 주세요";
 const EMPTY: SelectionState = { selected: [], anchor: null };
+const sameLoc = (a: S3Location | null, b: S3Location | null) =>
+  a === b || (!!a && !!b && a.bucket === b.bucket && a.region === b.region && a.prefix === b.prefix);
 const lastName = (p: string) => p.replace(/\/+$/, "").split("/").pop() ?? p;
 
 export function ExplorerTab(p: Props) {
@@ -77,6 +79,7 @@ export function ExplorerTab(p: Props) {
     if (prevProfile.current === p.profile) return;
     prevProfile.current = p.profile;
     setLocation(null);
+    s3History.current = { back: [], fwd: [] };
     setS3Sel(EMPTY);
     setLocalSel(EMPTY);
     setDialog(null);
@@ -88,14 +91,48 @@ export function ExplorerTab(p: Props) {
   const s3Entries = location ? (s3Objects.data?.pages.flatMap((pg) => pg.entries) ?? []).filter((e) => s3Sel.selected.includes(e.key)) : [];
   const targets = compareTargets({ local: localEntries, s3: s3Entries, s3Location: location, focused });
 
-  const changeLocalPath = (path: string) => {
+  // 패널별 탐색 기록 (뒤로/앞으로)
+  const localHistory = useRef<{ back: string[]; fwd: string[] }>({ back: [], fwd: [] });
+  const s3History = useRef<{ back: (S3Location | null)[]; fwd: (S3Location | null)[] }>({ back: [], fwd: [] });
+  const applyLocalPath = (path: string) => {
     setLocalPath(path);
     setLocalSel(EMPTY);
     p.onLocalPathChange(path);
   };
-  const changeLocation = (loc: S3Location | null) => {
+  const applyLocation = (loc: S3Location | null) => {
     setLocation(loc);
     setS3Sel(EMPTY);
+  };
+  const changeLocalPath = (path: string) => {
+    if (localPath && path !== localPath) {
+      localHistory.current.back.push(localPath);
+      localHistory.current.fwd = [];
+    }
+    applyLocalPath(path);
+  };
+  const changeLocation = (loc: S3Location | null) => {
+    if (!sameLoc(loc, location)) {
+      s3History.current.back.push(location);
+      s3History.current.fwd = [];
+    }
+    applyLocation(loc);
+  };
+  const go = (pane: Pane, dir: "back" | "fwd") => {
+    const from = dir === "back" ? "back" : "fwd";
+    const to = dir === "back" ? "fwd" : "back";
+    if (pane === "local") {
+      const h = localHistory.current;
+      if (!localPath || h[from].length === 0) return;
+      const target = h[from].pop() as string;
+      h[to].push(localPath);
+      applyLocalPath(target);
+    } else {
+      const h = s3History.current;
+      if (h[from].length === 0) return;
+      const target = h[from].pop() as S3Location | null;
+      h[to].push(location);
+      applyLocation(target);
+    }
   };
   const invalidateS3 = () => {
     if (location) void qc.invalidateQueries({ queryKey: ["s3", p.profile, location.bucket] });
@@ -253,8 +290,25 @@ export function ExplorerTab(p: Props) {
   });
 
   // 최신 콜백을 Finder 드롭/단축키 리스너에서 쓰기 위한 ref
-  const handlers = useRef({ uploadPaths, compare, remove });
-  handlers.current = { uploadPaths, compare, remove };
+  const handlers = useRef({ uploadPaths, compare, remove, go });
+  handlers.current = { uploadPaths, compare, remove, go };
+
+  // 마우스 뒤로(3)/앞으로(4) 버튼: 포인터가 있는 패널에 적용
+  useEffect(() => {
+    if (!p.active) return;
+    const onMouseUp = (e: MouseEvent) => {
+      if (e.button !== 3 && e.button !== 4) return;
+      const el = (e.target as Element | null)?.closest?.("[data-pane]");
+      const pane = el?.getAttribute("data-pane");
+      if (pane !== "local" && pane !== "s3") return;
+      e.preventDefault();
+      if (dialogRef.current) return;
+      setFocused(pane);
+      handlers.current.go(pane, e.button === 3 ? "back" : "fwd");
+    };
+    window.addEventListener("mouseup", onMouseUp);
+    return () => window.removeEventListener("mouseup", onMouseUp);
+  }, [p.active]);
 
   useEffect(() => {
     if (!p.active) return;
@@ -300,6 +354,9 @@ export function ExplorerTab(p: Props) {
         if (el && el !== document.body && !inTable) return;
         e.preventDefault();
         setFocused((f) => (f === "local" ? "s3" : "local"));
+      } else if (e.metaKey && (e.key === "[" || e.key === "]")) {
+        e.preventDefault();
+        handlers.current.go(focused, e.key === "[" ? "back" : "fwd");
       } else if (e.metaKey && e.key.toLowerCase() === "d") {
         e.preventDefault();
         handlers.current.compare();
