@@ -2,23 +2,11 @@
 
 use serde_json::json;
 
-use super::{key, status, table_status};
+use super::{assert_paths_agree, key, resources_of, status, strings, table_status, verdict_of};
 use crate::iam::catalog::{catalog, AccessLevel};
 use crate::iam::danger::admin_like_statementwise;
 use crate::iam::eval::{decide_action, evaluate, evaluate_action, policy_sources, principal_actions, principal_view, Status};
 use crate::iam::fixtures::*;
-
-fn strings(items: &[&str]) -> Vec<String> {
-    items.iter().map(|s| s.to_string()).collect()
-}
-
-/// 전체 계산과 한 건 계산이 같은 리소스 목록과 판정을 내는지 확인하고 그 값을 돌려준다.
-fn resources_of(s: &crate::iam::model::Snapshot, arn: &str, action: &str) -> Option<(Status, Vec<String>)> {
-    let (prefix, name) = action.split_once(':').unwrap();
-    let table = evaluate(s, arn).unwrap().actions.get(&key(prefix, name)).map(|(_, e)| e.clone());
-    assert_eq!(evaluate_action(s, arn, action, None), table, "{action}: 전체 계산과 한 건 계산이 달라요");
-    table.map(|e| (e.status, e.resources))
-}
 
 // ---- 관리자급: 리소스를 좁혀 허용한 작업은 세지 않는다 ----
 
@@ -239,21 +227,23 @@ fn many_not_action_statements_agree_with_the_single_action_path() {
         ]),
     );
     let eval = evaluate(&s, &arn).unwrap();
-    let (sources, boundary) = policy_sources(&s, &arn);
     let cat = catalog();
-    let mut checked = 0;
-    for (prefix, _) in cat.services() {
-        for (name, level) in cat.actions(prefix) {
+    // 카탈로그의 모든 작업에서 판정·리소스·근거·범위 플래그가 같다
+    assert_eq!(assert_paths_agree(&s, &arn, &[]), cat.all_count());
+    // `decide_action`(다른 모듈이 쓰는 한 건 판정)도 같은 답이다
+    let (sources, boundary) = policy_sources(&s, &arn);
+    for (prefix, _) in cat.services().filter(|(prefix, _)| ["s3", "iam", "sts", "kms", "organizations"].contains(prefix)) {
+        for (name, _) in cat.actions(prefix) {
             let single = decide_action(&sources, boundary.as_ref(), &format!("{prefix}:{name}"), None);
-            let table = eval.actions.get(&key(prefix, name));
-            assert_eq!(single.as_ref(), table.map(|(_, e)| e), "{prefix}:{name}");
-            if let Some((table_level, _)) = table {
-                assert_eq!(table_level, level, "{prefix}:{name}");
-            }
-            checked += 1;
+            assert_eq!(single.as_ref(), eval.actions.get(&key(prefix, name)).map(|(_, e)| e), "{prefix}:{name}");
         }
     }
-    assert_eq!(checked, cat.all_count());
+    // 범위 플래그가 실제로 갈리는 작업들이다: A와 경계가 조건 없이 모든 리소스에 열면 true, 조건부·거부·경계 차단이면 false
+    let full_scope = |action: &str| verdict_of(&s, &arn, action).map(|v| v.full_scope);
+    assert_eq!(full_scope("s3:GetObject"), Some(true));
+    assert_eq!(full_scope("iam:GetUser"), Some(false));
+    assert_eq!(full_scope("s3:DeleteBucket"), Some(false));
+    assert_eq!(full_scope("organizations:ListAccounts"), Some(false));
 
     let at = |prefix: &str, action: &str| eval.actions.get(&key(prefix, action)).map(|(_, e)| e.status);
     // A가 허용하고 막는 문장은 없다

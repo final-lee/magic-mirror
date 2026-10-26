@@ -31,10 +31,23 @@ pub use super::view::Status;
 #[derive(Clone, Debug, PartialEq)]
 pub struct ActionEval {
     pub status: Status,
-    /// 허용하는 문장들의 리소스 패턴(중복 없음). NotResource는 `* (제외: …)`로 적는다
+    /// 허용하는 리소스 패턴(중복 없음). NotResource는 `* (제외: …)`로 적는다.
+    /// 대상 리소스를 정하지 않은 판정에서는 조건 없는 Deny가 통째로 덮은 패턴을 빼고, 권한 경계가 있으면 경계가 허용하는 범위로
+    /// 좁힌 패턴이다(그 뒤에 덮인 것도 뺀다). 거부면 신원 정책 Allow가 열려던 패턴 전부, 경계 차단이면 경계로 좁히기 전의 패턴이다
     pub resources: Vec<String>,
     /// 판정에 걸린 문장들. 거부면 Deny 문장이 먼저 온다
     pub sources: Vec<GrantSource>,
+}
+
+/// 작업 하나의 판정과, 그 판정이 모든 리소스에 조건 없이 미치는지. 화면 값에는 `eval`만 나간다.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Verdict {
+    pub(super) eval: ActionEval,
+    /// 이 작업이 모든 리소스(또는 NotResource 목록만 뺀 모든 리소스)에서 조건 없이 허용된다: 둘 다 조건 없는 (신원 정책 Allow,
+    /// 경계가 있으면 경계 Allow) 문장 쌍이 그 범위를 열고, 어떤 Deny도 그 범위를 통째로 덮지 않는다. true이면 판정은 늘 허용이다.
+    /// 라벨 문자열이 아니라 판정 과정에서 정한다. 대상 리소스를 정한 판정에서는 늘 false다.
+    /// 관리자급의 90% 규칙과 "모든 리소스에 대한 권한 관리" 위험 표시가 이 값을 쓴다
+    pub(super) full_scope: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -254,6 +267,11 @@ fn hits_for<'a>(sources: impl Iterator<Item = &'a Source<'a>>, action: &str, res
 
 /// 작업 하나를 정책 출처에 대해 판정한다. 읽지 못한 경계 정책은 없는 것으로 본다.
 pub(super) fn decide_action<'a>(sources: &'a [Source<'a>], boundary: Option<&'a Source<'a>>, action: &str, resource: Option<&str>) -> Option<ActionEval> {
+    decide_verdict(sources, boundary, action, resource).map(|verdict| verdict.eval)
+}
+
+/// `decide_action`과 같되 `Verdict::full_scope`도 돌려준다.
+fn decide_verdict<'a>(sources: &'a [Source<'a>], boundary: Option<&'a Source<'a>>, action: &str, resource: Option<&str>) -> Option<Verdict> {
     let boundary = boundary.filter(|b| b.document.is_some());
     let identity = hits_for(sources.iter(), action, resource);
     let boundary_hits = hits_for(boundary.into_iter(), action, resource);
@@ -291,7 +309,7 @@ struct Evaluated {
     /// 허용하는 문장이 있는 작업만, `ActionId` 오름차순으로. 두 번째 값은 `distinct`의 순번이다
     verdicts: Vec<(ActionId, usize)>,
     /// 서로 다른 판정들. 같은 문장들에 맞은 작업은 판정이 같으므로 한 번만 계산해 나눠 쓴다
-    distinct: Vec<ActionEval>,
+    distinct: Vec<Verdict>,
     unknown: Vec<String>,
     admin_like: bool,
 }
@@ -325,7 +343,7 @@ fn evaluate_ids<'a>(sources: &'a [Source<'a>], boundary: Option<&'a Source<'a>>,
 
     let has_boundary = boundary.is_some();
     let mut verdicts = Vec::new();
-    let mut distinct: Vec<ActionEval> = Vec::new();
+    let mut distinct: Vec<Verdict> = Vec::new();
     // 맞은 문장 번호들 → 판정(없으면 None). 이어지는 작업은 대개 같은 문장들에 맞으니 바로 앞 것과 먼저 견준다
     let mut cache: HashMap<Vec<u32>, Option<usize>> = HashMap::new();
     let (mut key, mut previous_key, mut previous): (Vec<u32>, Vec<u32>, Option<usize>) = (Vec::new(), Vec::new(), None);
@@ -348,8 +366,8 @@ fn evaluate_ids<'a>(sources: &'a [Source<'a>], boundary: Option<&'a Source<'a>>,
                     limit.push(hit);
                 }
             }
-            let computed = decide(&identity, &limit, has_boundary, false, with_sources).map(|eval| {
-                distinct.push(eval);
+            let computed = decide(&identity, &limit, has_boundary, false, with_sources).map(|verdict| {
+                distinct.push(verdict);
                 distinct.len() - 1
             });
             cache.insert(key.clone(), computed);
@@ -361,12 +379,10 @@ fn evaluate_ids<'a>(sources: &'a [Source<'a>], boundary: Option<&'a Source<'a>>,
             verdicts.push(((group[0] >> 32) as ActionId, verdict));
         }
     }
-    // 관리자급: 문장 하나가 모든 작업을 모든 리소스에 열어 두었거나, 모든 리소스에서 최종적으로 허용된 작업이 카탈로그의 90% 이상.
-    // 리소스를 좁혀 허용한 작업(`Resource:"arn:aws:s3:::b/*"` 위의 `Action:"*"` 등)은 세지 않는다
-    let allowed_everywhere = verdicts
-        .iter()
-        .filter(|(_, v)| distinct[*v].status == Status::Allowed && distinct[*v].resources.iter().any(|r| all_star(r)))
-        .count();
+    // 관리자급: 문장 하나가 모든 작업을 모든 리소스에 열어 두었거나, 모든 리소스(NotResource 목록만 뺀 것도)에서 조건 없이 허용된
+    // 작업(`Verdict::full_scope`)이 카탈로그의 90% 이상. 리소스를 좁혀 허용한 작업(`Resource:"arn:aws:s3:::b/*"` 위의 `Action:"*"` 등)과
+    // 조건이 맞아야 모든 리소스에 열리는 작업은 세지 않는다
+    let allowed_everywhere = verdicts.iter().filter(|(_, v)| distinct[*v].full_scope).count();
     let admin_like = danger::admin_like(sources, boundary) || (allowed_everywhere > 0 && allowed_everywhere * 100 >= ix.total() * 90);
     Evaluated { verdicts, distinct, unknown: unknown.into_iter().collect(), admin_like }
 }
@@ -379,7 +395,7 @@ pub(super) fn evaluate_sources<'a>(sources: &'a [Source<'a>], boundary: Option<&
         .into_iter()
         .map(|(id, verdict)| {
             let (prefix, action) = ix.names(id);
-            ((prefix.to_owned(), action.to_owned()), (ix.level(id), distinct[verdict].clone()))
+            ((prefix.to_owned(), action.to_owned()), (ix.level(id), distinct[verdict].eval.clone()))
         })
         .collect();
     PrincipalEval { actions, unknown, admin_like }
@@ -408,9 +424,10 @@ pub fn principal_actions(s: &Snapshot, arn: &str, prefix: &str, level: AccessLev
         .filter(|(_, l)| *l == level)
         .filter_map(|(name, _)| {
             let action = format!("{service}:{name}");
-            let eval = decide_action(&sources, boundary.as_ref(), &action, None)?;
-            let danger = danger::danger_reason(service, name, level, &eval, admin_statement).map(str::to_owned);
-            Some(ActionGrant { action, status: eval.status, resources: eval.resources, sources: eval.sources, danger })
+            let verdict = decide_verdict(&sources, boundary.as_ref(), &action, None)?;
+            let danger = danger::danger_reason(service, name, level, &verdict, admin_statement).map(str::to_owned);
+            let ActionEval { status, resources, sources: grounds } = verdict.eval;
+            Some(ActionGrant { action, status, resources, sources: grounds, danger })
         })
         .collect()
 }
@@ -474,12 +491,12 @@ fn service_permissions(done: &Evaluated, admin_statement: bool) -> Vec<ServicePe
                 let result = &done.distinct[*verdict];
                 let level = ix.level(*id);
                 let cell = &mut cells[level as usize];
-                match result.status {
+                match result.eval.status {
                     Status::Allowed => cell.allowed += 1,
                     Status::Conditional => cell.conditional += 1,
                     Status::Denied | Status::Boundary => cell.denied += 1,
                 }
-                if result.status == Status::Allowed && !dangerous && danger::danger_reason(prefix, ix.names(*id).1, level, result, admin_statement).is_some() {
+                if result.eval.status == Status::Allowed && !dangerous && danger::danger_reason(prefix, ix.names(*id).1, level, result, admin_statement).is_some() {
                     dangerous = true;
                 }
             }
