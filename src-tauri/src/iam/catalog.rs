@@ -73,16 +73,16 @@ pub fn catalog() -> &'static Catalog {
 }
 
 /// ASCII 대소문자를 무시한 비교. 문자열을 새로 만들지 않는다.
-fn cmp_ignore_case(a: &str, b: &str) -> Ordering {
+pub(crate) fn cmp_ignore_case(a: &str, b: &str) -> Ordering {
     a.bytes().map(|c| c.to_ascii_lowercase()).cmp(b.bytes().map(|c| c.to_ascii_lowercase()))
 }
 
-fn has_wildcard(s: &str) -> bool {
+pub(crate) fn has_wildcard(s: &str) -> bool {
     s.bytes().any(|b| b == b'*' || b == b'?')
 }
 
 /// `*`로만 된 패턴(`*`, `**`)은 전부에 맞는다.
-fn is_match_all(pattern: &str) -> bool {
+pub(crate) fn is_match_all(pattern: &str) -> bool {
     !pattern.is_empty() && pattern.bytes().all(|b| b == b'*')
 }
 

@@ -170,6 +170,20 @@ fn privesc_badge() -> Badge {
     Badge::new(BadgeKind::Privesc, "권한 상승 위험", Level::Warn)
 }
 
+/// 관리자급 배지를 맨 앞에 단다. 이미 있으면 그대로 두고, 관리자급이면 권한 상승 배지는 따로 달지 않으므로 그것은 뗀다.
+pub(super) fn mark_admin(badges: &mut Vec<Badge>) {
+    if badges.iter().any(|b| b.kind == BadgeKind::Admin) {
+        return;
+    }
+    badges.retain(|b| b.kind != BadgeKind::Privesc);
+    badges.insert(0, admin_badge());
+}
+
+/// 서비스 연결 역할이나 Identity Center 역할이면 정책을 바꾸거나 뗄 수 없다.
+pub(super) fn is_locked_role(principal: Principal) -> bool {
+    matches!(principal, Principal::Role(role) if is_service_linked(&role.path) || is_sso_role(&role.name, &role.path))
+}
+
 /// 정책 문서 자체가 관리자급이거나 권한 상승 작업을 여는지에 따른 배지. 관리자급이면 권한 상승 배지는 따로 달지 않는다.
 pub(super) fn document_badges(doc: &PolicyDocument) -> Vec<Badge> {
     let sources = [Source { id: String::new(), name: String::new(), kind: SourceKind::Managed, scope: None, via: None, document: Some(doc) }];
@@ -406,7 +420,8 @@ mod tests {
         let badge_kinds = |arn: &str| managed_policy_badges(&s.policies[arn]).iter().map(|b| b.kind).collect::<Vec<_>>();
         assert_eq!(badge_kinds(ADMIN_POLICY), vec![BadgeKind::Admin, BadgeKind::AwsManaged]);
         assert_eq!(badge_kinds(S3_FULL), vec![BadgeKind::AwsManaged]);
-        assert!(badge_kinds(CAROL_BOUNDARY).is_empty());
+        // 정책 하나만 보면 AttachmentCount가 0이라 안 붙은 정책이다. 권한 경계로 쓰는 것까지 아는 `summary`의 배지에서는 이 배지가 빠진다
+        assert_eq!(badge_kinds(CAROL_BOUNDARY), vec![BadgeKind::Unattached]);
         assert_eq!(badge_kinds(UNUSED_POLICY), vec![BadgeKind::Unattached]);
 
         let local_admin = managed("arn:aws:iam::111111111111:policy/root-like", Scope::Local, 0, policy(json!([{ "Effect": "Allow", "Action": "*", "Resource": "*" }])));

@@ -110,7 +110,8 @@ pub fn snapshot() -> Snapshot {
     let policies = [
         managed(ADMIN_POLICY, Scope::Aws, 1, policy(json!([{ "Effect": "Allow", "Action": "*", "Resource": "*" }]))),
         managed(S3_FULL, Scope::Aws, 1, policy(json!([{ "Effect": "Allow", "Action": "s3:*", "Resource": "*" }]))),
-        managed(CAROL_BOUNDARY, Scope::Local, 1, policy(json!([{ "Sid": "ReadOnly", "Effect": "Allow", "Action": "s3:Get*", "Resource": "*" }]))),
+        // 권한 경계로만 쓰이는 정책이라 AWS가 돌려주는 AttachmentCount는 0이다
+        managed(CAROL_BOUNDARY, Scope::Local, 0, policy(json!([{ "Sid": "ReadOnly", "Effect": "Allow", "Action": "s3:Get*", "Resource": "*" }]))),
         managed(UNUSED_POLICY, Scope::Local, 0, policy(json!([{ "Effect": "Allow", "Action": "s3:GetObject", "Resource": "*" }]))),
     ];
     for p in policies {

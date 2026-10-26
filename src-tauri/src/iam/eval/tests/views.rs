@@ -3,9 +3,11 @@
 use serde_json::{json, Value};
 
 use crate::iam::catalog::{catalog, AccessLevel, LEVELS};
+use crate::iam::danger::admin_like_statementwise;
 use crate::iam::eval::{principal_actions, principal_view, Status};
 use crate::iam::fixtures::*;
-use crate::iam::view::{AttachedKind, BadgeKind, LevelCell, PrincipalKind, PrincipalView, ServicePermissions, TrustKind};
+use crate::iam::summary::principal_summary;
+use crate::iam::view::{AttachedKind, Badge, BadgeKind, LevelCell, PrincipalKind, PrincipalView, ServicePermissions, TrustKind};
 
 fn service<'a>(view: &'a PrincipalView, prefix: &str) -> &'a ServicePermissions {
     view.services.iter().find(|s| s.prefix == prefix).unwrap_or_else(|| panic!("{prefix} 서비스가 없어요"))
@@ -247,6 +249,63 @@ fn principal_view_json_has_the_contract_shape() {
     assert_eq!(sorted_keys(source), vec!["boundary", "conditional", "effect", "policyId", "policyName", "sid", "statementIndex", "via"]);
     assert_eq!(source["effect"], json!("Allow"));
     assert_eq!(source["sid"], json!("ReadAssets"));
+}
+
+fn kinds(badges: &[Badge]) -> Vec<BadgeKind> {
+    badges.iter().map(|b| b.kind).collect()
+}
+
+#[test]
+fn a_policy_used_only_as_a_boundary_is_not_shown_as_unattached() {
+    let s = snapshot();
+    // AWS의 AttachmentCount는 권한 경계로 쓰는 것을 세지 않는다
+    assert_eq!(s.policies[CAROL_BOUNDARY].attachment_count, 0);
+    let view = principal_view(&s, CAROL).unwrap();
+    let boundary = view.policies.iter().find(|p| p.id == CAROL_BOUNDARY).unwrap();
+    assert_eq!(kinds(&boundary.badges), vec![BadgeKind::Boundary]);
+    // 정말 어디에도 안 붙은 정책은 목록에서 그대로 안 붙음이다
+    let (_, _, _, policies) = crate::iam::summary::summaries(&s);
+    let badges_of = |arn: &str| kinds(&policies.iter().find(|p| p.arn == arn).unwrap().badges);
+    assert!(badges_of(CAROL_BOUNDARY).is_empty());
+    assert_eq!(badges_of(UNUSED_POLICY), vec![BadgeKind::Unattached]);
+}
+
+#[test]
+fn the_detail_view_marks_admin_when_the_full_evaluation_says_so() {
+    // `*:?*`는 모든 작업을 모든 리소스에 열지만 문장만 봐서는 `*` 와일드카드가 아니다
+    let (mut s, arn) = solo_user(json!([{ "Effect": "Allow", "Action": "*:?*", "Resource": "*" }]));
+    s.users[0].tags.insert("aws:cloudformation:stack-name".into(), "stack".into());
+    assert!(!admin_like_statementwise(&s, &arn));
+    // 목록 배지는 문장만 보고 정하니 권한 상승 위험까지만 단다
+    assert_eq!(kinds(&principal_summary(&s, &arn).unwrap().badges), vec![BadgeKind::Privesc, BadgeKind::Cfn]);
+    // 상세 화면은 전체 계산이 관리자급이면 관리자급 배지를 달고(권한 상승 배지는 대신 뗀다), 다른 배지는 그대로 둔다
+    let view = principal_view(&s, &arn).unwrap();
+    assert!(view.admin_like);
+    assert_eq!(kinds(&view.summary.badges), vec![BadgeKind::Admin, BadgeKind::Cfn]);
+    assert_eq!(view.summary.badges[0].label, "관리자급");
+
+    // 문장만 봐도 관리자급이면 배지가 겹치지 않는다
+    let view = principal_view(&snapshot(), ALICE).unwrap();
+    assert_eq!(kinds(&view.summary.badges), vec![BadgeKind::Admin]);
+    // 관리자급이 아니면 그대로다
+    let view = principal_view(&snapshot(), DEPLOY).unwrap();
+    assert_eq!(kinds(&view.summary.badges), vec![BadgeKind::Privesc, BadgeKind::Cfn]);
+}
+
+#[test]
+fn managed_policies_of_service_linked_and_identity_center_roles_cannot_be_detached() {
+    let mut s = snapshot();
+    for arn in [SLR, SSO, DEPLOY] {
+        s.roles.iter_mut().find(|r| r.arn == arn).unwrap().attached.push(S3_FULL.into());
+    }
+    let detachable = |arn: &str| principal_view(&s, arn).unwrap().policies.iter().find(|p| p.id == S3_FULL).map(|p| p.detachable);
+    assert_eq!(detachable(SLR), Some(false));
+    assert_eq!(detachable(SSO), Some(false));
+    assert_eq!(detachable(DEPLOY), Some(true));
+    // 사용자·그룹에 직접 붙은 것은 뗄 수 있다
+    assert_eq!(detachable(CAROL), Some(true));
+    assert_eq!(detachable(ADMINS), None);
+    assert!(principal_view(&s, ADMINS).unwrap().policies[0].detachable);
 }
 
 #[test]
