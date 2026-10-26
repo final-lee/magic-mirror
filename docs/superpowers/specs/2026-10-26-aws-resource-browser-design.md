@@ -18,7 +18,7 @@ Forklift 스타일의 3단(사이드바 · 목록 · 상세) 레이아웃을 사
 - 서비스 활성화 설정: 체크한 서비스만 사이드바에 표시·조회
 - 즐겨찾기: 리소스 타입을 사이드바 상단에 고정
 - S3 버킷 → prefix → 객체 탐색 (조회 전용)
-- ID/ARN 복사, AWS 콘솔에서 열기, 원본 JSON 보기
+- ID/ARN 복사, AWS 콘솔에서 열기, 원본 데이터 보기(SDK 응답의 Debug 출력)
 - 목록 정렬 및 이름/ID 텍스트 필터
 
 ### 제외 (YAGNI)
@@ -55,7 +55,7 @@ Forklift 스타일의 3단(사이드바 · 목록 · 상세) 레이아웃을 사
 - **사이드바**: 즐겨찾기 섹션 + 활성화된 서비스 트리. 서비스를 펼치면 리소스 타입과 개수가 표시된다. 리소스 타입에서 우클릭하면 즐겨찾기를 추가/제거한다.
 - **목록**: 리소스 타입별 칼럼 정의(§6)에 따라 표를 그린다. 칼럼 헤더 클릭으로 정렬, ⌘F 필터는 이름/ID 부분일치.
 - **S3**: Buckets 목록에서 행을 더블클릭하면 해당 버킷의 prefix로 들어간다. 경로(breadcrumb)를 클릭하면 상위로 이동한다.
-- **상세 패널**: 선택한 리소스의 필드, 태그, ARN(복사), "AWS 콘솔에서 열기", "원본 JSON 보기"(모달).
+- **상세 패널**: 선택한 리소스의 필드, 태그, ARN(복사), "AWS 콘솔에서 열기", "원본 데이터 보기"(모달).
 - **서비스 설정(⚙)**: 16개 서비스 체크박스 시트. 변경 즉시 사이드바에 반영되고 저장된다.
 - **키보드**: ↑↓ 행 이동, ⌘C 선택 리소스 ID 복사, ⌘F 필터, ⌘R 새로고침.
 
@@ -70,7 +70,7 @@ adapters/
   mod.rs         ResourceAdapter trait, 레지스트리(서비스 ID → 어댑터)
   ec2.rs s3.rs lambda.rs rds.rs ecs.rs eks.rs vpc.rs iam.rs dynamodb.rs
   logs.rs cloudfront.rs sqs.rs sns.rs ecr.rs route53.rs secretsmanager.rs
-model.rs         ResourceType, ResourceSummary, ResourceDetail, AppError
+model.rs         ResourceType, Resource, ListResult, ServiceInfo; error.rs: AppError
 commands.rs      Tauri 커맨드
 settings.rs      settings.json 읽기/쓰기
 ```
@@ -84,19 +84,20 @@ pub trait ResourceAdapter: Send + Sync {
     fn display_name(&self) -> &'static str;        // "EC2"
     fn is_global(&self) -> bool;                   // 리전 무관 여부
     fn resource_types(&self) -> Vec<ResourceType>; // 타입 ID, 표시명, 칼럼 정의
-    async fn list(&self, cfg: &SdkConfig, type_id: &str) -> Result<Vec<ResourceSummary>, AppError>;
-    async fn get(&self, cfg: &SdkConfig, type_id: &str, id: &str) -> Result<ResourceDetail, AppError>;
+    async fn list(&self, cfg: &SdkConfig, type_id: &str) -> Result<ListResult, AppError>;
 }
 ```
+
+목록 응답 하나에 상세 패널용 정보까지 모두 담는다(별도 `get` 호출 없음). 목록 API만으로 칼럼을 채울 수 없는 서비스(DynamoDB, SQS, SNS, EKS, ECS)는 어댑터 안에서 항목별 describe 호출을 동시성 8로 수행한다.
 
 **데이터 모델**
 
 - `ResourceType { id, name, columns: Vec<Column { key, label, kind } > }` — `kind`: `text | mono | state | datetime | bytes`
-- `ResourceSummary { id, name, arn: Option<String>, values: Map<String, String>, tags: Map<String, String> }`
-- `ResourceDetail { summary, fields: Vec<(label, value)>, raw_json: serde_json::Value, console_url: Option<String> }`
-- `AppError` (직렬화되어 프론트로 전달): `SsoExpired { profile }`, `AccessDenied { action }`, `Throttled`, `Network { message }`, `Other { message }`
+- `Resource { id, name, arn: Option<String>, values: Map<String, String>, tags: Map<String, String>, fields: Vec<Field { label, value }>, raw: String, console_url: Option<String> }` — `values`는 표 칼럼, `fields`는 상세 패널 전용 추가 정보, `raw`는 SDK 응답 타입의 `{:#?}` 출력(SDK 타입은 serde 직렬화를 지원하지 않음)
+- `ListResult { items: Vec<Resource>, truncated: bool }`
+- `AppError` (직렬화되어 프론트로 전달): `SsoExpired`, `AccessDenied { action }`, `Throttled`, `Network { message }`, `Other { message }`
 
-SDK 응답 → 모델 변환은 어댑터 안의 **순수 함수**(`fn to_summary(&aws_sdk_ec2::types::Instance) -> ResourceSummary` 등)로 분리해 단위 테스트한다.
+SDK 응답 → 모델 변환은 어댑터 안의 **순수 함수**(`fn instance(&aws_sdk_ec2::types::Instance, ..) -> Resource` 등)로 분리해 단위 테스트한다.
 
 **Tauri 커맨드**
 
@@ -105,8 +106,7 @@ SDK 응답 → 모델 변환은 어댑터 안의 **순수 함수**(`fn to_summar
 | `list_profiles` | — | 프로필 이름 목록, 각 프로필의 기본 리전 |
 | `get_account` | profile | 계정 ID (STS GetCallerIdentity) |
 | `list_services` | — | 전체 16개 서비스의 ID/이름/리소스 타입/칼럼 |
-| `list_resources` | profile, region, service, type | `Vec<ResourceSummary>` |
-| `get_resource` | profile, region, service, type, id | `ResourceDetail` |
+| `list_resources` | profile, region, service, type | `ListResult` |
 | `list_s3_objects` | profile, bucket, prefix, continuation_token | 폴더/객체 목록 + 다음 토큰 |
 | `sso_login` | profile | `aws sso login --profile <p>` 실행 완료까지 대기 |
 | `get_settings` / `save_settings` | — / Settings | Settings |
@@ -116,7 +116,7 @@ SDK 응답 → 모델 변환은 어댑터 안의 **순수 함수**(`fn to_summar
 ```
 api/          Tauri invoke 래퍼 + 타입 (Rust 모델과 1:1)
 components/   Toolbar, Sidebar, ResourceTable, DetailPanel, S3Browser, ServiceSettings, JsonModal, ErrorState
-hooks/        useResources, useResource, useS3Objects, useSettings (TanStack Query)
+hooks/        useResources, useS3Objects, useSettings (TanStack Query)
 App.tsx       레이아웃 + 선택 상태(profile, region, service, type, selectedId, s3Path)
 ```
 
@@ -151,7 +151,7 @@ App.tsx       레이아웃 + 선택 상태(profile, region, service, type, selec
 | Secrets Manager | Secrets | Name, Description, Last changed, Rotation | 값 조회 금지 |
 
 전역 서비스는 리전 선택과 무관하게 동일한 결과를 보여주며, 캐시 키에서 리전을 제외한다.
-"주요 칼럼"에 없는 정보는 상세 패널(`fields`, `raw_json`)에 표시한다.
+"주요 칼럼"에 없는 정보는 상세 패널(`fields`, `raw`)에 표시한다.
 
 ## 7. 데이터 흐름
 
@@ -159,7 +159,7 @@ App.tsx       레이아웃 + 선택 상태(profile, region, service, type, selec
 2. 리소스 타입 선택 → `list_resources`. 백엔드는 페이지네이션을 따라가며 최대 **1,000개**까지 모으고, 초과 시 "1,000개까지만 표시" 안내를 함께 반환한다.
 3. 프론트는 TanStack Query 캐시(키: profile, region|global, service, type)를 사용. `staleTime`은 무한대로 두고 ⌘R 또는 프로필/리전 변경 시에만 다시 조회한다.
 4. 사이드바에서 서비스를 펼치면 그 서비스의 모든 타입에 대해 `list_resources`를 병렬 실행해 개수를 채운다(같은 캐시 공유 → 클릭 시 즉시 표시). 앱 시작 시 일괄 조회는 하지 않는다.
-5. 행 선택 → `get_resource`로 상세 조회(캐시됨).
+5. 행 선택 → 목록 응답에 이미 들어 있는 정보로 상세 패널을 즉시 표시.
 6. S3 prefix 진입 → `list_s3_objects`(delimiter `/`, 1,000개 단위). 버킷 리전은 Buckets 목록의 Region 값(`GetBucketLocation`)을 사용해 해당 리전 클라이언트로 호출한다. 다음 토큰이 있으면 표 하단 "더 보기".
 7. 설정 변경 → `save_settings`. 위치: Tauri app data dir의 `settings.json`
    ```json
@@ -182,7 +182,7 @@ App.tsx       레이아웃 + 선택 상태(profile, region, service, type, selec
 
 ## 9. 테스트
 
-- **Rust 단위 테스트**: 각 어댑터의 SDK 타입 → `ResourceSummary`/`ResourceDetail` 변환 함수를 SDK 빌더로 만든 고정 입력으로 검증(이름 태그 없음, 선택 필드 누락 등 경계 포함). 오류 분류(`AppError` 매핑), 설정 파일 읽기/쓰기(파일 없음 → 기본값), 프로필 파싱 테스트. 실제 AWS 호출 없음.
+- **Rust 단위 테스트**: 각 어댑터의 SDK 타입 → `Resource` 변환 함수를 SDK 빌더로 만든 고정 입력으로 검증(이름 태그 없음, 선택 필드 누락 등 경계 포함). 오류 분류(`AppError` 매핑), 설정 파일 읽기/쓰기(파일 없음 → 기본값), 프로필 파싱 테스트. 실제 AWS 호출 없음.
 - **프론트엔드 테스트 (Vitest + Testing Library)**: `api` 계층을 mock하여 사이드바 서비스 필터링/즐겨찾기, 표 정렬·필터, S3 경로 이동과 breadcrumb, 오류 상태 렌더링을 검증.
 - **수동 체크리스트**: 실제 SSO 프로필로 16개 서비스의 모든 리소스 타입 목록·상세 확인, 리전 전환, SSO 만료 후 로그인 흐름, 권한 없는 타입 표시.
 
