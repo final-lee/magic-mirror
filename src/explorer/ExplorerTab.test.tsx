@@ -20,12 +20,16 @@ vi.mock("./api", () => ({
   onTransferProgress: vi.fn(async () => () => {}),
 }));
 vi.mock("../api/client", () => ({ api: { listResources: vi.fn(), listS3Objects: vi.fn(), ssoLogin: vi.fn() } }));
+const unlistenSpy = vi.fn();
+let resolveListen: (() => void) | null = null;
+let deferListen = false;
 let dropHandler: ((e: { payload: { type: string; paths?: string[]; position?: { x: number; y: number } } }) => void) | null = null;
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({
     onDragDropEvent: vi.fn(async (cb) => {
       dropHandler = cb;
-      return () => {};
+      if (deferListen) await new Promise<void>((r) => (resolveListen = r));
+      return unlistenSpy;
     }),
   }),
 }));
@@ -60,6 +64,8 @@ async function openBucket() {
 beforeEach(() => {
   vi.clearAllMocks();
   dropHandler = null;
+  deferListen = false;
+  resolveListen = null;
   m.localHome.mockResolvedValue("/home/me");
   m.localList.mockResolvedValue([
     { name: "a.txt", path: "/home/me/a.txt", isDir: false, size: 1, modified: null },
@@ -173,4 +179,68 @@ test("Finder drop on the S3 pane uploads; before opening a bucket it explains", 
   m.findConflicts.mockResolvedValue([]);
   act(() => dropHandler!({ payload: { type: "drop", paths: ["/Users/me/x.png"], position: { x: 10, y: 10 } } }));
   await waitFor(() => expect(m.planUpload).toHaveBeenCalledWith(["/Users/me/x.png"], "assets", "us-west-2", ""));
+});
+
+test("conflict dialog overwrite enqueues all requests", async () => {
+  const p = setup();
+  await openBucket();
+  fireEvent.click(screen.getByText("📄 a.txt", { selector: "[data-pane=local] *" }));
+  const reqs = [req("1", "a.txt"), req("2", "b.txt")];
+  m.planUpload.mockResolvedValue(reqs);
+  m.findConflicts.mockResolvedValue(["1"]);
+  fireEvent.click(screen.getByRole("button", { name: "복사 →" }));
+  fireEvent.click(await screen.findByRole("button", { name: "모두 덮어쓰기" }));
+  await waitFor(() => expect(p.transfers.enqueue).toHaveBeenCalledWith(reqs));
+});
+
+test("Finder drop not over the S3 pane starts nothing", async () => {
+  setup();
+  await openBucket();
+  await waitFor(() => expect(dropHandler).not.toBeNull());
+  for (const target of [screen.getByTestId("pane-local"), null]) {
+    document.elementFromPoint = vi.fn(() => target);
+    act(() => dropHandler!({ payload: { type: "drop", paths: ["/Users/me/x.png"], position: { x: 10, y: 10 } } }));
+  }
+  await new Promise((r) => setTimeout(r, 20));
+  expect(m.planUpload).not.toHaveBeenCalled();
+});
+
+test("Finder listener is unlistened on unmount", async () => {
+  const { unmount } = renderWithClient(
+    <ExplorerTab profile="prod" region="r" s3Service={sampleServices[1]} filter="" active initialLocalPath="/home/me" onLocalPathChange={vi.fn()} transfers={{ items: [], enqueue: vi.fn(), retry: vi.fn(), clearFinished: vi.fn() }} onOpenDiff={vi.fn()} onRefresh={vi.fn()} />,
+  );
+  await waitFor(() => expect(dropHandler).not.toBeNull());
+  await act(async () => {});
+  unmount();
+  expect(unlistenSpy).toHaveBeenCalledTimes(1);
+});
+
+test("unmount before listen resolves unlistens once it resolves", async () => {
+  deferListen = true;
+  const { unmount } = renderWithClient(
+    <ExplorerTab profile="prod" region="r" s3Service={sampleServices[1]} filter="" active initialLocalPath="/home/me" onLocalPathChange={vi.fn()} transfers={{ items: [], enqueue: vi.fn(), retry: vi.fn(), clearFinished: vi.fn() }} onOpenDiff={vi.fn()} onRefresh={vi.fn()} />,
+  );
+  await waitFor(() => expect(resolveListen).not.toBeNull());
+  unmount();
+  expect(unlistenSpy).not.toHaveBeenCalled();
+  await act(async () => resolveListen!());
+  await waitFor(() => expect(unlistenSpy).toHaveBeenCalledTimes(1));
+});
+
+test("dragging from s3 to local pane checks conflicts then downloads", async () => {
+  const p = setup();
+  await openBucket();
+  const dl = { ...req("9", "a.txt"), direction: "download" as const };
+  m.planDownload.mockResolvedValue([dl]);
+  m.findConflicts.mockResolvedValue([]);
+  document.elementFromPoint = vi.fn(() => screen.getByTestId("pane-local"));
+  const row = screen.getByText("📄 a.txt", { selector: "[data-pane=s3] *" }).closest("tr")!;
+  fireEvent.pointerDown(row, { clientX: 400, clientY: 0, button: 0 });
+  fireEvent.pointerMove(row, { clientX: 40, clientY: 0, buttons: 1 });
+  act(() => {
+    window.dispatchEvent(new MouseEvent("pointerup", { clientX: 10, clientY: 10 }));
+  });
+  await waitFor(() => expect(m.planDownload).toHaveBeenCalledWith("prod", "assets", "us-west-2", ["a.txt"], "/home/me"));
+  await waitFor(() => expect(m.findConflicts).toHaveBeenCalledWith("prod", [dl]));
+  await waitFor(() => expect(p.transfers.enqueue).toHaveBeenCalledWith([dl]));
 });

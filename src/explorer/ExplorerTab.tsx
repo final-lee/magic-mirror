@@ -60,6 +60,8 @@ export function ExplorerTab(p: Props) {
   useEffect(() => {
     setLocation(null);
     setS3Sel(EMPTY);
+    setLocalSel(EMPTY);
+    setDialog(null);
   }, [p.profile]);
 
   const localList = useLocalList(localPath);
@@ -247,6 +249,9 @@ export function ExplorerTab(p: Props) {
       .then((fn) => {
         if (cancelled) fn();
         else unlisten = fn;
+      })
+      .catch(() => {
+        // Finder 드롭 리스너를 못 붙여도 앱 내 드래그는 동작한다
       });
     return () => {
       cancelled = true;
@@ -261,6 +266,9 @@ export function ExplorerTab(p: Props) {
       const tag = (document.activeElement as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       if (e.key === "Tab") {
+        const el = document.activeElement as HTMLElement | null;
+        const inTable = !!el?.closest("[data-pane] table");
+        if (el && el !== document.body && !inTable) return;
         e.preventDefault();
         setFocused((f) => (f === "local" ? "s3" : "local"));
       } else if (e.metaKey && e.key.toLowerCase() === "d") {

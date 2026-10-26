@@ -44,11 +44,21 @@ export function usePaneDrag(onDrop: (from: Pane, to: Pane, ids: string[]) => voi
       const to = paneAt(e.clientX, e.clientY);
       if (d && to && to !== d.from) dropRef.current(d.from, to, d.ids);
     };
+    const cancel = () => update(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") cancel();
+    };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+    window.addEventListener("blur", cancel);
+    window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("blur", cancel);
+      window.removeEventListener("keydown", onKey);
     };
   }, [dragging]);
 
