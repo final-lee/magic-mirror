@@ -1,5 +1,5 @@
 //! 자격 증명 보고서로 찾는 점검: 루트, MFA, 액세스 키, 안 쓰는 사용자. 사용자 목록의 배지도 같은 규칙으로 만든다.
-//! 보고서에는 키 ID가 없어서, 액세스 키 점검의 빠른 조치는 키 목록을 따로 읽은 뒤 `add_key_fixes`가 단다.
+//! 보고서에는 키 ID가 없어서, 액세스 키 점검의 빠른 조치는 키 목록을 따로 읽은 뒤 `add_key_fixes`가 단다(그 키가 이미 꺼졌으면 항목을 뺀다).
 
 use std::collections::{BTreeSet, HashSet};
 
@@ -144,17 +144,30 @@ fn key_item(arn: &str, name: &str, detail: String, key: &KeyUse) -> FindingItem 
     FindingItem { key_rotated: key.rotated, ..item(arn, name, detail, Some(key_cli(name, None))) }
 }
 
-/// 보고서의 키 칸과 같은 키를 사용자의 키 목록에서 찾는다. 보고서의 `access_key_N_last_rotated`는 그 칸의 키를 만든 시각과 같다(키는
-/// 고쳐 쓸 수 없고 새로 만들어 바꾼다). 초까지 같은 키가 꼭 하나이고 지금 활성일 때만 그 키 ID다: 보고서는 4시간까지 묵을 수 있어서,
-/// 그 사이 지우고 새로 만들었거나 같은 초에 만든 키가 둘이면 어느 키인지 모른다.
-pub(super) fn matching_key(rotated: i64, keys: &[ListedKey]) -> Option<&str> {
+/// 보고서의 키 칸과 같은 키를 사용자의 키 목록에서 찾는다. 보고서의 `access_key_N_last_rotated`는 그 칸의 키를 만든 시각과 같다고 본다
+/// (키는 고쳐 쓸 수 없고 새로 만들어 바꾼다). 초까지 같은 키가 꼭 하나일 때만 그 키다: 보고서는 4시간까지 묵을 수 있어서, 그 사이 지우고
+/// 새로 만들었거나 같은 초에 만든 키가 둘이면 어느 키인지 모른다. 상태는 이 목록(지금)의 것이다.
+pub(super) fn matching_key(rotated: i64, keys: &[ListedKey]) -> Option<&ListedKey> {
     let mut same = keys.iter().filter(|k| k.created == Some(rotated));
     let key = same.next()?;
-    (same.next().is_none() && key.active).then_some(key.id.as_str())
+    same.next().is_none().then_some(key)
 }
 
-fn key_items(f: &mut Findings) -> impl Iterator<Item = &mut FindingItem> {
-    f.groups.iter_mut().filter(|g| KEY_KINDS.contains(&g.kind)).flat_map(|g| g.items.iter_mut())
+/// 키 목록에서 찾은 그 칸의 키(`matching_key`)대로 항목을 고친다. 지금도 활성이면 빠른 조치(그 키 비활성화)와 실제 키 ID를 달고,
+/// 보고서가 묵은 사이 꺼졌으면 이미 해결된 항목이라 false(뺀다)다. 키를 가리지 못했거나 목록을 읽지 못했으면 그대로 둔다.
+fn resolve_key_item(item: &mut FindingItem, listed: &ListedKeys) -> bool {
+    let (Some(rotated), Some(Ok(keys))) = (item.key_rotated, listed.get(&item.target_name)) else {
+        return true;
+    };
+    match matching_key(rotated, keys) {
+        Some(key) if key.active => {
+            item.cli = Some(key_cli(&item.target_name, Some(&key.id)));
+            item.fix = Some(IamChange::SetAccessKeyStatus { user_name: item.target_name.clone(), access_key_id: key.id.clone(), status: "Inactive".to_string() });
+            true
+        }
+        Some(_) => false,
+        None => true,
+    }
 }
 
 /// 빠른 조치를 달려면 키 목록을 읽어야 하는 사용자(이름순, 중복 없음): 액세스 키 점검에 걸렸고 그 키 칸의 교체 시각을 아는 사용자.
@@ -171,19 +184,15 @@ pub fn key_fix_users(f: &Findings) -> Vec<String> {
 }
 
 /// 액세스 키 점검 항목마다 키 목록에서 그 키를 찾아(`matching_key`) 빠른 조치(그 키 비활성화, 같은 미리보기를 거친다)를 달고 CLI 명령에
-/// 실제 키 ID를 넣는다. 찾지 못했거나 목록을 읽지 못한 사용자의 항목은 그대로 두고, 읽지 못한 사용자가 있으면 그 이유를 경고에 남긴다.
+/// 실제 키 ID를 넣는다. 그 키가 지금 비활성이면 항목을 뺀다(보고서가 묵어서 아직 활성으로 적혀 있다). 찾지 못했거나 목록을 읽지 못한
+/// 사용자의 항목은 그대로 두고, 읽지 못한 사용자가 있으면(요청 제한 포함) 경고 하나에 그 수와 첫 이유를 남긴다.
 pub fn add_key_fixes(f: &mut Findings, listed: &ListedKeys) {
-    for item in key_items(f) {
-        let Some(rotated) = item.key_rotated else { continue };
-        let Some(Ok(keys)) = listed.get(&item.target_name) else { continue };
-        if let Some(id) = matching_key(rotated, keys) {
-            item.cli = Some(key_cli(&item.target_name, Some(id)));
-            item.fix = Some(IamChange::SetAccessKeyStatus { user_name: item.target_name.clone(), access_key_id: id.to_string(), status: "Inactive".to_string() });
-        }
+    for group in f.groups.iter_mut().filter(|g| KEY_KINDS.contains(&g.kind)) {
+        group.items.retain_mut(|item| resolve_key_item(item, listed));
     }
     let failed: Vec<&AppError> = listed.values().filter_map(|r| r.as_ref().err()).collect();
     if let Some(first) = failed.first() {
-        f.warnings.push(format!("액세스 키 목록을 읽지 못해 사용자 {}명의 키 점검에는 빠른 조치가 없어요: {first}", failed.len()));
+        f.warnings.push(format!("일부 사용자의 액세스 키를 읽지 못해 빠른 조치를 만들지 못했어요 ({}명): {first}", failed.len()));
     }
 }
 

@@ -342,18 +342,19 @@ fn listed(id: &str, active: bool, days: i64) -> ListedKey {
 #[test]
 fn a_report_key_slot_is_matched_to_the_one_key_created_in_the_same_second() {
     use super::creds::matching_key;
+    let id = |key: Option<&ListedKey>| key.map(|k| k.id.clone());
     let rotated = crate::iam::clock::parse_iso(&ago(200)).unwrap();
     let keys = [listed("AKIAOLD", true, 200), listed("AKIANEW", true, 3)];
-    assert_eq!(matching_key(rotated, &keys), Some("AKIAOLD"));
+    assert_eq!(id(matching_key(rotated, &keys)), Some("AKIAOLD".into()));
     // 한 초라도 다르면 다른 키다
-    assert_eq!(matching_key(rotated + 1, &keys), None);
+    assert_eq!(id(matching_key(rotated + 1, &keys)), None);
     // 같은 초에 만든 키가 둘이면 어느 칸의 키인지 모른다
-    assert_eq!(matching_key(rotated, &[listed("AKIAA", true, 200), listed("AKIAB", true, 200)]), None);
-    // 보고서가 묵은 사이 꺼진 키에는 끄는 조치를 달지 않는다
-    assert_eq!(matching_key(rotated, &[listed("AKIAOLD", false, 200)]), None);
+    assert_eq!(id(matching_key(rotated, &[listed("AKIAA", true, 200), listed("AKIAB", false, 200)])), None);
+    // 보고서가 묵은 사이 꺼진 키도 그 칸의 키다. 상태는 지금 목록의 것이다(`add_key_fixes`가 그 항목을 뺀다)
+    assert_eq!(matching_key(rotated, &[listed("AKIAOLD", false, 200)]), Some(&listed("AKIAOLD", false, 200)));
     // 만든 시각을 모르는 키는 짝짓지 않는다
-    assert_eq!(matching_key(rotated, &[ListedKey { id: "AKIAX".into(), active: true, created: None }]), None);
-    assert_eq!(matching_key(rotated, &[]), None);
+    assert_eq!(id(matching_key(rotated, &[ListedKey { id: "AKIAX".into(), active: true, created: None }])), None);
+    assert_eq!(id(matching_key(rotated, &[])), None);
 }
 
 #[test]
@@ -399,7 +400,7 @@ fn a_key_found_in_the_users_key_list_gets_a_quick_fix_and_its_id_in_the_cli() {
             assert_eq!(found.cli, Some(format!("aws iam update-access-key --user-name {name} --access-key-id <ACCESS_KEY_ID> --status Inactive")));
         }
     }
-    assert_eq!(f.warnings, vec!["액세스 키 목록을 읽지 못해 사용자 1명의 키 점검에는 빠른 조치가 없어요: 권한 없음 (iam:ListAccessKeys)".to_string()]);
+    assert_eq!(f.warnings, vec!["일부 사용자의 액세스 키를 읽지 못해 빠른 조치를 만들지 못했어요 (1명): 권한 없음 (iam:ListAccessKeys)".to_string()]);
     // 키 점검이 아닌 항목에는 손대지 않는다
     assert_eq!(item(&f, ConsoleNoMfa, "bob").fix, None);
     // 화면으로 나가는 모양은 계약 그대로다
@@ -414,6 +415,55 @@ fn without_any_listed_keys_nothing_changes() {
     let before = f.clone();
     add_key_fixes(&mut f, &ListedKeys::new());
     assert_eq!(f, before);
+}
+
+#[test]
+fn a_finding_whose_key_is_already_inactive_is_resolved() {
+    // 재검토 M-3: [키 비활성화]를 적용한 뒤 다시 읽어도 보고서(4시간까지 묵는다)에는 그 키가 아직 활성이고 오래됐다고 적혀 있다.
+    // 지금 키 목록에서 같은 초에 만든 그 키가 비활성이면 해결된 항목이다: 버튼도 키 ID도 없는 줄로 남기지 않는다
+    let mut f = run();
+    let keys: ListedKeys = [
+        // carol의 키 1번(150일 전)은 꺼졌다. 오래된 키와 안 쓰는 키 두 항목 모두 그 키다
+        ("carol".to_string(), Ok(vec![listed("AKIACAROL1", false, 150), listed("AKIACAROL2", true, 5)])),
+        // bob은 같은 초에 만든 키가 둘이라 어느 키인지 모른다: 하나가 꺼졌어도 그대로 둔다
+        ("bob".to_string(), Ok(vec![listed("AKIABOB1", false, 120), listed("AKIABOB2", true, 120)])),
+        // alice의 키는 지금도 활성이다
+        ("alice".to_string(), Ok(vec![listed("AKIAALICE1", true, 200)])),
+    ]
+    .into_iter()
+    .collect();
+    add_key_fixes(&mut f, &keys);
+
+    assert_eq!(targets(&f, OldAccessKey), vec!["alice", "bob"]);
+    assert_eq!(targets(&f, UnusedAccessKey), vec!["bob"]);
+    assert_eq!(item(&f, OldAccessKey, "alice").fix, Some(IamChange::SetAccessKeyStatus { user_name: "alice".into(), access_key_id: "AKIAALICE1".into(), status: "Inactive".into() }));
+    for kind in [OldAccessKey, UnusedAccessKey] {
+        let bob = item(&f, kind, "bob");
+        assert_eq!(bob.fix, None, "{kind:?}");
+        assert!(bob.cli.as_deref().is_some_and(|cli| cli.contains("<ACCESS_KEY_ID>")), "{kind:?}");
+    }
+    // 키 점검이 아닌 carol의 항목(안 쓰는 사용자 등)과 사용자 배지는 손대지 않는다
+    assert_eq!(targets(&f, InactiveUser), targets(&run(), InactiveUser));
+    assert!(f.warnings.is_empty(), "{:?}", f.warnings);
+}
+
+#[test]
+fn users_whose_key_lists_failed_are_counted_in_one_warning_and_keep_no_fix() {
+    // 재검토 M-4: 요청 제한이든 권한 없음이든 빠른 조치만 못 만든다. 경고 하나에 사용자 수와 첫 이유를 적는다
+    let mut f = run();
+    let keys: ListedKeys = [
+        ("alice".to_string(), Err(AppError::Throttled)),
+        ("bob".to_string(), Err(AppError::AccessDenied { action: "iam:ListAccessKeys".into() })),
+        ("carol".to_string(), Ok(vec![listed("AKIACAROL1", true, 150)])),
+    ]
+    .into_iter()
+    .collect();
+    add_key_fixes(&mut f, &keys);
+    assert_eq!(f.warnings, vec!["일부 사용자의 액세스 키를 읽지 못해 빠른 조치를 만들지 못했어요 (2명): 요청이 너무 많아요".to_string()]);
+    for (kind, name) in [(OldAccessKey, "alice"), (OldAccessKey, "bob"), (UnusedAccessKey, "bob")] {
+        assert_eq!(item(&f, kind, name).fix, None, "{kind:?} {name}");
+    }
+    assert!(item(&f, OldAccessKey, "carol").fix.is_some());
 }
 
 #[test]
