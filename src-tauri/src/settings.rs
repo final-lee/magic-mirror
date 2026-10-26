@@ -18,6 +18,9 @@ pub struct Settings {
     pub favorites: Vec<Favorite>,
     pub last_profile: Option<String>,
     pub last_region: Option<String>,
+    pub explorer_local_path: Option<String>,
+    pub diff_tool: Option<String>,
+    pub diff_tool_command: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -27,6 +30,9 @@ struct RawSettings {
     favorites: Vec<Favorite>,
     last_profile: Option<String>,
     last_region: Option<String>,
+    explorer_local_path: Option<String>,
+    diff_tool: Option<String>,
+    diff_tool_command: Option<String>,
 }
 
 fn defaults(all_services: &[&str]) -> Settings {
@@ -48,6 +54,9 @@ pub fn load(path: &Path, all_services: &[&str]) -> Settings {
                 favorites: raw.favorites,
                 last_profile: raw.last_profile,
                 last_region: raw.last_region,
+                explorer_local_path: raw.explorer_local_path,
+                diff_tool: raw.diff_tool,
+                diff_tool_command: raw.diff_tool_command,
             },
             Err(_) => defaults(all_services),
         },
@@ -120,6 +129,7 @@ mod tests {
             }],
             last_profile: Some("prod".into()),
             last_region: Some("ap-northeast-2".into()),
+            ..Default::default()
         };
         save(&path, &s).unwrap();
         assert_eq!(load(&path, &["ec2", "iam"]), s);
@@ -127,5 +137,26 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(json["favorites"][0]["type"], "instances");
         assert_eq!(json["lastProfile"], "prod");
+    }
+
+    #[test]
+    fn explorer_fields_roundtrip_and_default_to_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, r#"{"lastProfile":"p"}"#).unwrap();
+        let s = load(&path, &["ec2"]);
+        assert_eq!(s.explorer_local_path, None);
+        assert_eq!(s.diff_tool, None);
+        let s = Settings {
+            explorer_local_path: Some("/Users/me".into()),
+            diff_tool: Some("vscode".into()),
+            diff_tool_command: None,
+            ..s
+        };
+        save(&path, &s).unwrap();
+        assert_eq!(load(&path, &["ec2"]), s);
+        let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(json["explorerLocalPath"], "/Users/me");
+        assert_eq!(json["diffTool"], "vscode");
     }
 }

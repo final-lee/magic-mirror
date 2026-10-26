@@ -1,4 +1,5 @@
 pub mod diff;
+pub mod external;
 pub mod keys;
 pub mod local;
 pub mod s3ops;
