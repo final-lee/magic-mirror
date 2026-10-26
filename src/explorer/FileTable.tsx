@@ -84,7 +84,15 @@ export function FileTable({ columns, rows, filter, selection, onSelectionChange,
   };
 
   return (
-    <div className="tbl" tabIndex={0} onKeyDown={onKeyDown} data-testid="file-table" 
+    <div
+      className="tbl"
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+      data-testid="file-table"
+      onPointerDown={(e) => {
+        // 행 밖에서 누른 경우: 이전 드래그(다른 패널에 놓은 경우 포함)의 흔적을 지운다.
+        if (!(e.target as Element).closest("tbody tr")) justDragged.current = false;
+      }}
       onPointerUp={() => (press.current = null)}
       onClick={(e) => {
         const t = e.target as Element;

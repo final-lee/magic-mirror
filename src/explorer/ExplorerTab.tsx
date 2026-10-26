@@ -118,7 +118,7 @@ export function ExplorerTab(p: Props) {
     applyLocation(loc);
   };
   const go = (pane: Pane, dir: "back" | "fwd") => {
-    const from = dir === "back" ? "back" : "fwd";
+    const from = dir;
     const to = dir === "back" ? "fwd" : "back";
     if (pane === "local") {
       const h = localHistory.current;

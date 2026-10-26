@@ -100,6 +100,17 @@ describe("deselect", () => {
     expect(p.onSelectionChange).toHaveBeenCalledWith({ selected: [], anchor: null });
   });
 
+  test("empty-space click works after a drag that ended in another pane", () => {
+    const p = setup({ selected: ["/p/a.txt"], anchor: "/p/a.txt" });
+    fireEvent.pointerDown(row("📄 a.txt"), { clientX: 10, clientY: 10, button: 0 });
+    fireEvent.pointerMove(row("📄 a.txt"), { clientX: 30, clientY: 10, buttons: 1 });
+    // 다른 패널에서 놓였으므로 이 표에는 click이 오지 않는다.
+    const table = screen.getByTestId("file-table");
+    fireEvent.pointerDown(table, { button: 0 });
+    fireEvent.click(table);
+    expect(p.onSelectionChange).toHaveBeenCalledWith({ selected: [], anchor: null });
+  });
+
   test("re-clicking the only selected row deselects after the delay", () => {
     vi.useFakeTimers();
     const p = setup({ selected: ["/p/a.txt"], anchor: "/p/a.txt" });
