@@ -107,17 +107,20 @@ fn changes_that_are_already_true_say_so_and_leave_nothing_to_undo() {
 }
 
 #[test]
-fn a_policy_whose_document_is_unknown_says_the_effect_could_not_be_computed() {
+fn a_policy_whose_document_is_unknown_needs_confirmation_because_the_effect_could_not_be_computed() {
     let mut s = snapshot();
     let p = preview(&s, &attach(BOB, &account_arn("policy/brand-new")), None);
-    assert_eq!(only(&p, WarnLevel::Warn), "정책 문서를 읽지 못해 권한 변화를 계산하지 못했어요");
+    assert_eq!(only(&p, WarnLevel::Confirm), "문서를 읽지 못한 정책이 있어 권한 변화를 다 계산하지 못했어요: brand-new");
+    assert!(!has_level(&p, WarnLevel::Warn), "{:?}", p.warnings);
+    assert_eq!(p.confirm_text.as_deref(), Some("bob"));
     assert!(p.impacts.is_empty());
     assert!(p.reversible);
 
     s.policies.get_mut(UNUSED_POLICY).unwrap().document = None;
     s.users[1].attached.push(UNUSED_POLICY.into());
     let p = preview(&s, &detach(BOB, UNUSED_POLICY), None);
-    assert!(only(&p, WarnLevel::Warn).contains("읽지 못"));
+    assert_eq!(only(&p, WarnLevel::Confirm), "문서를 읽지 못한 정책이 있어 권한 변화를 다 계산하지 못했어요: unused-policy");
+    assert_eq!(p.confirm_text.as_deref(), Some("bob"));
 }
 
 #[test]

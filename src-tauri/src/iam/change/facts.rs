@@ -1,4 +1,4 @@
-//! 스냅숏 밖에서 읽어 와 미리보기에 넣는 사실들: 액세스 키의 지금 상태, 이 앱이 쓰는 액세스 키, 정책 문서 검사 결과.
+//! 스냅숏 밖에서 읽어 와 미리보기에 넣는 사실들: 액세스 키의 지금 상태, 이 앱이 쓰는 액세스 키, 정책 문서 검사 결과, 붙일 정책을 읽지 못한 이유.
 //! 미리보기와 적용이 같은 방법으로 읽어 넣으므로, 순수 함수인 미리보기를 적용 직전에 그대로 다시 계산할 수 있다.
 
 use super::calls::version_to_delete;
@@ -28,6 +28,8 @@ pub struct Facts {
     pub own_key_id: Option<String>,
     /// 버전을 먼저 지워야 하는 관리형 정책 편집이면 새 문서를 검사한 결과
     pub policy_check: PolicyCheck,
+    /// 스냅숏에 문서가 없는 정책을 붙이는 변경이면 그 정책을 따로 읽다가 실패한 이유(`권한 없음 (iam:GetPolicy)` 등). 읽었거나 읽을 일이 없으면 None
+    pub policy_error: Option<String>,
 }
 
 #[cfg(test)]
