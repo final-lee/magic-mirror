@@ -56,7 +56,10 @@ export function useSettings() {
     if (!current) return;
     const next = { ...current, ...patch };
     qc.setQueryData(["settings"], next);
-    void api.saveSettings(next);
+    api.saveSettings(next).catch((err) => {
+      console.error("설정을 저장하지 못했어요", err);
+      void qc.invalidateQueries({ queryKey: ["settings"] });
+    });
   };
   return { settings: query.data, update, isError: query.isError, error: query.error, refetch: query.refetch };
 }

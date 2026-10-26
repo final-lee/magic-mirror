@@ -76,6 +76,13 @@ test("cmd+F focuses the filter", async () => {
   expect(filter).toHaveFocus();
 });
 
+test("cmd+F is case-insensitive (caps lock)", async () => {
+  renderWithClient(<App />);
+  const filter = await screen.findByPlaceholderText(/필터/);
+  fireEvent.keyDown(window, { key: "F", metaKey: true });
+  expect(filter).toHaveFocus();
+});
+
 test("no profiles shows setup guide", async () => {
   m.listProfiles.mockResolvedValue([]);
   renderWithClient(<App />);

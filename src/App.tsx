@@ -44,10 +44,11 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!e.metaKey) return;
-      if (e.key === "f") {
+      const key = e.key.toLowerCase();
+      if (key === "f") {
         e.preventDefault();
         filterRef.current?.focus();
-      } else if (e.key === "r") {
+      } else if (key === "r") {
         e.preventDefault();
         refresh();
       }
