@@ -89,7 +89,7 @@ const developerBase: PolicySummary = {
   updatedAt: "2026-09-14T12:00:00Z",
   badges: [BADGES.privesc],
 };
-// 권한 경계로만 쓰이면 AWS의 AttachmentCount는 0이다
+// 권한 경계로만 쓰이면 AWS의 AttachmentCount는 0이다. 쓰이고 있으니 "안 붙음" 배지도 없다
 const devBoundaryPolicy: PolicySummary = {
   id: devBoundary.id,
   arn: devBoundary.id,
@@ -98,7 +98,7 @@ const devBoundaryPolicy: PolicySummary = {
   attachmentCount: 0,
   defaultVersionId: "v1",
   updatedAt: "2026-02-01T12:00:00Z",
-  badges: [BADGES.boundary],
+  badges: [],
 };
 
 const demoAlice: PrincipalSummary = { ...alice, badges: [BADGES.privesc] };
