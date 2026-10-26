@@ -1,7 +1,7 @@
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::error::AppError;
 
@@ -56,9 +56,42 @@ pub fn spawn(program: &str, args: &[String], tool: &str) -> Result<(), AppError>
     Err(AppError::other(not_found_message(tool)))
 }
 
+pub const TEMP_MAX_AGE: Duration = Duration::from_secs(60 * 60);
+
+fn temp_root() -> PathBuf {
+    std::env::temp_dir().join("magic-mirror-diff")
+}
+
 pub fn temp_path(file_name: &str) -> PathBuf {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    std::env::temp_dir().join("magic-mirror-diff").join(nanos.to_string()).join(file_name)
+    temp_root().join(nanos.to_string()).join(file_name)
+}
+
+/// `root` 아래에서 `max_age`보다 오래된 항목을 지운다. 오류는 무시(best-effort).
+pub fn sweep_stale_in(root: &std::path::Path, max_age: Duration, now: SystemTime) {
+    let Ok(entries) = std::fs::read_dir(root) else { return };
+    for entry in entries.flatten() {
+        let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else { continue };
+        if now.duration_since(modified).map(|age| age > max_age).unwrap_or(false) {
+            let path = entry.path();
+            let _ = if path.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+        }
+    }
+}
+
+/// 오래된 비교용 임시 복사본을 정리한다.
+pub fn sweep_stale() {
+    sweep_stale_in(&temp_root(), TEMP_MAX_AGE, SystemTime::now());
+}
+
+/// `temp_path`가 만든 파일의 임시 폴더를 통째로 지운다. 임시 루트 밖이면 건드리지 않는다.
+pub fn remove_temp_copy(file: &str) {
+    let path = std::path::Path::new(file);
+    if let Some(dir) = path.parent() {
+        if dir.parent() == Some(temp_root().as_path()) {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -91,6 +124,36 @@ mod tests {
             command_for("custom", Some("  "), "/a", "/b"),
             Err(AppError::other("비교 도구 명령을 설정에서 입력하세요"))
         );
+    }
+
+    #[test]
+    fn command_for_keeps_metacharacters_in_single_argv_entry() {
+        let weird = "/tmp/a b;rm -rf $(x)";
+        let (_, args) = command_for("vscode", None, weird, "/c").unwrap();
+        assert_eq!(args, vec!["--diff", weird, "/c"]);
+        let (p, args) = command_for("custom", Some("tool {left} {right}"), weird, "/c").unwrap();
+        assert_eq!(p, "tool");
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0], weird);
+    }
+
+    #[test]
+    fn sweep_removes_only_stale_entries() {
+        let root = tempfile::tempdir().unwrap();
+        let old = root.path().join("old");
+        let fresh = root.path().join("fresh");
+        std::fs::create_dir_all(old.join("x")).unwrap();
+        std::fs::create_dir_all(&fresh).unwrap();
+        // 지금이 2시간 뒤라고 보면 둘 다 오래됐으므로, 기준 시각을 조절해 구분한다.
+        sweep_stale_in(root.path(), Duration::from_secs(3600), SystemTime::now());
+        assert!(old.exists() && fresh.exists());
+        sweep_stale_in(root.path(), Duration::from_secs(3600), SystemTime::now() + Duration::from_secs(7200));
+        assert!(!old.exists() && !fresh.exists());
+    }
+
+    #[test]
+    fn sweep_ignores_missing_root() {
+        sweep_stale_in(std::path::Path::new("/nonexistent/magic-mirror-xyz"), TEMP_MAX_AGE, SystemTime::now());
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -140,10 +141,17 @@ pub async fn find_conflicts(
             Direction::Upload => uploads.push(r),
         }
     }
-    if let Some(first) = uploads.first() {
-        let client = s3_client(&state, &profile, &first.region).await?;
+    if !uploads.is_empty() {
+        // 요청마다 리전이 다를 수 있으니 리전별로 클라이언트를 하나씩 만든다.
+        let mut clients: HashMap<String, Client> = HashMap::new();
+        for r in &uploads {
+            if !clients.contains_key(&r.region) {
+                let client = s3_client(&state, &profile, &r.region).await?;
+                clients.insert(r.region.clone(), client);
+            }
+        }
         let results = map_concurrent(uploads, |r| {
-            let client = client.clone();
+            let client = clients[&r.region].clone();
             async move { s3ops::exists(&client, &r.bucket, &r.key).await.map(|e| (r.id, e)) }
         })
         .await;
@@ -285,7 +293,10 @@ pub async fn diff_files(
         for (meta, r) in [(&mut lm, &left), (&mut rm, &right)] {
             if meta.md5.is_none() {
                 if let FileRef::Local { path } = r {
-                    meta.md5 = local::md5_file(Path::new(path)).ok();
+                    let p = PathBuf::from(path);
+                    meta.md5 = tauri::async_runtime::spawn_blocking(move || local::md5_file(&p).ok())
+                        .await
+                        .map_err(|e| AppError::other(e.to_string()))?;
                 }
             }
         }
@@ -315,8 +326,17 @@ pub async fn open_external_diff(
     tool: String,
     command: Option<String>,
 ) -> Result<(), AppError> {
+    external::sweep_stale();
     let l = materialize(&state, &profile, &left).await?;
-    let r = materialize(&state, &profile, &right).await?;
+    let r = match materialize(&state, &profile, &right).await {
+        Ok(r) => r,
+        Err(e) => {
+            if matches!(left, FileRef::S3 { .. }) {
+                external::remove_temp_copy(&l);
+            }
+            return Err(e);
+        }
+    };
     let (program, args) = external::command_for(&tool, command.as_deref(), &l, &r)?;
     external::spawn(&program, &args, &tool)
 }
@@ -345,8 +365,7 @@ mod tests {
         let keys: Vec<_> = reqs.iter().map(|r| r.key.as_str()).collect();
         assert_eq!(keys, vec!["web/site/css/app.css", "web/site/index.html", "web/note.txt"]);
         assert!(reqs.iter().all(|r| r.direction == Direction::Upload && r.bucket == "b"));
-        let mut ids: Vec<_> = reqs.iter().map(|r| r.id.clone()).collect();
-        ids.dedup();
+        let ids: std::collections::HashSet<_> = reqs.iter().map(|r| r.id.clone()).collect();
         assert_eq!(ids.len(), 3);
     }
 
