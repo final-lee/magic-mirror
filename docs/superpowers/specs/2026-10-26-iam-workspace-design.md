@@ -72,8 +72,8 @@
 | externalTrust | 누구나 또는 외부 계정에 열린 신뢰 | danger(누구나, 조건 없음)/warn | 없음 |
 | unattachedPolicy | 붙은 곳 없는 고객 관리형 정책 | info | 없음 |
 각 항목에 복사용 CLI 명령(예: `aws iam update-access-key --user-name alice --access-key-id AKIA… --status Inactive`).
-- 키 비활성화 빠른 조치(`setAccessKeyStatus` Inactive, 다른 변경과 같은 미리보기를 거친다): 보고서에는 키 ID가 없어서, 액세스 키 점검에 걸린 사용자의 `ListAccessKeys`를 읽는다(8명씩 동시에). 그 키 칸의 `access_key_N_last_rotated`(= 그 키를 만든 시각)와 초까지 같은 키가 꼭 하나이고 지금 활성일 때만 빠른 조치를 달고 CLI 명령에 그 키 ID를 넣는다.
-- 키를 가리지 못했거나 목록을 읽지 못하면 빠른 조치 없이 CLI 명령에 `<ACCESS_KEY_ID>`를 남긴다. 목록을 읽지 못한 사용자가 있으면 경고에 이유를 적고, SSO 만료·요청 제한은 점검 전체의 오류다.
+- 키 비활성화 빠른 조치(`setAccessKeyStatus` Inactive, 다른 변경과 같은 미리보기를 거친다): 보고서에는 키 ID가 없어서, 액세스 키 점검(oldAccessKey·unusedAccessKey)에 걸린 사용자의 `ListAccessKeys`만 읽는다(5명씩 동시에). 그 키 칸의 `access_key_N_last_rotated`(그 키를 만든 시각과 같다고 본다)와 초까지 같은 키가 꼭 하나이고 지금 활성일 때만 빠른 조치를 달고 CLI 명령에 그 키 ID를 넣는다. 그렇게 찾은 키가 지금 비활성이면 보고서(4시간까지 묵는다)가 아직 활성으로 적은 것이라 그 항목은 이미 해결된 것으로 보고 뺀다.
+- 키를 가리지 못했거나 목록을 읽지 못하면 빠른 조치 없이 CLI 명령에 `<ACCESS_KEY_ID>`를 남긴다. 목록을 읽지 못한 사용자가 있으면(요청 제한 포함) 경고 하나에 "일부 사용자의 액세스 키를 읽지 못해 빠른 조치를 만들지 못했어요 (N명): <첫 이유>"를 적는다. SSO 만료만 점검 전체의 오류다.
 
 ## 권한 줄이기
 - `GenerateServiceLastAccessedDetails(Granularity=ACTION_LEVEL)` → 폴링(최대 30초) → `GetServiceLastAccessedDetails`. 추적 기간 400일.

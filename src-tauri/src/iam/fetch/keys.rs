@@ -1,13 +1,18 @@
 //! 사용자의 액세스 키: 상태·나이·마지막 사용, 그리고 점검의 빠른 조치에 쓰는 키 목록. 키 ID만 다루고 비밀 키는 다루지 않는다.
 
+use std::future::Future;
+
 use aws_sdk_iam::types::{AccessKeyLastUsed, AccessKeyMetadata, StatusType};
 use futures::future::join_all;
+use futures::stream::{self, StreamExt};
 use serde::Serialize;
 
-use crate::adapters::util::map_concurrent;
 use crate::error::{from_sdk, AppError};
 use crate::iam::clock::{days_between, iso_of};
 use crate::iam::findings::{ListedKey, ListedKeys};
+
+/// 점검의 빠른 조치용 키 목록을 한꺼번에 몇 명까지 읽을지. 점검은 첫 화면이고 그 화면에서 적용한 뒤에도 다시 읽어서 적게 둔다.
+const KEY_LIST_CONCURRENCY: usize = 5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum KeyStatus {
@@ -102,18 +107,27 @@ fn listed_key(meta: &AccessKeyMetadata) -> ListedKey {
     }
 }
 
-/// 점검의 빠른 조치를 만들려고 사용자들의 키 목록을 읽는다(읽기만, 8명씩 동시에, 마지막 사용은 읽지 않는다).
-/// 목록을 못 읽은 사용자(권한 없음 등)는 그 오류로 남기고, SSO 만료·요청 제한은 다시 로그인하거나 잠시 뒤에 하면 되는 오류라 전체 오류다.
+/// 사용자마다 `list`로 키 목록을 읽는다(`KEY_LIST_CONCURRENCY`명씩 동시에). 빠른 조치는 없어도 되는 것이라 목록을 못 읽은 사용자
+/// (권한 없음, 요청 제한 등)는 그 오류로 남긴다. SSO 만료만 전체 오류다: 다시 로그인해야 점검도 다시 읽을 수 있다.
+async fn list_each<F, Fut>(users: Vec<String>, list: F) -> Result<ListedKeys, AppError>
+where
+    F: FnMut(String) -> Fut,
+    Fut: Future<Output = (String, Result<Vec<ListedKey>, AppError>)>,
+{
+    let results: Vec<(String, Result<Vec<ListedKey>, AppError>)> = stream::iter(users).map(list).buffered(KEY_LIST_CONCURRENCY).collect().await;
+    if results.iter().any(|(_, keys)| matches!(keys, Err(AppError::SsoExpired))) {
+        return Err(AppError::SsoExpired);
+    }
+    Ok(results.into_iter().collect())
+}
+
+/// 점검의 빠른 조치를 만들려고 사용자들의 키 목록을 읽는다(읽기만, 마지막 사용은 읽지 않는다). 규칙은 `list_each`다.
 pub(crate) async fn list_keys(client: &aws_sdk_iam::Client, users: Vec<String>) -> Result<ListedKeys, AppError> {
-    let results = map_concurrent(users, |user| async move {
+    list_each(users, |user| async move {
         let keys = list_metadata(client, &user).await.map(|metas| metas.iter().map(listed_key).collect());
         (user, keys)
     })
-    .await;
-    if let Some(fatal) = results.iter().filter_map(|(_, keys)| keys.as_ref().err()).find(|e| matches!(e, AppError::SsoExpired | AppError::Throttled)) {
-        return Err(fatal.clone());
-    }
-    Ok(results.into_iter().collect())
+    .await
 }
 
 #[cfg(test)]
@@ -239,15 +253,43 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sso_expiry_and_throttling_while_listing_keys_for_quick_fixes_are_errors() {
-        for (code, expected) in [("ExpiredToken", AppError::SsoExpired), ("Throttling", AppError::Throttled)] {
-            let recorder = Recorder::new(move |sent: &Sent| match sent.params.get("UserName").map(String::as_str) {
-                Some("bob") => (400, error_xml(code, "no")),
-                _ => (200, keys_xml(&[])),
-            });
-            assert_eq!(list_keys(&recorder.client(), vec!["alice".into(), "bob".into()]).await, Err(expected), "{code}");
-        }
+    async fn only_sso_expiry_while_listing_keys_for_quick_fixes_fails_the_findings() {
+        let recorder = Recorder::new(|sent: &Sent| match sent.params.get("UserName").map(String::as_str) {
+            Some("bob") => (400, error_xml("ExpiredToken", "no")),
+            _ => (200, keys_xml(&[])),
+        });
+        assert_eq!(list_keys(&recorder.client(), vec!["alice".into(), "bob".into()]).await, Err(AppError::SsoExpired));
+
+        // 요청 제한은 빠른 조치만 못 만드는 일이라 그 사용자에게만 남는다(점검 화면은 그대로 열린다)
+        let recorder = Recorder::new(|sent: &Sent| match sent.params.get("UserName").map(String::as_str) {
+            Some("bob") => (400, error_xml("Throttling", "Rate exceeded")),
+            _ => (200, keys_xml(&[("AKIAALICE1", "Active", "2026-04-09T00:00:00Z")])),
+        });
+        let listed = list_keys(&recorder.client(), vec!["alice".into(), "bob".into()]).await.unwrap();
+        assert_eq!(listed["bob"], Err(AppError::Throttled));
+        assert!(matches!(&listed["alice"], Ok(keys) if keys.len() == 1));
         assert_eq!(list_keys(&Recorder::ok().client(), Vec::new()).await, Ok(ListedKeys::new()));
+    }
+
+    #[tokio::test]
+    async fn key_lists_are_read_for_at_most_five_users_at_a_time() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (running, most) = (AtomicUsize::new(0), AtomicUsize::new(0));
+        let users: Vec<String> = (0..12).map(|i| format!("user{i}")).collect();
+        let listed = list_each(users.clone(), |user| {
+            let (running, most) = (&running, &most);
+            async move {
+                most.fetch_max(running.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
+                // 읽는 동안 한 번 양보해서 다른 사용자의 읽기가 함께 돌 틈을 준다
+                tokio::task::yield_now().await;
+                running.fetch_sub(1, Ordering::SeqCst);
+                (user, Ok(Vec::new()))
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(listed.keys().cloned().collect::<std::collections::BTreeSet<String>>(), users.into_iter().collect());
+        assert_eq!(most.load(Ordering::SeqCst), 5, "한꺼번에 5명까지만 읽어요");
     }
 
     #[test]

@@ -263,17 +263,25 @@ pub async fn iam_simulate(
     checks::simulate(&client, principal_arns, action.trim(), clean_resource(resource).as_deref()).await
 }
 
+/// 점검에 액세스 키 빠른 조치를 단다. 액세스 키 점검에 걸린 사용자가 있을 때만 클라이언트를 만들어(`client`) 그 사용자들의 키 목록을
+/// 읽는다(읽기만). 목록을 못 읽은 사용자는 경고로 남고(`add_key_fixes`), SSO 만료만 오류다(`keys::list_keys`).
+async fn with_key_fixes<C, Fut>(mut found: Findings, client: C) -> Result<Findings, AppError>
+where
+    C: FnOnce() -> Fut,
+    Fut: Future<Output = Result<aws_sdk_iam::Client, AppError>>,
+{
+    let users = key_fix_users(&found);
+    if !users.is_empty() {
+        add_key_fixes(&mut found, &keys::list_keys(&client().await?, users).await?);
+    }
+    Ok(found)
+}
+
 /// 보안 점검. 액세스 키 점검에 걸린 사용자가 있으면 그 사용자들의 키 목록을 읽어(읽기만) 키를 찾고 빠른 조치를 단다.
 #[tauri::command]
 pub async fn iam_findings(state: State<'_, AppState>, iam: State<'_, IamState>, profile: String) -> Result<Findings, AppError> {
     let s = snapshot(&state, &iam, &profile, false).await?;
-    let mut found = findings(&s, now_secs());
-    let users = key_fix_users(&found);
-    if !users.is_empty() {
-        let client = iam_client(&state, &profile).await?;
-        add_key_fixes(&mut found, &keys::list_keys(&client, users).await?);
-    }
-    Ok(found)
+    with_key_fixes(findings(&s, now_secs()), || iam_client(&state, &profile)).await
 }
 
 #[tauri::command]
@@ -1049,6 +1057,78 @@ mod tests {
 
     fn key(id: &str, status: KeyStatus) -> AccessKeyInfo {
         AccessKeyInfo { id: id.into(), status, created_at: None, age_days: None, last_used_at: None, last_used_service: None, last_used_region: None, last_used_unknown: false }
+    }
+
+    /// 2026-10-26 기준 점검. alice·bob·carol은 200일 전에 만든 활성 키(한 번도 안 씀)가 있어 오래된 키·안 쓰는 키에 걸리고,
+    /// gina는 비활성 키만, dave는 키가 없다.
+    fn findings_with_keys() -> Findings {
+        use crate::iam::model::CredRow;
+        let row = |name: &str, active: bool| CredRow {
+            user: name.into(),
+            arn: format!("arn:aws:iam::111111111111:user/{name}"),
+            created_at: Some("2025-01-01T00:00:00+00:00".into()),
+            mfa_active: true,
+            key1_active: active,
+            key1_rotated: Some("2026-04-09T00:00:00+00:00".into()),
+            ..Default::default()
+        };
+        let names = ["alice", "bob", "carol", "dave", "gina"];
+        let s = Snapshot {
+            account_id: "111111111111".into(),
+            fetched_at: "2026-10-26T00:00:00Z".into(),
+            users: names.iter().map(|name| crate::iam::fixtures::user(name)).collect(),
+            cred_report: Some(vec![row("alice", true), row("bob", true), row("carol", true), CredRow { key1_rotated: None, ..row("dave", false) }, row("gina", false)]),
+            ..Default::default()
+        };
+        findings(&s, parse_iso("2026-10-26T00:00:00Z").unwrap())
+    }
+
+    fn listed_key_xml(id: &str, status: &str) -> String {
+        let member = format!("<member><UserName>u</UserName><AccessKeyId>{id}</AccessKeyId><Status>{status}</Status><CreateDate>2026-04-09T00:00:00Z</CreateDate></member>");
+        crate::iam::mock_aws::ok_with("ListAccessKeys", &format!("<AccessKeyMetadata>{member}</AccessKeyMetadata><IsTruncated>false</IsTruncated>"))
+    }
+
+    fn key_targets(f: &Findings, kind: crate::iam::findings::FindingKind) -> Vec<(&str, bool)> {
+        f.groups.iter().find(|g| g.kind == kind).unwrap().items.iter().map(|i| (i.target_name.as_str(), i.fix.is_some())).collect()
+    }
+
+    #[tokio::test]
+    async fn findings_list_keys_only_for_flagged_users_and_a_throttled_list_is_a_warning() {
+        use crate::iam::findings::FindingKind::{OldAccessKey, UnusedAccessKey};
+        use crate::iam::mock_aws::{error_xml, Recorder, Sent};
+        let recorder = Recorder::new(|sent: &Sent| match sent.params.get("UserName").map(String::as_str) {
+            Some("alice") => (200, listed_key_xml("AKIAALICE1", "Active")),
+            Some("bob") => (400, error_xml("Throttling", "Rate exceeded")),
+            // 보고서에는 아직 활성으로 적혀 있지만 그 사이 꺼진 키
+            Some("carol") => (200, listed_key_xml("AKIACAROL1", "Inactive")),
+            _ => (200, listed_key_xml("AKIAOTHER", "Active")),
+        });
+        let found = with_key_fixes(findings_with_keys(), || async { Ok(recorder.client()) }).await.unwrap();
+
+        // 키 점검에 걸린 사용자의 키 목록만 읽는다(키가 없거나 비활성 키만 있는 dave·gina는 읽지 않는다)
+        let mut asked: Vec<String> = recorder.sent().iter().map(|sent| format!("{} {}", sent.action, sent.params["UserName"])).collect();
+        asked.sort();
+        assert_eq!(asked, ["ListAccessKeys alice", "ListAccessKeys bob", "ListAccessKeys carol"]);
+        // alice는 빠른 조치가 붙고, 요청 제한에 걸린 bob은 빠른 조치 없이 남고, 이미 꺼진 carol의 키 항목은 빠진다
+        for kind in [OldAccessKey, UnusedAccessKey] {
+            assert_eq!(key_targets(&found, kind), [("alice", true), ("bob", false)], "{kind:?}");
+        }
+        assert_eq!(found.warnings, ["일부 사용자의 액세스 키를 읽지 못해 빠른 조치를 만들지 못했어요 (1명): 요청이 너무 많아요"]);
+    }
+
+    #[tokio::test]
+    async fn findings_fail_only_when_the_sso_session_expired_while_listing_keys() {
+        use crate::iam::mock_aws::{error_xml, Recorder, Sent};
+        let recorder = Recorder::new(|sent: &Sent| match sent.params.get("UserName").map(String::as_str) {
+            Some("bob") => (400, error_xml("ExpiredToken", "expired")),
+            _ => (200, listed_key_xml("AKIAOTHER", "Active")),
+        });
+        assert_eq!(with_key_fixes(findings_with_keys(), || async { Ok(recorder.client()) }).await, Err(AppError::SsoExpired));
+
+        // 키 점검에 걸린 사용자가 없으면 클라이언트도 만들지 않는다
+        let quiet = findings(&Snapshot { account_id: "111111111111".into(), ..Default::default() }, parse_iso("2026-10-26T00:00:00Z").unwrap());
+        let unchanged = with_key_fixes(quiet.clone(), || async { Err(AppError::other("클라이언트를 만들면 안 돼요")) }).await;
+        assert_eq!(unchanged, Ok(quiet));
     }
 
     #[test]
