@@ -1,4 +1,5 @@
 //! 정책 문서와 이름 검사: JSON 문법, 크기 한도, 인라인 정책 이름. AWS가 거절할 것이 뻔한 입력을 미리 막는다.
+//! 크기 도우미(`size`, 한도, `commas`)는 권한 줄이기 초안의 크기 안내(`lastused::draft`)도 같은 규칙으로 쓴다.
 
 use super::IamChange;
 use crate::iam::eval::find_principal;
@@ -7,17 +8,17 @@ use crate::iam::policy::{decode_document, parse_document};
 use crate::iam::view::PrincipalKind;
 
 /// 관리형 정책 문서의 한도(공백을 뺀 글자 수).
-pub(super) const MANAGED_LIMIT: usize = 6_144;
+pub(crate) const MANAGED_LIMIT: usize = 6_144;
 /// 인라인 정책 이름의 최대 길이.
 pub(super) const MAX_NAME: usize = 128;
 
 /// AWS가 세는 정책 크기: 공백을 뺀 글자 수. 들여쓴 JSON을 그대로 보내도 한도에 영향이 없다.
-pub(super) fn size(document: &str) -> usize {
+pub(crate) fn size(document: &str) -> usize {
     document.chars().filter(|c| !c.is_whitespace()).count()
 }
 
 /// 한 사용자·그룹·역할에 붙은 인라인 정책 전체의 한도(공백을 뺀 글자 수).
-fn inline_limit(kind: PrincipalKind) -> usize {
+pub(crate) fn inline_limit(kind: PrincipalKind) -> usize {
     match kind {
         PrincipalKind::User => 2_048,
         PrincipalKind::Group => 5_120,
@@ -25,7 +26,7 @@ fn inline_limit(kind: PrincipalKind) -> usize {
     }
 }
 
-fn kind_label(kind: PrincipalKind) -> &'static str {
+pub(crate) fn kind_label(kind: PrincipalKind) -> &'static str {
     match kind {
         PrincipalKind::User => "사용자",
         PrincipalKind::Group => "그룹",
@@ -34,7 +35,7 @@ fn kind_label(kind: PrincipalKind) -> &'static str {
 }
 
 /// 천 단위로 쉼표를 찍는다(6144 → "6,144").
-fn commas(n: usize) -> String {
+pub(crate) fn commas(n: usize) -> String {
     let digits = n.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (i, digit) in digits.chars().enumerate() {
