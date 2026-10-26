@@ -7,7 +7,7 @@ import { useSettings } from "./queries";
 vi.mock("./client", () => ({ api: { getSettings: vi.fn(), saveSettings: vi.fn() } }));
 
 const m = vi.mocked(api);
-const proc = (globalThis as unknown as { process: NodeJS.EventEmitter }).process;
+const proc = (globalThis as unknown as { process: { on(e: string, f: () => void): void; off(e: string, f: () => void): void } }).process;
 const stored = { enabledServices: ["ec2"], favorites: [], lastProfile: null, lastRegion: null };
 
 test("a rejected save refetches settings and does not leave an unhandled rejection", async () => {
