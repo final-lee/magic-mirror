@@ -1,8 +1,11 @@
+pub mod cloudfront;
 pub mod ec2;
 pub mod ecs;
 pub mod eks;
+pub mod iam;
 pub mod lambda;
 pub mod rds;
+pub mod route53;
 pub mod s3;
 pub mod util;
 pub mod vpc;
@@ -32,7 +35,7 @@ pub type AdapterRef = Arc<dyn ResourceAdapter>;
 
 /// 서비스 표시 순서대로 모든 어댑터를 돌려준다.
 pub fn registry() -> Vec<AdapterRef> {
-    vec![Arc::new(ec2::Ec2), Arc::new(s3::S3), Arc::new(lambda::Lambda), Arc::new(rds::Rds), Arc::new(ecs::Ecs), Arc::new(eks::Eks), Arc::new(vpc::Vpc)]
+    vec![Arc::new(ec2::Ec2), Arc::new(s3::S3), Arc::new(lambda::Lambda), Arc::new(rds::Rds), Arc::new(ecs::Ecs), Arc::new(eks::Eks), Arc::new(vpc::Vpc), Arc::new(iam::Iam), Arc::new(cloudfront::CloudFront), Arc::new(route53::Route53)]
 }
 
 pub fn service_info(a: &dyn ResourceAdapter) -> ServiceInfo {
