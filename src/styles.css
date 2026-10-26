@@ -73,3 +73,6 @@ tbody tr.on td { background: var(--accent) !important; color: #fff; }
 .grid label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
 .foot { display: flex; justify-content: flex-end; margin-top: 16px; }
 .raw { background: #1c1c1e; border: 1px solid var(--line); border-radius: 6px; padding: 10px; font: 11px ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-all; user-select: text; text-align: left; max-height: 60vh; overflow: auto; }
+.error-banner { padding: 6px 14px; background: #ff453a22; color: var(--red); font-size: 12px; }
+.error-banner p { margin: 0 0 4px; }
+.error-banner .btn { margin-top: 2px; }

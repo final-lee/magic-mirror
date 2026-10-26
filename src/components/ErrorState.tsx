@@ -2,7 +2,15 @@ import { useState } from "react";
 import { api } from "../api/client";
 import { errorMessage, isAppError } from "../api/errors";
 
-export function ErrorState({ error, profile, onRetry }: { error: unknown; profile: string; onRetry: () => void }) {
+interface Props {
+  error: unknown;
+  profile: string;
+  onRetry: () => void;
+  compact?: boolean;
+}
+
+export function ErrorState({ error, profile, onRetry, compact = false }: Props) {
+  const box = compact ? "error-banner" : "empty";
   const [busy, setBusy] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
@@ -20,7 +28,7 @@ export function ErrorState({ error, profile, onRetry }: { error: unknown; profil
       }
     };
     return (
-      <div className="empty">
+      <div className={box}>
         <div>
           <p>SSO 세션이 만료됐어요 ({profile})</p>
           <button className="btn primary" disabled={busy} onClick={login}>
@@ -34,7 +42,7 @@ export function ErrorState({ error, profile, onRetry }: { error: unknown; profil
 
   const retryable = !(isAppError(error) && error.kind === "accessDenied");
   return (
-    <div className="empty">
+    <div className={box}>
       <div>
         <p className="err">{errorMessage(error)}</p>
         {retryable && (

@@ -44,7 +44,8 @@ export function S3Area({ profile, account, location, filter, onNavigate, onBack,
     <>
       <section className="center">
         <Breadcrumb service={S3_SERVICE} segments={segments} count={q.data ? entries.length : undefined} />
-        {q.isError ? (
+        {q.isError && q.data && <ErrorState compact error={q.error} profile={profile} onRetry={onRefresh} />}
+        {q.isError && !q.data ? (
           <ErrorState error={q.error} profile={profile} onRetry={onRefresh} />
         ) : q.isPending ? (
           <div className="empty">불러오는 중…</div>
