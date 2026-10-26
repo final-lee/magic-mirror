@@ -1,0 +1,804 @@
+[
+  {
+    "id": "ec2",
+    "name": "EC2",
+    "global": false,
+    "types": [
+      {
+        "id": "instances",
+        "name": "Instances",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "id",
+            "label": "Instance ID",
+            "kind": "mono"
+          },
+          {
+            "key": "state",
+            "label": "State",
+            "kind": "state"
+          },
+          {
+            "key": "type",
+            "label": "Type",
+            "kind": "text"
+          },
+          {
+            "key": "privateIp",
+            "label": "Private IP",
+            "kind": "mono"
+          },
+          {
+            "key": "az",
+            "label": "AZ",
+            "kind": "text"
+          }
+        ]
+      },
+      {
+        "id": "security-groups",
+        "name": "Security Groups",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "id",
+            "label": "Group ID",
+            "kind": "mono"
+          },
+          {
+            "key": "vpc",
+            "label": "VPC",
+            "kind": "mono"
+          },
+          {
+            "key": "description",
+            "label": "Description",
+            "kind": "text"
+          }
+        ]
+      },
+      {
+        "id": "volumes",
+        "name": "Volumes",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "id",
+            "label": "Volume ID",
+            "kind": "mono"
+          },
+          {
+            "key": "state",
+            "label": "State",
+            "kind": "state"
+          },
+          {
+            "key": "size",
+            "label": "Size (GiB)",
+            "kind": "text"
+          },
+          {
+            "key": "type",
+            "label": "Type",
+            "kind": "text"
+          },
+          {
+            "key": "attachedTo",
+            "label": "Attached To",
+            "kind": "mono"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "s3",
+    "name": "S3",
+    "global": true,
+    "types": [
+      {
+        "id": "buckets",
+        "name": "Buckets",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Bucket name",
+            "kind": "text"
+          },
+          {
+            "key": "region",
+            "label": "Region",
+            "kind": "text"
+          },
+          {
+            "key": "created",
+            "label": "Created",
+            "kind": "datetime"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "lambda",
+    "name": "Lambda",
+    "global": false,
+    "types": [
+      {
+        "id": "functions",
+        "name": "Functions",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Function name",
+            "kind": "text"
+          },
+          {
+            "key": "runtime",
+            "label": "Runtime",
+            "kind": "text"
+          },
+          {
+            "key": "memory",
+            "label": "Memory",
+            "kind": "text"
+          },
+          {
+            "key": "lastModified",
+            "label": "Last modified",
+            "kind": "datetime"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "rds",
+    "name": "RDS",
+    "global": false,
+    "types": [
+      {
+        "id": "db-instances",
+        "name": "DB Instances",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Identifier",
+            "kind": "text"
+          },
+          {
+            "key": "engine",
+            "label": "Engine",
+            "kind": "text"
+          },
+          {
+            "key": "class",
+            "label": "Class",
+            "kind": "text"
+          },
+          {
+            "key": "status",
+            "label": "Status",
+            "kind": "state"
+          },
+          {
+            "key": "endpoint",
+            "label": "Endpoint",
+            "kind": "mono"
+          }
+        ]
+      },
+      {
+        "id": "db-clusters",
+        "name": "DB Clusters",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Identifier",
+            "kind": "text"
+          },
+          {
+            "key": "engine",
+            "label": "Engine",
+            "kind": "text"
+          },
+          {
+            "key": "status",
+            "label": "Status",
+            "kind": "state"
+          },
+          {
+            "key": "endpoint",
+            "label": "Endpoint",
+            "kind": "mono"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "ecs",
+    "name": "ECS",
+    "global": false,
+    "types": [
+      {
+        "id": "clusters",
+        "name": "Clusters",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "status",
+            "label": "Status",
+            "kind": "state"
+          },
+          {
+            "key": "services",
+            "label": "Services",
+            "kind": "text"
+          },
+          {
+            "key": "runningTasks",
+            "label": "Running tasks",
+            "kind": "text"
+          }
+        ]
+      },
+      {
+        "id": "services",
+        "name": "Services",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "cluster",
+            "label": "Cluster",
+            "kind": "text"
+          },
+          {
+            "key": "status",
+            "label": "Status",
+            "kind": "state"
+          },
+          {
+            "key": "tasks",
+            "label": "Running/Desired",
+            "kind": "text"
+          }
+        ]
+      },
+      {
+        "id": "tasks",
+        "name": "Tasks",
+        "columns": [
+          {
+            "key": "id",
+            "label": "Task ID",
+            "kind": "mono"
+          },
+          {
+            "key": "cluster",
+            "label": "Cluster",
+            "kind": "text"
+          },
+          {
+            "key": "status",
+            "label": "Status",
+            "kind": "state"
+          },
+          {
+            "key": "taskDefinition",
+            "label": "Task definition",
+            "kind": "text"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "eks",
+    "name": "EKS",
+    "global": false,
+    "types": [
+      {
+        "id": "clusters",
+        "name": "Clusters",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "version",
+            "label": "Version",
+            "kind": "text"
+          },
+          {
+            "key": "status",
+            "label": "Status",
+            "kind": "state"
+          },
+          {
+            "key": "endpoint",
+            "label": "Endpoint",
+            "kind": "mono"
+          }
+        ]
+      },
+      {
+        "id": "node-groups",
+        "name": "Node Groups",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "cluster",
+            "label": "Cluster",
+            "kind": "text"
+          },
+          {
+            "key": "status",
+            "label": "Status",
+            "kind": "state"
+          },
+          {
+            "key": "instanceTypes",
+            "label": "Instance types",
+            "kind": "text"
+          },
+          {
+            "key": "size",
+            "label": "Size (min/desired/max)",
+            "kind": "text"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "vpc",
+    "name": "VPC",
+    "global": false,
+    "types": [
+      {
+        "id": "vpcs",
+        "name": "VPCs",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "id",
+            "label": "VPC ID",
+            "kind": "mono"
+          },
+          {
+            "key": "cidr",
+            "label": "CIDR",
+            "kind": "mono"
+          },
+          {
+            "key": "default",
+            "label": "Default",
+            "kind": "text"
+          },
+          {
+            "key": "state",
+            "label": "State",
+            "kind": "state"
+          }
+        ]
+      },
+      {
+        "id": "subnets",
+        "name": "Subnets",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "id",
+            "label": "Subnet ID",
+            "kind": "mono"
+          },
+          {
+            "key": "vpc",
+            "label": "VPC",
+            "kind": "mono"
+          },
+          {
+            "key": "cidr",
+            "label": "CIDR",
+            "kind": "mono"
+          },
+          {
+            "key": "az",
+            "label": "AZ",
+            "kind": "text"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "iam",
+    "name": "IAM",
+    "global": true,
+    "types": [
+      {
+        "id": "users",
+        "name": "Users",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "id",
+            "label": "User ID",
+            "kind": "mono"
+          },
+          {
+            "key": "created",
+            "label": "Created",
+            "kind": "datetime"
+          },
+          {
+            "key": "lastUsed",
+            "label": "Last used",
+            "kind": "datetime"
+          }
+        ]
+      },
+      {
+        "id": "roles",
+        "name": "Roles",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "id",
+            "label": "Role ID",
+            "kind": "mono"
+          },
+          {
+            "key": "created",
+            "label": "Created",
+            "kind": "datetime"
+          },
+          {
+            "key": "description",
+            "label": "Description",
+            "kind": "text"
+          }
+        ]
+      },
+      {
+        "id": "policies",
+        "name": "Policies",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "id",
+            "label": "Policy ID",
+            "kind": "mono"
+          },
+          {
+            "key": "attachments",
+            "label": "Attachments",
+            "kind": "text"
+          },
+          {
+            "key": "updated",
+            "label": "Updated",
+            "kind": "datetime"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "dynamodb",
+    "name": "DynamoDB",
+    "global": false,
+    "types": [
+      {
+        "id": "tables",
+        "name": "Tables",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "status",
+            "label": "Status",
+            "kind": "state"
+          },
+          {
+            "key": "items",
+            "label": "Items",
+            "kind": "text"
+          },
+          {
+            "key": "size",
+            "label": "Size",
+            "kind": "bytes"
+          },
+          {
+            "key": "billing",
+            "label": "Billing mode",
+            "kind": "text"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "logs",
+    "name": "CloudWatch Logs",
+    "global": false,
+    "types": [
+      {
+        "id": "log-groups",
+        "name": "Log Groups",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "retention",
+            "label": "Retention",
+            "kind": "text"
+          },
+          {
+            "key": "stored",
+            "label": "Stored bytes",
+            "kind": "bytes"
+          },
+          {
+            "key": "created",
+            "label": "Created",
+            "kind": "datetime"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "cloudfront",
+    "name": "CloudFront",
+    "global": true,
+    "types": [
+      {
+        "id": "distributions",
+        "name": "Distributions",
+        "columns": [
+          {
+            "key": "id",
+            "label": "ID",
+            "kind": "mono"
+          },
+          {
+            "key": "domain",
+            "label": "Domain",
+            "kind": "mono"
+          },
+          {
+            "key": "aliases",
+            "label": "Aliases",
+            "kind": "text"
+          },
+          {
+            "key": "status",
+            "label": "Status",
+            "kind": "state"
+          },
+          {
+            "key": "enabled",
+            "label": "Enabled",
+            "kind": "text"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "sqs",
+    "name": "SQS",
+    "global": false,
+    "types": [
+      {
+        "id": "queues",
+        "name": "Queues",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "type",
+            "label": "Type",
+            "kind": "text"
+          },
+          {
+            "key": "messages",
+            "label": "Messages",
+            "kind": "text"
+          },
+          {
+            "key": "url",
+            "label": "URL",
+            "kind": "mono"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "sns",
+    "name": "SNS",
+    "global": false,
+    "types": [
+      {
+        "id": "topics",
+        "name": "Topics",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "arn",
+            "label": "ARN",
+            "kind": "mono"
+          },
+          {
+            "key": "subscriptions",
+            "label": "Subscriptions",
+            "kind": "text"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "ecr",
+    "name": "ECR",
+    "global": false,
+    "types": [
+      {
+        "id": "repositories",
+        "name": "Repositories",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "uri",
+            "label": "URI",
+            "kind": "mono"
+          },
+          {
+            "key": "created",
+            "label": "Created",
+            "kind": "datetime"
+          },
+          {
+            "key": "scanOnPush",
+            "label": "Scan on push",
+            "kind": "text"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "route53",
+    "name": "Route53",
+    "global": true,
+    "types": [
+      {
+        "id": "hosted-zones",
+        "name": "Hosted Zones",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "id",
+            "label": "Zone ID",
+            "kind": "mono"
+          },
+          {
+            "key": "private",
+            "label": "Private",
+            "kind": "text"
+          },
+          {
+            "key": "records",
+            "label": "Record count",
+            "kind": "text"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "secretsmanager",
+    "name": "Secrets Manager",
+    "global": false,
+    "types": [
+      {
+        "id": "secrets",
+        "name": "Secrets",
+        "columns": [
+          {
+            "key": "name",
+            "label": "Name",
+            "kind": "text"
+          },
+          {
+            "key": "description",
+            "label": "Description",
+            "kind": "text"
+          },
+          {
+            "key": "lastChanged",
+            "label": "Last changed",
+            "kind": "datetime"
+          },
+          {
+            "key": "rotation",
+            "label": "Rotation",
+            "kind": "text"
+          }
+        ]
+      }
+    ]
+  }
+]

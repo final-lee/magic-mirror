@@ -1,0 +1,30 @@
+import { chromium } from "playwright-core";
+// 사용: npm run dev 를 띄우고 `npm i --no-save playwright-core && node scripts/screenshots/shoot.mjs` (Google Chrome 필요)
+const OUT = process.argv[2] ?? "docs/screenshots";
+const browser = await chromium.launch({ channel: "chrome" });
+const page = await browser.newPage({ viewport: { width: 1280, height: 780 }, deviceScaleFactor: 2, colorScheme: "dark" });
+page.on("console", (m) => m.type() === "error" && console.log("console:", m.text()));
+page.on("pageerror", (e) => console.log("pageerror:", e.message));
+await page.goto("http://localhost:1420/scripts/screenshots/demo.html");
+await page.locator(".side .typ", { hasText: "Instances" }).first().click();
+await page.getByText("web-1", { exact: true }).click();
+await page.waitForTimeout(300);
+await page.screenshot({ path: `${OUT}/resources.png` });
+
+await page.locator(".side .typ", { hasText: "Buckets" }).first().click();
+await page.getByText("prod-assets", { exact: true }).dblclick();
+const s3 = page.locator("[data-pane=s3]");
+await s3.getByText(/web$/).dblclick();
+await s3.getByText(/index\.html/).waitFor();
+const local = page.locator("[data-pane=local]");
+await local.getByText(/sitemap\.xml/).click();
+await page.getByRole("button", { name: "복사 →" }).click();
+await page.waitForTimeout(600);
+await local.getByText(/index\.html/).click();
+await s3.getByText(/index\.html/).click();
+await page.waitForTimeout(300);
+await page.screenshot({ path: `${OUT}/explorer.png` });
+await page.getByRole("button", { name: /비교/ }).click();
+await page.waitForTimeout(800);
+await page.screenshot({ path: `${OUT}/diff.png` });
+await browser.close();
