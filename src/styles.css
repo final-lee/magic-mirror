@@ -138,3 +138,5 @@ tbody tr.on td { background: var(--accent) !important; color: #fff; }
 .k-collapsed { display: block; padding: 3px 52px; background: #ffffff05; }
 .meta-compare { padding: 16px; }
 .meta-compare th { text-align: left; color: var(--dim); width: 80px; position: static; }
+.update-banner { display: flex; align-items: center; gap: 8px; padding: 6px 14px; background: #0a84ff22; color: #fff; font-size: 12px; border-bottom: 1px solid var(--line); }
+.update-banner span { flex: 1; }

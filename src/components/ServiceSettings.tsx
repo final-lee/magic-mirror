@@ -1,3 +1,4 @@
+import type { Updater } from "../lib/useUpdater";
 import type { ServiceInfo } from "../api/types";
 import type { DiffTool } from "../explorer/types";
 import { ServiceBadge } from "./ServiceBadge";
@@ -10,6 +11,8 @@ interface Props {
   diffTool?: DiffTool;
   diffToolCommand?: string | null;
   onDiffToolChange?: (tool: DiffTool, command: string | null) => void;
+  updater?: Updater;
+  appVersion?: string | null;
 }
 
 const TOOLS: { id: DiffTool; label: string }[] = [
@@ -18,7 +21,34 @@ const TOOLS: { id: DiffTool; label: string }[] = [
   { id: "custom", label: "직접 입력" },
 ];
 
-export function ServiceSettings({ services, enabled, onChange, onClose, diffTool, diffToolCommand, onDiffToolChange }: Props) {
+function updateStatus(u: Updater): string {
+  switch (u.state.kind) {
+    case "checking":
+      return "확인하는 중…";
+    case "upToDate":
+      return "최신 버전이에요.";
+    case "available":
+      return `새 버전 ${u.state.version}이 있어요.`;
+    case "downloading":
+      return `새 버전 ${u.state.version} 내려받는 중…`;
+    case "error":
+      return `확인하지 못했어요: ${u.state.message}`;
+    default:
+      return "";
+  }
+}
+
+export function ServiceSettings({
+  services,
+  enabled,
+  onChange,
+  onClose,
+  diffTool,
+  diffToolCommand,
+  onDiffToolChange,
+  updater,
+  appVersion,
+}: Props) {
   const toggle = (id: string, on: boolean) => onChange(on ? [...enabled, id] : enabled.filter((x) => x !== id));
   return (
     <div
@@ -65,6 +95,24 @@ export function ServiceSettings({ services, enabled, onChange, onClose, diffTool
                 onChange={(e) => onDiffToolChange("custom", e.target.value)}
               />
             )}
+          </>
+        )}
+        {updater && (
+          <>
+            <h4>업데이트</h4>
+            <p>
+              현재 버전 {appVersion ?? "—"} {updateStatus(updater) && `· ${updateStatus(updater)}`}
+            </p>
+            <div className="tools">
+              <button className="btn small" disabled={updater.state.kind === "checking" || updater.state.kind === "downloading"} onClick={() => void updater.checkNow()}>
+                업데이트 확인
+              </button>
+              {updater.state.kind === "available" && (
+                <button className="btn small primary" onClick={() => void updater.install()}>
+                  지금 업데이트
+                </button>
+              )}
+            </div>
           </>
         )}
         <div className="foot">

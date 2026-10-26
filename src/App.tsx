@@ -15,6 +15,9 @@ import { refKey, refName } from "./explorer/rows";
 import type { DiffTool, FileRef, TransferRequest } from "./explorer/types";
 import { useTransfers } from "./explorer/useTransfers";
 import type { S3Location } from "./lib/s3";
+import { getVersion } from "@tauri-apps/api/app";
+import { UpdateBanner } from "./components/UpdateBanner";
+import { useUpdater } from "./lib/useUpdater";
 
 const sameFav = (a: Favorite, b: Favorite) => a.service === b.service && a.type === b.type;
 
@@ -42,6 +45,12 @@ export default function App() {
     [qc],
   );
   const transfers = useTransfers(profile, onTransferSettled);
+  const updater = useUpdater();
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  useEffect(() => {
+    getVersion().then(setAppVersion, () => {});
+  }, []);
+  const transfersActive = transfers.items.some((i) => i.event.status === "queued" || i.event.status === "running");
 
   // 첫 로드: 마지막 프로필/리전 복원
   useEffect(() => {
@@ -172,6 +181,7 @@ export default function App() {
         onRefresh={refresh}
         onOpenSettings={() => setShowSettings(true)}
       />
+      <UpdateBanner updater={updater} transfersActive={transfersActive} />
       <TabBar tabs={tabs} active={activeTab} onActivate={activate} onClose={closeTab} />
       <div className="tabpane main" hidden={activeTab !== "resources"}>
         <Sidebar
@@ -233,6 +243,8 @@ export default function App() {
           diffTool={diffTool}
           diffToolCommand={settings.diffToolCommand ?? null}
           onDiffToolChange={(tool, command) => update({ diffTool: tool, diffToolCommand: command })}
+          updater={updater}
+          appVersion={appVersion}
         />
       )}
     </div>
