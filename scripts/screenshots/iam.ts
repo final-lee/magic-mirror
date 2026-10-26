@@ -129,7 +129,7 @@ const ALICE_SERVICES = byName([
   service("s3", { list: "all", read: "all", write: [5, 2, 2], tagging: [3] }),
   service("secretsmanager", { list: "all", read: [0, 3] }),
   service("sqs", { read: "all", write: [3] }),
-  service("sts", { read: [2], write: [1] }, true),
+  service("sts", { read: [2], write: [1] }),
   service("ssm", { list: "all", read: [41, 12] }),
 ]);
 
@@ -180,8 +180,9 @@ const S3_WRITE: ActionGrant[] = [
 
 const SPECIAL: Record<string, ActionGrant[]> = {
   "s3/write": S3_WRITE,
-  "iam/write": [grant("iam:PassRole", "allowed", [`arn:aws:iam::${OVERVIEW.accountId}:role/app-*`], [baseSrc("PassAppRoles", 4)], PRIVESC)],
-  "sts/write": [grant("sts:AssumeRole", "allowed", [`arn:aws:iam::${OVERVIEW.accountId}:role/dev-*`], [baseSrc("AssumeDev", 5)], PRIVESC)],
+  // 권한 상승 위험은 모든 리소스에 조건 없이 허용될 때만 붙는다(역할을 좁힌 AssumeRole은 해당 없음)
+  "iam/write": [grant("iam:PassRole", "allowed", ["*"], [baseSrc("PassRoles", 4)], PRIVESC)],
+  "sts/write": [grant("sts:AssumeRole", "allowed", [`arn:aws:iam::${OVERVIEW.accountId}:role/dev-*`], [baseSrc("AssumeDev", 5)])],
 };
 
 /** 칸의 수에 맞춰 카탈로그 앞쪽 작업으로 목록을 채운다 */
@@ -231,7 +232,7 @@ function findings() {
   const f = sampleFindings();
   const extra: Partial<Record<FindingKind, FindingItem[]>> = {
     adminPrincipal: [finding(ciBot.arn, "ci-bot", "AdministratorAccess가 직접 붙어 있어요")],
-    privescPrincipal: [finding(alice.arn, "alice", "iam:PassRole, sts:AssumeRole로 더 큰 권한을 얻을 수 있어요")],
+    privescPrincipal: [finding(alice.arn, "alice", "권한 상승에 쓸 수 있는 작업을 모든 리소스에 조건 없이 허용해요: iam:PassRole")],
     unattachedPolicy: [finding(orphanPolicy.arn, "legacy-unused", "어디에도 붙어 있지 않아요")],
   };
   return { ...f, groups: f.groups.map((g) => ({ ...g, items: [...g.items, ...(extra[g.kind] ?? [])] })) };

@@ -36,18 +36,22 @@
 - 데이터: `iam:GetAccountAuthorizationDetails`(User/Group/Role/LocalManagedPolicy, 끝까지 페이지). AWS 관리형 정책은 통째로 받지 않고, 사용자·그룹·역할에 붙어 있거나 권한 경계로 쓰이는데 목록에 없는 관리형 정책만 `GetPolicy`+`GetPolicyVersion`으로 기본 버전 문서를 읽는다(10개씩 동시에, 자격 증명 보고서를 기다리는 동안. SSO 만료·요청 제한은 오류, 그 밖의 실패는 경고). 정책 문서는 URL 인코딩돼 있으니 디코드 후 JSON 파싱.
 - 정책 문장 정규화: `Action`/`NotAction`/`Resource`/`NotResource`는 문자열 또는 배열. `Condition` 유무 기록. `Statement`가 객체 하나일 수도 있다.
 - 작업 매칭: 대소문자 무시 glob(`*`, `?`). 서비스 접두어 포함(`s3:Get*`, `*`).
-- 리소스 매칭: 대소문자 구분 glob(`*`, `?`). `${...}` 정책 변수가 있으면 판단 불가 → 조건부.
+- 리소스 매칭: 대소문자 구분 glob(`*`, `?`). `${...}` 정책 변수는 `*`로 바꿔 먼저 맞춰 본다. 그래도 안 맞으면 안 맞는 것이고, 맞으면 값에 따라 달라지니 조건부.
 - 카탈로그: AWS Service Reference(https://servicereference.us-east-1.amazonaws.com/)에서 만든 스냅숏을 앱에 넣는다(`src-tauri/src/iam/catalog.json`, `scripts/update-iam-catalog.mjs`로 갱신). 작업별 접근 수준: IsPermissionManagement → permissions, IsTaggingOnly → tagging, IsWrite → write, IsList → list, 그 외 read.
 - 주체의 정책 출처: 사용자 = 사용자 인라인 + 사용자 관리형 + 소속 그룹 인라인·관리형, 역할 = 역할 인라인 + 관리형, 그룹 = 그룹 인라인 + 관리형. 권한 경계는 별도.
-- 작업별 판정(우선순위 순). Allow가 하나도 매칭되지 않는 작업은 Deny만 있어도 표와 "누가 할 수 있나"에서 제외한다(원래 허용되지 않으므로).
-  1. Allow가 매칭되고 조건 없는 Deny도 매칭 → `denied` (대상 리소스를 지정하지 않았고 Deny가 일부 리소스에만 걸리면 `allowed`로 두고 근거에 Deny를 함께 표시)
-  2. (제외 규칙은 위에 적음)
-  3. 권한 경계가 있고 경계가 이 작업을 조건 없이 허용하지 않음 → 경계가 아예 허용 안 하면 `boundary`, 조건부로만 허용하면 `conditional`
-  4. 조건 있는 Deny가 매칭되거나, 조건 없는 Allow가 없고 조건 있는 Allow만 있음 → `conditional`
-  5. 그 외 → `allowed`
-- 대상 리소스 지정 시(누가 할 수 있나): 문장의 Resource/NotResource가 그 ARN에 매칭될 때만 적용.
-- 카탈로그에 없는 작업 이름은 `unknownActions`로 따로 보여준다.
-- 관리자급(`adminLike`): 조건 없는 Allow 문장이 `Action:"*"`(또는 `"*:*"`)와 `Resource:"*"`를 갖거나(경계·Deny 적용 후에도 유지될 때), 최종 `allowed` 작업이 카탈로그 전체의 90% 이상.
+- 작업별 판정. Allow가 하나도 매칭되지 않는 작업은 Deny만 있어도 표와 "누가 할 수 있나"에서 제외한다(원래 허용되지 않으므로). 권한 경계 정책의 Deny도 Deny로 본다.
+  - 대상 리소스를 지정했을 때(누가 할 수 있나): 문장의 Resource/NotResource가 그 ARN에 매칭될 때만 적용한다. 조건 없는 Deny → `denied`. 경계가 조건 없이 허용하지 않으면, 아예 허용하지 않을 때 `boundary`, 조건부로만 허용할 때 `conditional`. 조건 있는 Deny가 맞거나 조건 있는 Allow만 있으면 `conditional`. 그 외 `allowed`.
+  - 대상 리소스를 지정하지 않았을 때(권한 표): 신원 정책 Allow의 리소스 패턴 하나하나를 조각으로 보고 차례로 따진다.
+    1. 조건 없는 Deny가 통째로 덮는 조각을 지운다. NotResource Deny는 제외 목록과 겹치지 않는 조각을 덮는다. 남는 것이 없으면 `denied`.
+    2. 권한 경계가 있으면 남은 조각을 경계 Allow의 조각과 하나씩 겹친다. 한쪽이 `*`면 다른 쪽이 남고, 한쪽이 다른 쪽을 포함하면 좁은 쪽이 남는다. 일부만 겹치면 신원 쪽 패턴으로 근사한다. 경계가 이 작업을 허용하지 않거나 겹치는 것이 없으면 `boundary`.
+    3. 겹친 조각에 조건 없는 Deny를 다시 적용한다. 남는 것이 없으면 `denied`.
+    4. 남은 조각 가운데 연 문장(신원 Allow, 경계 Allow)이 모두 조건 없고 조건 있는 Deny도 덮지 않는 것이 있으면 `allowed`, 없으면 `conditional`.
+  - 허용 리소스(`resources`)는 남은 조각의 라벨이다. NotResource 조각은 `* (제외: …)`로 적는다. 일부 리소스에만 걸린 Deny는 근거에 함께 보여준다.
+- 카탈로그에 없는 작업 이름은 `unknownActions`로 따로 보여준다. 정책을 해석하지 못한 주체는 "누가 할 수 있나" 결과에서 빠지고, 안내(`notes`)에 이름을 적는다.
+- 관리자급(`adminLike`): 조건 없는 Allow 문장이 `Action:"*"`(또는 `"*:*"`)와 `Resource:"*"`를 갖거나(경계·Deny 적용 후에도 유지될 때), 아래 `full_scope` 작업이 카탈로그 전체의 90% 이상.
+  - `full_scope`는 판정 결과에 함께 나온다. 조건 없는 (신원 Allow, 경계 Allow) 문장 쌍으로 모든 리소스(NotResource 목록만 뺀 나머지 포함)에서 허용됐다는 뜻이다.
+  - 리소스를 좁혀 허용했거나(`Resource:"arn:aws:s3:::b/*"` 위의 `Action:"*"` 등) 조건이 맞아야 모든 리소스에 열리는 작업은 세지 않는다.
+  - "모든 리소스에 대한 권한 관리" 위험 표시도 같은 `full_scope`를 쓴다.
 - 권한 상승 위험(`privesc`): 아래 작업 중 하나라도 `Resource:"*"`로 조건 없이 허용: iam:CreatePolicyVersion, iam:SetDefaultPolicyVersion, iam:PassRole, iam:CreateAccessKey, iam:CreateLoginProfile, iam:UpdateLoginProfile, iam:AttachUserPolicy, iam:AttachGroupPolicy, iam:AttachRolePolicy, iam:PutUserPolicy, iam:PutGroupPolicy, iam:PutRolePolicy, iam:AddUserToGroup, iam:UpdateAssumeRolePolicy, iam:PutUserPermissionsBoundary, iam:PutRolePermissionsBoundary, iam:DeleteUserPermissionsBoundary, iam:DeleteRolePermissionsBoundary, sts:AssumeRole.
 - 신뢰 정책 해석: Allow + `sts:AssumeRole*`/`sts:TagSession` 문장의 Principal. `*`/`{"AWS":"*"}` → 누구나(조건 없으면 위험), 다른 계정 ID/ARN → 외부 계정(`sts:ExternalId` 조건 없으면 경고), `Service` → 서비스, `Federated` → 연동(OIDC/SAML 공급자 이름).
 
@@ -64,15 +68,22 @@
 | inactiveRole | 역할 마지막 사용 90일 초과 또는 기록 없음(서비스 연결·SSO 역할 제외, 만든 지 90일 이상) | info | 없음 |
 | adminPrincipal | adminLike 사용자·역할 | warn | 없음 |
 | privescPrincipal | privesc 사용자·역할(adminLike 제외) | warn | 없음 |
-| externalTrust | 누구나 또는 외부 계정에 열린 신뢰 | danger(누구나)/warn | 없음 |
+| externalTrust | 누구나 또는 외부 계정에 열린 신뢰 | danger(누구나, 조건 없음)/warn | 없음 |
 | unattachedPolicy | 붙은 곳 없는 고객 관리형 정책 | info | 없음 |
 각 항목에 복사용 CLI 명령(예: `aws iam update-access-key --user-name alice --access-key-id AKIA… --status Inactive`).
 
 ## 권한 줄이기
 - `GenerateServiceLastAccessedDetails(Granularity=ACTION_LEVEL)` → 폴링(최대 30초) → `GetServiceLastAccessedDetails`. 추적 기간 400일.
-- 허용된 서비스 중 400일 동안(또는 90일 넘게) 안 쓴 서비스 목록.
-- 통째로 안 쓰는 정책: 그 정책이 허용하는 서비스가 전부 안 쓰임 → [떼기] 제안(그룹 상속 정책은 그룹에서 떼야 한다고 안내).
-- 줄인 정책 초안: 쓰인 서비스만 남긴 Allow 문장. 작업 단위 기록이 있는 서비스는 쓰인 작업만, 없으면 `prefix:*`. Resource는 원래 허용 패턴을 유지. 조건은 버린다는 안내 표시.
+- "안 씀": 추적 기간 동안 한 번도 쓰지 않았거나, 마지막 사용이 `completedAt`보다 90일(`STALE_DAYS`) 넘게 전. 허용된 서비스 목록에 이 기준으로 표시한다.
+- 통째로 안 쓰는 정책: 그 정책이 허용하는 서비스가 전부 안 쓰이면 [떼기]를 제안한다. 그룹에서 상속한 정책은 그룹에서 떼야 한다고 안내한다. 만든 지 90일이 안 됐거나, 만든 날짜나 사용 기록 시각을 모르는 주체에는 제안하지 않고 안내만 한다.
+- 줄인 정책 초안: 지금보다 넓게 허용하지 않는다.
+  - 조건 없는 Allow 문장에서 지금 `allowed`인 작업만 가져온다. 조건부로만 허용된 작업은 빼고, 뺀 것을 안내(`draftNotes`)에 적는다.
+  - 작업 단위 기록이 있는 서비스에서는 기록됐는데 최근 90일 안에 안 쓴 작업을 뺀다. 기록되지 않는 작업(데이터 플레인 등)은 남긴다. 기록이 없는 서비스는 지금 허용된 작업을 그대로 남긴다.
+  - Resource는 원래 허용 패턴을 유지한다. 와일드카드(`s3:*` 등)는 원래 문장이 그 범위를 덮을 때만 쓴다.
+  - 초안에 남긴 작업을 막을 수 있는 Deny 문장은 원문 그대로 옮긴다. 초안이 와일드카드로 연 서비스에서 카탈로그에 없는 작업을 막을 수 있는 Deny도 옮긴다.
+  - Deny 원문을 찾지 못했거나 읽지 못한 신원 정책이 있으면 초안을 만들지 않는다.
+  - 버전이 2012-10-17이 아닌 문서에서 `${…}` 리소스를 쓰는 Allow 문장은 넣지 않는다. 초안에서는 변수로 풀려 더 넓어지기 때문이다.
+  - 초안이 그 주체 종류의 인라인 정책 한도나 관리형 정책 한도(6,144자)를 넘으면 안내한다.
 
 ## 직접 변경
 변경 종류(`IamChange`): attachPolicy, detachPolicy, addToGroup, removeFromGroup, setAccessKeyStatus, deleteAccessKey, putInlinePolicy, deleteInlinePolicy, updateManagedPolicy(CreatePolicyVersion SetAsDefault=true, 버전이 5개면 가장 오래된 비기본 버전을 먼저 삭제).
