@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { DiffResult, DiffTool, FileRef, LocalEntry, RenameResult, TransferEvent, TransferRequest } from "./types";
+import type { DiffResult, FileRef, LocalEntry, RenameResult, TransferEvent, TransferRequest } from "./types";
 
 export const explorerApi = {
   localHome: () => invoke<string>("local_home"),
@@ -20,8 +20,8 @@ export const explorerApi = {
   s3Delete: (profile: string, bucket: string, region: string, keys: string[]) =>
     invoke<number>("s3_delete", { profile, bucket, region, keys }),
   diffFiles: (profile: string, left: FileRef, right: FileRef) => invoke<DiffResult>("diff_files", { profile, left, right }),
-  openExternalDiff: (profile: string, left: FileRef, right: FileRef, tool: DiffTool, command: string | null) =>
-    invoke<void>("open_external_diff", { profile, left, right, tool, command }),
+  openExternalDiff: (profile: string, left: FileRef, right: FileRef) =>
+    invoke<void>("open_external_diff", { profile, left, right }),
 };
 
 export function onTransferProgress(cb: (ev: TransferEvent) => void): Promise<() => void> {

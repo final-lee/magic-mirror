@@ -40,7 +40,7 @@ const textResult: DiffResult = {
 
 function setup(extra = {}) {
   const transfers = { items: [], enqueue: vi.fn(), retry: vi.fn(), clearFinished: vi.fn() };
-  const props = { profile: "prod", left, right, active: true, transfers, diffTool: "filemerge" as const, diffToolCommand: null, ...extra };
+  const props = { profile: "prod", left, right, active: true, transfers, ...extra };
   renderWithClient(<DiffTab {...props} />);
   return props;
 }
@@ -120,5 +120,5 @@ test("upload/download buttons hidden for local↔local; external tool errors are
   expect(screen.queryByRole("button", { name: "S3로 업로드 →" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "외부 도구로 열기" }));
   expect(await screen.findByText("FileMerge를 찾을 수 없어요")).toBeInTheDocument();
-  expect(explorerApi.openExternalDiff).toHaveBeenCalledWith("prod", left, { source: "local", path: "/w/b.html" }, "filemerge", null);
+  expect(explorerApi.openExternalDiff).toHaveBeenCalledWith("prod", left, { source: "local", path: "/w/b.html" }, );
 });
