@@ -110,26 +110,6 @@ test("startup load failure shows error with retry", async () => {
   expect(await screen.findByText("EC2")).toBeInTheDocument();
 });
 
-test("tab bar switches to the S3 explorer and keeps the resource tab mounted", async () => {
-  renderWithClient(<App />);
-  fireEvent.click(await screen.findByText("EC2"));
-  fireEvent.click(screen.getByText("Instances"));
-  await screen.findByText("web-1");
-  fireEvent.click(screen.getByRole("tab", { name: "S3 탐색기" }));
-  expect(await screen.findByTestId("pane-local")).toBeVisible();
-  expect(screen.getAllByText("web-1")[0]).not.toBeVisible();
-  fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
-  expect(screen.getAllByText("web-1")[0]).toBeVisible();
-});
-
-test("local path change is persisted to settings", async () => {
-  renderWithClient(<App />);
-  fireEvent.click(await screen.findByRole("tab", { name: "S3 탐색기" }));
-  const local = await screen.findByTestId("pane-local");
-  fireEvent.click(await within(local).findByRole("button", { name: "상위 폴더" }));
-  await waitFor(() => expect(m.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ explorerLocalPath: "/home" })));
-});
-
 // 탐색기 탭들도 같은 버킷 목록을 그리므로, 리소스 탭(DOM 첫 번째 패널)의 행만 고른다.
 async function resourceBucket() {
   return (await screen.findAllByText("assets"))[0];
@@ -177,7 +157,31 @@ describe("bucket explorer tabs", () => {
     const tab = await screen.findByRole("tab", { name: /S3: assets/ });
     fireEvent.click(within(tab.parentElement as HTMLElement).getByRole("button", { name: /닫기/ }));
     expect(screen.queryByRole("tab", { name: /S3: assets/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "S3 탐색기" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("there is no explorer tab until a bucket is opened", async () => {
+    renderWithClient(<App />);
+    await screen.findByText("EC2");
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["리소스"]);
+    expect(screen.queryByTestId("pane-local")).not.toBeInTheDocument();
+  });
+
+  test("bucket tab keeps the resource tab mounted", async () => {
+    renderWithClient(<App />);
+    await openAssetsBucket();
+    expect(await screen.findByTestId("pane-local")).toBeVisible();
+    expect(await resourceBucket()).not.toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    expect(await resourceBucket()).toBeVisible();
+  });
+
+  test("local path change is persisted to settings", async () => {
+    renderWithClient(<App />);
+    await openAssetsBucket();
+    const local = await screen.findByTestId("pane-local");
+    fireEvent.click(await within(local).findByRole("button", { name: "상위 폴더" }));
+    await waitFor(() => expect(m.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ explorerLocalPath: "/home" })));
   });
 
   test("changing profile closes bucket tabs", async () => {
