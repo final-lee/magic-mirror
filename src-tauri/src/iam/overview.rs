@@ -115,8 +115,9 @@ mod tests {
         assert_eq!(o.caller, Caller { arn: ALICE.into(), principal_arn: Some(ALICE.into()) });
         assert_eq!(o.fetched_at, "2026-10-26T00:00:00Z");
         assert_eq!(o.warnings, vec!["샘플 경고".to_string()]);
-        // 루트 2 + 콘솔 MFA 1 + 오래된 키 3 + 안 쓰는 키 2 + 안 쓰는 사용자 3 + 안 쓰는 역할 3 + 관리자 1 + 권한 상승 1 + 외부 신뢰 2 + 안 붙은 정책 1
-        assert_eq!(o.finding_count, 19);
+        // 루트 2 + 콘솔 MFA 1 + 오래된 키 3 + 안 쓰는 키 2 + 안 쓰는 사용자 1 + 안 쓰는 역할 3 + 관리자 1 + 권한 상승 1 + 외부 신뢰 2 + 안 붙은 정책 1.
+        // 보고서에만 있는 dave·erin(지금 계정에 없는 사용자)은 세지 않는다
+        assert_eq!(o.finding_count, 17);
         assert_eq!(o.users.len(), 3);
         assert_eq!(o.groups.len(), 1);
         assert_eq!(o.roles.len(), 6);
@@ -157,6 +158,6 @@ mod tests {
         keys.sort_unstable();
         assert_eq!(keys, vec!["accountId", "caller", "fetchedAt", "findingCount", "groups", "policies", "roles", "users", "warnings"]);
         assert_eq!(value["caller"], json!({ "arn": ALICE, "principalArn": ALICE }));
-        assert_eq!(value["findingCount"], json!(19));
+        assert_eq!(value["findingCount"], json!(17));
     }
 }

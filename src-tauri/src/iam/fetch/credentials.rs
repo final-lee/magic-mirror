@@ -7,7 +7,7 @@ use aws_sdk_iam::types::ReportStateType;
 use super::{poll, POLL_INTERVAL};
 use crate::error::{from_sdk, AppError};
 use crate::iam::clock::iso_of;
-use crate::iam::findings::parse_credential_report;
+use crate::iam::findings::read_credential_report;
 use crate::iam::model::CredRow;
 
 const REPORT_WAIT: Duration = Duration::from_secs(20);
@@ -15,6 +15,13 @@ const REPORT_WAIT: Duration = Duration::from_secs(20);
 pub(super) struct Report {
     pub rows: Vec<CredRow>,
     pub generated_at: Option<String>,
+    /// 형식이 맞지 않아 읽지 못한 줄 수
+    pub unreadable: usize,
+}
+
+/// 보고서에서 읽지 못한 줄이 있으면 남길 경고. 그 사용자들은 점검에서 빠졌다.
+pub(super) fn unreadable_warning(unreadable: usize) -> Option<String> {
+    (unreadable > 0).then(|| format!("자격 증명 보고서의 {unreadable}줄을 읽지 못했어요"))
 }
 
 /// 보고서는 4시간 안에 만든 게 있으면 AWS가 그대로 돌려준다. 못 읽거나 줄이 하나도 없으면(루트 줄은 늘 있다) 오류다.
@@ -29,9 +36,21 @@ pub(super) async fn fetch_report(client: &aws_sdk_iam::Client) -> Result<Report,
     }
     let out = client.get_credential_report().send().await.map_err(|e| from_sdk(e, "iam:GetCredentialReport"))?;
     let content = out.content().ok_or_else(|| AppError::other("보고서 내용이 비어 있어요"))?;
-    let rows = parse_credential_report(&String::from_utf8_lossy(content.as_ref()));
+    let (rows, unreadable) = read_credential_report(&String::from_utf8_lossy(content.as_ref()));
     if rows.is_empty() {
         return Err(AppError::other("보고서 형식을 읽지 못했어요"));
     }
-    Ok(Report { rows, generated_at: iso_of(out.generated_time()) })
+    Ok(Report { rows, generated_at: iso_of(out.generated_time()), unreadable })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unreadable_rows_leave_a_warning_with_the_count() {
+        assert_eq!(unreadable_warning(0), None);
+        assert_eq!(unreadable_warning(1).as_deref(), Some("자격 증명 보고서의 1줄을 읽지 못했어요"));
+        assert_eq!(unreadable_warning(3).as_deref(), Some("자격 증명 보고서의 3줄을 읽지 못했어요"));
+    }
 }

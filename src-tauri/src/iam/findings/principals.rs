@@ -2,8 +2,8 @@
 
 use super::{item, push, sh_quote, FindingKind, Items, STALE_DAYS};
 use crate::iam::clock::{days_between, parse_iso};
-use crate::iam::danger::{admin_like_statementwise, document_badges, is_service_linked, is_sso_role, privesc_reasons};
-use crate::iam::eval::policy_sources;
+use crate::iam::danger::{admin_like_statementwise, document_badges, is_service_linked, is_sso_role, privesc_reasons, PRIVESC_ACTIONS};
+use crate::iam::eval::{evaluate_action, policy_sources, Status};
 use crate::iam::model::{RoleRec, Scope, Snapshot};
 use crate::iam::text::shortened;
 use crate::iam::trust::parse_trust;
@@ -54,10 +54,22 @@ fn admin_detail(s: &Snapshot, arn: &str) -> String {
     }
 }
 
-/// `iam:PassRole 작업을 모든 리소스에 조건 없이 허용해요` 같은 이유에서 작업 이름만 뽑는다.
-fn privesc_detail(reasons: &[String]) -> String {
-    let actions: Vec<String> = reasons.iter().map(|r| r.split_whitespace().next().unwrap_or(r).to_string()).collect();
-    format!("권한 상승에 쓸 수 있는 작업을 모든 리소스에 조건 없이 허용해요: {}", shortened(&actions, SHOWN))
+/// 모든 리소스에 조건 없이 허용된 권한 상승 작업(`PRIVESC_ACTIONS` 순서). 위험 판정의 이유 문구를 읽지 않고 작업마다 다시 판정한다.
+fn privesc_actions(s: &Snapshot, arn: &str) -> Vec<String> {
+    PRIVESC_ACTIONS
+        .iter()
+        .filter(|action| evaluate_action(s, arn, action, Some("*")).is_some_and(|eval| eval.status == Status::Allowed))
+        .map(|action| action.to_string())
+        .collect()
+}
+
+fn privesc_detail(actions: &[String]) -> String {
+    let base = "권한 상승에 쓸 수 있는 작업을 모든 리소스에 조건 없이 허용해요";
+    if actions.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base}: {}", shortened(actions, SHOWN))
+    }
 }
 
 fn user_or_role_cli(kind: &str, name: &str) -> String {
@@ -75,6 +87,13 @@ fn describe_trust(entry: &TrustEntry) -> String {
             format!("외부 {who} {}에서 {tail}", entry.value)
         }
     }
+}
+
+/// 누구나 조건 없이 맡을 수 있게 열린 역할이 있다. 외부에 열린 신뢰 점검이 위험 단계가 되는 경우다.
+pub(super) fn open_to_anyone(s: &Snapshot) -> bool {
+    s.roles.iter().filter_map(|role| role.trust.as_ref()).any(|doc| {
+        parse_trust(doc, &s.account_id).iter().any(|entry| entry.external && entry.kind == TrustKind::Anyone && !entry.conditional)
+    })
 }
 
 /// 이 정책을 권한 경계로 쓰는 사용자·역할이 있다. AWS의 `AttachmentCount`는 권한 경계로 쓰이는 것을 세지 않는다.
@@ -95,12 +114,9 @@ pub(super) fn principal_findings(s: &Snapshot, now: i64, out: &mut Items) {
         let cli = Some(user_or_role_cli(kind, name));
         if admin_like_statementwise(s, arn) {
             push(out, FindingKind::AdminPrincipal, item(arn, name, admin_detail(s, arn), cli));
-        } else {
-            // 관리자급이면 권한 상승 위험은 따로 알리지 않는다
-            let reasons = privesc_reasons(s, arn);
-            if !reasons.is_empty() {
-                push(out, FindingKind::PrivescPrincipal, item(arn, name, privesc_detail(&reasons), cli));
-            }
+        } else if !privesc_reasons(s, arn).is_empty() {
+            // 관리자급이면 권한 상승 위험은 따로 알리지 않는다. 대상인지는 목록 배지와 같은 판정으로 정한다
+            push(out, FindingKind::PrivescPrincipal, item(arn, name, privesc_detail(&privesc_actions(s, arn)), cli));
         }
     }
 

@@ -5,7 +5,7 @@ use aws_sdk_iam::types::{Policy, PolicyScopeType};
 use serde::Serialize;
 
 use crate::error::{from_sdk, AppError};
-use crate::iam::model::Scope;
+use crate::iam::model::{Scope, Snapshot};
 use crate::iam::view::{Badge, BadgeKind, Level};
 
 /// 붙이기 선택 목록에서 한 번에 보여 주는 최대 개수.
@@ -36,7 +36,7 @@ fn name_badges(arn: &str) -> Vec<Badge> {
     }
 }
 
-/// 붙일 수 없는 정책(`IsAttachable`이 거짓)과 이름·ARN이 없는 항목은 뺀다.
+/// 붙일 수 없는 정책(`IsAttachable`이 거짓)과 이름·ARN이 없는 항목은 뺀다. 설명은 `ListPolicies`가 주지 않으니 `describe`가 채운다.
 fn policy_ref(policy: &Policy) -> Option<PolicyRef> {
     if !policy.is_attachable() {
         return None;
@@ -46,7 +46,7 @@ fn policy_ref(policy: &Policy) -> Option<PolicyRef> {
         arn: arn.to_string(),
         name: name.to_string(),
         scope: if arn.split(':').nth(4) == Some("aws") { Scope::Aws } else { Scope::Local },
-        description: policy.description().filter(|d| !d.is_empty()).map(str::to_string),
+        description: None,
         badges: name_badges(arn),
     })
 }
@@ -73,11 +73,23 @@ pub fn search(all: &[PolicyRef], query: &str, limit: usize) -> Vec<PolicyRef> {
     all.iter().filter(|p| query.is_empty() || p.name.to_lowercase().contains(&query)).take(limit).cloned().collect()
 }
 
+/// 고객 관리형 정책의 설명을 스냅숏에서 채운다(`ListPolicies`는 설명을 돌려주지 않는다). AWS 관리형과 설명이 없는 정책은 null이다.
+pub fn describe(mut refs: Vec<PolicyRef>, s: &Snapshot) -> Vec<PolicyRef> {
+    for p in &mut refs {
+        p.description = match p.scope {
+            Scope::Local => s.policies.get(&p.arn).and_then(|rec| rec.description.clone()).filter(|d| !d.is_empty()),
+            Scope::Aws => None,
+        };
+    }
+    refs
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::iam::model::ManagedPolicyRec;
 
     fn policy(name: &str, arn: &str, attachable: bool) -> Policy {
         Policy::builder().policy_name(name).arn(arn).is_attachable(attachable).build()
@@ -112,12 +124,28 @@ mod tests {
     }
 
     #[test]
-    fn descriptions_are_kept_unless_empty() {
+    fn the_list_itself_carries_no_descriptions() {
+        // ListPolicies는 설명을 돌려주지 않는다. 값이 들어 있어도 믿지 않고 스냅숏에서 채운다
         let with = Policy::builder().policy_name("a").arn("arn:aws:iam::1:policy/a").is_attachable(true).description("읽기 전용").build();
-        let empty = Policy::builder().policy_name("b").arn("arn:aws:iam::1:policy/b").is_attachable(true).description("").build();
-        let refs = build_refs(&[with, empty, local("c")]);
-        let found: Vec<Option<&str>> = refs.iter().map(|p| p.description.as_deref()).collect();
-        assert_eq!(found, vec![Some("읽기 전용"), None, None]);
+        let refs = build_refs(&[with, local("c")]);
+        assert!(refs.iter().all(|p| p.description.is_none()), "{refs:?}");
+    }
+
+    #[test]
+    fn descriptions_come_from_the_snapshot_for_customer_policies_only() {
+        let mut s = Snapshot::default();
+        let mut add = |arn: &str, scope: Scope, description: Option<&str>| {
+            let rec = ManagedPolicyRec { arn: arn.into(), name: arn.rsplit('/').next().unwrap().into(), scope, description: description.map(str::to_string), ..Default::default() };
+            s.policies.insert(arn.into(), rec);
+        };
+        add("arn:aws:iam::111111111111:policy/a", Scope::Local, Some("읽기 전용"));
+        add("arn:aws:iam::111111111111:policy/b", Scope::Local, Some(""));
+        add("arn:aws:iam::aws:policy/X", Scope::Aws, Some("AWS가 붙인 설명"));
+        let refs = build_refs(&[local("a"), local("b"), local("gone"), aws("X")]);
+        let described = describe(refs, &s);
+        let found: Vec<(&str, Option<&str>)> = described.iter().map(|p| (p.name.as_str(), p.description.as_deref())).collect();
+        // 빈 설명과 스냅숏에 없는 정책은 null, AWS 관리형은 늘 null이다
+        assert_eq!(found, vec![("a", Some("읽기 전용")), ("b", None), ("gone", None), ("X", None)]);
     }
 
     #[test]

@@ -125,16 +125,23 @@ pub(crate) fn syntax_failure(document: &str) -> Option<ValidationResult> {
     syntax_error(document).map(|error| ValidationResult { syntax_error: Some(error), analyzer_available: true, findings: Vec::new() })
 }
 
+/// 검사기 결과를 화면 값으로. 검사기를 못 쓰면(권한 없음 등) 문법 결과만 남긴다.
+fn analyzer_outcome(result: Result<Vec<ValidationFinding>, AppError>) -> Result<ValidationResult, AppError> {
+    match result {
+        Ok(findings) => Ok(ValidationResult { syntax_error: None, analyzer_available: true, findings }),
+        // 다시 로그인하거나 잠시 뒤에 하면 되는 오류라 "검사기를 쓸 수 없다"로 바꾸지 않는다
+        Err(e @ (AppError::SsoExpired | AppError::Throttled)) => Err(e),
+        Err(_) => Ok(ValidationResult { syntax_error: None, analyzer_available: false, findings: Vec::new() }),
+    }
+}
+
 /// 정책 문서를 검사한다. JSON 문법이 틀리면 거기서 멈춘다. 맞으면 Access Analyzer(`IDENTITY_POLICY`)로 검사하고,
-/// 검사기를 못 쓰면(권한 없음 등) 문법 결과만 남긴다.
-pub(crate) async fn validate(cfg: &SdkConfig, document: &str) -> ValidationResult {
+/// 검사기를 못 쓰면(권한 없음 등) 문법 결과만 남긴다. SSO 만료·요청 제한은 오류다.
+pub(crate) async fn validate(cfg: &SdkConfig, document: &str) -> Result<ValidationResult, AppError> {
     if let Some(failure) = syntax_failure(document) {
-        return failure;
+        return Ok(failure);
     }
-    match analyze(cfg, document).await {
-        Ok(findings) => ValidationResult { syntax_error: None, analyzer_available: true, findings },
-        Err(_) => ValidationResult { syntax_error: None, analyzer_available: false, findings: Vec::new() },
-    }
+    analyzer_outcome(analyze(cfg, document).await)
 }
 
 #[cfg(test)]
@@ -226,6 +233,20 @@ mod tests {
         assert_eq!(level(ValidatePolicyFindingType::from("SOMETHING_NEW")), FindingLevel::Warning);
         let f = finding(&analyzer_finding(ValidatePolicyFindingType::Error));
         assert_eq!((f.code.as_str(), f.message.as_str()), ("MISSING_RESOURCE", "Resource가 필요해요"));
+    }
+
+    #[test]
+    fn analyzer_failures_turn_it_off_but_sso_expiry_and_throttling_are_errors() {
+        let found = vec![finding(&analyzer_finding(ValidatePolicyFindingType::Error))];
+        assert_eq!(analyzer_outcome(Ok(found.clone())), Ok(ValidationResult { syntax_error: None, analyzer_available: true, findings: found }));
+        // 권한이 없거나 다른 이유로 못 쓰면 문법 결과만 남는다
+        for unavailable in [AppError::AccessDenied { action: "access-analyzer:ValidatePolicy".into() }, AppError::other("x"), AppError::Network { message: "n".into() }] {
+            assert_eq!(analyzer_outcome(Err(unavailable)), Ok(ValidationResult { syntax_error: None, analyzer_available: false, findings: Vec::new() }));
+        }
+        // 다시 로그인하거나 잠시 뒤에 하면 되는 오류는 검사기가 없다고 말하지 않고 그대로 알린다
+        for retry in [AppError::SsoExpired, AppError::Throttled] {
+            assert_eq!(analyzer_outcome(Err(retry.clone())), Err(retry));
+        }
     }
 
     #[test]
