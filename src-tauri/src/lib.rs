@@ -1,3 +1,4 @@
+mod aws;
 mod error;
 mod model;
 mod settings;
