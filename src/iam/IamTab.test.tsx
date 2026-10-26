@@ -8,17 +8,33 @@ import {
   appRole,
   appRoleView,
   bob,
+  catalogActions,
   deployPolicy,
   deployPolicyView,
   devTeam,
   devTeamView,
   s3WriteGrants,
+  sampleFindings,
+  sampleLastAccessed,
   sampleOverview,
+  simulateResults,
+  whoCanResult,
 } from "./fixtures";
 import { IamTab } from "./IamTab";
 
 vi.mock("./api", () => ({
-  iamApi: { overview: vi.fn(), principal: vi.fn(), principalActions: vi.fn(), policy: vi.fn(), accessKeys: vi.fn() },
+  iamApi: {
+    overview: vi.fn(),
+    principal: vi.fn(),
+    principalActions: vi.fn(),
+    policy: vi.fn(),
+    accessKeys: vi.fn(),
+    findings: vi.fn(),
+    actions: vi.fn(),
+    whoCan: vi.fn(),
+    simulate: vi.fn(),
+    lastAccessed: vi.fn(),
+  },
 }));
 let mouseNav: ((dir: "back" | "forward") => void) | null = null;
 vi.mock("../explorer/api", () => ({
@@ -54,10 +70,15 @@ const nav = async (name: RegExp) => {
   return menu().getByRole("button", { name });
 };
 const listRow = (name: string) => screen.getByText(name).closest("tr") as HTMLElement;
+// 처음 화면은 점검이다. 목록이 필요한 테스트는 메뉴로 먼저 이동한다.
+const openUsersList = async () => fireEvent.click(await nav(/사용자/));
 const openUser = async (name = "alice") => {
+  await openUsersList();
   fireEvent.doubleClick(await screen.findByText(name));
   return screen.findByRole("heading", { name });
 };
+const waitForMenu = () => screen.findByRole("navigation", { name: "IAM 메뉴" });
+const findingCards = () => screen.findByRole("group", { name: "점검 항목" });
 const metaKey = (key: "[" | "]") => fireEvent.keyDown(window, { key, metaKey: true });
 
 beforeEach(() => {
@@ -71,6 +92,11 @@ beforeEach(() => {
   m.principalActions.mockResolvedValue(s3WriteGrants);
   m.policy.mockResolvedValue(deployPolicyView());
   m.accessKeys.mockResolvedValue([]);
+  m.findings.mockResolvedValue(sampleFindings());
+  m.actions.mockResolvedValue(catalogActions);
+  m.whoCan.mockResolvedValue(whoCanResult());
+  m.simulate.mockResolvedValue(simulateResults);
+  m.lastAccessed.mockResolvedValue(sampleLastAccessed());
 });
 
 describe("loading", () => {
@@ -80,7 +106,7 @@ describe("loading", () => {
     setup();
     expect(screen.getByText(/IAM 정보를 불러오는 중이에요/)).toBeInTheDocument();
     await act(async () => resolve(sampleOverview()));
-    expect(await screen.findByText("alice")).toBeInTheDocument();
+    expect(await findingCards()).toBeInTheDocument();
   });
 
   test("shows the error and retries", async () => {
@@ -88,12 +114,12 @@ describe("loading", () => {
     setup();
     expect(await screen.findByText("네트워크 오류: timeout")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
-    expect(await screen.findByText("alice")).toBeInTheDocument();
+    expect(await findingCards()).toBeInTheDocument();
   });
 
   test("loads the overview of the profile without forcing", async () => {
     setup();
-    await screen.findByText("alice");
+    await waitForMenu();
     expect(m.overview).toHaveBeenCalledWith("prod", false);
   });
 
@@ -105,16 +131,17 @@ describe("loading", () => {
 });
 
 describe("menu and lists", () => {
-  test("opens on the users list and always shows the SCP note", async () => {
+  test("opens on the security findings and always shows the SCP note", async () => {
     setup();
-    expect(await screen.findByText("alice")).toBeInTheDocument();
-    expect(menu().getByRole("button", { name: /사용자/ })).toHaveAttribute("aria-current", "page");
+    expect(await findingCards()).toBeInTheDocument();
+    expect(m.findings).toHaveBeenCalledWith("prod");
+    expect(menu().getByRole("button", { name: /점검/ })).toHaveAttribute("aria-current", "page");
     expect(screen.getByText("조직 SCP와 리소스 기반 정책은 반영하지 않아요")).toBeInTheDocument();
   });
 
   test("the menu shows counts from the overview", async () => {
     setup();
-    await screen.findByText("alice");
+    await waitForMenu();
     const count = (name: RegExp) => within(menu().getByRole("button", { name })).getByTestId("nav-count").textContent;
     expect([count(/점검/), count(/사용자/), count(/그룹/), count(/역할/), count(/정책/)]).toEqual(["4", "3", "2", "3", "4"]);
   });
@@ -132,18 +159,25 @@ describe("menu and lists", () => {
     expect(screen.getByText("bob")).toBeInTheDocument();
   });
 
-  test("findings, who-can and the change log are placeholders for now", async () => {
+  test("the who-can view has its search form; the change log is still a placeholder", async () => {
     setup();
-    fireEvent.click(await nav(/점검/));
-    expect(screen.getByText("점검 화면은 곧 추가돼요")).toBeInTheDocument();
-    fireEvent.click(menu().getByRole("button", { name: /누가 할 수 있나/ }));
-    expect(screen.getByText("누가 할 수 있나 화면은 곧 추가돼요")).toBeInTheDocument();
+    fireEvent.click(await nav(/누가 할 수 있나/));
+    expect(await screen.findByRole("combobox", { name: "작업" })).toBeInTheDocument();
+    expect(menu().getByRole("button", { name: /누가 할 수 있나/ })).toHaveAttribute("aria-current", "page");
     fireEvent.click(menu().getByRole("button", { name: /변경 기록/ }));
     expect(screen.getByText("변경 기록 화면은 곧 추가돼요")).toBeInTheDocument();
   });
 
+  test("the findings view comes back from the other views", async () => {
+    setup();
+    fireEvent.click(await nav(/그룹/));
+    fireEvent.click(menu().getByRole("button", { name: /점검/ }));
+    expect(await findingCards()).toBeInTheDocument();
+  });
+
   test("the toolbar filter narrows the list", async () => {
     const { update } = setup();
+    await openUsersList();
     await screen.findByText("alice");
     update({ filter: "bob" });
     expect(screen.queryByText("alice")).not.toBeInTheDocument();
@@ -152,6 +186,7 @@ describe("menu and lists", () => {
 
   test("shows the item count of the list in the header", async () => {
     setup();
+    await openUsersList();
     await screen.findByText("alice");
     expect(screen.getByText("3개")).toBeInTheDocument();
   });
@@ -170,6 +205,7 @@ describe("detail and history", () => {
 
   test("Enter opens the selected row", async () => {
     setup();
+    await openUsersList();
     fireEvent.click(await screen.findByText("bob"));
     fireEvent.keyDown(screen.getByTestId("iam-list"), { key: "Enter" });
     expect(await screen.findByRole("heading", { name: "bob" })).toBeInTheDocument();
@@ -265,7 +301,7 @@ describe("detail and history", () => {
 
   test("stops listening to the mouse when the tab becomes inactive", async () => {
     const { update } = setup();
-    await screen.findByText("alice");
+    await waitForMenu();
     await waitFor(() => expect(mouseNav).not.toBeNull());
     update({ active: false });
     await waitFor(() => expect(mouseNav).toBeNull());
@@ -273,12 +309,12 @@ describe("detail and history", () => {
 });
 
 describe("opening a target (focus)", () => {
-  test("a user ARN opens that user's detail, with the list behind it in the history", async () => {
+  test("a user ARN opens that user's detail, with the home screen behind it in the history", async () => {
     setup({ focus: bob.arn, nonce: 1 });
     expect(await screen.findByRole("heading", { name: "bob" })).toBeInTheDocument();
     expect(m.principal).toHaveBeenCalledWith("prod", bob.arn);
     fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
-    expect(screen.getByTestId("iam-list")).toBeInTheDocument();
+    expect(await findingCards()).toBeInTheDocument();
   });
 
   test("a role ARN opens the roles view", async () => {
@@ -303,13 +339,14 @@ describe("opening a target (focus)", () => {
 
   test("something that is not an IAM target is ignored", async () => {
     setup({ focus: "arn:aws:s3:::bucket", nonce: 1 });
-    expect(await screen.findByText("alice")).toBeInTheDocument();
-    expect(screen.getByTestId("iam-list")).toBeInTheDocument();
+    expect(await findingCards()).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2 })).not.toBeInTheDocument(); // 상세 화면의 이름 제목이 없다
+    expect(screen.getByRole("button", { name: "뒤로" })).toBeDisabled();
   });
 
   test("a new nonce moves an already open tab; opening without a target keeps the place", async () => {
     const { update } = setup();
-    await screen.findByText("alice");
+    await waitForMenu();
     update({ focus: bob.arn, nonce: 1 });
     expect(await screen.findByRole("heading", { name: "bob" })).toBeInTheDocument();
     update({ focus: null, nonce: 2 });
@@ -323,7 +360,8 @@ describe("opening a target (focus)", () => {
     await screen.findByRole("heading", { name: "bob" });
     fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
     update({ focus: bob.arn, nonce: 1 });
-    expect(screen.getByTestId("iam-list")).toBeInTheDocument();
+    expect(await findingCards()).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "bob" })).not.toBeInTheDocument();
   });
 });
 
@@ -373,7 +411,7 @@ describe("navigating inside the details", () => {
 describe("refresh", () => {
   test("the refresh button rebuilds the snapshot", async () => {
     setup();
-    await screen.findByText("alice");
+    await waitForMenu();
     fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
     await waitFor(() => expect(m.overview).toHaveBeenLastCalledWith("prod", true));
   });
@@ -381,5 +419,106 @@ describe("refresh", () => {
   test("shows when the data was fetched", async () => {
     setup();
     expect(await screen.findByText(/조회 .*\d{1,2}:\d{2}:\d{2}/)).toBeInTheDocument();
+  });
+});
+
+describe("security findings", () => {
+  const checkCard = (name: RegExp) => screen.getByRole("button", { name });
+
+  test("a finding's target opens its detail (access keys tab for key findings); back returns to the same card", async () => {
+    setup();
+    await findingCards();
+    fireEvent.click(checkCard(/오래된 액세스 키/));
+    fireEvent.click(within(screen.getByRole("table", { name: "점검 대상" })).getByRole("button", { name: "bob" }));
+
+    expect(await screen.findByRole("heading", { name: "bob" })).toBeInTheDocument();
+    expect(menu().getByRole("button", { name: /사용자/ })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("tab", { name: "액세스 키" })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
+    expect(await findingCards()).toBeInTheDocument();
+    expect(checkCard(/오래된 액세스 키/)).toHaveAttribute("aria-pressed", "true");
+    expect(checkCard(/루트 MFA 없음/)).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("the fix button is disabled until the change flow is connected", async () => {
+    setup();
+    await findingCards();
+    fireEvent.click(checkCard(/오래된 액세스 키/));
+    expect(screen.getByRole("button", { name: "키 비활성화" })).toBeDisabled();
+  });
+
+  test("refreshing re-reads the findings", async () => {
+    setup();
+    await findingCards();
+    fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
+    await waitFor(() => expect(m.findings).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("who can", () => {
+  const search = async (action = "s3:PutObject") => {
+    fireEvent.click(await nav(/누가 할 수 있나/));
+    fireEvent.change(await screen.findByRole("combobox", { name: "작업" }), { target: { value: action } });
+    fireEvent.click(screen.getByRole("button", { name: "찾기" }));
+    return screen.findByRole("table", { name: "찾은 주체" });
+  };
+
+  test("searches and opens a principal; back restores the search and its results without asking again", async () => {
+    setup();
+    await search();
+    expect(m.whoCan).toHaveBeenCalledWith("prod", "s3:PutObject", null);
+
+    fireEvent.click(screen.getByRole("button", { name: "alice" }));
+    expect(await screen.findByRole("heading", { name: "alice" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
+
+    expect(await screen.findByRole("table", { name: "찾은 주체" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "작업" })).toHaveValue("s3:PutObject");
+    expect(m.whoCan).toHaveBeenCalledTimes(1);
+  });
+
+  test("going to another view and clicking the menu again starts a blank form", async () => {
+    setup();
+    await search();
+    fireEvent.click(menu().getByRole("button", { name: /그룹/ }));
+    fireEvent.click(menu().getByRole("button", { name: /누가 할 수 있나/ }));
+    expect(await screen.findByRole("combobox", { name: "작업" })).toHaveValue("");
+    expect(screen.queryByRole("table", { name: "찾은 주체" })).not.toBeInTheDocument();
+  });
+
+  test("a policy in the sources opens the policy", async () => {
+    setup();
+    await search();
+    const row = screen.getByRole("button", { name: "alice" }).closest("tr") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "app-deploy" }));
+    expect(await screen.findByRole("heading", { name: "app-deploy" })).toBeInTheDocument();
+    expect(m.policy).toHaveBeenCalledWith("prod", deployPolicy.id);
+  });
+});
+
+describe("unused permissions", () => {
+  test("a user's 안 쓰는 권한 tab loads its data on demand", async () => {
+    setup({ focus: alice.arn, nonce: 1 });
+    fireEvent.click(await screen.findByRole("tab", { name: "안 쓰는 권한" }));
+    expect(m.lastAccessed).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "불러오기" }));
+    expect(await screen.findByRole("table", { name: "서비스별 마지막 사용" })).toBeInTheDocument();
+    expect(m.lastAccessed).toHaveBeenCalledWith("prod", alice.arn);
+  });
+
+  test("opening a policy from the tab and coming back shows the loaded result again, without asking AWS again", async () => {
+    setup({ focus: alice.arn, nonce: 1 });
+    fireEvent.click(await screen.findByRole("tab", { name: "안 쓰는 권한" }));
+    fireEvent.click(screen.getByRole("button", { name: "불러오기" }));
+    await screen.findByRole("table", { name: "서비스별 마지막 사용" });
+
+    fireEvent.click(screen.getByRole("button", { name: "ReadOnlyAccess" }));
+    expect(await screen.findByRole("heading", { name: "app-deploy" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
+
+    expect(await screen.findByRole("tab", { name: "안 쓰는 권한" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("table", { name: "서비스별 마지막 사용" })).toBeInTheDocument();
+    expect(m.lastAccessed).toHaveBeenCalledTimes(1);
   });
 });

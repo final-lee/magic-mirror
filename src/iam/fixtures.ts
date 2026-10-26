@@ -5,7 +5,14 @@ import type {
   ActionGrant,
   Badge,
   BadgeKind,
+  FindingGroup,
+  FindingItem,
+  FindingKind,
+  Findings,
+  GrantSource,
+  IamChange,
   IamOverview,
+  LastAccessed,
   Level,
   LevelCell,
   PolicySummary,
@@ -14,7 +21,9 @@ import type {
   PrincipalSummary,
   PrincipalView,
   ServicePermissions,
+  SimulateResult,
   TrustEntry,
+  WhoCanResult,
 } from "./types";
 
 export const ACCOUNT = "123456789012";
@@ -359,3 +368,151 @@ export const bobKeys: AccessKeyInfo[] = [
     lastUsedRegion: null,
   },
 ];
+
+// ── 점검 ──
+export const rootArn = `arn:aws:iam::${ACCOUNT}:root`;
+export const deactivateBobKey: IamChange = { op: "setAccessKeyStatus", userName: "bob", accessKeyId: "AKIAIOSFODNN7EXAMPLE", status: "Inactive" };
+
+// 설계 문서 "보안 점검 규칙" 표의 순서
+const FINDING_META: Record<FindingKind, { title: string; level: Level }> = {
+  rootAccessKey: { title: "루트 액세스 키", level: "danger" },
+  rootNoMfa: { title: "루트 MFA 없음", level: "danger" },
+  consoleNoMfa: { title: "MFA 없는 콘솔 사용자", level: "danger" },
+  oldAccessKey: { title: "오래된 액세스 키", level: "warn" },
+  unusedAccessKey: { title: "안 쓰는 액세스 키", level: "warn" },
+  inactiveUser: { title: "안 쓰는 사용자", level: "info" },
+  inactiveRole: { title: "안 쓰는 역할", level: "info" },
+  adminPrincipal: { title: "관리자급 주체", level: "warn" },
+  privescPrincipal: { title: "권한 상승 위험 주체", level: "warn" },
+  externalTrust: { title: "외부에 열린 신뢰", level: "danger" },
+  unattachedPolicy: { title: "붙은 곳 없는 정책", level: "info" },
+};
+
+/** 표 순서대로 11개 그룹을 만든다. items를 주지 않은 그룹은 빈 그룹으로 포함된다. */
+export function findingGroups(items: Partial<Record<FindingKind, FindingItem[]>> = {}): FindingGroup[] {
+  return (Object.keys(FINDING_META) as FindingKind[]).map((kind) => ({ kind, ...FINDING_META[kind], items: items[kind] ?? [] }));
+}
+
+export const finding = (targetArn: string, targetName: string, detail: string, extra: Partial<FindingItem> = {}): FindingItem => ({
+  targetArn,
+  targetName,
+  detail,
+  cli: null,
+  fix: null,
+  ...extra,
+});
+
+export function sampleFindings(extra: Partial<Findings> = {}): Findings {
+  return {
+    generatedAt: "2026-10-26T03:00:00Z",
+    warnings: [],
+    groups: findingGroups({
+      rootNoMfa: [finding(rootArn, "루트 계정", "루트 계정에 MFA가 없어요. 콘솔에서 MFA를 켜세요")],
+      consoleNoMfa: [
+        finding(bob.arn, "bob", "콘솔 비밀번호를 쓰는데 MFA가 없어요", { cli: "aws iam list-mfa-devices --user-name bob" }),
+      ],
+      oldAccessKey: [
+        finding(bob.arn, "bob", "AKIAIOSFODNN7EXAMPLE 키를 만든 지 289일 지났어요", {
+          cli: "aws iam update-access-key --user-name bob --access-key-id AKIAIOSFODNN7EXAMPLE --status Inactive",
+          fix: deactivateBobKey,
+        }),
+      ],
+      externalTrust: [
+        finding(partnerRole.arn, "partner-access", "외부 계정 999988887777이 ExternalId 없이 맡을 수 있어요", {
+          cli: "aws iam get-role --role-name partner-access",
+        }),
+      ],
+    }),
+    ...extra,
+  };
+}
+
+// ── 누가 할 수 있나 ──
+export const catalogActions = [
+  "ec2:DescribeInstances",
+  "iam:PassRole",
+  "s3:DeleteObject",
+  "s3:GetObject",
+  "s3:GetObjectAcl",
+  "s3:ListBucket",
+  "s3:PutObject",
+  "sqs:SendMessage",
+];
+
+export const grantSource = (extra: Partial<GrantSource> = {}): GrantSource => ({
+  policyId: deployPolicy.id,
+  policyName: "app-deploy",
+  via: null,
+  effect: "Allow",
+  sid: "Deploy",
+  statementIndex: 0,
+  conditional: false,
+  boundary: false,
+  ...extra,
+});
+
+export function whoCanResult(extra: Partial<WhoCanResult> = {}): WhoCanResult {
+  return {
+    action: "s3:PutObject",
+    resource: null,
+    notes: ["사용자와 역할만 보여줘요. 그룹으로 받은 권한은 구성원에 합쳐서 계산해요"],
+    hits: [
+      { principal: alice, status: "allowed", sources: [grantSource({ via: "dev-team" })] },
+      {
+        principal: appRole,
+        status: "conditional",
+        sources: [grantSource({ policyId: scratchInline.id, policyName: "s3-scratch", sid: null, statementIndex: 1, conditional: true })],
+      },
+      {
+        principal: ciBot,
+        status: "boundary",
+        sources: [grantSource({ policyId: devBoundary.id, policyName: "dev-boundary", sid: null, boundary: true })],
+      },
+      {
+        principal: bob,
+        status: "denied",
+        sources: [
+          grantSource(),
+          grantSource({ policyId: scratchInline.id, policyName: "s3-scratch", effect: "Deny", sid: "NoPut", statementIndex: 2 }),
+        ],
+      },
+    ],
+    ...extra,
+  };
+}
+
+export const simulateResults: SimulateResult[] = [
+  { principalArn: alice.arn, decision: "allowed", matchedStatements: ["app-deploy#Deploy"], missingContext: [] },
+  { principalArn: appRole.arn, decision: "allowed", matchedStatements: ["s3-scratch"], missingContext: ["aws:SourceIp"] },
+  { principalArn: ciBot.arn, decision: "implicitDeny", matchedStatements: [], missingContext: [] },
+  { principalArn: bob.arn, decision: "explicitDeny", matchedStatements: ["s3-scratch#NoPut"], missingContext: [] },
+];
+
+// ── 안 쓰는 권한 ──
+export function sampleLastAccessed(extra: Partial<LastAccessed> = {}): LastAccessed {
+  return {
+    completedAt: "2026-10-26T03:10:00Z",
+    trackingDays: 400,
+    services: [
+      {
+        prefix: "s3",
+        name: "Amazon S3",
+        lastUsed: "2026-10-20T12:00:00Z",
+        actions: [{ action: "s3:GetObject", lastUsed: "2026-10-20T12:00:00Z" }],
+      },
+      { prefix: "ec2", name: "Amazon EC2", lastUsed: "2026-02-01T12:00:00Z", actions: null },
+      { prefix: "sqs", name: "Amazon SQS", lastUsed: null, actions: null },
+      { prefix: "iam", name: "IAM", lastUsed: null, actions: null },
+    ],
+    unusedPolicies: [
+      { policyId: readOnlyPolicy.id, name: "ReadOnlyAccess", via: null, reason: "허용하는 서비스를 400일 동안 하나도 안 썼어요" },
+      { policyId: deployPolicy.id, name: "app-deploy", via: "dev-team", reason: "허용하는 서비스를 400일 동안 하나도 안 썼어요" },
+    ],
+    draft: JSON.stringify({
+      Version: "2012-10-17",
+      Statement: [{ Effect: "Allow", Action: ["s3:GetObject"], Resource: "arn:aws:s3:::assets/*" }],
+    }),
+    draftNotes: ["조건(Condition)은 초안에 넣지 않았어요", "작업 단위 기록이 없는 서비스는 서비스 전체(예: ec2:*)로 남겼어요"],
+    ...extra,
+  };
+}

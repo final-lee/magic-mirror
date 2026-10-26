@@ -1,4 +1,4 @@
-import { formatAgo, formatDay } from "./format";
+import { formatAgo, formatDateTime, formatDay } from "./format";
 
 describe("formatDay", () => {
   test("formats an ISO time as a local date", () => {
@@ -8,6 +8,18 @@ describe("formatDay", () => {
     expect(formatDay(null)).toBe("");
     expect(formatDay(undefined)).toBe("");
     expect(formatDay("not a date")).toBe("not a date");
+  });
+});
+
+describe("formatDateTime", () => {
+  test("formats an ISO time as a local date and minute", () => {
+    expect(formatDateTime(new Date(2026, 9, 26, 9, 5, 30).toISOString())).toBe("2026-10-26 09:05");
+    expect(formatDateTime(new Date(2026, 0, 2, 23, 59).toISOString())).toBe("2026-01-02 23:59");
+  });
+  test("returns an empty string for null and the input for garbage", () => {
+    expect(formatDateTime(null)).toBe("");
+    expect(formatDateTime(undefined)).toBe("");
+    expect(formatDateTime("not a date")).toBe("not a date");
   });
 });
 

@@ -9,9 +9,10 @@ import { PermissionMatrix } from "./PermissionMatrix";
 import { SCOPE_LABEL } from "./PolicyList";
 import { useAccessKeys, usePrincipal } from "./queries";
 import { policyRoute, principalRoute, type IamRoute, type MatrixCell } from "./route";
-import type { AccessKeyInfo, AttachedPolicy, IamOverview, PrincipalSummary, PrincipalView, TrustEntry } from "./types";
+import type { AccessKeyInfo, AttachedPolicy, IamChange, IamOverview, PrincipalSummary, PrincipalView, TrustEntry } from "./types";
+import { UnusedPermissions } from "./UnusedPermissions";
 
-export type PrincipalTab = "permissions" | "policies" | "groups" | "members" | "keys" | "trust";
+export type PrincipalTab = "permissions" | "policies" | "groups" | "members" | "keys" | "trust" | "unused";
 
 interface Props {
   profile: string;
@@ -23,6 +24,8 @@ interface Props {
   initialTab?: string;
   initialCell?: MatrixCell | null;
   onViewState?: (state: { tab: string; cell: MatrixCell | null }) => void;
+  /** 안 쓰는 권한 탭의 [떼기]·[저장]이 만든 변경을 넘긴다. 없으면 그 버튼들은 꺼져 있다 */
+  onFix?: (change: IamChange) => void;
 }
 
 interface TabSpec {
@@ -48,10 +51,12 @@ function tabsFor(view: PrincipalView): TabSpec[] {
       tabs.push({ id: "trust", label: "신뢰", count: view.trust.length });
       break;
   }
+  // 설계 문서: 안 쓰는 권한 탭은 사용자·역할 상세에만 있다
+  if (view.summary.kind !== "group") tabs.push({ id: "unused", label: "안 쓰는 권한" });
   return tabs;
 }
 
-export function PrincipalDetail({ profile, arn, overview, onOpen, initialTab, initialCell = null, onViewState }: Props) {
+export function PrincipalDetail({ profile, arn, overview, onOpen, initialTab, initialCell = null, onViewState, onFix }: Props) {
   const q = usePrincipal(profile, arn);
   const [tab, setTab] = useState(initialTab ?? "permissions");
   const [cell, setCell] = useState<MatrixCell | null>(initialCell);
@@ -117,6 +122,9 @@ export function PrincipalDetail({ profile, arn, overview, onOpen, initialTab, in
           )}
           {active === "keys" && <KeysPane profile={profile} userName={view.summary.name} />}
           {active === "trust" && <TrustPane trust={view.trust} />}
+          {active === "unused" && (
+            <UnusedPermissions profile={profile} arn={arn} onOpenPolicy={(id) => onOpen(policyRoute(id))} onOpenGroup={openGroup} onFix={onFix} />
+          )}
         </div>
       </section>
       {active === "permissions" && cell && (

@@ -9,9 +9,16 @@ export interface MatrixCell {
   level: AccessLevel;
 }
 
+/** 누가 할 수 있나 화면에서 마지막으로 찾은 조건. resource가 빈 문자열이면 대상을 지정하지 않은 검색이다. */
+export interface WhoCanSearch {
+  action: string;
+  resource: string;
+}
+
 /**
- * IAM 탭 안의 위치. 정체성은 view와 id뿐이고, tab과 cell은 "그 화면에서 보던 상태"다.
- * 다른 화면으로 갔다가 뒤로 돌아오면 보던 하위 탭과 열어 둔 칸을 그대로 되살리려고 기록에 함께 둔다.
+ * IAM 탭 안의 위치. 정체성은 view와 id뿐이고, tab과 cell과 search는 "그 화면에서 보던 상태"다.
+ * 다른 화면으로 갔다가 뒤로 돌아오면 보던 하위 탭, 열어 둔 칸, 찾은 조건을 그대로 되살리려고 기록에 함께 둔다.
+ * 점검 화면은 고른 점검 항목을 tab에 둔다.
  */
 export interface IamRoute {
   view: IamView;
@@ -19,6 +26,7 @@ export interface IamRoute {
   id?: string;
   tab?: string;
   cell?: MatrixCell | null;
+  search?: WhoCanSearch;
 }
 
 const VIEW_OF_KIND: Record<PrincipalKind, IamView> = { user: "users", group: "groups", role: "roles" };

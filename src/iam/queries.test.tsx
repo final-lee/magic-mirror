@@ -1,12 +1,48 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { iamApi } from "./api";
-import { alice, aliceView, bobKeys, deployPolicy, deployPolicyView, s3WriteGrants, sampleOverview } from "./fixtures";
-import { iamKeys, refreshIam, useAccessKeys, useIamCatalog, useIamOverview, usePolicy, usePrincipal, usePrincipalActions } from "./queries";
+import {
+  alice,
+  aliceView,
+  bobKeys,
+  deployPolicy,
+  deployPolicyView,
+  s3WriteGrants,
+  sampleFindings,
+  sampleLastAccessed,
+  sampleOverview,
+  simulateResults,
+  whoCanResult,
+} from "./fixtures";
+import {
+  iamKeys,
+  refreshIam,
+  useAccessKeys,
+  useFindings,
+  useIamCatalog,
+  useIamOverview,
+  useLastAccessed,
+  usePolicy,
+  usePrincipal,
+  usePrincipalActions,
+  useSimulation,
+  useWhoCan,
+} from "./queries";
 
 vi.mock("./api", () => ({
-  iamApi: { overview: vi.fn(), principal: vi.fn(), principalActions: vi.fn(), policy: vi.fn(), accessKeys: vi.fn(), actions: vi.fn() },
+  iamApi: {
+    overview: vi.fn(),
+    principal: vi.fn(),
+    principalActions: vi.fn(),
+    policy: vi.fn(),
+    accessKeys: vi.fn(),
+    actions: vi.fn(),
+    findings: vi.fn(),
+    whoCan: vi.fn(),
+    simulate: vi.fn(),
+    lastAccessed: vi.fn(),
+  },
 }));
 
 const m = vi.mocked(iamApi);
@@ -25,6 +61,10 @@ beforeEach(() => {
   m.policy.mockResolvedValue(deployPolicyView());
   m.accessKeys.mockResolvedValue(bobKeys);
   m.actions.mockResolvedValue(["s3:GetObject", "s3:PutObject"]);
+  m.findings.mockResolvedValue(sampleFindings());
+  m.whoCan.mockResolvedValue(whoCanResult());
+  m.simulate.mockResolvedValue(simulateResults);
+  m.lastAccessed.mockResolvedValue(sampleLastAccessed());
 });
 
 describe("query keys", () => {
@@ -36,6 +76,10 @@ describe("query keys", () => {
     expect(iamKeys.policy("prod", "p1")).toEqual(["iam", "prod", "policy", "p1"]);
     expect(iamKeys.keys("prod", "bob")).toEqual(["iam", "prod", "keys", "bob"]);
     expect(iamKeys.catalog).toEqual(["iam", "catalog"]);
+    expect(iamKeys.findings("prod")).toEqual(["iam", "prod", "findings"]);
+    expect(iamKeys.whoCan("prod", "s3:GetObject", "arn:x")).toEqual(["iam", "prod", "whoCan", "s3:GetObject", "arn:x"]);
+    expect(iamKeys.simulate("prod", "s3:GetObject", "", ["arn:a", "arn:b"])).toEqual(["iam", "prod", "simulate", "s3:GetObject", "", ["arn:a", "arn:b"]]);
+    expect(iamKeys.lastAccessed("prod", "arn:x")).toEqual(["iam", "prod", "lastAccessed", "arn:x"]);
   });
 });
 
@@ -76,6 +120,61 @@ describe("hooks", () => {
     const { wrapper } = makeClient();
     renderHook(() => useAccessKeys("prod", "bob", false), { wrapper });
     expect(m.accessKeys).not.toHaveBeenCalled();
+  });
+
+  test("findings load for the profile", async () => {
+    const { qc, wrapper } = makeClient();
+    const { result } = renderHook(() => useFindings("prod"), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(m.findings).toHaveBeenCalledWith("prod");
+    expect(qc.getQueryData(iamKeys.findings("prod"))).toEqual(sampleFindings());
+  });
+
+  test("who-can runs only for a search and sends a blank resource as null", async () => {
+    const { wrapper } = makeClient();
+    const { result } = renderHook(
+      () => ({
+        none: useWhoCan("prod", null),
+        withResource: useWhoCan("prod", { action: "s3:GetObject", resource: "arn:aws:s3:::b/*" }),
+        blank: useWhoCan("prod", { action: "s3:PutObject", resource: "" }),
+      }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.withResource.isSuccess && result.current.blank.isSuccess).toBe(true));
+    expect(m.whoCan).toHaveBeenCalledTimes(2);
+    expect(m.whoCan).toHaveBeenCalledWith("prod", "s3:GetObject", "arn:aws:s3:::b/*");
+    expect(m.whoCan).toHaveBeenCalledWith("prod", "s3:PutObject", null);
+    expect(result.current.none.fetchStatus).toBe("idle");
+  });
+
+  test("the simulation and the last-accessed job only run when asked, and their results stay cached", async () => {
+    const { qc, wrapper } = makeClient();
+    // 화면이 읽는 값(data)을 렌더 중에 읽어야 react-query가 그 값이 바뀔 때 다시 그린다
+    const { result } = renderHook(
+      () => {
+        const sim = useSimulation("prod", [alice.arn], "s3:GetObject", null);
+        const last = useLastAccessed("prod", alice.arn);
+        return { runSim: sim.refetch, runLast: last.refetch, simData: sim.data, lastData: last.data };
+      },
+      { wrapper },
+    );
+    await Promise.resolve();
+    expect(m.simulate).not.toHaveBeenCalled();
+    expect(m.lastAccessed).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.runSim();
+      await result.current.runLast();
+    });
+    expect(m.simulate).toHaveBeenCalledWith("prod", [alice.arn], "s3:GetObject", null);
+    expect(m.lastAccessed).toHaveBeenCalledWith("prod", alice.arn);
+    await waitFor(() => expect(result.current.simData).toEqual(simulateResults));
+    expect(result.current.lastData).toEqual(sampleLastAccessed());
+
+    // 다시 붙은 구독자는 부르지 않고 캐시를 그대로 본다
+    const again = renderHook(() => useLastAccessed("prod", alice.arn), { wrapper });
+    expect(again.result.current.data).toEqual(sampleLastAccessed());
+    expect(m.lastAccessed).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -118,6 +217,35 @@ describe("refreshIam", () => {
     finishOverview();
     await done;
     expect(order).toEqual(["overview:true", "principal"]);
+  });
+
+  test("refetches findings and who-can but never starts the slow AWS jobs on its own", async () => {
+    const { qc, wrapper } = makeClient();
+    const { result } = renderHook(
+      () => ({
+        overview: useIamOverview("prod"),
+        findings: useFindings("prod"),
+        who: useWhoCan("prod", { action: "s3:GetObject", resource: "" }),
+        sim: useSimulation("prod", [alice.arn], "s3:GetObject", null),
+        last: useLastAccessed("prod", alice.arn),
+      }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.findings.isSuccess && result.current.who.isSuccess && result.current.overview.isSuccess).toBe(true));
+    await act(async () => {
+      await result.current.sim.refetch();
+      await result.current.last.refetch();
+    });
+    vi.clearAllMocks();
+
+    await refreshIam(qc, "prod");
+    expect(m.findings).toHaveBeenCalledTimes(1);
+    expect(m.whoCan).toHaveBeenCalledTimes(1);
+    expect(m.simulate).not.toHaveBeenCalled();
+    expect(m.lastAccessed).not.toHaveBeenCalled();
+    // 이미 받은 값은 지우지 않는다(낡았다고만 표시)
+    expect(qc.getQueryData(iamKeys.simulate("prod", "s3:GetObject", "", [alice.arn]))).toEqual(simulateResults);
+    expect(qc.getQueryData(iamKeys.lastAccessed("prod", alice.arn))).toEqual(sampleLastAccessed());
   });
 
   test("leaves other profiles alone", async () => {
