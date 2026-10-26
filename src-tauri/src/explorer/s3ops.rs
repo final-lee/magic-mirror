@@ -124,15 +124,35 @@ pub async fn delete_keys(client: &Client, bucket: &str, keys: Vec<String>) -> Re
     }
 }
 
+/// 이동 전 검사: 같은 키이거나 폴더를 자기 자신 안으로 옮기는 경우를 막는다.
+pub fn rename_guard(from: &str, to: &str) -> Result<(), String> {
+    if from == to {
+        return Err("원본과 대상이 같아요".to_string());
+    }
+    if from.ends_with('/') && to.starts_with(from) {
+        return Err("폴더를 자기 자신 안으로 옮길 수 없어요".to_string());
+    }
+    Ok(())
+}
+
+/// 삭제할 원본 키: 복사 대상 키와 겹치는 것은 지우지 않는다.
+pub fn keys_to_delete(sources: &[String], targets: &[String]) -> Vec<String> {
+    sources.iter().filter(|k| !targets.contains(k)).cloned().collect()
+}
+
 /// 복사 후 삭제. 하나라도 복사에 실패하면 원본은 지우지 않는다.
 pub async fn rename(client: &Client, bucket: &str, from: &str, to: &str) -> Result<(), AppError> {
+    rename_guard(from, to).map_err(AppError::other)?;
     let items = expand_keys(client, bucket, &[from.to_string()]).await?;
     if let Some((k, _)) = items.iter().find(|(_, size)| *size as u64 > MAX_SINGLE_PUT) {
         return Err(AppError::other(format!("5GB가 넘는 파일은 아직 옮길 수 없어요 ({k})")));
     }
     let mut failed = 0;
+    let mut first_err: Option<String> = None;
+    let mut targets = Vec::with_capacity(items.len());
     for (key, _) in &items {
         let target = moved_key(from, to, key);
+        targets.push(target.clone());
         let res = client
             .copy_object()
             .bucket(bucket)
@@ -140,14 +160,21 @@ pub async fn rename(client: &Client, bucket: &str, from: &str, to: &str) -> Resu
             .key(&target)
             .send()
             .await;
-        if res.is_err() {
+        if let Err(e) = res {
             failed += 1;
+            if first_err.is_none() {
+                first_err = Some(from_sdk(e, "s3:PutObject").to_string());
+            }
         }
     }
     if failed > 0 {
-        return Err(AppError::other(format!("일부 객체를 옮기지 못했어요 ({failed}개)")));
+        return Err(AppError::other(format!(
+            "일부 객체를 옮기지 못했어요 ({failed}개): {}",
+            first_err.unwrap_or_default()
+        )));
     }
-    delete_keys(client, bucket, items.into_iter().map(|(k, _)| k).collect()).await?;
+    let sources: Vec<String> = items.into_iter().map(|(k, _)| k).collect();
+    delete_keys(client, bucket, keys_to_delete(&sources, &targets)).await?;
     Ok(())
 }
 
@@ -216,6 +243,27 @@ mod tests {
         assert_eq!(etag_md5(Some("\"5D41402ABC4B2A76B9719D911017C592\"")), Some("5d41402abc4b2a76b9719d911017c592".into()));
         assert_eq!(etag_md5(Some("\"abc123-4\"")), None);
         assert_eq!(etag_md5(None), None);
+    }
+
+    #[test]
+    fn rename_guard_rejects_folder_into_itself() {
+        assert!(rename_guard("a/", "a/b/").is_err());
+        assert!(rename_guard("a/", "a/").is_err());
+    }
+
+    #[test]
+    fn rename_guard_allows_valid_moves() {
+        assert!(rename_guard("a/", "ab/").is_ok());
+        assert!(rename_guard("a/x.txt", "a/y.txt").is_ok());
+        assert!(rename_guard("a", "a/b").is_ok());
+        assert!(rename_guard("x.txt", "x.txt").is_err());
+    }
+
+    #[test]
+    fn keys_to_delete_excludes_targets() {
+        let src = vec!["a/x".to_string(), "a/b/x".to_string()];
+        let tgt = vec!["a/b/x".to_string(), "a/b/b/x".to_string()];
+        assert_eq!(keys_to_delete(&src, &tgt), vec!["a/x".to_string()]);
     }
 
     #[test]
