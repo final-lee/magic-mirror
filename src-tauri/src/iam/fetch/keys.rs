@@ -23,6 +23,8 @@ pub struct AccessKeyInfo {
     pub last_used_at: Option<String>,
     pub last_used_service: Option<String>,
     pub last_used_region: Option<String>,
+    /// 마지막 사용을 읽지 못했다(권한 없음 등). 참이면 `last_used_*`가 비어 있어도 "한 번도 안 씀"이 아니다
+    pub last_used_unknown: bool,
 }
 
 /// 한 번도 안 쓴 키는 서비스·리전이 `N/A`로 온다.
@@ -43,7 +45,28 @@ fn key_info(meta: &AccessKeyMetadata, used: Option<&AccessKeyLastUsed>, now: i64
         last_used_at: used.and_then(|u| iso_of(u.last_used_date())),
         last_used_service: used.and_then(|u| known(u.service_name())),
         last_used_region: used.and_then(|u| known(u.region())),
+        last_used_unknown: false,
     }
+}
+
+/// 키 목록과 키마다 `GetAccessKeyLastUsed` 결과를 합쳐 만든 순서대로 늘어놓는다. SSO 만료·요청 제한은 요청 전체의 오류다.
+fn key_infos(metas: &[AccessKeyMetadata], used: Vec<Result<Option<AccessKeyLastUsed>, AppError>>, now: i64) -> Result<Vec<AccessKeyInfo>, AppError> {
+    if let Some(fatal) = used.iter().filter_map(|r| r.as_ref().err()).find(|e| matches!(e, AppError::SsoExpired | AppError::Throttled)) {
+        return Err(fatal.clone());
+    }
+    let mut keys: Vec<AccessKeyInfo> = metas
+        .iter()
+        .zip(used)
+        .map(|(meta, used)| {
+            // 못 읽었거나(권한 없음 등) AWS가 마지막 사용 정보를 비워 보냈으면 "모름"이다. 키 목록은 그대로 보여 준다
+            let used = used.ok().flatten();
+            let mut info = key_info(meta, used.as_ref(), now);
+            info.last_used_unknown = used.is_none();
+            info
+        })
+        .collect();
+    keys.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
+    Ok(keys)
 }
 
 async fn last_used(client: &aws_sdk_iam::Client, key_id: &str) -> Result<Option<AccessKeyLastUsed>, AppError> {
@@ -51,7 +74,8 @@ async fn last_used(client: &aws_sdk_iam::Client, key_id: &str) -> Result<Option<
     Ok(out.access_key_last_used().cloned())
 }
 
-/// 사용자의 액세스 키를 만든 순서대로. 마지막 사용을 못 읽어도(권한 없음 등) 키 목록은 보여 주고, SSO 만료·요청 제한은 오류로 돌려준다.
+/// 사용자의 액세스 키를 만든 순서대로. 마지막 사용을 못 읽어도(권한 없음 등) 키 목록은 보여 주되 그 키는 `last_used_unknown`으로 표시하고,
+/// SSO 만료·요청 제한은 오류로 돌려준다.
 pub(crate) async fn fetch_keys(client: &aws_sdk_iam::Client, user_name: &str, now: i64) -> Result<Vec<AccessKeyInfo>, AppError> {
     let mut pages = client.list_access_keys().user_name(user_name).into_paginator().send();
     let mut metas: Vec<AccessKeyMetadata> = Vec::new();
@@ -59,12 +83,7 @@ pub(crate) async fn fetch_keys(client: &aws_sdk_iam::Client, user_name: &str, no
         metas.extend(page.map_err(|e| from_sdk(e, "iam:ListAccessKeys"))?.access_key_metadata().iter().cloned());
     }
     let used = join_all(metas.iter().map(|meta| last_used(client, meta.access_key_id().unwrap_or_default()))).await;
-    if let Some(fatal) = used.iter().filter_map(|r| r.as_ref().err()).find(|e| matches!(e, AppError::SsoExpired | AppError::Throttled)) {
-        return Err(fatal.clone());
-    }
-    let mut keys: Vec<AccessKeyInfo> = metas.iter().zip(used).map(|(meta, used)| key_info(meta, used.ok().flatten().as_ref(), now)).collect();
-    keys.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
-    Ok(keys)
+    key_infos(&metas, used, now)
 }
 
 #[cfg(test)]
@@ -105,7 +124,8 @@ mod tests {
         assert_eq!(info.status, KeyStatus::Inactive);
         assert_eq!((info.last_used_at, info.last_used_service, info.last_used_region), (None, None, None));
         assert_eq!(info.age_days, Some(30));
-        // 마지막 사용을 못 읽은 경우도 같다
+        assert!(!info.last_used_unknown);
+        // 마지막 사용 정보가 없으면 칸은 비어 있다. "모름" 표시는 `key_infos`가 단다
         let unknown = key_info(&meta("AKIA3", StatusType::Active, 1), None, now());
         assert_eq!((unknown.last_used_at, unknown.last_used_service), (None, None));
     }
@@ -128,7 +148,41 @@ mod tests {
         assert_eq!(value["status"], json!("Active"));
         let mut keys: Vec<&str> = value.as_object().unwrap().keys().map(String::as_str).collect();
         keys.sort_unstable();
-        assert_eq!(keys, vec!["ageDays", "createdAt", "id", "lastUsedAt", "lastUsedRegion", "lastUsedService", "status"]);
+        assert_eq!(keys, vec!["ageDays", "createdAt", "id", "lastUsedAt", "lastUsedRegion", "lastUsedService", "lastUsedUnknown", "status"]);
+        assert_eq!(value["lastUsedUnknown"], json!(false));
         assert_eq!(serde_json::to_value(KeyStatus::Inactive).unwrap(), json!("Inactive"));
+    }
+
+    fn denied() -> AppError {
+        AppError::AccessDenied { action: "iam:GetAccessKeyLastUsed".into() }
+    }
+
+    #[test]
+    fn a_last_use_that_could_not_be_read_is_unknown_not_never_used() {
+        let never = AccessKeyLastUsed::builder().service_name("N/A").region("N/A").build().unwrap();
+        let metas = [meta("AKIA1", StatusType::Active, 200), meta("AKIA2", StatusType::Active, 100), meta("AKIA3", StatusType::Active, 50), meta("AKIA4", StatusType::Active, 10)];
+        let results = vec![Err(denied()), Ok(Some(used(5, "s3", "us-east-1"))), Ok(Some(never)), Ok(None)];
+        let keys = key_infos(&metas, results, now()).unwrap();
+        let ids: Vec<&str> = keys.iter().map(|k| k.id.as_str()).collect();
+        assert_eq!(ids, vec!["AKIA1", "AKIA2", "AKIA3", "AKIA4"]);
+        // 권한이 없어 못 읽었다: 한 번도 안 쓴 것처럼 보이면 안 된다
+        assert!(keys[0].last_used_unknown);
+        assert_eq!((keys[0].last_used_at.clone(), keys[0].last_used_service.clone()), (None, None));
+        assert_eq!(serde_json::to_value(&keys[0]).unwrap()["lastUsedUnknown"], json!(true));
+        // 읽었으면 쓴 기록이 있든 없든 아는 값이다
+        assert!(!keys[1].last_used_unknown && keys[1].last_used_at.is_some());
+        assert!(!keys[2].last_used_unknown && keys[2].last_used_at.is_none());
+        // 성공했는데 마지막 사용 정보가 비어 있으면 그것도 모르는 것이다
+        assert!(keys[3].last_used_unknown);
+    }
+
+    #[test]
+    fn sso_expiry_and_throttling_fail_the_whole_request() {
+        for fatal in [AppError::SsoExpired, AppError::Throttled] {
+            let results = vec![Ok(Some(used(1, "s3", "us-east-1"))), Err(denied()), Err(fatal.clone())];
+            let metas = [meta("A", StatusType::Active, 3), meta("B", StatusType::Active, 2), meta("C", StatusType::Active, 1)];
+            assert_eq!(key_infos(&metas, results, now()), Err(fatal));
+        }
+        assert_eq!(key_infos(&[], Vec::new(), now()), Ok(Vec::new()));
     }
 }

@@ -36,26 +36,45 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// 캐시의 프로필 한 칸. `generation`은 무효화(변경 적용 뒤, 새로 고침)할 때마다 오른다.
+struct Slot<T> {
+    generation: u64,
+    value: Option<Arc<T>>,
+}
+
+impl<T> Default for Slot<T> {
+    fn default() -> Self {
+        Slot { generation: 0, value: None }
+    }
+}
+
 /// 프로필마다 한 번 읽어 두는 값의 캐시. 같은 프로필에서 읽는 동안 다른 요청은 기다렸다가 그 결과를 쓴다(같은 일을 또 하지 않는다).
+/// 읽기는 시작할 때의 세대를 기억해 두고, 끝났을 때 세대가 그대로일 때만 결과를 담는다. 읽는 도중에 무효화됐으면
+/// 그 결과는 무효화 전의 상태일 수 있어서 담지 않는다(그 읽기를 기다리던 요청에게만 돌려준다).
 struct Cache<T> {
-    entries: Mutex<HashMap<String, Arc<T>>>,
+    slots: Mutex<HashMap<String, Slot<T>>>,
     /// 프로필마다 하나씩 읽는 차례를 지키는 자물쇠
     gates: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl<T> Default for Cache<T> {
     fn default() -> Self {
-        Cache { entries: Mutex::default(), gates: Mutex::default() }
+        Cache { slots: Mutex::default(), gates: Mutex::default() }
     }
 }
 
 impl<T> Cache<T> {
+    #[cfg(test)]
     fn get(&self, profile: &str) -> Option<Arc<T>> {
-        locked(&self.entries).get(profile).cloned()
+        locked(&self.slots).get(profile).and_then(|slot| slot.value.clone())
     }
 
-    fn remove(&self, profile: &str) {
-        locked(&self.entries).remove(profile);
+    /// 담아 둔 값을 버리고 세대를 올린다. 지금 진행 중인 읽기의 결과도 담기지 않는다.
+    fn invalidate(&self, profile: &str) {
+        let mut slots = locked(&self.slots);
+        let slot = slots.entry(profile.to_string()).or_default();
+        slot.generation += 1;
+        slot.value = None;
     }
 
     /// 캐시에 있으면 그것을, 없으면 `fetch`로 읽어 담는다. 읽기에 실패하면 담지 않는다.
@@ -66,11 +85,20 @@ impl<T> Cache<T> {
     {
         let gate = locked(&self.gates).entry(profile.to_string()).or_default().clone();
         let _turn = gate.lock().await;
-        if let Some(hit) = self.get(profile) {
-            return Ok(hit);
-        }
+        let started = {
+            let slots = locked(&self.slots);
+            let slot = slots.get(profile);
+            if let Some(hit) = slot.and_then(|slot| slot.value.clone()) {
+                return Ok(hit);
+            }
+            slot.map_or(0, |slot| slot.generation)
+        };
         let fresh = Arc::new(fetch().await?);
-        locked(&self.entries).insert(profile.to_string(), fresh.clone());
+        let mut slots = locked(&self.slots);
+        let slot = slots.entry(profile.to_string()).or_default();
+        if slot.generation == started {
+            slot.value = Some(fresh.clone());
+        }
         Ok(fresh)
     }
 }
@@ -91,9 +119,9 @@ impl IamState {
     }
 }
 
-/// 읽어 둔 스냅숏을 버린다. 다음 요청이 새로 읽는다. 변경을 적용한 뒤에 부른다.
+/// 읽어 둔 스냅숏을 버린다. 다음 요청이 새로 읽고, 지금 진행 중인 읽기의 결과는 캐시에 남지 않는다. 변경을 적용한 뒤에 부른다.
 pub fn invalidate(iam: &IamState, profile: &str) {
-    iam.snapshots.remove(profile);
+    iam.snapshots.invalidate(profile);
 }
 
 async fn snapshot_with<F, Fut>(iam: &IamState, profile: &str, force: bool, fetch: F) -> Result<Arc<Snapshot>, AppError>
@@ -102,10 +130,10 @@ where
     Fut: Future<Output = Result<Snapshot, AppError>>,
 {
     if force {
-        // 새로 고침은 읽어 둔 것을 모두 버리고 다시 읽는다. 정책 목록은 다음에 필요할 때 읽는다.
-        // 새로 고침이 겹치면 먼저 온 쪽이 읽는 동안 나머지는 기다렸다가 그 결과를 쓴다
+        // 새로 고침은 읽어 둔 것을 모두 버리고, 새로 고침보다 먼저 시작한 읽기의 결과도 쓰지 않는다. 정책 목록은 다음에 필요할 때 읽는다.
+        // 새로 고침 뒤에 시작한 읽기는 함께 쓴다(새로 고침 여러 개가 같은 읽기를 기다리면 한 번만 읽는다)
         invalidate(iam, profile);
-        iam.policy_lists.remove(profile);
+        iam.policy_lists.invalidate(profile);
     }
     iam.snapshots.get_or_fetch(profile, fetch).await
 }
@@ -248,7 +276,9 @@ pub async fn iam_list_policies(state: State<'_, AppState>, iam: State<'_, IamSta
             policies::fetch_refs(&client).await
         })
         .await?;
-    Ok(policies::search(&all, &query, policies::MAX_RESULTS))
+    // ListPolicies는 설명을 주지 않는다. 고객 관리형 정책의 설명은 스냅숏에서 채운다
+    let s = snapshot(&state, &iam, &profile, false).await?;
+    Ok(policies::describe(policies::search(&all, &query, policies::MAX_RESULTS), &s))
 }
 
 #[tauri::command]
@@ -258,7 +288,7 @@ pub async fn iam_validate_policy(state: State<'_, AppState>, profile: String, do
         return Ok(failure);
     }
     let cfg = state.ctx.config(&profile, GLOBAL_REGION).await?;
-    Ok(checks::validate(&cfg, &document).await)
+    checks::validate(&cfg, &document).await
 }
 
 // ── 변경(쓰기) ──────────────────────────────────────────────────────────
@@ -446,13 +476,118 @@ mod tests {
         assert!(Arc::ptr_eq(&a.unwrap(), &b.unwrap()) && c.is_ok());
     }
 
+    /// 손으로 끝내는 읽기. 시작하면 `started`로 알리고 `release`가 올 때까지 끝나지 않는다.
+    #[derive(Default)]
+    struct Held {
+        started: tokio::sync::Notify,
+        release: tokio::sync::Notify,
+    }
+
+    async fn held(calls: &AtomicUsize, gate: &Held, account: &str) -> Result<Snapshot, AppError> {
+        calls.fetch_add(1, Ordering::SeqCst);
+        gate.started.notify_one();
+        gate.release.notified().await;
+        Ok(snapshot_of(account))
+    }
+
     #[tokio::test]
-    async fn refreshes_that_arrive_together_share_one_read() {
-        let (iam, calls) = (IamState::default(), AtomicUsize::new(0));
-        snapshot_with(&iam, "dev", false, || counted(&calls, "old")).await.unwrap();
-        let (a, b) = tokio::join!(snapshot_with(&iam, "dev", true, || counted(&calls, "new-a")), snapshot_with(&iam, "dev", true, || counted(&calls, "new-b")));
+    async fn requests_that_arrive_during_a_read_share_it() {
+        let (iam, calls, gate) = (IamState::default(), AtomicUsize::new(0), Held::default());
+        let first = snapshot_with(&iam, "dev", false, || held(&calls, &gate, "1"));
+        let others = async {
+            gate.started.notified().await;
+            let b = snapshot_with(&iam, "dev", false, || counted(&calls, "2"));
+            let c = snapshot_with(&iam, "dev", false, || counted(&calls, "3"));
+            tokio::pin!(b, c);
+            assert!(futures::poll!(b.as_mut()).is_pending() && futures::poll!(c.as_mut()).is_pending());
+            gate.release.notify_one();
+            (b.await, c.await)
+        };
+        let (a, (b, c)) = tokio::join!(first, others);
+        let (a, b, c) = (a.unwrap(), b.unwrap(), c.unwrap());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(Arc::ptr_eq(&a, &b) && Arc::ptr_eq(&a, &c));
+        assert_eq!(a.account_id, "1");
+    }
+
+    #[tokio::test]
+    async fn a_refresh_during_an_in_flight_read_reads_again() {
+        let (iam, calls, gate) = (IamState::default(), AtomicUsize::new(0), Held::default());
+        let first = snapshot_with(&iam, "dev", false, || held(&calls, &gate, "before"));
+        let refresh = async {
+            gate.started.notified().await;
+            let forced = snapshot_with(&iam, "dev", true, || counted(&calls, "after"));
+            tokio::pin!(forced);
+            // 새로 고침이 도착해서 차례를 기다리는 동안 먼저 시작한 읽기가 끝난다
+            assert!(futures::poll!(forced.as_mut()).is_pending());
+            gate.release.notify_one();
+            forced.await
+        };
+        let (first, forced) = tokio::join!(first, refresh);
+        // 먼저 물은 쪽은 자기가 기다린 결과를 받고, 새로 고침은 그 뒤에 시작한 읽기의 결과를 받는다
+        assert_eq!(first.unwrap().account_id, "before");
+        let forced = forced.unwrap();
+        assert_eq!((forced.account_id.as_str(), calls.load(Ordering::SeqCst)), ("after", 2));
+        let again = snapshot_with(&iam, "dev", false, || counted(&calls, "never")).await.unwrap();
+        assert!(Arc::ptr_eq(&forced, &again));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn an_invalidation_during_an_in_flight_read_keeps_its_result_out_of_the_cache() {
+        let (iam, calls, gate) = (IamState::default(), AtomicUsize::new(0), Held::default());
+        let first = snapshot_with(&iam, "dev", false, || held(&calls, &gate, "stale"));
+        let write = async {
+            gate.started.notified().await;
+            // 읽는 도중에 변경을 적용했다
+            invalidate(&iam, "dev");
+            gate.release.notify_one();
+        };
+        let (first, ()) = tokio::join!(first, write);
+        assert_eq!(first.unwrap().account_id, "stale");
+        assert!(iam.snapshots.get("dev").is_none());
+        let next = snapshot_with(&iam, "dev", false, || counted(&calls, "fresh")).await.unwrap();
+        assert_eq!((next.account_id.as_str(), calls.load(Ordering::SeqCst)), ("fresh", 2));
+        assert!(Arc::ptr_eq(&next, &iam.snapshots.get("dev").unwrap()));
+    }
+
+    #[tokio::test]
+    async fn refreshes_that_arrive_while_a_read_is_in_flight_share_one_new_read() {
+        let (iam, calls, gate) = (IamState::default(), AtomicUsize::new(0), Held::default());
+        let first = snapshot_with(&iam, "dev", false, || held(&calls, &gate, "old"));
+        let refreshes = async {
+            gate.started.notified().await;
+            let a = snapshot_with(&iam, "dev", true, || counted(&calls, "new-a"));
+            let b = snapshot_with(&iam, "dev", true, || counted(&calls, "new-b"));
+            tokio::pin!(a, b);
+            assert!(futures::poll!(a.as_mut()).is_pending() && futures::poll!(b.as_mut()).is_pending());
+            gate.release.notify_one();
+            (a.await, b.await)
+        };
+        let (first, (a, b)) = tokio::join!(first, refreshes);
+        assert_eq!(first.unwrap().account_id, "old");
+        // 두 새로 고침 모두 그 뒤에 시작한 같은 읽기를 쓴다
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!((a.unwrap().account_id.as_str(), b.unwrap().account_id.as_str()), ("new-a", "new-a"));
+    }
+
+    #[tokio::test]
+    async fn a_refresh_that_arrives_after_another_refresh_started_reading_reads_again() {
+        let (iam, calls, gate) = (IamState::default(), AtomicUsize::new(0), Held::default());
+        let first = snapshot_with(&iam, "dev", true, || held(&calls, &gate, "new-1"));
+        let later = async {
+            gate.started.notified().await;
+            let second = snapshot_with(&iam, "dev", true, || counted(&calls, "new-2"));
+            tokio::pin!(second);
+            assert!(futures::poll!(second.as_mut()).is_pending());
+            gate.release.notify_one();
+            second.await
+        };
+        let (first, second) = tokio::join!(first, later);
+        assert_eq!(first.unwrap().account_id, "new-1");
+        let second = second.unwrap();
+        assert_eq!((second.account_id.as_str(), calls.load(Ordering::SeqCst)), ("new-2", 2));
+        assert!(Arc::ptr_eq(&second, &iam.snapshots.get("dev").unwrap()));
     }
 
     #[tokio::test]
@@ -593,7 +728,7 @@ mod tests {
     }
 
     fn key(id: &str, status: KeyStatus) -> AccessKeyInfo {
-        AccessKeyInfo { id: id.into(), status, created_at: None, age_days: None, last_used_at: None, last_used_service: None, last_used_region: None }
+        AccessKeyInfo { id: id.into(), status, created_at: None, age_days: None, last_used_at: None, last_used_service: None, last_used_region: None, last_used_unknown: false }
     }
 
     #[test]

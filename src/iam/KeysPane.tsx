@@ -10,6 +10,12 @@ interface Props {
   onFix: (change: IamChange) => void;
 }
 
+/** 마지막 사용 칸. 읽지 못한 경우(권한 없음 등)는 "사용 기록 없음"과 구분해서 보여준다. */
+function lastUse(k: AccessKeyInfo) {
+  if (k.lastUsedAt) return formatDay(k.lastUsedAt);
+  return <span className="dim">{k.lastUsedUnknown ? "마지막 사용 확인 못 함 (권한 없음)" : "사용 기록 없음"}</span>;
+}
+
 function KeyRow({ k, userName, onFix }: { k: AccessKeyInfo; userName: string; onFix: Props["onFix"] }) {
   const where = [k.lastUsedService, k.lastUsedRegion].filter(Boolean).join(" · ");
   const active = k.status === "Active";
@@ -22,7 +28,7 @@ function KeyRow({ k, userName, onFix }: { k: AccessKeyInfo; userName: string; on
       </td>
       <td>{formatDay(k.createdAt) || "—"}</td>
       <td>{k.ageDays === null ? "—" : `${k.ageDays}일`}</td>
-      <td>{k.lastUsedAt ? formatDay(k.lastUsedAt) : <span className="dim">사용 기록 없음</span>}</td>
+      <td>{lastUse(k)}</td>
       <td>{where || <span className="dim">—</span>}</td>
       <td className="key-act">
         <button

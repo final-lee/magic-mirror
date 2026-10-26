@@ -373,6 +373,17 @@ export const bobKeys: AccessKeyInfo[] = [
     lastUsedService: null,
     lastUsedRegion: null,
   },
+  // 마지막 사용을 읽을 권한이 없었던 키: 비어 있어도 "한 번도 안 씀"이 아니다
+  {
+    id: "AKIAI7UNKNOWNEXAMPLE",
+    status: "Active",
+    createdAt: "2026-03-01T12:00:00Z",
+    ageDays: 239,
+    lastUsedAt: null,
+    lastUsedService: null,
+    lastUsedRegion: null,
+    lastUsedUnknown: true,
+  },
 ];
 
 // ── 점검 ──

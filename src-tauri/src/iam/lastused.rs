@@ -1,26 +1,25 @@
-//! 권한 줄이기: AWS가 기록한 서비스별 마지막 사용 시각으로 안 쓰는 정책을 찾고, 쓴 서비스만 남긴 정책 초안을 만든다. 순수 코드다.
-//! 사용 기록을 가져오는 AWS 호출은 `fetch::usage`에 있다.
+//! 권한 줄이기: AWS가 기록한 서비스별 마지막 사용 시각으로 안 쓰는 정책을 찾고, 최근에 쓴 서비스만 남긴 정책 초안을 만든다. 순수 코드다.
+//! "안 씀"은 기록 기간(400일) 안에 한 번도 안 썼거나, 마지막 사용이 사용 기록을 만든 시각보다 `STALE_DAYS`(90일) 넘게 앞인 것이다.
+//! 초안 만들기는 `draft`에, 사용 기록을 가져오는 AWS 호출은 `fetch::usage`에 있다.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use super::catalog::catalog;
-use super::clock::iso;
-use super::eval::{policy_sources, statement_actions, PrincipalEval, Source, Status};
+use super::clock::{days_between, iso, parse_iso};
+use super::eval::{find_principal, policy_sources, statement_actions, PrincipalEval, Source};
+use super::findings::STALE_DAYS;
 use super::model::Snapshot;
-use super::policy::{Effect, PolicyDocument, Resources, Statement};
+use super::policy::{Effect, PolicyDocument};
 use super::text::shortened;
+
+mod draft;
 
 /// AWS가 서비스 사용 기록을 남기는 기간(일).
 pub const TRACKING_DAYS: u32 = 400;
 
 /// 이유에 서비스 이름을 이 개수까지만 적는다.
 const SHOWN_SERVICES: usize = 3;
-
-const NOTE_CONDITIONS: &str = "조건(Condition)은 초안에 넣지 않았어요";
-const NOTE_NO_ACTION_LEVEL: &str = "작업 단위 기록이 없는 서비스는 지금 허용된 작업을 그대로 남겼어요";
-const NOTE_NO_DRAFT: &str = "사용 기록이 있는 서비스에 허용된 작업이 없어서 초안을 만들지 않았어요";
 
 /// `GetServiceLastAccessedDetails`에서 필요한 값만 옮긴 것. 시각은 유닉스 초다.
 #[derive(Clone, Debug, Default)]
@@ -88,37 +87,71 @@ pub struct LastAccessed {
     pub draft_notes: Vec<String>,
 }
 
-/// AWS가 알려 준 서비스와 그중 쓴 서비스.
-struct Usage {
-    /// 접두어(소문자) → 서비스 이름. AWS가 알려 준 서비스 전부
-    reported: BTreeMap<String, String>,
-    used: BTreeMap<String, UsedService>,
+/// 서비스(또는 작업) 하나를 쓴 정도.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Use {
+    /// 기록 기간 안에 쓴 적이 없다
+    Never,
+    /// 마지막 사용이 사용 기록을 만든 시각보다 이 일수만큼 앞이다(`STALE_DAYS` 초과)
+    Stale(i64),
+    /// 최근(`STALE_DAYS` 안)에 썼다
+    Recent,
 }
 
-struct UsedService {
+/// 기록을 만든 시각을 모르면 오래됐는지 판단하지 않는다(안 쓴다고 말하지 않는다).
+fn use_of(last_used: Option<i64>, completed_at: Option<i64>) -> Use {
+    match (last_used, completed_at) {
+        (None, _) => Use::Never,
+        (Some(used), Some(done)) => {
+            let days = days_between(used, done);
+            if days > STALE_DAYS {
+                Use::Stale(days)
+            } else {
+                Use::Recent
+            }
+        }
+        (Some(_), None) => Use::Recent,
+    }
+}
+
+/// 최근에 쓴 서비스의 작업 단위 기록.
+struct Tracked {
     name: String,
-    /// 쓴 기록이 있는 작업(소문자). 작업 단위 기록이 없거나 쓴 작업이 하나도 없으면 None
-    actions: Option<BTreeSet<String>>,
+    /// AWS가 기록한 작업(소문자) → 최근에 썼는지. AWS는 관리 작업만 기록하니 여기 없는 작업은 "모름"이다
+    actions: BTreeMap<String, bool>,
+}
+
+/// AWS가 알려 준 서비스와 그중 최근에 쓴 서비스.
+struct Usage {
+    /// 접두어(소문자) → (서비스 이름, 쓴 정도). AWS가 알려 준 서비스 전부
+    reported: BTreeMap<String, (String, Use)>,
+    recent: BTreeMap<String, Tracked>,
 }
 
 impl Usage {
     fn new(la: &LastAccessedRaw) -> Usage {
-        let mut usage = Usage { reported: BTreeMap::new(), used: BTreeMap::new() };
+        let mut usage = Usage { reported: BTreeMap::new(), recent: BTreeMap::new() };
         for service in &la.services {
             let prefix = service.prefix.to_ascii_lowercase();
-            usage.reported.insert(prefix.clone(), service.name.clone());
-            if service.last_used.is_some() {
-                let tracked: BTreeSet<String> =
-                    service.actions.iter().flatten().filter(|a| a.last_used.is_some()).map(|a| a.name.to_ascii_lowercase()).collect();
-                usage.used.insert(prefix, UsedService { name: service.name.clone(), actions: (!tracked.is_empty()).then_some(tracked) });
+            let used = use_of(service.last_used, la.completed_at);
+            usage.reported.insert(prefix.clone(), (service.name.clone(), used));
+            if used != Use::Recent {
+                continue;
             }
+            let mut actions: BTreeMap<String, bool> = BTreeMap::new();
+            for action in service.actions.iter().flatten() {
+                let recent = use_of(action.last_used, la.completed_at) == Use::Recent;
+                // 같은 작업이 두 번 오면 하나라도 최근에 썼다고 하면 쓴 것이다
+                *actions.entry(action.name.to_ascii_lowercase()).or_default() |= recent;
+            }
+            usage.recent.insert(prefix, Tracked { name: service.name.clone(), actions });
         }
         usage
     }
 
-    /// AWS가 알려 줬고 기록 기간 안에 쓴 적이 없다. 알려 주지 않은 서비스는 모르는 것이라 안 쓴 것으로 치지 않는다.
+    /// AWS가 알려 줬고 최근에 쓰지 않았다. 알려 주지 않은 서비스는 모르는 것이라 안 쓴 것으로 치지 않는다.
     fn is_unused(&self, prefix: &str) -> bool {
-        self.reported.contains_key(prefix) && !self.used.contains_key(prefix)
+        matches!(self.reported.get(prefix), Some((_, Use::Never | Use::Stale(_))))
     }
 }
 
@@ -135,9 +168,31 @@ fn allowed_services(doc: &PolicyDocument) -> Option<BTreeSet<String>> {
     Some(services)
 }
 
+/// 한 번도 안 쓴 서비스와 오래 안 쓴 서비스를 나눠 적는다. 오래 안 쓴 쪽은 그중 가장 최근 사용을 알린다.
 fn unused_reason(services: &BTreeSet<String>, usage: &Usage) -> String {
-    let names: Vec<String> = services.iter().map(|prefix| usage.reported.get(prefix).cloned().unwrap_or_else(|| prefix.clone())).collect();
-    format!("허용하는 서비스({})를 {TRACKING_DAYS}일 동안 하나도 안 썼어요", shortened(&names, SHOWN_SERVICES))
+    let (mut never, mut stale): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+    let mut latest: Option<i64> = None;
+    for prefix in services {
+        let Some((name, used)) = usage.reported.get(prefix) else { continue };
+        match used {
+            Use::Never => never.push(name.clone()),
+            Use::Stale(days) => {
+                stale.push(name.clone());
+                latest = Some(latest.map_or(*days, |d| d.min(*days)));
+            }
+            Use::Recent => {}
+        }
+    }
+    let latest = latest.unwrap_or_default();
+    match (never.is_empty(), stale.is_empty()) {
+        (false, true) => format!("허용하는 서비스({})를 {TRACKING_DAYS}일 동안 한 번도 안 썼어요", shortened(&never, SHOWN_SERVICES)),
+        (true, false) => format!("허용하는 서비스({})를 {STALE_DAYS}일 넘게 안 썼어요(마지막 사용 {latest}일 전)", shortened(&stale, SHOWN_SERVICES)),
+        _ => format!(
+            "허용하는 서비스를 모두 {STALE_DAYS}일 넘게 안 썼어요. {TRACKING_DAYS}일 동안 한 번도 안 썼어요: {}. 마지막 사용 {latest}일 전: {}",
+            shortened(&never, SHOWN_SERVICES),
+            shortened(&stale, SHOWN_SERVICES)
+        ),
+    }
 }
 
 /// 허용하는 서비스를 전부 안 쓴 정책. Deny만 있는 정책, 알 수 없는 작업이나 AWS가 알려 주지 않은 서비스가 걸린 정책은 판단하지 않는다.
@@ -154,163 +209,36 @@ fn unused_policies(sources: &[Source], usage: &Usage) -> Vec<UnusedPolicy> {
         .collect()
 }
 
-/// 작업 이름의 첫 단어: 첫 글자부터 다음 대문자 앞까지. `GetObject` → `Get`.
-fn verb(name: &str) -> &str {
-    let mut chars = name.char_indices();
-    chars.next();
-    match chars.find(|(_, c)| c.is_ascii_uppercase()) {
-        Some((i, _)) => &name[..i],
-        None => name,
-    }
+/// 사용 기록을 만든 시각에 주체가 만들어진 지 며칠 됐는지. 둘 중 하나라도 모르면 None.
+fn principal_age(s: &Snapshot, arn: &str, completed_at: Option<i64>) -> Option<i64> {
+    let created = find_principal(s, arn)?.created_at().and_then(parse_iso)?;
+    Some(days_between(created, completed_at?))
 }
 
-/// 서비스 하나에서 고른 작업을 정책에 쓸 패턴으로 줄인다. 서비스 전체면 `s3:*`, 첫 단어가 같은 작업을 카탈로그에서 전부 골랐으면
-/// `s3:Get*`, 아니면 작업 이름 그대로다. 고른 것보다 넓게 쓰지 않는다.
-fn compress(prefix: &str, chosen: &BTreeSet<String>) -> Vec<String> {
-    let all = catalog().actions(prefix);
-    if !all.is_empty() && chosen.len() == all.len() {
-        return vec![format!("{prefix}:*")];
+/// 만든 지 얼마 안 된 주체는 아직 써 보지 않은 권한이 많아서 "통째로 안 쓴다"고 하기 이르다.
+fn too_young_note(age: Option<i64>) -> String {
+    match age {
+        Some(age) => format!("만든 지 {age}일밖에 안 된 주체라 통째로 안 쓰는 정책은 고르지 않았어요. 사용 기록이 {STALE_DAYS}일 넘게 쌓인 뒤에 다시 확인해 주세요"),
+        None => "주체를 만든 날짜나 사용 기록을 만든 시각을 알 수 없어서 통째로 안 쓰는 정책은 고르지 않았어요".to_string(),
     }
-    let mut out = Vec::new();
-    let mut wildcards: Vec<&str> = Vec::new();
-    for name in chosen {
-        if wildcards.iter().any(|w| name.starts_with(w)) {
-            continue;
-        }
-        let first = verb(name);
-        let total = all.iter().filter(|(n, _)| n.starts_with(first)).count();
-        let picked = chosen.iter().filter(|n| n.starts_with(first)).count();
-        if total >= 2 && picked == total {
-            wildcards.push(first);
-            out.push(format!("{prefix}:{first}*"));
-        } else {
-            out.push(format!("{prefix}:{name}"));
-        }
-    }
-    out
-}
-
-/// 문장의 리소스 조건. 조건이 같은 작업은 초안에서 한 문장으로 묶는다.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum ResKey {
-    Resource(Vec<String>),
-    NotResource(Vec<String>),
-}
-
-fn res_key(stmt: &Statement) -> ResKey {
-    let sorted = |patterns: &[String]| {
-        let mut patterns = patterns.to_vec();
-        patterns.sort();
-        patterns.dedup();
-        patterns
-    };
-    match &stmt.resources {
-        Resources::Resource(patterns) => ResKey::Resource(sorted(patterns)),
-        Resources::NotResource(patterns) => ResKey::NotResource(sorted(patterns)),
-        Resources::Unspecified => ResKey::Resource(vec!["*".to_string()]),
-    }
-}
-
-#[derive(Serialize)]
-#[serde(untagged)]
-enum OneOrMany {
-    One(String),
-    Many(Vec<String>),
-}
-
-impl OneOrMany {
-    fn of(mut list: Vec<String>) -> OneOrMany {
-        if list.len() == 1 {
-            OneOrMany::One(list.remove(0))
-        } else {
-            OneOrMany::Many(list)
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct DraftStatement {
-    #[serde(rename = "Effect")]
-    effect: &'static str,
-    #[serde(rename = "Action")]
-    action: Vec<String>,
-    #[serde(rename = "Resource", skip_serializing_if = "Option::is_none")]
-    resource: Option<OneOrMany>,
-    #[serde(rename = "NotResource", skip_serializing_if = "Option::is_none")]
-    not_resource: Option<OneOrMany>,
-}
-
-#[derive(Serialize)]
-struct DraftDocument {
-    #[serde(rename = "Version")]
-    version: &'static str,
-    #[serde(rename = "Statement")]
-    statement: Vec<DraftStatement>,
-}
-
-/// 쓴 서비스만 남긴 Allow 문서. 작업 단위 기록이 있는 서비스는 쓴 작업만, 없으면 지금 허용된 작업 그대로(서비스 전체면 `s3:*`).
-/// 거부·경계로 막힌 작업은 빼고, 리소스는 원래 문장 그대로, 조건은 버린다.
-fn draft(eval: &PrincipalEval, sources: &[Source], usage: &Usage) -> (Option<String>, Vec<String>) {
-    // 리소스 조건 → 서비스 → 작업
-    let mut groups: BTreeMap<ResKey, BTreeMap<String, BTreeSet<String>>> = BTreeMap::new();
-    for doc in sources.iter().filter_map(|src| src.document) {
-        for stmt in doc.statements.iter().filter(|st| st.effect == Effect::Allow) {
-            let key = res_key(stmt);
-            for (prefix, action, _) in statement_actions(stmt).0 {
-                let Some(used) = usage.used.get(&prefix) else { continue };
-                if used.actions.as_ref().is_some_and(|tracked| !tracked.contains(&action.to_ascii_lowercase())) {
-                    continue;
-                }
-                let in_effect = eval.actions.get(&(prefix.clone(), action.clone())).is_some_and(|(_, result)| matches!(result.status, Status::Allowed | Status::Conditional));
-                if in_effect {
-                    groups.entry(key.clone()).or_default().entry(prefix).or_default().insert(action);
-                }
-            }
-        }
-    }
-
-    let mut narrowed: BTreeSet<&str> = BTreeSet::new();
-    let mut kept_as_is = false;
-    let mut statement = Vec::new();
-    for (key, services) in &groups {
-        let mut action = Vec::new();
-        for (prefix, chosen) in services {
-            action.extend(compress(prefix, chosen));
-            match usage.used.get(prefix) {
-                Some(UsedService { name, actions: Some(_) }) => {
-                    narrowed.insert(name.as_str());
-                }
-                _ => kept_as_is = true,
-            }
-        }
-        let (resource, not_resource) = match key {
-            ResKey::Resource(list) => (Some(OneOrMany::of(list.clone())), None),
-            ResKey::NotResource(list) => (None, Some(OneOrMany::of(list.clone()))),
-        };
-        statement.push(DraftStatement { effect: "Allow", action, resource, not_resource });
-    }
-    if statement.is_empty() {
-        return (None, vec![NOTE_NO_DRAFT.to_string()]);
-    }
-
-    let mut notes = vec![NOTE_CONDITIONS.to_string()];
-    if !narrowed.is_empty() {
-        let names = narrowed.into_iter().collect::<Vec<_>>().join(", ");
-        notes.push(format!("{names}은(는) 관리 작업만 작업 단위로 기록돼요. 객체 읽기·쓰기 같은 데이터 작업은 기록에 없어서 초안에서 빠졌을 수 있어요"));
-    }
-    if kept_as_is {
-        notes.push(NOTE_NO_ACTION_LEVEL.to_string());
-    }
-    let document = DraftDocument { version: "2012-10-17", statement };
-    (serde_json::to_string(&document).ok(), notes)
 }
 
 /// 안 쓰는 정책, 줄인 정책 초안, 초안에 대한 안내를 만든다. `eval`은 같은 주체의 권한 계산 결과다.
+/// 만든 지 `STALE_DAYS`일이 안 된 주체(또는 언제 만들었는지 모르는 주체)는 뗄 정책을 고르지 않고 그 사실을 안내한다.
 pub fn least_privilege(eval: &PrincipalEval, la: &LastAccessedRaw, s: &Snapshot, arn: &str) -> (Vec<UnusedPolicy>, Option<String>, Vec<String>) {
     let (sources, _boundary) = policy_sources(s, arn);
     let usage = Usage::new(la);
-    let (draft, notes) = draft(eval, &sources, &usage);
-    (unused_policies(&sources, &usage), draft, notes)
+    let mut notes = Vec::new();
+    let unused = match principal_age(s, arn, la.completed_at) {
+        Some(age) if age >= STALE_DAYS => unused_policies(&sources, &usage),
+        age => {
+            notes.push(too_young_note(age));
+            Vec::new()
+        }
+    };
+    let (draft, draft_notes) = draft::draft(eval, &sources, &usage, s);
+    notes.extend(draft_notes);
+    (unused, draft, notes)
 }
 
 /// 화면에 나가는 값: 서비스별 마지막 사용 + `least_privilege` 결과.

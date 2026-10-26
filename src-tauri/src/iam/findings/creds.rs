@@ -1,5 +1,7 @@
 //! 자격 증명 보고서로 찾는 점검: 루트, MFA, 액세스 키, 안 쓰는 사용자. 사용자 목록의 배지도 같은 규칙으로 만든다.
 
+use std::collections::HashSet;
+
 use super::{item, push, sh_quote, FindingKind, Items, STALE_DAYS};
 use crate::iam::clock::{days_between, iso, parse_iso};
 use crate::iam::model::{CredRow, Snapshot};
@@ -171,12 +173,14 @@ fn user_findings(row: &CredRow, now: i64, out: &mut Items) {
     }
 }
 
-/// 보고서 줄마다 루트 점검과 사용자 점검을 한다.
-pub(super) fn report_findings(rows: &[CredRow], now: i64, out: &mut Items) {
+/// 보고서 줄마다 루트 점검과 사용자 점검을 한다. 보고서는 4시간까지 묵은 것이 올 수 있으니
+/// 스냅숏에 없는 사용자(그사이 지운 사용자)의 줄은 건너뛴다. 루트 줄은 늘 본다.
+pub(super) fn report_findings(s: &Snapshot, rows: &[CredRow], now: i64, out: &mut Items) {
+    let current: HashSet<&str> = s.users.iter().map(|u| u.arn.as_str()).collect();
     for row in rows {
         if is_root(row) {
             root_findings(row, out);
-        } else {
+        } else if current.contains(row.arn.as_str()) {
             user_findings(row, now, out);
         }
     }

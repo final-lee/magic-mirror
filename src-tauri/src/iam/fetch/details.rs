@@ -5,7 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use aws_sdk_iam::operation::get_account_authorization_details::GetAccountAuthorizationDetailsOutput;
 use aws_sdk_iam::types::{
-    AttachedPermissionsBoundary, AttachedPolicy, EntityType, GroupDetail, ManagedPolicyDetail, PolicyDetail, RoleDetail, Tag, UserDetail,
+    AttachedPermissionsBoundary, AttachedPolicy, EntityType, GroupDetail, ManagedPolicyDetail, Policy, PolicyDetail, PolicyVersion, RoleDetail, Tag,
+    UserDetail,
 };
 use futures::stream::{self, StreamExt};
 
@@ -15,7 +16,47 @@ use crate::iam::model::{GroupRec, InlinePolicy, ManagedPolicyRec, RoleRec, Scope
 use crate::iam::policy::{decode_document, parse_document};
 
 /// 정책을 한꺼번에 몇 개까지 가져올지.
-const POLICY_FETCH_CONCURRENCY: usize = 20;
+const POLICY_FETCH_CONCURRENCY: usize = 10;
+
+/// `GetAccountAuthorizationDetails`로 받을 종류. AWS 관리형 정책은 받지 않는다: 1,000개가 넘는 정책이 버전 목록까지 와서
+/// 첫 읽기가 몇 MB가 된다. 사용자·그룹·역할에 붙어 있거나 권한 경계로 쓰이는 것만 `fill_missing`이 따로 읽는다.
+fn entity_filters() -> Vec<EntityType> {
+    vec![EntityType::User, EntityType::Role, EntityType::Group, EntityType::LocalManagedPolicy]
+}
+
+type Loaded = Result<(Policy, Option<PolicyVersion>), AppError>;
+
+/// 따로 읽은 정책 하나를 담는다. SSO 만료·요청 제한은 스냅숏 전체의 오류이고(일부 정책이 빠진 스냅숏을 내지 않는다),
+/// 그 밖의 실패는 경고만 남긴다.
+fn absorb_policy(details: &mut Details, arn: String, loaded: Loaded) -> Result<(), AppError> {
+    let (policy, version) = match loaded {
+        Ok(found) => found,
+        Err(e @ (AppError::SsoExpired | AppError::Throttled)) => return Err(e),
+        Err(e) => {
+            details.warnings.push(format!("{arn} 정책을 불러오지 못했어요: {e}"));
+            return Ok(());
+        }
+    };
+    let default_id = policy.default_version_id();
+    let rec = managed_rec(
+        PolicyParts {
+            arn: &arn,
+            name: policy.policy_name().unwrap_or_else(|| arn.rsplit('/').next().unwrap_or(&arn)),
+            description: policy.description(),
+            default_version_id: default_id,
+            attachment_count: policy.attachment_count().unwrap_or(0),
+            updated_at: iso_of(policy.update_date()),
+            versions: default_id
+                .map(|id| VersionRec { id: id.to_string(), is_default: true, created_at: iso_of(version.as_ref().and_then(|v| v.create_date())) })
+                .into_iter()
+                .collect(),
+            document: version.as_ref().and_then(|v| v.document()),
+        },
+        &mut details.warnings,
+    );
+    details.policies.insert(arn, rec);
+    Ok(())
+}
 
 /// 읽은 결과를 모으는 그릇. 페이지가 올 때마다 `absorb`로 레코드로 바꿔 담아서 SDK 응답은 바로 버린다.
 #[derive(Default)]
@@ -240,27 +281,22 @@ impl Details {
     }
 }
 
-/// 계정의 사용자·그룹·역할·관리형 정책을 끝까지 읽는다.
+/// 계정의 사용자·그룹·역할·고객 관리형 정책을 끝까지 읽는다(AWS 관리형은 `fill_missing`).
 pub(super) async fn fetch_all(client: &aws_sdk_iam::Client) -> Result<Details, AppError> {
     let mut details = Details::default();
-    let mut pages = client
-        .get_account_authorization_details()
-        .filter(EntityType::User)
-        .filter(EntityType::Role)
-        .filter(EntityType::Group)
-        .filter(EntityType::LocalManagedPolicy)
-        .filter(EntityType::AwsManagedPolicy)
-        .into_paginator()
-        .page_size(1000)
-        .send();
+    let mut request = client.get_account_authorization_details();
+    for filter in entity_filters() {
+        request = request.filter(filter);
+    }
+    let mut pages = request.into_paginator().page_size(1000).send();
     while let Some(page) = pages.next().await {
         details.absorb(&page.map_err(|e| from_sdk(e, "iam:GetAccountAuthorizationDetails"))?);
     }
     Ok(details)
 }
 
-/// `GetPolicy` + `GetPolicyVersion`으로 정책 하나를 읽는다.
-async fn load_policy(client: &aws_sdk_iam::Client, arn: &str) -> Result<(aws_sdk_iam::types::Policy, Option<aws_sdk_iam::types::PolicyVersion>), AppError> {
+/// `GetPolicy` + `GetPolicyVersion`으로 정책 하나(기본 버전 문서)를 읽는다.
+async fn load_policy(client: &aws_sdk_iam::Client, arn: &str) -> Loaded {
     let out = client.get_policy().policy_arn(arn).send().await.map_err(|e| from_sdk(e, "iam:GetPolicy"))?;
     let policy = out.policy().cloned().ok_or_else(|| AppError::other("정책 정보가 비어 있어요"))?;
     let Some(version_id) = policy.default_version_id() else {
@@ -271,44 +307,25 @@ async fn load_policy(client: &aws_sdk_iam::Client, arn: &str) -> Result<(aws_sdk
     Ok((policy, version))
 }
 
-/// 붙어 있는데 목록에 없던 관리형 정책을 하나씩(20개씩 동시에) 읽어 채운다. 못 읽은 정책은 경고만 남기고 넘어간다.
-pub(super) async fn fill_missing(client: &aws_sdk_iam::Client, details: &mut Details) {
+/// 붙어 있거나 권한 경계로 쓰이는데 목록에 없는 관리형 정책(AWS 관리형 전부와, 목록을 읽는 사이 생긴 고객 관리형)을
+/// 10개씩 동시에 읽어 채운다. 못 읽은 정책은 경고만 남기고, SSO 만료·요청 제한이면 거기서 멈추고 오류를 돌려준다.
+pub(super) async fn fill_missing(client: &aws_sdk_iam::Client, details: &mut Details) -> Result<(), AppError> {
     let arns = details.missing_policy_arns();
-    if arns.is_empty() {
-        return;
+    let mut loaded = stream::iter(arns)
+        .map(|arn| async move {
+            let result = load_policy(client, &arn).await;
+            (arn, result)
+        })
+        .buffered(POLICY_FETCH_CONCURRENCY);
+    while let Some((arn, result)) = loaded.next().await {
+        absorb_policy(details, arn, result)?;
     }
-    let loaded: Vec<(String, Result<_, AppError>)> =
-        stream::iter(arns).map(|arn| async move { let result = load_policy(client, &arn).await; (arn, result) }).buffered(POLICY_FETCH_CONCURRENCY).collect().await;
-    for (arn, result) in loaded {
-        match result {
-            Ok((policy, version)) => {
-                let default_id = policy.default_version_id();
-                let rec = managed_rec(
-                    PolicyParts {
-                        arn: &arn,
-                        name: policy.policy_name().unwrap_or_else(|| arn.rsplit('/').next().unwrap_or(&arn)),
-                        description: policy.description(),
-                        default_version_id: default_id,
-                        attachment_count: policy.attachment_count().unwrap_or(0),
-                        updated_at: iso_of(policy.update_date()),
-                        versions: default_id
-                            .map(|id| VersionRec { id: id.to_string(), is_default: true, created_at: iso_of(version.as_ref().and_then(|v| v.create_date())) })
-                            .into_iter()
-                            .collect(),
-                        document: version.as_ref().and_then(|v| v.document()),
-                    },
-                    &mut details.warnings,
-                );
-                details.policies.insert(arn, rec);
-            }
-            Err(e) => details.warnings.push(format!("{arn} 정책을 불러오지 못했어요: {e}")),
-        }
-    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use aws_sdk_iam::types::{PolicyVersion, RoleLastUsed};
+    use aws_sdk_iam::types::{Policy, PolicyVersion, RoleLastUsed};
     use aws_smithy_types::DateTime;
     use serde_json::json;
 
@@ -573,5 +590,50 @@ mod tests {
     #[test]
     fn version_numbers_sort_numerically() {
         assert_eq!((version_number("v1"), version_number("v10"), version_number("V3"), version_number("x")), (1, 10, 3, 0));
+    }
+
+    #[test]
+    fn aws_managed_policies_are_not_listed_in_bulk() {
+        // AWS 관리형 정책 전부(1,000개가 넘고 버전 목록까지 온다)를 받지 않고, 붙어 있는 것만 따로 읽는다
+        let filters = entity_filters();
+        assert!(!filters.contains(&EntityType::AwsManagedPolicy), "{filters:?}");
+        for wanted in [EntityType::User, EntityType::Group, EntityType::Role, EntityType::LocalManagedPolicy] {
+            assert!(filters.contains(&wanted), "{wanted:?}");
+        }
+        assert_eq!(POLICY_FETCH_CONCURRENCY, 10);
+    }
+
+    fn fetched(name: &str, arn: &str, document: &str) -> Result<(Policy, Option<PolicyVersion>), AppError> {
+        let policy = Policy::builder().policy_name(name).arn(arn).default_version_id("v3").attachment_count(4).description("AWS가 붙인 설명").build();
+        Ok((policy, Some(version("v3", true, document, 1_700_000_000))))
+    }
+
+    #[test]
+    fn a_fetched_policy_is_added_with_its_default_version() {
+        let mut d = Details::default();
+        let arn = "arn:aws:iam::aws:policy/ReadOnlyAccess";
+        absorb_policy(&mut d, arn.to_string(), fetched("ReadOnlyAccess", arn, &encoded(json!([{ "Effect": "Allow", "Action": "s3:Get*", "Resource": "*" }])))).unwrap();
+        assert!(d.warnings.is_empty(), "{:?}", d.warnings);
+        let rec = &d.policies[arn];
+        assert_eq!((rec.name.as_str(), rec.scope, rec.attachment_count), ("ReadOnlyAccess", Scope::Aws, 4));
+        assert_eq!(rec.default_version_id.as_deref(), Some("v3"));
+        let versions: Vec<(&str, bool)> = rec.versions.iter().map(|v| (v.id.as_str(), v.is_default)).collect();
+        assert_eq!(versions, vec![("v3", true)]);
+        assert_eq!(rec.document.as_ref().unwrap().statements[0].actions, Actions::Action(vec!["s3:Get*".to_string()]));
+    }
+
+    #[test]
+    fn a_policy_that_cannot_be_read_is_a_warning_but_sso_expiry_and_throttling_fail_the_snapshot() {
+        let mut d = Details::default();
+        let arn = "arn:aws:iam::aws:policy/Gone";
+        let denied = AppError::AccessDenied { action: "iam:GetPolicy".into() };
+        assert_eq!(absorb_policy(&mut d, arn.to_string(), Err(denied)), Ok(()));
+        assert_eq!(d.warnings, vec![format!("{arn} 정책을 불러오지 못했어요: 권한 없음 (iam:GetPolicy)")]);
+        assert!(!d.policies.contains_key(arn));
+        for fatal in [AppError::SsoExpired, AppError::Throttled] {
+            let mut d = Details::default();
+            assert_eq!(absorb_policy(&mut d, arn.to_string(), Err(fatal.clone())), Err(fatal));
+            assert!(d.warnings.is_empty() && d.policies.is_empty());
+        }
     }
 }

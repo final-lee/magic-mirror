@@ -190,6 +190,8 @@ export interface AccessKeyInfo {
   lastUsedAt: string | null;
   lastUsedService: string | null;
   lastUsedRegion: string | null;
+  /** 마지막 사용을 읽지 못함(권한 없음 등). 이때 lastUsed* 값이 비어 있어도 "사용 기록 없음"이 아니다 */
+  lastUsedUnknown?: boolean;
 }
 export interface LastAccessed {
   completedAt: string | null;

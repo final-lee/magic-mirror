@@ -33,7 +33,7 @@
 - 모든 화면 위에 한 줄 안내: "조직 SCP와 리소스 기반 정책은 반영하지 않아요"
 
 ## 권한 계산 규칙
-- 데이터: `iam:GetAccountAuthorizationDetails`(User/Group/Role/LocalManagedPolicy/AWSManagedPolicy, 끝까지 페이지). 붙어 있는데 문서가 없는 관리형 정책은 `GetPolicy`+`GetPolicyVersion`으로 채운다. 정책 문서는 URL 인코딩돼 있으니 디코드 후 JSON 파싱.
+- 데이터: `iam:GetAccountAuthorizationDetails`(User/Group/Role/LocalManagedPolicy, 끝까지 페이지). AWS 관리형 정책은 통째로 받지 않고, 사용자·그룹·역할에 붙어 있거나 권한 경계로 쓰이는데 목록에 없는 관리형 정책만 `GetPolicy`+`GetPolicyVersion`으로 기본 버전 문서를 읽는다(10개씩 동시에, 자격 증명 보고서를 기다리는 동안. SSO 만료·요청 제한은 오류, 그 밖의 실패는 경고). 정책 문서는 URL 인코딩돼 있으니 디코드 후 JSON 파싱.
 - 정책 문장 정규화: `Action`/`NotAction`/`Resource`/`NotResource`는 문자열 또는 배열. `Condition` 유무 기록. `Statement`가 객체 하나일 수도 있다.
 - 작업 매칭: 대소문자 무시 glob(`*`, `?`). 서비스 접두어 포함(`s3:Get*`, `*`).
 - 리소스 매칭: 대소문자 구분 glob(`*`, `?`). `${...}` 정책 변수가 있으면 판단 불가 → 조건부.
@@ -191,6 +191,7 @@ interface FindingItem { targetArn: string; targetName: string; detail: string; c
 interface AccessKeyInfo {
   id: string; status: "Active" | "Inactive"; createdAt: string | null; ageDays: number | null;
   lastUsedAt: string | null; lastUsedService: string | null; lastUsedRegion: string | null;
+  lastUsedUnknown?: boolean;        // 마지막 사용을 읽지 못함(권한 없음 등). true면 lastUsed*가 null이어도 "사용 기록 없음"이 아니다
 }
 interface LastAccessed {
   completedAt: string | null; trackingDays: number;

@@ -123,14 +123,29 @@ fn parse_row(cols: &Columns, mut fields: Vec<String>) -> Option<CredRow> {
     })
 }
 
-/// `GetCredentialReport`가 돌려준 CSV를 사용자 한 명당 한 줄로 읽는다(루트 `<root_account>` 포함).
-/// 값이 `N/A`·`no_information`·`not_supported`면 None이고, 형식이 맞지 않는 줄은 건너뛴다.
+/// `read_credential_report`에서 줄만(테스트에서 보고서를 만들 때 쓴다).
+#[cfg(test)]
 pub fn parse_credential_report(csv: &str) -> Vec<CredRow> {
+    read_credential_report(csv).0
+}
+
+/// `GetCredentialReport`가 돌려준 CSV를 사용자 한 명당 한 줄로 읽는다(루트 `<root_account>` 포함).
+/// 값이 `N/A`·`no_information`·`not_supported`면 None이고, 형식이 맞지 않는 줄은 건너뛰고 그 수(빈 줄 제외)를 함께 돌려준다.
+/// 건너뛴 사용자는 점검에서 빠지므로 그 수를 경고로 알린다.
+pub fn read_credential_report(csv: &str) -> (Vec<CredRow>, usize) {
     let mut lines = csv.trim_start_matches('\u{feff}').lines().filter(|line| !line.trim().is_empty());
     let Some(cols) = lines.next().and_then(|header| Columns::from_header(&split_line(header))) else {
-        return Vec::new();
+        return (Vec::new(), 0);
     };
-    lines.filter_map(|line| parse_row(&cols, split_line(line))).collect()
+    let mut rows = Vec::new();
+    let mut unreadable = 0;
+    for line in lines {
+        match parse_row(&cols, split_line(line)) {
+            Some(row) => rows.push(row),
+            None => unreadable += 1,
+        }
+    }
+    (rows, unreadable)
 }
 
 #[cfg(test)]
@@ -259,6 +274,23 @@ mod tests {
         let rows = parse_credential_report(&format!("{HEADER}\n{short}\n{odd}\n{good}\n"));
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].user, "alice");
+    }
+
+    #[test]
+    fn skipped_rows_are_counted_so_they_can_be_reported() {
+        let good = rows()[1].clone();
+        let short = "short,arn:aws:iam::111111111111:user/short,2020-01-01T00:00:00+00:00";
+        let odd = format!("{},EXTRA", rows()[2]);
+        // 빈 줄은 읽지 못한 줄이 아니다
+        let (read, unreadable) = read_credential_report(&format!("{HEADER}\n{short}\n\n{odd}\r\n{good}\n\n"));
+        assert_eq!((read.len(), unreadable), (1, 2));
+        assert_eq!(read[0].user, "alice");
+        let (all, none) = read_credential_report(&csv());
+        assert_eq!((all.len(), none), (parsed().len(), 0));
+        for empty in ["", HEADER] {
+            let (read, unreadable) = read_credential_report(empty);
+            assert!(read.is_empty() && unreadable == 0, "{empty:?}");
+        }
     }
 
     #[test]

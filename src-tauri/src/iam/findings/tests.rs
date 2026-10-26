@@ -8,9 +8,14 @@ use crate::iam::fixtures::{self, ADMIN_POLICY, ALICE, BOB, CAROL};
 use crate::iam::model::{CredRow, RoleRec};
 use crate::iam::view::{Badge, BadgeKind};
 
+/// 테스트 스냅숏 + 보고서. 보고서에만 있던 사용자(dave·erin·frank·gina)도 계정에 있는 것으로 넣는다
+/// (지금 계정에 없는 사용자의 보고서 줄은 점검하지 않는다).
 fn snap() -> Snapshot {
     let mut s = fixtures::snapshot();
     s.cred_report = Some(parse_credential_report(&csv()));
+    for name in ["dave", "erin", "frank", "gina"] {
+        s.users.push(fixtures::user(name));
+    }
     s
 }
 
@@ -82,7 +87,8 @@ fn groups_come_in_table_order_and_empty_ones_are_kept() {
             ("안 쓰는 역할", Level::Info),
             ("관리자급 주체", Level::Warn),
             ("권한 상승 위험 주체", Level::Warn),
-            ("외부에 열린 신뢰", Level::Danger),
+            // 누구나 조건 없이 맡을 수 있는 역할이 있을 때만 위험이다
+            ("외부에 열린 신뢰", Level::Warn),
             ("붙은 곳 없는 정책", Level::Info),
         ]
     );
@@ -148,13 +154,42 @@ fn without_a_report_only_the_report_free_checks_run() {
 }
 
 #[test]
-fn generated_at_is_the_report_time_or_else_the_snapshot_time() {
+fn generated_at_is_the_report_time_or_else_the_snapshot_time_when_there_is_a_report() {
     let mut s = snap();
     s.fetched_at = "2026-10-25T12:00:00Z".into();
+    // 보고서가 만든 시각을 알려 주지 않았으면 스냅숏을 읽은 시각이다
     assert_eq!(findings(&s, now()).generated_at.as_deref(), Some("2026-10-25T12:00:00Z"));
     // 보고서는 스냅숏보다 오래됐을 수 있다. 점검은 가장 오래된 자료의 시각을 기준으로 알린다
     s.cred_generated_at = Some("2026-10-25T08:00:00Z".into());
     assert_eq!(findings(&s, now()).generated_at.as_deref(), Some("2026-10-25T08:00:00Z"));
+}
+
+#[test]
+fn without_a_report_there_is_no_generated_time() {
+    // 보고서로 하는 점검을 건너뛰었으니 "이 시각에 점검했다"고 말할 수 없다
+    let mut s = fixtures::snapshot();
+    assert!(!s.fetched_at.is_empty());
+    assert_eq!(findings(&s, now()).generated_at, None);
+    s.cred_generated_at = Some("2026-10-25T08:00:00Z".into());
+    assert_eq!(findings(&s, now()).generated_at, None);
+    assert!(serde_json::to_value(findings(&s, now())).unwrap()["generatedAt"].is_null());
+}
+
+#[test]
+fn report_rows_of_users_no_longer_in_the_account_are_skipped_but_root_is_kept() {
+    // 보고서는 4시간까지 묵은 것이 올 수 있어서, 그사이 지운 사용자의 줄이 남아 있을 수 있다
+    let mut s = fixtures::snapshot();
+    s.cred_report = Some(parse_credential_report(&csv()));
+    let f = findings(&s, now());
+    assert_eq!(targets(&f, InactiveUser), vec!["carol"]);
+    assert_eq!(targets(&f, ConsoleNoMfa), vec!["bob"]);
+    assert_eq!(targets(&f, OldAccessKey), vec!["alice", "bob", "carol"]);
+    for kind in [RootAccessKey, RootNoMfa] {
+        assert_eq!(targets(&f, kind), vec!["루트 계정"], "{kind:?}");
+    }
+    // 지운 사용자의 오래된 키도 알리지 않는다
+    edit_row(&mut s, "gina", |r| r.key1_active = true);
+    assert!(!targets(&findings(&s, now()), OldAccessKey).contains(&"gina"));
 }
 
 // ---- 루트 ----
@@ -412,6 +447,26 @@ fn a_role_with_a_wildcard_policy_is_admin_and_a_long_privesc_list_is_shortened()
 }
 
 #[test]
+fn privesc_details_name_the_actions_in_the_catalog_order() {
+    // 작업 이름은 위험 판정 문구가 아니라 작업마다 다시 판정해서 얻는다(문구가 바뀌어도 그대로다)
+    let f = run();
+    assert_eq!(item(&f, PrivescPrincipal, "deploy").detail, "권한 상승에 쓸 수 있는 작업을 모든 리소스에 조건 없이 허용해요: iam:PassRole");
+    let (s, _) = fixtures::solo_user(json!([{ "Effect": "Allow", "Action": "iam:*", "Resource": "*" }]));
+    let iam_actions = crate::iam::danger::PRIVESC_ACTIONS.iter().filter(|a| a.starts_with("iam:")).count();
+    assert_eq!(
+        item(&findings(&s, now()), PrivescPrincipal, "u").detail,
+        format!("권한 상승에 쓸 수 있는 작업을 모든 리소스에 조건 없이 허용해요: iam:CreatePolicyVersion, iam:SetDefaultPolicyVersion, iam:PassRole 외 {}개", iam_actions - 3)
+    );
+    // 조건이 걸렸거나 모든 리소스에 열려 있지 않은 작업은 이름에 넣지 않는다
+    let (s, _) = fixtures::solo_user(json!([
+        { "Effect": "Allow", "Action": "iam:PassRole", "Resource": "*" },
+        { "Effect": "Allow", "Action": "iam:CreateAccessKey", "Resource": "*", "Condition": { "Bool": { "aws:MultiFactorAuthPresent": "true" } } },
+        { "Effect": "Allow", "Action": "sts:AssumeRole", "Resource": "arn:aws:iam::111111111111:role/app-*" }
+    ]));
+    assert_eq!(item(&findings(&s, now()), PrivescPrincipal, "u").detail, "권한 상승에 쓸 수 있는 작업을 모든 리소스에 조건 없이 허용해요: iam:PassRole");
+}
+
+#[test]
 fn external_trust_lists_open_and_cross_account_roles() {
     let f = run();
     assert_eq!(targets(&f, ExternalTrust), vec!["open", "vendor"]);
@@ -446,6 +501,32 @@ fn external_id_and_conditions_change_the_wording() {
     assert!(vendor.detail.contains("ExternalId 조건이 있어요"), "{}", vendor.detail);
     assert!(!vendor.detail.contains("ExternalId 없이"));
     assert!(item(&f, ExternalTrust, "open").detail.contains("조건"), "{}", item(&f, ExternalTrust, "open").detail);
+}
+
+#[test]
+fn external_trust_is_danger_only_when_someone_is_open_to_anyone_without_conditions() {
+    let f = run();
+    // `open`은 누구나 조건 없이 맡을 수 있다
+    assert_eq!(group(&f, ExternalTrust).level, Level::Danger);
+    let before: Vec<FindingItem> = group(&f, ExternalTrust).items.clone();
+
+    // 누구나 열려 있어도 조건이 걸려 있으면 경고다. 항목 설명은 각자 그대로다
+    let mut s = snap();
+    let conditional_open = fixtures::trust(json!({ "AWS": "*" }), "sts:AssumeRole", Some(json!({ "StringEquals": { "aws:PrincipalOrgID": "o-abc" } })));
+    edit_role(&mut s, "open", |r| r.trust = Some(fixtures::doc(conditional_open)));
+    let f = findings(&s, now());
+    assert_eq!(group(&f, ExternalTrust).level, Level::Warn);
+    assert_eq!(targets(&f, ExternalTrust), vec!["open", "vendor"]);
+    assert_eq!(item(&f, ExternalTrust, "vendor"), before.iter().find(|i| i.target_name == "vendor").unwrap());
+
+    // 다른 계정에만 열려 있으면 경고다
+    let mut s = snap();
+    s.roles.retain(|r| r.name != "open");
+    let f = findings(&s, now());
+    assert_eq!(targets(&f, ExternalTrust), vec!["vendor"]);
+    assert_eq!(group(&f, ExternalTrust).level, Level::Warn);
+    // 다른 그룹의 심각도는 표 그대로다
+    assert_eq!(group(&f, RootAccessKey).level, Level::Danger);
 }
 
 #[test]
