@@ -38,7 +38,7 @@ Open **IAM → 🔐 IAM 관리** in the sidebar, or double-click a user, role, o
   - Attach or detach managed policies, add or remove group members, and create, edit, or delete inline policies.
   - Save a new version of a customer managed policy.
   - Deactivate, reactivate, or delete access keys.
-- **Preview before every change**: every change starts with a preview of the exact API calls, who gains or loses which permissions, and any warnings. Risky changes, such as granting admin access or cutting off the app's own access, ask you to type the target's name or key ID. When you apply, the app recomputes the change and stops if it no longer matches the preview you confirmed. Service-linked and IAM Identity Center roles are managed by AWS and can't be changed.
+- **Preview before every change**: every change starts with a preview of the exact API calls, who gains or loses which permissions, and any warnings. Risky changes ask you to type the target's name or key ID: granting admin access, cutting off the app's own access, or a change the app can't fully evaluate because a policy document couldn't be read. (For a profile that assumes a role through `source_profile`, the source profile's access key isn't recognized as the app's own key.) When you apply, the app recomputes the change and stops if it no longer matches the preview you confirmed. Service-linked and IAM Identity Center roles are managed by AWS and can't be changed.
 - **Change log**: every applied change is recorded locally, and most can be undone. An undo goes through the same preview. Changes AWS can't reverse, such as deleting an access key, are marked as such.
 - **What it doesn't evaluate**: only identity-based policies and permissions boundaries. Organization SCPs and resource-based policies (such as bucket policies) aren't included, and the app says so on screen.
 
@@ -80,7 +80,7 @@ The app checks for a new version at launch and every 6 hours, and shows an **Upd
   - `iam:GetAccountAuthorizationDetails`, `iam:ListPolicies`, `iam:GetPolicy`, `iam:GetPolicyVersion`
   - `iam:ListAccessKeys`, `iam:GetAccessKeyLastUsed`, `iam:GenerateCredentialReport`, `iam:GetCredentialReport`
   - `iam:GenerateServiceLastAccessedDetails`, `iam:GetServiceLastAccessedDetails`, `iam:SimulatePrincipalPolicy`, `access-analyzer:ValidatePolicy`
-  - If one of these is missing, the screens that need it say which action is missing.
+  - If one of these is missing, most screens that need it say which action is missing.
 - Making changes in the IAM workspace also needs the matching write actions:
   - `iam:AttachUserPolicy`, `iam:AttachGroupPolicy`, `iam:AttachRolePolicy`, and the matching `Detach…Policy`, `Put…Policy`, and `Delete…Policy` actions
   - `iam:AddUserToGroup`, `iam:RemoveUserFromGroup`
