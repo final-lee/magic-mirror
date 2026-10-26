@@ -188,8 +188,9 @@ function Results({ profile, result, overview, onOpen }: ResultsProps) {
   );
 }
 
+/** 이 주체의 AWS 판정. 시뮬레이터는 찾은 주체 모두에 대해 물었으니, 결과가 없으면 그 주체만 실패한 것이다(권한 없음 등) */
 function Decision({ result }: { result: SimulateResult | undefined }) {
-  if (!result) return <span className="dim">—</span>;
+  if (!result) return <span className="dim">확인하지 못했어요</span>;
   const d = DECISION[result.decision];
   return (
     <>

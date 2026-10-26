@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { desktop } from "../api/desktop";
 import { ErrorState } from "../components/ErrorState";
-import { formatAgo, formatDateTime, formatDay } from "./format";
+import { formatAgo, formatDateTime, formatDay, prettyJson } from "./format";
 import { useLastAccessed } from "./queries";
 import type { IamChange, LastAccessed } from "./types";
 
@@ -49,15 +49,6 @@ function sortServices(services: Service[]): Service[] {
   return [...services].sort((a, b) => time(a) - time(b) || a.name.localeCompare(b.name, "ko"));
 }
 
-/** 보기 좋게 들여 쓴다. JSON이 아니면 받은 그대로 보여준다. */
-function indent(document: string): string {
-  try {
-    return JSON.stringify(JSON.parse(document), null, 2);
-  } catch {
-    return document;
-  }
-}
-
 /** 줄인 정책을 저장할 인라인 정책 이름: least-privilege-20261026 */
 const draftName = () => `least-privilege-${formatDay(new Date().toISOString()).replace(/-/g, "")}`;
 
@@ -92,7 +83,7 @@ export function UnusedPermissions({ profile, arn, onOpenPolicy, onOpenGroup, onF
   }
 
   const completed = formatDateTime(data.completedAt);
-  const pretty = data.draft === null ? null : indent(data.draft);
+  const pretty = data.draft === null ? null : prettyJson(data.draft);
 
   return (
     <div className="up">

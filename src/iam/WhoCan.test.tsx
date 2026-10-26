@@ -248,7 +248,9 @@ describe("AWS로 확인", () => {
     await screen.findByRole("columnheader", { name: "AWS 확인" });
     expect(decisionOf("alice")).toBe("허용");
     expect(decisionOf("bob")).toBe("명시적 거부");
-    expect(awsCell("app-role")).toHaveTextContent("—"); // 결과가 없는 주체
+    // 물었는데 결과가 없는 주체(그 주체만 시뮬레이터 호출이 실패했다)는 빈칸이 아니라 확인하지 못했다고 말한다
+    expect(awsCell("app-role")).toHaveTextContent("확인하지 못했어요");
+    expect(awsCell("app-role")).not.toHaveTextContent("—");
   });
 
   test("shows progress while AWS answers and blocks a second click", async () => {

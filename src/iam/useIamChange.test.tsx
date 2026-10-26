@@ -401,14 +401,20 @@ describe("a failed apply", () => {
     expect(h.flow().pending).toBeNull();
   });
 
-  test("does not re-read the (possibly large) IAM snapshot, only the change log that recorded the failure", async () => {
+  test("re-reads the IAM views of the profile and the change log, since part of the change may have been applied", async () => {
     m.apply.mockRejectedValueOnce({ kind: "network", message: "timeout" });
     const h = setup();
     await waitFor(() => expect(h.result.current.overview.isSuccess).toBe(true));
     h.qc.setQueryData(iamKeys.changeLog, []);
+    h.qc.setQueryData(iamKeys.policy("prod", "arn:aws:iam::123456789012:policy/x"), { any: "thing" });
+    h.qc.setQueryData(iamKeys.policy("dev", "arn:aws:iam::123456789012:policy/x"), { any: "thing" });
     await startAndWait(h, attachReadOnlyToBob);
     await act(async () => h.flow().apply(""));
-    expect(m.overview).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(m.overview).toHaveBeenCalledTimes(2));
+    // 백엔드가 실패 뒤에 스냅숏을 버렸으니 강제로 새로 읽게 하지는 않는다
+    expect(m.overview).toHaveBeenLastCalledWith("prod", false);
+    expect(h.qc.getQueryState(iamKeys.policy("prod", "arn:aws:iam::123456789012:policy/x"))?.isInvalidated).toBe(true);
+    expect(h.qc.getQueryState(iamKeys.policy("dev", "arn:aws:iam::123456789012:policy/x"))?.isInvalidated).toBe(false);
     expect(h.qc.getQueryState(iamKeys.changeLog)?.isInvalidated).toBe(true);
     expect(h.flow().pending?.error?.message).toBe("네트워크 오류: timeout");
   });

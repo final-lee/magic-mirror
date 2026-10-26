@@ -184,13 +184,18 @@ describe("type to confirm", () => {
     expect(props.onApply).toHaveBeenCalledWith("bob");
   });
 
-  test("hints when what was typed differs, but not before anything was typed", () => {
+  test("hints when what was typed differs, but not before anything was typed or while a correct start is being typed", () => {
     setup(confirmPreview());
-    expect(screen.queryByText("입력한 이름이 달라요")).not.toBeInTheDocument();
+    const hint = () => screen.queryByText("입력한 이름이 달라요");
+    expect(hint()).not.toBeInTheDocument();
     fireEvent.change(confirmInput("bob"), { target: { value: "bo" } });
-    expect(screen.getByText("입력한 이름이 달라요")).toBeInTheDocument();
+    expect(hint()).not.toBeInTheDocument();
+    for (const wrong of ["bx", "Bo", " b", "bobb"]) {
+      fireEvent.change(confirmInput("bob"), { target: { value: wrong } });
+      expect(hint()).toBeInTheDocument();
+    }
     fireEvent.change(confirmInput("bob"), { target: { value: "bob" } });
-    expect(screen.queryByText("입력한 이름이 달라요")).not.toBeInTheDocument();
+    expect(hint()).not.toBeInTheDocument();
   });
 
   test("Enter in the field never applies, not even with the right text", () => {
@@ -438,8 +443,9 @@ describe("impacts", () => {
     const item = screen.getByTestId(`impact-${alice.arn}`);
     const gained = within(item).getByTestId("gained");
     expect(within(gained).getAllByRole("listitem")).toHaveLength(21);
-    expect(lastRow(gained)).toHaveTextContent(/^외 1630개$/);
-    expect(lastRow(within(item).getByTestId("lost"))).toHaveTextContent(/^외 7개$/);
+    // 줄마다 붙는 "외 N개"(그 줄의 작업 수)와 다르게, 빠진 것은 (서비스, 수준) 줄이라고 적는다
+    expect(lastRow(gained)).toHaveTextContent(/^서비스·수준 1630개 더$/);
+    expect(lastRow(within(item).getByTestId("lost"))).toHaveTextContent(/^서비스·수준 7개 더$/);
   });
 
   test("shows actions that become conditional under their own label", () => {
@@ -452,7 +458,7 @@ describe("impacts", () => {
     expect(list).toHaveTextContent("s3");
     expect(list).toHaveTextContent("40개");
     expect(list).toHaveTextContent("s3:GetObject");
-    expect(lastRow(list)).toHaveTextContent(/^외 3개$/);
+    expect(lastRow(list)).toHaveTextContent(/^서비스·수준 3개 더$/);
     expect(within(item).queryByText("권한 변화 없음")).not.toBeInTheDocument();
     expect(within(item).queryByTestId("gained")).not.toBeInTheDocument();
   });

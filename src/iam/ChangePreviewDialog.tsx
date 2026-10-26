@@ -218,7 +218,8 @@ function Deltas({ kind, deltas, omitted }: { kind: keyof typeof DELTA; deltas: P
             {d.count > d.sample.length && <span className="dim"> 외 {d.count - d.sample.length}개</span>}
           </li>
         ))}
-        {omitted > 0 && <li className="dim">외 {omitted}개</li>}
+        {/* 줄마다 붙는 "외 N개"(그 줄의 작업 수)와 헷갈리지 않게, 빠진 것이 (서비스, 수준) 줄이라고 적는다 */}
+        {omitted > 0 && <li className="dim">서비스·수준 {omitted}개 더</li>}
       </ul>
     </>
   );
@@ -242,7 +243,8 @@ function ConfirmField({ required, typed, onTyped, locked }: { required: string; 
           if (e.key === "Enter") e.preventDefault();
         }}
       />
-      {typed !== "" && typed !== required && <span className="err">입력한 이름이 달라요</span>}
+      {/* 아직 입력하는 중(맞게 쓴 앞부분)일 때는 틀렸다고 하지 않는다 */}
+      {!required.startsWith(typed) && <span className="err">입력한 이름이 달라요</span>}
     </label>
   );
 }

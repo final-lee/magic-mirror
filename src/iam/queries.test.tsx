@@ -187,6 +187,36 @@ describe("hooks", () => {
     expect(m.lastAccessed).toHaveBeenCalledTimes(1);
   });
 
+  test("the slow results outlive the default 5 minutes after their screen is closed, for 30 minutes", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { qc, wrapper } = makeClient();
+      const { result, unmount } = renderHook(
+        () => ({ sim: useSimulation("prod", [alice.arn], "s3:GetObject", null), last: useLastAccessed("prod", alice.arn) }),
+        { wrapper },
+      );
+      await act(async () => {
+        await result.current.sim.refetch();
+        await result.current.last.refetch();
+      });
+      unmount();
+      const simKey = iamKeys.simulate("prod", "s3:GetObject", "", [alice.arn]);
+      const lastKey = iamKeys.lastAccessed("prod", alice.arn);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6 * 60_000);
+      });
+      expect(qc.getQueryData(simKey)).toEqual(simulateResults);
+      expect(qc.getQueryData(lastKey)).toEqual(sampleLastAccessed());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(25 * 60_000);
+      });
+      expect(qc.getQueryData(simKey)).toBeUndefined();
+      expect(qc.getQueryData(lastKey)).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("the policy picker list is searched by name, and typing keeps the previous list until the new one arrives", async () => {
     const { wrapper } = makeClient();
     m.listPolicies.mockImplementation(async (_p, query) => (query === "" ? [policyRef("ReadOnlyAccess")] : [policyRef("AdministratorAccess")]));
