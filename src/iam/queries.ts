@@ -35,6 +35,12 @@ export const iamKeys = {
   changeLog: ["iam", "changeLog"] as const,
 };
 
+/**
+ * 사용자가 눌러야 도는 느린 조회(정책 시뮬레이터, 마지막 사용 시각 집계는 최대 30초)의 결과를 화면을 떠난 뒤에도 남겨 두는 시간.
+ * 기본값(5분)이면 다른 사용자를 보고 돌아왔을 때 결과가 사라져서 다시 오래 기다려야 한다.
+ */
+export const SLOW_RESULT_GC_MS = 30 * 60_000;
+
 /** 다음 overview 조회를 force=true로 부를 프로필들. 새로 고침이 켜고, 조회가 한 번 쓰면서 끈다. */
 const forceNext = new Set<string>();
 
@@ -118,6 +124,7 @@ export function useSimulation(profile: string, arns: string[], action: string, r
     queryFn: () => iamApi.simulate(profile, arns, action, resource),
     enabled: false,
     staleTime: Infinity,
+    gcTime: SLOW_RESULT_GC_MS,
     retry: false,
   });
 }
@@ -132,6 +139,7 @@ export function useLastAccessed(profile: string, arn: string) {
     queryFn: () => iamApi.lastAccessed(profile, arn),
     enabled: false,
     staleTime: Infinity,
+    gcTime: SLOW_RESULT_GC_MS,
     retry: false,
   });
 }

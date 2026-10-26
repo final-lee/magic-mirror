@@ -164,7 +164,9 @@ export function useIamChange(profile: string) {
           onApplied.current = undefined;
           done?.();
         } catch (e) {
-          // 실패도 기록에 남으므로 기록만 다시 읽는다. 큰 계정의 스냅숏을 헛되이 다시 만들지 않는다.
+          // 실패도 기록에 남는다. 앞의 호출이 이미 적용됐을 수 있어서(버전을 지운 뒤 새 버전 만들기가 실패 등) IAM 화면도 다시 읽는다.
+          // 아무것도 쓰지 않은 거부였다면 백엔드는 캐시한 스냅숏을 그대로 주고, 썼다면 백엔드가 이미 그 스냅숏을 버렸다
+          void qc.invalidateQueries({ queryKey: iamKeys.root(cur.profile) });
           void qc.invalidateQueries({ queryKey: iamKeys.changeLog });
           commit({ ...cur, phase: "ready", error: { kind: "apply", message: errorMessage(e) }, stale: true });
         } finally {
