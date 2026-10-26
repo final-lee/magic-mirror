@@ -56,6 +56,9 @@ export interface Settings {
   favorites: Favorite[];
   lastProfile: string | null;
   lastRegion: string | null;
+  explorerLocalPath?: string | null;
+  diffTool?: "filemerge" | "vscode" | "custom" | null;
+  diffToolCommand?: string | null;
 }
 
 export interface S3Entry {
