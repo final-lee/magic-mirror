@@ -112,7 +112,10 @@ export default function App() {
   const closeTab = (id: string) => {
     setExplorerTabs((tabs) => tabs.filter((t) => t.id !== id));
     setDiffTabs((tabs) => tabs.filter((t) => t.id !== id));
-    if (activeTab === id) setActiveTab("explorer");
+    if (activeTab === id) {
+      const order = tabs.map((t) => t.id);
+      setActiveTab(order[order.indexOf(id) - 1] ?? "resources");
+    }
   };
   const activate = (id: string) => {
     setActiveTab(id);
@@ -121,7 +124,6 @@ export default function App() {
   const diffTitle = (l: FileRef, r: FileRef) => (refName(l) === refName(r) ? `⇄ ${refName(l)}` : `⇄ ${refName(l)} ↔ ${refName(r)}`);
   const tabs: TabInfo[] = [
     { id: "resources", title: "리소스", closable: false },
-    { id: "explorer", title: "S3 탐색기", closable: false },
     ...explorerTabs.map((t) => ({ id: t.id, title: `S3: ${t.location.bucket}`, closable: true })),
     ...diffTabs.map((t) => ({ id: t.id, title: diffTitle(t.left, t.right), closable: true })),
   ];
@@ -192,20 +194,6 @@ export default function App() {
           onOpenBucket={openExplorer}
           onRefresh={refresh}
           active={activeTab === "resources"}
-        />
-      </div>
-      <div className="tabpane" hidden={activeTab !== "explorer"}>
-        <ExplorerTab
-          profile={profile}
-          region={region}
-          s3Service={s3Service}
-          filter={activeTab === "explorer" ? filter : ""}
-          active={activeTab === "explorer"}
-          initialLocalPath={settings.explorerLocalPath ?? null}
-          onLocalPathChange={(path) => update({ explorerLocalPath: path })}
-          transfers={transfers}
-          onOpenDiff={openDiff}
-          onRefresh={refresh}
         />
       </div>
       {explorerTabs.map((t) => (
