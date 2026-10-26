@@ -25,7 +25,8 @@ function summarize(grants: ActionGrant[]): string {
   return parts.join(" · ");
 }
 
-function Source({ s, onOpenPolicy, onOpenGroup }: { s: GrantSource } & Pick<Props, "onOpenPolicy" | "onOpenGroup">) {
+/** 작업 하나의 근거 한 줄(정책, 상속한 그룹, Sid, 조건). 누가 할 수 있나 화면의 근거 칸도 같은 모양을 쓴다. */
+export function Source({ s, onOpenPolicy, onOpenGroup }: { s: GrantSource } & Pick<Props, "onOpenPolicy" | "onOpenGroup">) {
   return (
     <li className="dr-s">
       <button className="link" onClick={() => onOpenPolicy(s.policyId)}>

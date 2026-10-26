@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ErrorState } from "../components/ErrorState";
 import { onMouseNav } from "../explorer/api";
+import { Findings } from "./Findings";
 import { IamNav, type NavCounts } from "./IamNav";
 import { PolicyDetail } from "./PolicyDetail";
 import { PolicyList } from "./PolicyList";
@@ -11,6 +12,7 @@ import { refreshIam, useIamOverview } from "./queries";
 import { policyNameFromId, policyRoute, principalRoute, routeForFocus, VIEW_LABEL, type IamRoute, type IamView } from "./route";
 import type { IamOverview, PrincipalKind } from "./types";
 import { useIamHistory } from "./useIamHistory";
+import { WhoCan } from "./WhoCan";
 
 interface Props {
   profile: string;
@@ -23,8 +25,8 @@ interface Props {
   nonce: number;
 }
 
-// 처음 열면 사용자 목록. 점검 화면이 생기면 이 한 줄만 바꾸면 된다.
-const HOME: IamRoute = { view: "users" };
+// 처음 열면 보안 점검 화면
+const HOME: IamRoute = { view: "findings" };
 
 const KIND_OF_VIEW: Partial<Record<IamView, PrincipalKind>> = { users: "user", groups: "group", roles: "role" };
 
@@ -168,8 +170,12 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
         />
       </section>
     );
+  } else if (route.view === "findings") {
+    body = <Findings profile={profile} overview={ov} onOpen={navigate} initialKind={route.tab} onViewState={remember} />;
+  } else if (route.view === "whoCan") {
+    body = <WhoCan profile={profile} overview={ov} onOpen={navigate} initial={route.search} onViewState={remember} />;
   } else {
-    // 점검 · 누가 할 수 있나 · 변경 기록 화면이 들어올 자리
+    // 변경 기록 화면이 들어올 자리
     body = (
       <section className="center">
         <div className="empty">{VIEW_LABEL[route.view]} 화면은 곧 추가돼요</div>

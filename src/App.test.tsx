@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import App from "./App";
 import { api } from "./api/client";
 import { iamApi } from "./iam/api";
-import { ACCOUNT, alice, aliceView, bob, sampleOverview } from "./iam/fixtures";
+import { ACCOUNT, alice, aliceView, bob, sampleFindings, sampleOverview } from "./iam/fixtures";
 import { vpcApi } from "./vpcmap/api";
 import { sampleTopology } from "./vpcmap/fixtures";
 import { makeResource, renderWithClient, sampleServices } from "./test/utils";
@@ -31,7 +31,7 @@ vi.mock("./explorer/api", () => ({
 }));
 vi.mock("./vpcmap/api", () => ({ vpcApi: { topology: vi.fn(), savePng: vi.fn() } }));
 vi.mock("./iam/api", () => ({
-  iamApi: { overview: vi.fn(), principal: vi.fn(), principalActions: vi.fn(), policy: vi.fn(), accessKeys: vi.fn() },
+  iamApi: { overview: vi.fn(), principal: vi.fn(), principalActions: vi.fn(), policy: vi.fn(), accessKeys: vi.fn(), findings: vi.fn() },
 }));
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: vi.fn(async () => () => {}) }),
@@ -252,12 +252,20 @@ describe("IAM 작업 공간 탭", () => {
     iam.overview.mockResolvedValue(sampleOverview());
     iam.principal.mockImplementation(async (_profile, arn) => aliceView(arn === bob.arn ? { summary: bob } : {}));
     iam.principalActions.mockResolvedValue([]);
+    iam.findings.mockResolvedValue(sampleFindings());
     m.listResources.mockResolvedValue({ items: [makeResource("alice", { name: "alice" }, { arn: alice.arn })], truncated: false });
   });
   const openFromSidebar = async () => {
     renderWithClient(<App />);
     fireEvent.click(await screen.findByText("IAM"));
     fireEvent.click(await screen.findByText("🔐 IAM 관리"));
+  };
+  // IAM 탭은 점검 화면으로 열린다. 사용자 목록이 필요하면 메뉴로 이동한다.
+  const findingCards = () => screen.findByRole("group", { name: "점검 항목" });
+  const openIamUsers = async () => {
+    await openFromSidebar();
+    fireEvent.click(within(await screen.findByRole("navigation", { name: "IAM 메뉴" })).getByRole("button", { name: /사용자/ }));
+    return screen.findByTestId("iam-list");
   };
   const openUserFromList = async () => {
     fireEvent.click(await screen.findByText("IAM"));
@@ -271,9 +279,8 @@ describe("IAM 작업 공간 탭", () => {
     const tab = await screen.findByRole("tab", { name: IAM_TAB });
     expect(tab).toHaveAttribute("aria-selected", "true");
     expect(iam.overview).toHaveBeenCalledWith("prod", false);
-    const list = await screen.findByTestId("iam-list");
-    expect(list).toBeVisible();
-    expect(within(list).getByText("alice")).toBeInTheDocument();
+    expect(await findingCards()).toBeVisible();
+    expect(iam.findings).toHaveBeenCalledWith("prod");
   });
 
   test("the title is just 🔐 IAM until the overview has loaded", async () => {
@@ -305,7 +312,7 @@ describe("IAM 작업 공간 탭", () => {
 
   test("an open tab moves to the target of a later double click", async () => {
     await openFromSidebar();
-    await screen.findByTestId("iam-list");
+    await findingCards();
     fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
     fireEvent.click(screen.getByText("Users"));
     fireEvent.doubleClick(await screen.findByText("alice", { selector: "[data-testid=resource-table] *" }));
@@ -348,8 +355,7 @@ describe("IAM 작업 공간 탭", () => {
   });
 
   test("the toolbar filter narrows the IAM list only while that tab is active", async () => {
-    await openFromSidebar();
-    const list = await screen.findByTestId("iam-list");
+    const list = await openIamUsers();
     expect(within(list).getByText("alice")).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText(/필터/), { target: { value: "bob" } });
     expect(within(list).queryByText("alice")).not.toBeInTheDocument();
@@ -362,7 +368,7 @@ describe("IAM 작업 공간 탭", () => {
 
   test("⌘R rebuilds the IAM snapshot with a forced overview call", async () => {
     await openFromSidebar();
-    await screen.findByTestId("iam-list");
+    await findingCards();
     fireEvent.keyDown(window, { key: "r", metaKey: true });
     await waitFor(() => expect(iam.overview).toHaveBeenLastCalledWith("prod", true));
   });
@@ -376,9 +382,10 @@ describe("IAM 작업 공간 탭", () => {
     fireEvent.click(screen.getByRole("tab", { name: IAM_TAB }));
     expect(screen.getByRole("heading", { name: "alice" })).toBeVisible();
     fireEvent.keyDown(window, { key: "[", metaKey: true });
-    expect(await screen.findByTestId("iam-list")).toBeVisible();
+    expect(await findingCards()).toBeVisible();
     // 목록에서 다른 행으로 열면 새 기록이 쌓인다
-    fireEvent.doubleClick(within(screen.getByTestId("iam-list")).getByText(bob.name));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "IAM 메뉴" })).getByRole("button", { name: /사용자/ }));
+    fireEvent.doubleClick(within(await screen.findByTestId("iam-list")).getByText(bob.name));
     expect(await screen.findByRole("heading", { name: "bob" })).toBeVisible();
   });
 });

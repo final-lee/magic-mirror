@@ -15,19 +15,20 @@ import {
   devTeamView,
   readOnlyPolicy,
   s3WriteGrants,
+  sampleLastAccessed,
   sampleOverview,
   scratchInline,
 } from "./fixtures";
 import { PrincipalDetail } from "./PrincipalDetail";
 
-vi.mock("./api", () => ({ iamApi: { principal: vi.fn(), principalActions: vi.fn(), accessKeys: vi.fn() } }));
+vi.mock("./api", () => ({ iamApi: { principal: vi.fn(), principalActions: vi.fn(), accessKeys: vi.fn(), lastAccessed: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 vi.mock("../api/desktop", () => ({ desktop: { copy: vi.fn(), openUrl: vi.fn() } }));
 
 const m = vi.mocked(iamApi);
 
 function setup(arn = alice.arn, extra: Partial<React.ComponentProps<typeof PrincipalDetail>> = {}) {
-  const props = { onOpen: vi.fn(), onViewState: vi.fn() };
+  const props = { onOpen: vi.fn(), onViewState: vi.fn(), onFix: vi.fn() };
   const utils = renderWithClient(<PrincipalDetail profile="prod" arn={arn} overview={sampleOverview()} {...props} {...extra} />);
   return { props, ...utils };
 }
@@ -39,6 +40,7 @@ beforeEach(() => {
   m.principal.mockResolvedValue(aliceView());
   m.principalActions.mockResolvedValue(s3WriteGrants);
   m.accessKeys.mockResolvedValue(bobKeys);
+  m.lastAccessed.mockResolvedValue(sampleLastAccessed());
 });
 
 describe("header", () => {
@@ -76,17 +78,17 @@ describe("header", () => {
 });
 
 describe("sub-tabs", () => {
-  test("a user has permissions, policies, groups and access keys", async () => {
+  test("a user has permissions, policies, groups, access keys and unused permissions", async () => {
     setup();
     await screen.findByRole("heading", { name: "alice" });
-    expect(tabNames()).toEqual(["권한", "정책 4", "그룹 1", "액세스 키"]);
+    expect(tabNames()).toEqual(["권한", "정책 4", "그룹 1", "액세스 키", "안 쓰는 권한"]);
   });
 
-  test("a role has permissions, policies and trust", async () => {
+  test("a role has permissions, policies, trust and unused permissions", async () => {
     m.principal.mockResolvedValue(appRoleView());
     setup(appRole.arn);
     await screen.findByRole("heading", { name: "app-role" });
-    expect(tabNames()).toEqual(["권한", "정책 2", "신뢰 3"]);
+    expect(tabNames()).toEqual(["권한", "정책 2", "신뢰 3", "안 쓰는 권한"]);
   });
 
   test("a group has permissions, policies and members", async () => {
@@ -324,5 +326,63 @@ describe("trust", () => {
     setup(appRole.arn);
     fireEvent.click(await tab(/^신뢰/));
     expect(screen.getByText("이 역할을 맡을 수 있는 대상이 없어요")).toBeInTheDocument();
+  });
+});
+
+describe("unused permissions", () => {
+  const unusedTab = () => tab("안 쓰는 권한");
+
+  test("the tab asks AWS only when 불러오기 is pressed, for this principal", async () => {
+    setup();
+    fireEvent.click(await unusedTab());
+    expect(screen.getByRole("tab", { name: "안 쓰는 권한" })).toHaveAttribute("aria-selected", "true");
+    expect(m.lastAccessed).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "불러오기" }));
+    expect(await screen.findByRole("table", { name: "서비스별 마지막 사용" })).toBeInTheDocument();
+    expect(m.lastAccessed).toHaveBeenCalledWith("prod", alice.arn);
+  });
+
+  test("works for roles too", async () => {
+    m.principal.mockResolvedValue(appRoleView());
+    setup(appRole.arn);
+    fireEvent.click(await unusedTab());
+    fireEvent.click(screen.getByRole("button", { name: "불러오기" }));
+    await screen.findByRole("table", { name: "서비스별 마지막 사용" });
+    expect(m.lastAccessed).toHaveBeenCalledWith("prod", appRole.arn);
+  });
+
+  test("reports the tab for the history and keeps the loaded result when switching tabs", async () => {
+    const { props } = setup();
+    fireEvent.click(await unusedTab());
+    expect(props.onViewState).toHaveBeenLastCalledWith({ tab: "unused", cell: null });
+    fireEvent.click(screen.getByRole("button", { name: "불러오기" }));
+    await screen.findByRole("table", { name: "서비스별 마지막 사용" });
+    fireEvent.click(await tab(/^정책/));
+    fireEvent.click(await unusedTab());
+    expect(await screen.findByRole("table", { name: "서비스별 마지막 사용" })).toBeInTheDocument();
+    expect(m.lastAccessed).toHaveBeenCalledTimes(1);
+  });
+
+  test("restores the tab from the history", async () => {
+    setup(alice.arn, { initialTab: "unused" });
+    expect(await unusedTab()).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: "불러오기" })).toBeInTheDocument();
+  });
+
+  test("policy and group links navigate; a fix goes to onFix", async () => {
+    const { props } = setup();
+    fireEvent.click(await unusedTab());
+    fireEvent.click(screen.getByRole("button", { name: "불러오기" }));
+    await screen.findByRole("table", { name: "서비스별 마지막 사용" });
+
+    fireEvent.click(screen.getByRole("button", { name: "ReadOnlyAccess" }));
+    expect(props.onOpen).toHaveBeenLastCalledWith({ view: "policies", id: readOnlyPolicy.id });
+    const inherited = screen.getByRole("button", { name: "app-deploy" }).closest("tr") as HTMLElement;
+    fireEvent.click(within(inherited).getByRole("button", { name: "dev-team" }));
+    expect(props.onOpen).toHaveBeenLastCalledWith({ view: "groups", id: devTeam.arn });
+
+    const direct = screen.getByRole("button", { name: "ReadOnlyAccess" }).closest("tr") as HTMLElement;
+    fireEvent.click(within(direct).getByRole("button", { name: "떼기" }));
+    expect(props.onFix).toHaveBeenCalledWith({ op: "detachPolicy", target: alice.arn, policyArn: readOnlyPolicy.id });
   });
 });
