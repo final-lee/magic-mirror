@@ -236,7 +236,7 @@ mod tests {
         let denied = AppError::AccessDenied {
             action: "sqs:GetQueueAttributes".into(),
         };
-        let r = settle(vec![Ok(10), Err(denied), Ok(30)], |i, _| i as i32 * -1).unwrap();
+        let r = settle(vec![Ok(10), Err(denied), Ok(30)], |i, _| -(i as i32)).unwrap();
         assert_eq!(r, vec![10, -1, 30]);
         assert_eq!(settle::<i32>(vec![], |_, _| 0), Ok(vec![]));
     }

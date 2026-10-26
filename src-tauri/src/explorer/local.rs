@@ -35,7 +35,7 @@ pub fn list_dir(path: &Path) -> Result<Vec<LocalEntry>, AppError> {
             name,
             path: entry.path().to_string_lossy().into_owned(),
             is_dir,
-            size: (!is_dir).then(|| meta.len()),
+            size: (!is_dir).then_some(meta.len()),
             modified: meta.modified().ok().map(system_time_iso),
         });
     }

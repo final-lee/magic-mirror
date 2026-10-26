@@ -134,12 +134,12 @@ fn push_replace(rows: &mut Vec<DiffRow>, stats: &mut DiffStats, o: Range<usize>,
         rows.push(row(RowKind::Replace, line(a + 1, l), line(b + 1, r)));
         stats.changed += 1;
     }
-    for a in o.start + pairs..o.end {
-        rows.push(row(RowKind::Delete, line(a + 1, plain(old[a])), None));
+    for (a, text) in old.iter().enumerate().take(o.end).skip(o.start + pairs) {
+        rows.push(row(RowKind::Delete, line(a + 1, plain(text)), None));
         stats.removed += 1;
     }
-    for b in n.start + pairs..n.end {
-        rows.push(row(RowKind::Insert, None, line(b + 1, plain(new[b]))));
+    for (b, text) in new.iter().enumerate().take(n.end).skip(n.start + pairs) {
+        rows.push(row(RowKind::Insert, None, line(b + 1, plain(text))));
         stats.added += 1;
     }
 }
