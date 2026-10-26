@@ -88,6 +88,16 @@ pub fn plan_upload(
             });
         }
     }
+    // 같은 S3 키로 가는 파일이 둘 이상이면 하나가 조용히 덮어써지므로 막는다.
+    let mut seen = std::collections::HashSet::new();
+    for r in &out {
+        if !seen.insert(r.key.as_str()) {
+            let name = r.key.rsplit('/').next().unwrap_or(&r.key);
+            return Err(AppError::other(format!(
+                "이름이 같은 파일이 여러 개라 같은 위치에 올라가요: {name}. 나눠서 올려 주세요"
+            )));
+        }
+    }
     Ok(out)
 }
 
@@ -103,6 +113,7 @@ pub async fn plan_download(
     let client = s3_client(&state, &profile, &region).await?;
     let dir = PathBuf::from(&local_dir);
     let mut out = Vec::new();
+    let mut seen_paths = std::collections::HashSet::new();
     for selected in &keys {
         let base = crate::explorer::keys::parent_prefix(selected).to_string();
         for (key, _) in s3ops::expand_keys(&client, &bucket, std::slice::from_ref(selected)).await? {
@@ -110,6 +121,9 @@ pub async fn plan_download(
                 continue; // 폴더 표시 객체는 파일로 받지 않는다
             }
             let Some(path) = crate::explorer::keys::download_path(&dir, &base, &key) else { continue };
+            if !seen_paths.insert(path.clone()) {
+                continue; // 같은 로컬 경로로 가는 요청은 처음 것만 남긴다
+            }
             out.push(TransferRequest {
                 id: crate::explorer::keys::new_transfer_id(out.len()),
                 direction: Direction::Download,
@@ -369,6 +383,25 @@ mod tests {
         assert!(reqs.iter().all(|r| r.direction == Direction::Upload && r.bucket == "b"));
         let ids: std::collections::HashSet<_> = reqs.iter().map(|r| r.id.clone()).collect();
         assert_eq!(ids.len(), 3);
+    }
+
+    #[test]
+    fn plan_upload_rejects_duplicate_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        // 서로 다른 폴더의 파일을 직접 고르면 둘 다 prefix/same.txt 가 된다
+        std::fs::write(a.join("same.txt"), "1").unwrap();
+        std::fs::write(b.join("same.txt"), "2").unwrap();
+        let err = plan_upload(
+            vec![a.join("same.txt").to_string_lossy().into_owned(), b.join("same.txt").to_string_lossy().into_owned()],
+            "b".into(),
+            "r".into(),
+            "".into(),
+        )
+        .unwrap_err();
+        assert!(format!("{err:?}").contains("same.txt"));
     }
 
     #[test]
