@@ -11,11 +11,12 @@ interface Props {
   filter: string;
   onOpenBucket: (loc: S3Location) => void;
   onOpenVpc?: (vpc: { vpcId: string; name: string; region: string }) => void;
+  onOpenIam?: (arn: string | null) => void;
   onRefresh: () => void;
   active: boolean;
 }
 
-export function MainArea({ services, selection, profile, region, account, filter, onOpenBucket, onOpenVpc, onRefresh, active }: Props) {
+export function MainArea({ services, selection, profile, region, account, filter, onOpenBucket, onOpenVpc, onOpenIam, onRefresh, active }: Props) {
   const service = services.find((s) => s.id === selection?.service);
   const type = service?.types.find((t) => t.id === selection?.type);
   if (!profile || !service || !type) {
@@ -35,6 +36,7 @@ export function MainArea({ services, selection, profile, region, account, filter
       filter={filter}
       onOpenBucket={onOpenBucket}
       onOpenVpc={onOpenVpc}
+      onOpenIam={onOpenIam}
       onRefresh={onRefresh}
       active={active}
     />
