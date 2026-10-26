@@ -4,6 +4,7 @@ mod commands;
 mod error;
 mod explorer;
 mod explorer_commands;
+mod iam;
 mod model;
 mod mouse_nav;
 mod settings;
