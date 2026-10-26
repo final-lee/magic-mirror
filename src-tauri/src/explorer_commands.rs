@@ -323,9 +323,11 @@ pub async fn open_external_diff(
     profile: String,
     left: FileRef,
     right: FileRef,
-    tool: String,
-    command: Option<String>,
 ) -> Result<(), AppError> {
+    // 비교 도구는 프론트엔드가 아니라 저장된 설정에서만 읽는다.
+    let saved = crate::settings::load(&state.settings_path, &[]);
+    let tool = saved.diff_tool.unwrap_or_else(|| "filemerge".into());
+    let command = saved.diff_tool_command;
     external::sweep_stale();
     let l = materialize(&state, &profile, &left).await?;
     let r = match materialize(&state, &profile, &right).await {

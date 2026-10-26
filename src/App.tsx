@@ -208,8 +208,6 @@ export default function App() {
             right={t.right}
             active={activeTab === t.id}
             transfers={transfers}
-            diffTool={diffTool}
-            diffToolCommand={settings.diffToolCommand ?? null}
           />
         </div>
       ))}

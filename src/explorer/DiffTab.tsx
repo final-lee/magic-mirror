@@ -6,7 +6,7 @@ import { formatBytes, formatDate } from "../lib/format";
 import { explorerApi } from "./api";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { refKey, refLabel } from "./rows";
-import type { DiffLine, DiffResult, DiffRow, DiffTool, FileRef, TransferRequest } from "./types";
+import type { DiffLine, DiffResult, DiffRow, FileRef, TransferRequest } from "./types";
 import type { Transfers } from "./useTransfers";
 
 interface Props {
@@ -15,8 +15,6 @@ interface Props {
   right: FileRef;
   active: boolean;
   transfers: Transfers;
-  diffTool: DiffTool;
-  diffToolCommand: string | null;
 }
 
 const VERDICT = { same: "같은 파일로 보여요", different: "두 파일이 달라요", unknown: "같은지 판단할 수 없어요" } as const;
@@ -50,7 +48,7 @@ function RowView({ row }: { row: DiffRow }) {
   );
 }
 
-export function DiffTab({ profile, left, right, active, transfers, diffTool, diffToolCommand }: Props) {
+export function DiffTab({ profile, left, right, active, transfers }: Props) {
   const q = useQuery<DiffResult>({
     queryKey: ["diff", profile, refKey(left), refKey(right)],
     queryFn: () => explorerApi.diffFiles(profile!, left, right),
@@ -104,7 +102,7 @@ export function DiffTab({ profile, left, right, active, transfers, diffTool, dif
   const openExternal = () => {
     if (!profile) return;
     setNotice(null);
-    explorerApi.openExternalDiff(profile, left, right, diffTool, diffToolCommand).catch((e) => setNotice(errorMessage(e)));
+    explorerApi.openExternalDiff(profile, left, right).catch((e) => setNotice(errorMessage(e)));
   };
 
   const d = q.data;
