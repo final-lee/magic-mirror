@@ -1,4 +1,4 @@
-import { useQuery, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, type QueryClient } from "@tanstack/react-query";
 import type { AppError } from "../api/types";
 import { iamApi } from "./api";
 import type { WhoCanSearch } from "./route";
@@ -6,9 +6,11 @@ import type {
   AccessKeyInfo,
   AccessLevel,
   ActionGrant,
+  ChangeLogEntry,
   Findings,
   IamOverview,
   LastAccessed,
+  PolicyRef,
   PolicyView,
   PrincipalView,
   SimulateResult,
@@ -27,7 +29,10 @@ export const iamKeys = {
   whoCan: (profile: string, action: string, resource: string) => ["iam", profile, "whoCan", action, resource] as const,
   simulate: (profile: string, action: string, resource: string, arns: string[]) => ["iam", profile, "simulate", action, resource, arns] as const,
   lastAccessed: (profile: string, arn: string) => ["iam", profile, "lastAccessed", arn] as const,
+  policyRefs: (profile: string, query: string) => ["iam", profile, "policyRefs", query] as const,
   catalog: ["iam", "catalog"] as const,
+  /** 변경 기록은 앱 데이터 폴더의 파일이라 프로필과 상관없다 */
+  changeLog: ["iam", "changeLog"] as const,
 };
 
 /** 다음 overview 조회를 force=true로 부를 프로필들. 새로 고침이 켜고, 조회가 한 번 쓰면서 끈다. */
@@ -127,6 +132,30 @@ export function useLastAccessed(profile: string, arn: string) {
     queryFn: () => iamApi.lastAccessed(profile, arn),
     enabled: false,
     staleTime: Infinity,
+    retry: false,
+  });
+}
+
+/**
+ * 정책 붙이기 선택 목록(이름 부분 일치, 최대 100개). 입력을 바꾸는 동안에는 이전 목록을 그대로 보여 주어
+ * 목록이 깜빡이지 않게 한다.
+ */
+export function usePolicyRefs(profile: string, query: string) {
+  return useQuery<PolicyRef[], AppError>({
+    queryKey: iamKeys.policyRefs(profile, query),
+    queryFn: () => iamApi.listPolicies(profile, query),
+    placeholderData: keepPreviousData,
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+/** 변경 기록(최신순). 화면을 열 때마다 다시 읽는다 — 다른 창이나 방금 한 변경이 바로 보여야 해서 캐시를 믿지 않는다. */
+export function useChangeLog() {
+  return useQuery<ChangeLogEntry[], AppError>({
+    queryKey: iamKeys.changeLog,
+    queryFn: iamApi.changeLog,
+    staleTime: 0,
     retry: false,
   });
 }

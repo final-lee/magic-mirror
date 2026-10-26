@@ -218,11 +218,13 @@ describe("items", () => {
     expect(within(rows()[0]).getAllByRole("button").map((b) => b.textContent)).toEqual(["bob", "CLI 복사"]);
   });
 
-  test("quick fixes are disabled while no change handler is connected", async () => {
-    setup({ onFix: undefined });
+  test("the quick-fix button is always usable: it opens the change preview, there is no placeholder state", async () => {
+    setup();
     await cardGroup();
     fireEvent.click(card("oldAccessKey"));
-    expect(within(rows()[0]).getByRole("button", { name: "키 비활성화" })).toBeDisabled();
+    const button = within(rows()[0]).getByRole("button", { name: "키 비활성화" });
+    expect(button).toBeEnabled();
+    expect(button).not.toHaveAttribute("title");
   });
 });
 
@@ -239,6 +241,57 @@ describe("report time and warnings", () => {
     setup();
     await cardGroup();
     expect(screen.queryByText(/기준/)).not.toBeInTheDocument();
+  });
+});
+
+describe("without a credential report", () => {
+  const CREDENTIAL_KINDS: FindingKind[] = ["rootAccessKey", "rootNoMfa", "consoleNoMfa", "oldAccessKey", "unusedAccessKey", "inactiveUser"];
+  const OTHER_KINDS: FindingKind[] = ["inactiveRole", "adminPrincipal", "privescPrincipal", "externalTrust", "unattachedPolicy"];
+  const NOT_CHECKED = "확인할 수 없어요 (자격 증명 보고서 없음)";
+
+  beforeEach(() => {
+    m.findings.mockResolvedValue(
+      sampleFindings({
+        generatedAt: null,
+        warnings: ["자격 증명 보고서를 불러오지 못했어요"],
+        groups: findingGroups({ adminPrincipal: [finding(bob.arn, "bob", "관리자급이에요")] }),
+      }),
+    );
+  });
+
+  test("the checks that need the report say they could not be checked instead of claiming there is no problem", async () => {
+    setup();
+    await cardGroup();
+    for (const kind of CREDENTIAL_KINDS) {
+      expect(card(kind)).toHaveTextContent(NOT_CHECKED);
+      expect(card(kind)).not.toHaveTextContent("문제 없음");
+      expect(card(kind)).toBeDisabled();
+    }
+  });
+
+  test("the other checks still report their own results", async () => {
+    setup();
+    await cardGroup();
+    for (const kind of OTHER_KINDS.filter((k) => k !== "adminPrincipal")) {
+      expect(card(kind)).toHaveTextContent("문제 없음");
+      expect(card(kind)).not.toHaveTextContent(NOT_CHECKED);
+    }
+    expect(card("adminPrincipal")).toHaveTextContent("1건");
+  });
+
+  test("with the report, an empty credential check is a plain no-problem", async () => {
+    m.findings.mockResolvedValue(sampleFindings({ generatedAt: "2026-10-26T03:00:00Z", groups: findingGroups() }));
+    setup();
+    await cardGroup();
+    expect(card("rootAccessKey")).toHaveTextContent("문제 없음");
+    expect(screen.queryByText(NOT_CHECKED)).not.toBeInTheDocument();
+  });
+
+  test("when nothing else was found the summary does not claim a clean account", async () => {
+    m.findings.mockResolvedValue(sampleFindings({ generatedAt: null, groups: findingGroups() }));
+    setup();
+    expect(await screen.findByText(/자격 증명 보고서가 없어서 일부 점검은 하지 못했어요/)).toBeInTheDocument();
+    expect(screen.queryByText("발견된 문제가 없어요")).not.toBeInTheDocument();
   });
 });
 

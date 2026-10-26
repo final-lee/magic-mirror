@@ -11,14 +11,14 @@ interface Props {
   arn: string;
   onOpenPolicy: (policyId: string) => void;
   onOpenGroup: (name: string) => void;
-  /** 떼기·삭제·저장을 누르면 그 변경을 넘긴다. 없으면 버튼은 꺼져 있다(변경 흐름이 연결되기 전) */
-  onFix?: (change: IamChange) => void;
+  /** 떼기·삭제·저장을 누르면 그 변경을 넘긴다(변경 미리보기가 열린다) */
+  onFix: (change: IamChange) => void;
+  /** 바꿀 수 없는 주체(서비스 연결·Identity Center 역할)면 그 이유. 있으면 변경 버튼을 끄고 이유를 보여준다 */
+  blockedReason?: string | null;
 }
 
 type Service = LastAccessed["services"][number];
 type UnusedPolicy = LastAccessed["unusedPolicies"][number];
-
-const NOT_CONNECTED = "변경 기능은 곧 추가돼요";
 
 /** 초안은 사용 기록만 보고 만든 제안이라, 저장하기 전에 알아야 할 점을 초안 아래에 늘 보여준다. */
 const CAUTIONS = [
@@ -45,7 +45,7 @@ function indent(document: string): string {
 const draftName = () => `least-privilege-${formatDay(new Date().toISOString()).replace(/-/g, "")}`;
 
 /** 사용자·역할 상세의 "안 쓰는 권한" 탭. AWS 쪽 집계가 10~30초 걸려서 누를 때만 불러오고, 받은 결과는 캐시에 남긴다. */
-export function UnusedPermissions({ profile, arn, onOpenPolicy, onOpenGroup, onFix }: Props) {
+export function UnusedPermissions({ profile, arn, onOpenPolicy, onOpenGroup, onFix, blockedReason = null }: Props) {
   const q = useLastAccessed(profile, arn);
   const data = q.data;
   const load = () => void q.refetch();
@@ -89,6 +89,11 @@ export function UnusedPermissions({ profile, arn, onOpenPolicy, onOpenGroup, onF
       </div>
       {progress}
       {error}
+      {blockedReason && (
+        <div className="iam-hint">
+          <span aria-hidden="true">ⓘ</span> <span>{blockedReason}</span>
+        </div>
+      )}
 
       <h3 className="up-h">서비스별 마지막 사용</h3>
       {services.length === 0 ? (
@@ -136,7 +141,7 @@ export function UnusedPermissions({ profile, arn, onOpenPolicy, onOpenGroup, onF
           </thead>
           <tbody>
             {data.unusedPolicies.map((p) => (
-              <PolicyRow key={`${p.policyId}|${p.via ?? ""}`} policy={p} arn={arn} onOpenPolicy={onOpenPolicy} onOpenGroup={onOpenGroup} onFix={onFix} />
+              <PolicyRow key={`${p.policyId}|${p.via ?? ""}`} policy={p} arn={arn} onOpenPolicy={onOpenPolicy} onOpenGroup={onOpenGroup} onFix={onFix} blockedReason={blockedReason} />
             ))}
           </tbody>
         </table>
@@ -153,9 +158,9 @@ export function UnusedPermissions({ profile, arn, onOpenPolicy, onOpenGroup, onF
             </button>
             <button
               className="btn small"
-              disabled={!onFix}
-              title={onFix ? undefined : NOT_CONNECTED}
-              onClick={() => onFix?.({ op: "putInlinePolicy", target: arn, name: draftName(), document: pretty })}
+              disabled={!!blockedReason}
+              title={blockedReason ?? undefined}
+              onClick={() => onFix({ op: "putInlinePolicy", target: arn, name: draftName(), document: pretty })}
             >
               인라인 정책으로 저장
             </button>
@@ -179,7 +184,14 @@ export function UnusedPermissions({ profile, arn, onOpenPolicy, onOpenGroup, onF
   );
 }
 
-function PolicyRow({ policy, arn, onOpenPolicy, onOpenGroup, onFix }: { policy: UnusedPolicy; arn: string } & Pick<Props, "onOpenPolicy" | "onOpenGroup" | "onFix">) {
+function PolicyRow({
+  policy,
+  arn,
+  onOpenPolicy,
+  onOpenGroup,
+  onFix,
+  blockedReason,
+}: { policy: UnusedPolicy; arn: string } & Pick<Props, "onOpenPolicy" | "onOpenGroup" | "onFix" | "blockedReason">) {
   // 인라인 정책은 붙은 것이 아니라 주체 안에 들어 있어서 떼는 대신 지운다
   const inline = policy.policyId.startsWith("inline:");
   const change: IamChange = inline
@@ -194,7 +206,7 @@ function PolicyRow({ policy, arn, onOpenPolicy, onOpenGroup, onFix }: { policy: 
       </td>
       <td className="dim">{policy.reason}</td>
       <td className="up-act">
-        <button className="btn small" disabled={!onFix || !!policy.via} title={!onFix ? NOT_CONNECTED : undefined} onClick={() => onFix?.(change)}>
+        <button className="btn small" disabled={!!policy.via || !!blockedReason} title={blockedReason ?? undefined} onClick={() => onFix(change)}>
           {inline ? "삭제" : "떼기"}
         </button>
         {policy.via && (

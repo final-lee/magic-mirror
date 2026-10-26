@@ -30,3 +30,12 @@ export function formatAgo(iso: string | null | undefined, now: number = Date.now
   if (days < 365) return `${Math.floor(days / 30)}개월 전`;
   return `${Math.floor(days / 365)}년 전`;
 }
+
+/** JSON 문서를 보기 좋게 들여 쓴다. JSON이 아니면 받은 그대로 돌려준다. */
+export function prettyJson(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+}

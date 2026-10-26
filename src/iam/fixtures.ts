@@ -5,6 +5,8 @@ import type {
   ActionGrant,
   Badge,
   BadgeKind,
+  ChangeLogEntry,
+  ChangePreview,
   FindingGroup,
   FindingItem,
   FindingKind,
@@ -15,6 +17,7 @@ import type {
   LastAccessed,
   Level,
   LevelCell,
+  PermDelta,
   PolicySummary,
   PolicyView,
   PrincipalKind,
@@ -38,7 +41,9 @@ export const BADGES = {
   privesc: badge("privesc", "권한 상승 위험", "warn"),
   noMfa: badge("noMfa", "MFA 없음", "danger"),
   oldKey: badge("oldKey", "오래된 키", "warn"),
-  externalTrust: badge("externalTrust", "외부 신뢰", "danger"),
+  // 백엔드: 누구나 맡을 수 있으면 danger, 외부 계정만 열려 있으면 warn
+  externalTrust: badge("externalTrust", "외부 신뢰", "warn"),
+  externalTrustOpen: badge("externalTrust", "외부 신뢰", "danger"),
   serviceLinked: badge("serviceLinked", "서비스 연결", "info"),
   awsManaged: badge("awsManaged", "AWS 관리형", "info"),
   unattached: badge("unattached", "안 붙음", "info"),
@@ -177,6 +182,7 @@ export const deployAttached = {
   badges: [],
   detachable: false,
 };
+// 백엔드의 detachable은 "주체에 직접 붙은 관리형 정책"일 때만 true다. 인라인(편집·삭제)과 권한 경계(변경 범위 밖)는 false.
 export const scratchInline = {
   id: inlineId(alice.arn, "s3-scratch"),
   name: "s3-scratch",
@@ -184,7 +190,7 @@ export const scratchInline = {
   scope: null,
   via: null,
   badges: [],
-  detachable: true,
+  detachable: false,
 };
 export const devBoundary = {
   id: policyArn("dev-boundary"),
@@ -193,7 +199,7 @@ export const devBoundary = {
   scope: "local" as const,
   via: null,
   badges: [BADGES.boundary],
-  detachable: true,
+  detachable: false,
 };
 
 export function aliceView(extra: Partial<PrincipalView> = {}): PrincipalView {
@@ -229,7 +235,7 @@ export function appRoleView(extra: Partial<PrincipalView> = {}): PrincipalView {
     summary: appRole,
     policies: [
       { ...readOnlyAttached },
-      { id: inlineId(appRole.arn, "queue-access"), name: "queue-access", kind: "inline", scope: null, via: null, badges: [], detachable: true },
+      { id: inlineId(appRole.arn, "queue-access"), name: "queue-access", kind: "inline", scope: null, via: null, badges: [], detachable: false },
     ],
     groups: [],
     trust: appRoleTrust,
@@ -372,6 +378,7 @@ export const bobKeys: AccessKeyInfo[] = [
 // ── 점검 ──
 export const rootArn = `arn:aws:iam::${ACCOUNT}:root`;
 export const deactivateBobKey: IamChange = { op: "setAccessKeyStatus", userName: "bob", accessKeyId: "AKIAIOSFODNN7EXAMPLE", status: "Inactive" };
+export const activateBobKey: IamChange = { op: "setAccessKeyStatus", userName: "bob", accessKeyId: "AKIAIOSFODNN7EXAMPLE", status: "Active" };
 
 // 설계 문서 "보안 점검 규칙" 표의 순서
 const FINDING_META: Record<FindingKind, { title: string; level: Level }> = {
@@ -515,4 +522,56 @@ export function sampleLastAccessed(extra: Partial<LastAccessed> = {}): LastAcces
     draftNotes: ["조건(Condition)은 초안에 넣지 않았어요", "작업 단위 기록이 없는 서비스는 서비스 전체(예: ec2:*)로 남겼어요"],
     ...extra,
   };
+}
+
+// ── 직접 변경 ──
+export const attachReadOnlyToBob: IamChange = { op: "attachPolicy", target: bob.arn, policyArn: readOnlyPolicy.arn };
+export const detachReadOnlyFromAlice: IamChange = { op: "detachPolicy", target: alice.arn, policyArn: readOnlyPolicy.arn };
+
+/** 미리보기 응답. change를 그대로 되돌려 주고, 나머지는 경고 없는 가장 단순한 모양이다. */
+export function previewOf(change: IamChange, extra: Partial<ChangePreview> = {}): ChangePreview {
+  return {
+    change,
+    summary: `${change.op} 변경`,
+    calls: [{ api: "iam:AttachUserPolicy", params: { UserName: "bob", PolicyArn: readOnlyPolicy.arn } }],
+    impacts: [],
+    warnings: [],
+    confirmText: null,
+    reversible: true,
+    ...extra,
+  };
+}
+
+export const permDelta = (prefix: string, level: AccessLevel, count: number, sample: string[] = []): PermDelta => ({ prefix, level, count, sample });
+
+export function logEntry(extra: Partial<ChangeLogEntry> = {}): ChangeLogEntry {
+  return {
+    id: "log-1",
+    at: "2026-10-26T12:00:00Z",
+    profile: "prod",
+    accountId: ACCOUNT,
+    callerArn: `arn:aws:sts::${ACCOUNT}:assumed-role/dev/me`,
+    change: deactivateBobKey,
+    summary: "bob의 액세스 키 AKIAIOSFODNN7EXAMPLE를 비활성화했어요",
+    calls: ["iam:UpdateAccessKey"],
+    ok: true,
+    error: null,
+    inverse: activateBobKey,
+    undoOf: null,
+    undone: false,
+    ...extra,
+  };
+}
+
+/** 인라인 정책 상세. 소유자는 alice다. */
+export function scratchInlineView(extra: Partial<PolicyView> = {}): PolicyView {
+  return deployPolicyView({
+    id: scratchInline.id,
+    name: "s3-scratch",
+    scope: "inline",
+    arn: null,
+    versions: [],
+    attachedTo: [{ arn: alice.arn, name: "alice", kind: "user" }],
+    ...extra,
+  });
 }

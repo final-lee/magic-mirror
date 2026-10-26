@@ -2,12 +2,14 @@ import { useMemo, useState } from "react";
 import { desktop } from "../api/desktop";
 import { ErrorState } from "../components/ErrorState";
 import { BadgeList } from "./Badges";
-import { formatDay } from "./format";
+import { formatDay, prettyJson } from "./format";
 import { KIND_LABEL, LEVEL_LABEL } from "./labels";
+import { PolicyEditor } from "./PolicyEditor";
 import { SCOPE_LABEL } from "./PolicyList";
 import { usePolicy } from "./queries";
-import { principalRoute, type IamRoute } from "./route";
-import type { PolicyView, StatementView } from "./types";
+import { inlineOwnerFromId, principalRoute, type IamRoute } from "./route";
+import type { IamChange, PolicyView, StatementView } from "./types";
+import type { StartOptions } from "./useIamChange";
 
 export type PolicyTab = "statements" | "json" | "versions" | "attached";
 
@@ -19,13 +21,26 @@ interface Props {
   /** 뒤로 가기로 돌아왔을 때 보던 하위 탭을 되살린다 */
   initialTab?: string;
   onViewState?: (state: { tab: string }) => void;
+  /** [편집]으로 만든 변경을 변경 흐름(미리보기 → 확인 → 적용)에 넘긴다. onApplied는 적용에 성공하면 불린다 */
+  onFix: (change: IamChange, opts?: StartOptions) => void;
 }
 
 const SCOPE_TEXT: Record<PolicyView["scope"], string> = { ...SCOPE_LABEL, inline: "인라인" };
 
-export function PolicyDetail({ profile, policyId, onOpen, initialTab, onViewState }: Props) {
+/**
+ * 이 화면에서 고칠 수 있는 정책인지. 백엔드가 editable이라고 해도 AWS 관리형은 고치지 않고(편집 대상이 아니다),
+ * 인라인 정책은 가진 주체를 id에서 알아볼 수 있어야 putInlinePolicy를 만들 수 있다.
+ */
+function canEdit(view: PolicyView): boolean {
+  if (!view.editable) return false;
+  if (view.scope === "local") return !!view.arn;
+  return view.scope === "inline" && inlineOwnerFromId(view.id) !== null;
+}
+
+export function PolicyDetail({ profile, policyId, onOpen, initialTab, onViewState, onFix }: Props) {
   const q = usePolicy(profile, policyId);
   const [tab, setTab] = useState(initialTab ?? "statements");
+  const [editing, setEditing] = useState(false);
   const view = q.data;
 
   if (!view) {
@@ -48,6 +63,13 @@ export function PolicyDetail({ profile, policyId, onOpen, initialTab, onViewStat
     onViewState?.({ tab: id });
   };
 
+  const inline = view.scope === "inline";
+  const submit = (_name: string, document: string) => {
+    const opts = { onApplied: () => setEditing(false) };
+    if (inline) onFix({ op: "putInlinePolicy", target: inlineOwnerFromId(view.id)!, name: view.name, document }, opts);
+    else onFix({ op: "updateManagedPolicy", policyArn: view.arn!, document }, opts);
+  };
+
   return (
     <section className="center iam-detail">
       {q.isError && <ErrorState compact error={q.error} profile={profile} onRetry={() => void q.refetch()} />}
@@ -55,6 +77,11 @@ export function PolicyDetail({ profile, policyId, onOpen, initialTab, onViewStat
         <div className="iam-title">
           <h2>{view.name}</h2>
           <span className="iam-kind">{SCOPE_TEXT[view.scope]}</span>
+          {!editing && canEdit(view) && (
+            <button className="btn small" onClick={() => setEditing(true)}>
+              편집
+            </button>
+          )}
         </div>
         {view.arn && (
           <div className="iam-arn">
@@ -66,25 +93,41 @@ export function PolicyDetail({ profile, policyId, onOpen, initialTab, onViewStat
         )}
         <BadgeList badges={view.badges} hide={["awsManaged"]} />
       </header>
-      <div className="iam-tabs" role="tablist" aria-label="정책 항목">
-        {tabs.map((t) => (
-          <button key={t.id} role="tab" aria-selected={t.id === active} className={`iam-tab${t.id === active ? " on" : ""}`} onClick={() => select(t.id)}>
-            {t.label}
-            {t.count !== undefined && (
-              <>
-                {" "}
-                <span className="iam-tab-n">{t.count}</span>
-              </>
-            )}
-          </button>
-        ))}
-      </div>
-      <div className="iam-pane" role="tabpanel">
-        {active === "statements" && <StatementsPane statements={view.statements} />}
-        {active === "json" && <JsonPane document={view.document} />}
-        {active === "versions" && <VersionsPane versions={view.versions} />}
-        {active === "attached" && <AttachedPane attachedTo={view.attachedTo} onOpen={onOpen} />}
-      </div>
+      {editing ? (
+        <div className="iam-pane">
+          <PolicyEditor
+            profile={profile}
+            mode="edit"
+            name={view.name}
+            title={`${inline ? "인라인 정책" : "정책"} 편집 · ${view.name}`}
+            document={prettyJson(view.document)}
+            onCancel={() => setEditing(false)}
+            onSubmit={submit}
+          />
+        </div>
+      ) : (
+        <>
+          <div className="iam-tabs" role="tablist" aria-label="정책 항목">
+            {tabs.map((t) => (
+              <button key={t.id} role="tab" aria-selected={t.id === active} className={`iam-tab${t.id === active ? " on" : ""}`} onClick={() => select(t.id)}>
+                {t.label}
+                {t.count !== undefined && (
+                  <>
+                    {" "}
+                    <span className="iam-tab-n">{t.count}</span>
+                  </>
+                )}
+              </button>
+            ))}
+          </div>
+          <div className="iam-pane" role="tabpanel">
+            {active === "statements" && <StatementsPane statements={view.statements} />}
+            {active === "json" && <JsonPane document={view.document} />}
+            {active === "versions" && <VersionsPane versions={view.versions} />}
+            {active === "attached" && <AttachedPane attachedTo={view.attachedTo} onOpen={onOpen} />}
+          </div>
+        </>
+      )}
     </section>
   );
 }

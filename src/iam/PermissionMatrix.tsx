@@ -21,7 +21,8 @@ function tone(c: LevelCell): string {
 function cellLabel(svc: ServicePermissions, level: AccessLevel, c: LevelCell): string {
   const parts = [`허용 ${c.allowed}/${c.total}`];
   if (c.conditional > 0) parts.push(`조건부 ${c.conditional}`);
-  if (c.denied > 0) parts.push(`거부 ${c.denied}`);
+  // denied에는 권한 경계로 막힌 작업도 들어 있다(드릴다운은 둘을 나눠 보여준다)
+  if (c.denied > 0) parts.push(`거부·경계 ${c.denied}`);
   return `${svc.name} ${LEVEL_LABEL[level]} ${parts.join(", ")}`;
 }
 
@@ -50,7 +51,7 @@ function Cell({ svc, level, selected, onSelect }: { svc: ServicePermissions; lev
           </span>
         )}
         {c.denied > 0 && (
-          <span className="mx-mark deny" title={`거부 ${c.denied}`}>
+          <span className="mx-mark deny" title={`거부·경계 ${c.denied}`}>
             ⊘ {c.denied}
           </span>
         )}

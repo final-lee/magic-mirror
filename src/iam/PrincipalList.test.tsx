@@ -137,3 +137,33 @@ describe("PolicyList", () => {
     expect(screen.getByText("정책이 없어요")).toBeInTheDocument();
   });
 });
+
+describe("scrolling to the selection", () => {
+  afterEach(() => {
+    delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+  });
+
+  test("scrolls the selected row into view when the list opens", () => {
+    const scroll = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scroll;
+    renderUsers({ selectedId: ciBot.arn });
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
+    expect(scroll.mock.contexts[0]).toBe(screen.getByText("ci-bot").closest("tr"));
+  });
+
+  test("follows the selection when it moves, e.g. with the arrow keys", () => {
+    const scroll = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scroll;
+    const { rerender } = render(<PrincipalList kind="user" items={users} filter="" selectedId={alice.arn} onSelect={vi.fn()} onOpen={vi.fn()} />);
+    rerender(<PrincipalList kind="user" items={users} filter="" selectedId={bob.arn} onSelect={vi.fn()} onOpen={vi.fn()} />);
+    expect(scroll).toHaveBeenCalledTimes(2);
+    expect(scroll.mock.contexts[1]).toBe(screen.getByText("bob").closest("tr"));
+  });
+
+  test("nothing to scroll without a selection, and no error where scrollIntoView does not exist", () => {
+    renderUsers();
+    renderUsers({ selectedId: alice.arn });
+    expect(screen.getAllByTestId("iam-list")).toHaveLength(2);
+  });
+});

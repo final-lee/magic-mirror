@@ -2,6 +2,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ErrorState } from "../components/ErrorState";
 import { onMouseNav } from "../explorer/api";
+import { ChangeLog } from "./ChangeLog";
+import { ChangePreviewDialog } from "./ChangePreviewDialog";
 import { Findings } from "./Findings";
 import { IamNav, type NavCounts } from "./IamNav";
 import { PolicyDetail } from "./PolicyDetail";
@@ -11,6 +13,7 @@ import { PrincipalList } from "./PrincipalList";
 import { refreshIam, useIamOverview } from "./queries";
 import { policyNameFromId, policyRoute, principalRoute, routeForFocus, VIEW_LABEL, type IamRoute, type IamView } from "./route";
 import type { IamOverview, PrincipalKind } from "./types";
+import { useIamChange } from "./useIamChange";
 import { useIamHistory } from "./useIamHistory";
 import { WhoCan } from "./WhoCan";
 
@@ -55,6 +58,8 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
   const overview = useIamOverview(profile);
   const ov = overview.data;
   const { route, canBack, canForward, navigate, replace, back, forward } = useIamHistory(HOME);
+  // 모든 IAM 변경(버튼, 빠른 조치, 되돌리기)이 지나는 하나뿐인 길: 미리보기 → 확인 → 적용
+  const change = useIamChange(profile);
   // 목록마다 마지막으로 고른 행. 상세를 보고 돌아와도 그대로 남는다.
   const [selected, setSelected] = useState<Partial<Record<IamView, string>>>({});
 
@@ -141,12 +146,14 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
         initialTab={route.tab}
         initialCell={route.cell ?? null}
         onViewState={remember}
+        onFix={change.start}
       />
     );
   } else if (kind) {
     body = (
       <section className="center">
         <PrincipalList
+          key={kind}
           kind={kind}
           items={listOf(ov, kind)}
           filter={filter}
@@ -157,7 +164,9 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
       </section>
     );
   } else if (route.view === "policies" && route.id) {
-    body = <PolicyDetail key={route.id} profile={profile} policyId={route.id} onOpen={navigate} initialTab={route.tab} onViewState={remember} />;
+    body = (
+      <PolicyDetail key={route.id} profile={profile} policyId={route.id} onOpen={navigate} initialTab={route.tab} onViewState={remember} onFix={change.start} />
+    );
   } else if (route.view === "policies") {
     body = (
       <section className="center">
@@ -171,16 +180,11 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
       </section>
     );
   } else if (route.view === "findings") {
-    body = <Findings profile={profile} overview={ov} onOpen={navigate} initialKind={route.tab} onViewState={remember} />;
+    body = <Findings profile={profile} overview={ov} onOpen={navigate} onFix={change.start} initialKind={route.tab} onViewState={remember} />;
   } else if (route.view === "whoCan") {
     body = <WhoCan profile={profile} overview={ov} onOpen={navigate} initial={route.search} onViewState={remember} />;
   } else {
-    // 변경 기록 화면이 들어올 자리
-    body = (
-      <section className="center">
-        <div className="empty">{VIEW_LABEL[route.view]} 화면은 곧 추가돼요</div>
-      </section>
-    );
+    body = <ChangeLog profile={profile} accountId={ov.accountId} onStart={change.start} />;
   }
 
   return (
@@ -226,8 +230,17 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
           </ul>
         )}
         {overview.isError && <ErrorState compact error={overview.error} profile={profile} onRetry={() => void overview.refetch()} />}
+        {change.notice && (
+          <div className="iam-done" role="status">
+            <span aria-hidden="true">✓</span> <span>{change.notice.summary}</span> <span className="dim">반영까지 몇 초 걸릴 수 있어요</span>
+            <button className="icon" aria-label="알림 닫기" onClick={change.dismissNotice}>
+              ✕
+            </button>
+          </div>
+        )}
         <div className="iam-main">{body}</div>
       </div>
+      {change.pending && <ChangePreviewDialog pending={change.pending} onApply={change.apply} onRetry={change.retryPreview} onCancel={change.cancel} />}
     </div>
   );
 }

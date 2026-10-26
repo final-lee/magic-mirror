@@ -71,3 +71,13 @@ export function policyNameFromId(id: string): string {
   if (id.startsWith("inline:")) return id.slice(id.lastIndexOf(":") + 1);
   return id.slice(id.lastIndexOf("/") + 1);
 }
+
+/**
+ * 인라인 정책 id("inline:<소유자 ARN>:<이름>")에서 정책을 가진 사용자·그룹·역할의 ARN.
+ * 소유자를 알아볼 수 없으면 null이다. 이름에는 ':'가 들어갈 수 없으므로 마지막 ':' 앞이 소유자다.
+ */
+export function inlineOwnerFromId(id: string): string | null {
+  if (!id.startsWith("inline:")) return null;
+  const owner = id.slice("inline:".length, id.lastIndexOf(":"));
+  return /^arn:[^:]*:iam::[^:]*:(user|group|role)\//.test(owner) ? owner : null;
+}

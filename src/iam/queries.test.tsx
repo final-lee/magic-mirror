@@ -8,6 +8,7 @@ import {
   bobKeys,
   deployPolicy,
   deployPolicyView,
+  logEntry,
   s3WriteGrants,
   sampleFindings,
   sampleLastAccessed,
@@ -19,16 +20,21 @@ import {
   iamKeys,
   refreshIam,
   useAccessKeys,
+  useChangeLog,
   useFindings,
   useIamCatalog,
   useIamOverview,
   useLastAccessed,
   usePolicy,
+  usePolicyRefs,
   usePrincipal,
   usePrincipalActions,
   useSimulation,
   useWhoCan,
 } from "./queries";
+import type { PolicyRef } from "./types";
+
+const policyRef = (name: string): PolicyRef => ({ arn: `arn:aws:iam::aws:policy/${name}`, name, scope: "aws", description: null, badges: [] });
 
 vi.mock("./api", () => ({
   iamApi: {
@@ -42,6 +48,8 @@ vi.mock("./api", () => ({
     whoCan: vi.fn(),
     simulate: vi.fn(),
     lastAccessed: vi.fn(),
+    listPolicies: vi.fn(),
+    changeLog: vi.fn(),
   },
 }));
 
@@ -80,6 +88,8 @@ describe("query keys", () => {
     expect(iamKeys.whoCan("prod", "s3:GetObject", "arn:x")).toEqual(["iam", "prod", "whoCan", "s3:GetObject", "arn:x"]);
     expect(iamKeys.simulate("prod", "s3:GetObject", "", ["arn:a", "arn:b"])).toEqual(["iam", "prod", "simulate", "s3:GetObject", "", ["arn:a", "arn:b"]]);
     expect(iamKeys.lastAccessed("prod", "arn:x")).toEqual(["iam", "prod", "lastAccessed", "arn:x"]);
+    expect(iamKeys.policyRefs("prod", "Read")).toEqual(["iam", "prod", "policyRefs", "Read"]);
+    expect(iamKeys.changeLog).toEqual(["iam", "changeLog"]);
   });
 });
 
@@ -175,6 +185,38 @@ describe("hooks", () => {
     const again = renderHook(() => useLastAccessed("prod", alice.arn), { wrapper });
     expect(again.result.current.data).toEqual(sampleLastAccessed());
     expect(m.lastAccessed).toHaveBeenCalledTimes(1);
+  });
+
+  test("the policy picker list is searched by name, and typing keeps the previous list until the new one arrives", async () => {
+    const { wrapper } = makeClient();
+    m.listPolicies.mockImplementation(async (_p, query) => (query === "" ? [policyRef("ReadOnlyAccess")] : [policyRef("AdministratorAccess")]));
+    const { result, rerender } = renderHook(({ q }) => usePolicyRefs("prod", q), { wrapper, initialProps: { q: "" } });
+    await waitFor(() => expect(result.current.data?.[0].name).toBe("ReadOnlyAccess"));
+    expect(m.listPolicies).toHaveBeenCalledWith("prod", "");
+
+    let release!: () => void;
+    m.listPolicies.mockImplementation(async () => {
+      await new Promise<void>((r) => (release = r));
+      return [policyRef("AdministratorAccess")];
+    });
+    rerender({ q: "Admin" });
+    expect(result.current.data?.[0].name).toBe("ReadOnlyAccess"); // 새 목록이 올 때까지 이전 목록
+    expect(result.current.isPlaceholderData).toBe(true);
+    release();
+    await waitFor(() => expect(result.current.data?.[0].name).toBe("AdministratorAccess"));
+  });
+
+  test("the change log is read fresh every time its view is opened", async () => {
+    const { qc, wrapper } = makeClient();
+    m.changeLog.mockResolvedValue([logEntry()]);
+    const first = renderHook(() => useChangeLog(), { wrapper });
+    await waitFor(() => expect(first.result.current.isSuccess).toBe(true));
+    expect(qc.getQueryData(iamKeys.changeLog)).toEqual([logEntry()]);
+    first.unmount();
+
+    const second = renderHook(() => useChangeLog(), { wrapper });
+    await waitFor(() => expect(m.changeLog).toHaveBeenCalledTimes(2));
+    expect(second.result.current.data).toEqual([logEntry()]);
   });
 });
 
