@@ -31,6 +31,9 @@ aws-sdk-lambda = "1"
 aws-sdk-rds = "1"
 aws-sdk-ecs = "1"
 aws-sdk-eks = "1"
+aws-sdk-iam = "1"
+aws-sdk-route53 = "1"
+aws-sdk-cloudfront = "1"
 
 [dev-dependencies]
 tempfile = "3"
