@@ -24,6 +24,11 @@ export const explorerApi = {
     invoke<void>("open_external_diff", { profile, left, right }),
 };
 
+/** 네이티브(macOS)에서 가로챈 마우스 뒤로/앞으로 버튼 */
+export function onMouseNav(cb: (dir: "back" | "forward") => void): Promise<() => void> {
+  return listen<"back" | "forward">("mouse-nav", (e) => cb(e.payload));
+}
+
 export function onTransferProgress(cb: (ev: TransferEvent) => void): Promise<() => void> {
   return listen<TransferEvent>("transfer-progress", (e) => cb(e.payload));
 }

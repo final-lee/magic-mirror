@@ -23,6 +23,7 @@ vi.mock("./explorer/api", () => ({
     startTransfers: vi.fn(),
   },
   onTransferProgress: vi.fn(async () => () => {}),
+  onMouseNav: vi.fn(async () => () => {}),
 }));
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: vi.fn(async () => () => {}) }),

@@ -18,9 +18,14 @@ vi.mock("./api", () => ({
     s3Delete: vi.fn(),
   },
   onTransferProgress: vi.fn(async () => () => {}),
+  onMouseNav: vi.fn(async (cb: (d: "back" | "forward") => void) => {
+    mouseNavHandler = cb;
+    return () => {};
+  }),
 }));
 vi.mock("../api/client", () => ({ api: { listResources: vi.fn(), listS3Objects: vi.fn(), ssoLogin: vi.fn() } }));
 const unlistenSpy = vi.fn();
+let mouseNavHandler: ((d: "back" | "forward") => void) | null = null;
 let resolveListen: (() => void) | null = null;
 let deferListen = false;
 let dropHandler: ((e: { payload: { type: string; paths?: string[]; position?: { x: number; y: number } } }) => void) | null = null;
@@ -295,6 +300,16 @@ describe("navigation history", () => {
     fireEvent.mouseUp(pane, { button: 4 });
     await screen.findByText("📄 z.txt");
     expect(pathText("/home/me/d1/d2")).toBeInTheDocument();
+  });
+
+  test("native mouse-nav event (MX Master side buttons) moves the focused pane", async () => {
+    await enterTwo();
+    await waitFor(() => expect(mouseNavHandler).not.toBeNull());
+    act(() => mouseNavHandler!("back"));
+    await screen.findByText("📁 d2");
+    expect(pathText("/home/me/d1")).toBeInTheDocument();
+    act(() => mouseNavHandler!("forward"));
+    await screen.findByText("📄 z.txt");
   });
 
   test("a new navigation clears forward history", async () => {
