@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use aws_config::SdkConfig;
 use aws_sdk_dynamodb::types::TableDescription;
 
-use super::util::{dt, map_concurrent, opt, region, s, unknown_type, Capped};
+use super::util::{degraded, dt, map_concurrent, opt, region, s, settle, unknown_type, Capped};
 use super::ResourceAdapter;
 use crate::error::{from_sdk, AppError};
 use crate::model::{col, ColumnKind::*, ListResult, Resource, ResourceType};
@@ -47,19 +47,31 @@ impl ResourceAdapter for DynamoDb {
                 }
             }
         }
+        let table_names = names.items.clone();
         let results = map_concurrent(names.items, |name| {
             let client = client.clone();
-            async move { client.describe_table().table_name(name).send().await }
+            let region = region.clone();
+            async move {
+                client
+                    .describe_table()
+                    .table_name(name)
+                    .send()
+                    .await
+                    .map(|out| out.table().map(|t| table(t, &region)))
+                    .map_err(|e| from_sdk(e, "dynamodb:DescribeTable"))
+            }
         })
         .await;
-        let mut items = Vec::new();
-        for res in results {
-            let res = res.map_err(|e| from_sdk(e, "dynamodb:DescribeTable"))?;
-            if let Some(t) = res.table() {
-                items.push(table(t, &region));
-            }
-        }
-        Ok(ListResult { items, truncated: names.truncated })
+        let items = settle(results, |i, e| {
+            Some(degraded(&table_names[i], &table_names[i], None, e))
+        })?
+        .into_iter()
+        .flatten()
+        .collect();
+        Ok(ListResult {
+            items,
+            truncated: names.truncated,
+        })
     }
 }
 
@@ -93,7 +105,9 @@ fn table(t: &TableDescription, region: &str) -> Resource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aws_sdk_dynamodb::types::{BillingMode, BillingModeSummary, KeySchemaElement, KeyType, TableStatus};
+    use aws_sdk_dynamodb::types::{
+        BillingMode, BillingModeSummary, KeySchemaElement, KeyType, TableStatus,
+    };
 
     #[test]
     fn table_resource() {
@@ -102,15 +116,28 @@ mod tests {
             .table_status(TableStatus::Active)
             .item_count(120)
             .table_size_bytes(2048)
-            .billing_mode_summary(BillingModeSummary::builder().billing_mode(BillingMode::PayPerRequest).build())
-            .key_schema(KeySchemaElement::builder().attribute_name("pk").key_type(KeyType::Hash).build().unwrap())
+            .billing_mode_summary(
+                BillingModeSummary::builder()
+                    .billing_mode(BillingMode::PayPerRequest)
+                    .build(),
+            )
+            .key_schema(
+                KeySchemaElement::builder()
+                    .attribute_name("pk")
+                    .key_type(KeyType::Hash)
+                    .build()
+                    .unwrap(),
+            )
             .build();
         let r = table(&t, "ap-northeast-2");
         assert_eq!(r.values["status"], "ACTIVE");
         assert_eq!(r.values["items"], "120");
         assert_eq!(r.values["size"], "2048");
         assert_eq!(r.values["billing"], "PAY_PER_REQUEST");
-        assert!(r.fields.iter().any(|f| f.label == "Keys" && f.value == "pk (HASH)"));
+        assert!(r
+            .fields
+            .iter()
+            .any(|f| f.label == "Keys" && f.value == "pk (HASH)"));
     }
 
     #[test]

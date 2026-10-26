@@ -3,7 +3,7 @@ use aws_config::SdkConfig;
 use aws_sdk_ecs::types::{Cluster, ClusterField, Service, ServiceField, Tag, Task, TaskField};
 use aws_sdk_ecs::Client;
 
-use super::util::{dt, last_segment, region, s, unknown_type, Capped};
+use super::util::{degraded, dt, last_segment, region, s, settle, unknown_type, Capped};
 use super::ResourceAdapter;
 use crate::error::{from_sdk, AppError};
 use crate::model::{col, ColumnKind::*, ListResult, Resource, ResourceType};
@@ -74,42 +74,81 @@ impl ResourceAdapter for Ecs {
         match type_id {
             "clusters" => {
                 let arns = cluster_arns(&client).await?;
-                'outer: for chunk in arns.chunks(100) {
-                    let res = client
-                        .describe_clusters()
-                        .set_clusters(Some(chunk.to_vec()))
-                        .include(ClusterField::Tags)
-                        .send()
-                        .await
-                        .map_err(|e| from_sdk(e, "ecs:DescribeClusters"))?;
-                    for c in res.clusters() {
-                        if !out.push(cluster(c, &region)) {
-                            break 'outer;
-                        }
+                let mut results = Vec::new();
+                for chunk in arns.chunks(100) {
+                    results.push(
+                        client
+                            .describe_clusters()
+                            .set_clusters(Some(chunk.to_vec()))
+                            .include(ClusterField::Tags)
+                            .send()
+                            .await
+                            .map(|res| {
+                                res.clusters()
+                                    .iter()
+                                    .map(|c| cluster(c, &region))
+                                    .collect::<Vec<_>>()
+                            })
+                            .map_err(|e| from_sdk(e, "ecs:DescribeClusters")),
+                    );
+                }
+                let chunks: Vec<&[String]> = arns.chunks(100).collect();
+                let rows = settle(results, |i, e| {
+                    chunks[i]
+                        .iter()
+                        .map(|a| {
+                            let n = last_segment(a, '/');
+                            degraded(&n, &n, Some(a), e)
+                        })
+                        .collect()
+                })?;
+                for r in rows.into_iter().flatten() {
+                    if !out.push(r) {
+                        break;
                     }
                 }
             }
             "services" => {
                 'outer: for cluster_arn in cluster_arns(&client).await? {
                     let mut service_arns = Vec::new();
-                    let mut pages = client.list_services().cluster(&cluster_arn).into_paginator().send();
+                    let mut pages = client
+                        .list_services()
+                        .cluster(&cluster_arn)
+                        .into_paginator()
+                        .send();
                     while let Some(page) = pages.next().await {
                         let page = page.map_err(|e| from_sdk(e, "ecs:ListServices"))?;
                         service_arns.extend(page.service_arns().iter().cloned());
                     }
+                    let mut results = Vec::new();
                     for chunk in service_arns.chunks(10) {
-                        let res = client
-                            .describe_services()
-                            .cluster(&cluster_arn)
-                            .set_services(Some(chunk.to_vec()))
-                            .include(ServiceField::Tags)
-                            .send()
-                            .await
-                            .map_err(|e| from_sdk(e, "ecs:DescribeServices"))?;
-                        for svc in res.services() {
-                            if !out.push(service(svc, &region)) {
-                                break 'outer;
-                            }
+                        results.push(
+                            client
+                                .describe_services()
+                                .cluster(&cluster_arn)
+                                .set_services(Some(chunk.to_vec()))
+                                .include(ServiceField::Tags)
+                                .send()
+                                .await
+                                .map(|res| {
+                                    res.services()
+                                        .iter()
+                                        .map(|svc| service(svc, &region))
+                                        .collect::<Vec<_>>()
+                                })
+                                .map_err(|e| from_sdk(e, "ecs:DescribeServices")),
+                        );
+                    }
+                    let chunks: Vec<&[String]> = service_arns.chunks(10).collect();
+                    let rows = settle(results, |i, e| {
+                        chunks[i]
+                            .iter()
+                            .map(|a| degraded(a, &last_segment(a, '/'), Some(a), e))
+                            .collect()
+                    })?;
+                    for r in rows.into_iter().flatten() {
+                        if !out.push(r) {
+                            break 'outer;
                         }
                     }
                 }
@@ -117,24 +156,47 @@ impl ResourceAdapter for Ecs {
             "tasks" => {
                 'outer: for cluster_arn in cluster_arns(&client).await? {
                     let mut task_arns = Vec::new();
-                    let mut pages = client.list_tasks().cluster(&cluster_arn).into_paginator().send();
+                    let mut pages = client
+                        .list_tasks()
+                        .cluster(&cluster_arn)
+                        .into_paginator()
+                        .send();
                     while let Some(page) = pages.next().await {
                         let page = page.map_err(|e| from_sdk(e, "ecs:ListTasks"))?;
                         task_arns.extend(page.task_arns().iter().cloned());
                     }
+                    let mut results = Vec::new();
                     for chunk in task_arns.chunks(100) {
-                        let res = client
-                            .describe_tasks()
-                            .cluster(&cluster_arn)
-                            .set_tasks(Some(chunk.to_vec()))
-                            .include(TaskField::Tags)
-                            .send()
-                            .await
-                            .map_err(|e| from_sdk(e, "ecs:DescribeTasks"))?;
-                        for t in res.tasks() {
-                            if !out.push(task(t, &region)) {
-                                break 'outer;
-                            }
+                        results.push(
+                            client
+                                .describe_tasks()
+                                .cluster(&cluster_arn)
+                                .set_tasks(Some(chunk.to_vec()))
+                                .include(TaskField::Tags)
+                                .send()
+                                .await
+                                .map(|res| {
+                                    res.tasks()
+                                        .iter()
+                                        .map(|t| task(t, &region))
+                                        .collect::<Vec<_>>()
+                                })
+                                .map_err(|e| from_sdk(e, "ecs:DescribeTasks")),
+                        );
+                    }
+                    let chunks: Vec<&[String]> = task_arns.chunks(100).collect();
+                    let rows = settle(results, |i, e| {
+                        chunks[i]
+                            .iter()
+                            .map(|a| {
+                                let n = last_segment(a, '/');
+                                degraded(&n, &n, Some(a), e)
+                            })
+                            .collect()
+                    })?;
+                    for r in rows.into_iter().flatten() {
+                        if !out.push(r) {
+                            break 'outer;
                         }
                     }
                 }
@@ -154,11 +216,16 @@ fn cluster(c: &Cluster, region: &str) -> Resource {
         .value("services", c.active_services_count())
         .value("runningTasks", c.running_tasks_count())
         .field("Pending tasks", c.pending_tasks_count())
-        .field("Container instances", c.registered_container_instances_count())
+        .field(
+            "Container instances",
+            c.registered_container_instances_count(),
+        )
         .field("Capacity providers", c.capacity_providers().join(", "))
         .tags(tag_pairs(c.tags()))
         .raw(c)
-        .console(format!("https://{region}.console.aws.amazon.com/ecs/v2/clusters/{name}?region={region}"))
+        .console(format!(
+            "https://{region}.console.aws.amazon.com/ecs/v2/clusters/{name}?region={region}"
+        ))
 }
 
 fn service(svc: &Service, region: &str) -> Resource {
@@ -237,7 +304,10 @@ mod tests {
         let r = service(&svc, "ap-northeast-2");
         assert_eq!(r.values["cluster"], "prod");
         assert_eq!(r.values["tasks"], "2/3");
-        assert!(r.console_url.unwrap().contains("/clusters/prod/services/api"));
+        assert!(r
+            .console_url
+            .unwrap()
+            .contains("/clusters/prod/services/api"));
     }
 
     #[test]

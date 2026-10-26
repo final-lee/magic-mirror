@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use aws_config::SdkConfig;
 
-use super::util::{last_segment, map_concurrent, region, unknown_type, Capped};
+use super::util::{degraded, last_segment, map_concurrent, region, settle, unknown_type, Capped};
 use super::ResourceAdapter;
 use crate::error::{from_sdk, AppError};
 use crate::model::{col, ColumnKind::*, ListResult, Resource, ResourceType};
@@ -50,16 +50,32 @@ impl ResourceAdapter for Sns {
         }
         let results = map_concurrent(arns.items.clone(), |arn| {
             let client = client.clone();
-            async move { client.get_topic_attributes().topic_arn(arn).send().await }
+            let region = region.clone();
+            async move {
+                client
+                    .get_topic_attributes()
+                    .topic_arn(&arn)
+                    .send()
+                    .await
+                    .map(|res| {
+                        topic(
+                            &arn,
+                            &res.attributes().cloned().unwrap_or_default(),
+                            &region,
+                        )
+                    })
+                    .map_err(|e| from_sdk(e, "sns:GetTopicAttributes"))
+            }
         })
         .await;
-        let mut items = Vec::new();
-        for (arn, res) in arns.items.iter().zip(results) {
-            let res = res.map_err(|e| from_sdk(e, "sns:GetTopicAttributes"))?;
-            let empty = HashMap::new();
-            items.push(topic(arn, res.attributes().unwrap_or(&empty), &region));
-        }
-        Ok(ListResult { items, truncated: arns.truncated })
+        let items = settle(results, |i, e| {
+            let arn = &arns.items[i];
+            degraded(arn, &last_segment(arn, ':'), Some(arn), e)
+        })?;
+        Ok(ListResult {
+            items,
+            truncated: arns.truncated,
+        })
     }
 }
 
@@ -76,7 +92,9 @@ fn topic(arn: &str, attrs: &HashMap<String, String>, region: &str) -> Resource {
         .field("Owner", get("Owner"))
         .field("FIFO", get("FifoTopic"))
         .raw(attrs)
-        .console(format!("https://{region}.console.aws.amazon.com/sns/v3/home?region={region}#/topic/{arn}"))
+        .console(format!(
+            "https://{region}.console.aws.amazon.com/sns/v3/home?region={region}#/topic/{arn}"
+        ))
 }
 
 #[cfg(test)]
@@ -86,9 +104,16 @@ mod tests {
     #[test]
     fn topic_from_attributes() {
         let attrs = HashMap::from([("SubscriptionsConfirmed".to_string(), "3".to_string())]);
-        let r = topic("arn:aws:sns:ap-northeast-2:1:alerts", &attrs, "ap-northeast-2");
+        let r = topic(
+            "arn:aws:sns:ap-northeast-2:1:alerts",
+            &attrs,
+            "ap-northeast-2",
+        );
         assert_eq!(r.name, "alerts");
         assert_eq!(r.values["subscriptions"], "3");
-        assert!(r.console_url.unwrap().ends_with("#/topic/arn:aws:sns:ap-northeast-2:1:alerts"));
+        assert!(r
+            .console_url
+            .unwrap()
+            .ends_with("#/topic/arn:aws:sns:ap-northeast-2:1:alerts"));
     }
 }

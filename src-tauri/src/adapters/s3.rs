@@ -7,7 +7,7 @@ use serde::Serialize;
 use super::util::{dt, map_concurrent, s, unknown_type, Capped};
 use super::ResourceAdapter;
 use crate::error::{from_sdk, AppError};
-use crate::model::{col, ColumnKind::*, ListResult, Resource, ResourceType};
+use crate::model::{col, ColumnKind::*, ListResult, Resource, ResourceType, MAX_ITEMS};
 
 pub struct S3;
 
@@ -57,8 +57,14 @@ impl ResourceAdapter for S3 {
             return Err(unknown_type(type_id));
         }
         let client = aws_sdk_s3::Client::new(cfg);
-        let out = client.list_buckets().send().await.map_err(|e| from_sdk(e, "s3:ListAllMyBuckets"))?;
+        let out = client
+            .list_buckets()
+            .max_buckets(MAX_ITEMS as i32)
+            .send()
+            .await
+            .map_err(|e| from_sdk(e, "s3:ListAllMyBuckets"))?;
         let buckets: Vec<Bucket> = out.buckets().to_vec();
+        let list_truncated = is_truncated(out.continuation_token());
         // ListBuckets 응답에 리전이 없으면 GetBucketLocation으로 보완한다(실패하면 빈 값).
         let regions = map_concurrent(buckets.clone(), |b| {
             let client = client.clone();
@@ -66,7 +72,12 @@ impl ResourceAdapter for S3 {
                 if let Some(r) = b.bucket_region() {
                     return r.to_string();
                 }
-                match client.get_bucket_location().bucket(s(b.name())).send().await {
+                match client
+                    .get_bucket_location()
+                    .bucket(s(b.name()))
+                    .send()
+                    .await
+                {
                     Ok(loc) => location_to_region(loc.location_constraint().map(|c| c.as_str())),
                     Err(_) => String::new(),
                 }
@@ -74,6 +85,7 @@ impl ResourceAdapter for S3 {
         })
         .await;
         let mut capped = Capped::new();
+        capped.truncated = list_truncated;
         for (b, region) in buckets.iter().zip(regions) {
             if !capped.push(bucket(b, &region)) {
                 break;
@@ -81,6 +93,11 @@ impl ResourceAdapter for S3 {
         }
         Ok(capped.finish())
     }
+}
+
+/// ListBuckets 응답에 이어받을 토큰이 있으면 1,000개를 넘는 버킷이 더 있다는 뜻이다.
+pub fn is_truncated(continuation_token: Option<&str>) -> bool {
+    continuation_token.is_some()
 }
 
 /// GetBucketLocation의 빈 값은 us-east-1, "EU"는 eu-west-1을 뜻한다.
@@ -100,7 +117,9 @@ fn bucket(b: &Bucket, region: &str) -> Resource {
         .value("region", region)
         .value("created", dt(b.creation_date()))
         .raw(b)
-        .console(format!("https://s3.console.aws.amazon.com/s3/buckets/{name}?region={region}"))
+        .console(format!(
+            "https://s3.console.aws.amazon.com/s3/buckets/{name}?region={region}"
+        ))
 }
 
 pub async fn list_objects(
@@ -158,7 +177,10 @@ pub fn to_listing(out: &ListObjectsV2Output, prefix: &str) -> S3Listing {
     } else {
         None
     };
-    S3Listing { entries, next_token }
+    S3Listing {
+        entries,
+        next_token,
+    }
 }
 
 #[cfg(test)]
@@ -194,7 +216,10 @@ mod tests {
 
     #[test]
     fn listing_without_truncation_has_no_token() {
-        let out = ListObjectsV2Output::builder().next_continuation_token("stale").is_truncated(false).build();
+        let out = ListObjectsV2Output::builder()
+            .next_continuation_token("stale")
+            .is_truncated(false)
+            .build();
         assert_eq!(to_listing(&out, "").next_token, None);
     }
 
@@ -204,6 +229,12 @@ mod tests {
         assert_eq!(location_to_region(Some("")), "us-east-1");
         assert_eq!(location_to_region(Some("EU")), "eu-west-1");
         assert_eq!(location_to_region(Some("ap-northeast-2")), "ap-northeast-2");
+    }
+
+    #[test]
+    fn truncation_follows_continuation_token() {
+        assert!(is_truncated(Some("tok")));
+        assert!(!is_truncated(None));
     }
 
     #[test]
