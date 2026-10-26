@@ -447,6 +447,18 @@ fn a_role_with_a_wildcard_policy_is_admin_and_a_long_privesc_list_is_shortened()
 }
 
 #[test]
+fn a_full_allow_except_a_few_resources_is_an_admin_principal_like_on_the_detail_screen() {
+    // 리뷰 P6: 상세 화면은 관리자급이라고 하는데 점검은 권한 상승 위험이라고 하던 경우
+    let mut s = snap();
+    s.users[1].inline.push(fixtures::inline("almost-all", fixtures::policy(json!([{ "Effect": "Allow", "Action": "*", "NotResource": "arn:aws:s3:::secret/*" }]))));
+    assert!(crate::iam::eval::evaluate(&s, BOB).unwrap().admin_like);
+    let f = findings(&s, now());
+    assert_eq!(targets(&f, AdminPrincipal), vec!["alice", "bob"]);
+    assert!(item(&f, AdminPrincipal, "bob").detail.contains("almost-all"), "{}", item(&f, AdminPrincipal, "bob").detail);
+    assert!(!targets(&f, PrivescPrincipal).contains(&"bob"));
+}
+
+#[test]
 fn privesc_details_name_the_actions_in_the_catalog_order() {
     // 작업 이름은 위험 판정 문구가 아니라 작업마다 다시 판정해서 얻는다(문구가 바뀌어도 그대로다)
     let f = run();

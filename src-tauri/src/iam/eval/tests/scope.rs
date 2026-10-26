@@ -29,8 +29,8 @@ const MFA: &str = "aws:MultiFactorAuthPresent";
 #[test]
 fn full_access_except_a_not_resource_list_is_admin_like() {
     let (s, arn) = solo_user(json!([{ "Effect": "Allow", "Action": "*", "NotResource": "arn:aws:s3:::secret/*" }]));
-    // 문장만 봐서는 `Resource:"*"`가 아니라 90% 규칙으로만 관리자급이 된다
-    assert!(!admin_like_statementwise(&s, &arn));
+    // 문장 단위 판정(목록 배지·점검)도 몇 곳만 뺀 전부를 모든 리소스로 봐서 전체 계산과 같은 답이다(리뷰 P6)
+    assert!(admin_like_statementwise(&s, &arn));
     assert!(evaluate(&s, &arn).unwrap().admin_like);
     let view = principal_view(&s, &arn).unwrap();
     assert!(view.admin_like);
@@ -50,8 +50,8 @@ fn an_administrator_with_a_not_resource_boundary_is_still_admin_like() {
     let boundary = policy(json!([{ "Effect": "Allow", "Action": "*", "NotResource": "arn:aws:s3:::audit/*" }]));
     s.policies.insert(guard.clone(), managed(&guard, Scope::Local, 0, boundary));
     s.users.iter_mut().find(|u| u.arn == ALICE).unwrap().boundary = Some(guard);
-    // 경계 문장이 `Resource:"*"`가 아니라 문장 단위 판정은 관리자급이 아니다
-    assert!(!admin_like_statementwise(&s, ALICE));
+    // 경계가 몇 곳만 뺀 전부를 열어도 문장 단위 판정과 전체 계산이 모두 관리자급이다
+    assert!(admin_like_statementwise(&s, ALICE));
     assert!(evaluate(&s, ALICE).unwrap().admin_like);
     assert!(principal_view(&s, ALICE).unwrap().admin_like);
     assert_eq!(resources_of(&s, ALICE, "s3:PutBucketPolicy"), Some((Status::Allowed, strings(&["* (제외: arn:aws:s3:::audit/*)"]))));
@@ -64,6 +64,37 @@ fn an_administrator_with_a_not_resource_boundary_is_still_admin_like() {
     assert!(!evaluate(&s, &arn).unwrap().admin_like);
     assert!(!verdict_of(&s, &arn, "s3:PutBucketPolicy").unwrap().full_scope);
     assert_eq!(danger_of(&s, &arn, "s3", AccessLevel::Permissions, "s3:PutBucketPolicy"), None);
+}
+
+// ---- `*`를 빼는 NotResource는 아무것도 열지 않는다(리뷰 P5) ----
+
+#[test]
+fn an_allow_whose_not_resource_list_has_a_full_wildcard_grants_nothing() {
+    let not_everything = json!({ "Effect": "Allow", "Action": "*", "NotResource": "*" });
+    let (s, arn) = solo_user(json!([not_everything]));
+    let eval = evaluate(&s, &arn).unwrap();
+    assert!(eval.actions.is_empty(), "{:?}", eval.actions.keys().take(3).collect::<Vec<_>>());
+    assert!(!eval.admin_like);
+    assert!(!admin_like_statementwise(&s, &arn));
+    assert_eq!(evaluate_action(&s, &arn, "s3:GetObject", None), None);
+    assert_eq!(status(&s, &arn, "s3:GetObject", Some("arn:aws:s3:::b/x")), None);
+    assert!(principal_view(&s, &arn).unwrap().services.is_empty());
+    // 다른 패턴과 함께 `*`를 빼도 마찬가지다
+    let (s, arn) = solo_user(json!([{ "Effect": "Allow", "Action": "s3:*", "NotResource": ["arn:aws:s3:::x", "**"] }]));
+    assert!(evaluate(&s, &arn).unwrap().actions.is_empty());
+    // 다른 Allow가 연 것은 그대로다
+    let (s, arn) = solo_user(json!([not_everything, { "Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::b/*" }]));
+    assert_eq!(resources_of(&s, &arn, "s3:GetObject"), Some((Status::Allowed, strings(&["arn:aws:s3:::b/*"]))));
+    assert_eq!(evaluate(&s, &arn).unwrap().actions.len(), 1);
+}
+
+#[test]
+fn a_boundary_whose_not_resource_list_has_a_full_wildcard_allows_nothing() {
+    let (s, arn) = solo_user_with_boundary(json!([{ "Effect": "Allow", "Action": "s3:*", "Resource": "*" }]), json!([{ "Effect": "Allow", "Action": "*", "NotResource": "*" }]));
+    assert_eq!(resources_of(&s, &arn, "s3:GetObject").map(|r| r.0), Some(Status::Boundary));
+    assert_eq!(status(&s, &arn, "s3:GetObject", Some("arn:aws:s3:::b/x")), Some(Status::Boundary));
+    assert!(evaluate(&s, &arn).unwrap().actions.values().all(|(_, e)| e.status == Status::Boundary));
+    assert!(assert_paths_agree(&s, &arn, &["s3"]) > 0);
 }
 
 // ---- 조건이 있어야 넓게 열리는 허용은 세지 않는다 ----

@@ -235,6 +235,22 @@ fn only_a_full_administrator_counts_as_admin() {
 }
 
 #[test]
+fn an_allow_that_leaves_out_every_resource_neither_makes_admin_nor_hides_a_loss() {
+    // P5: `NotResource: "*"`는 어떤 리소스에도 열지 않는다
+    let nothing = json!([{ "Effect": "Allow", "Action": "*", "NotResource": "*" }]);
+    let s = snapshot();
+    let p = preview(&s, &put_inline(BOB, "nothing", doc(nothing.clone())), None);
+    assert_clean(&p);
+    assert!(p.impacts.is_empty());
+
+    // 그 문장이 모든 작업을 허용으로 남기면, 앱이 쓰는 alice가 관리자 정책을 잃어도 잃는 것이 없어 보였다
+    let mut s = snapshot();
+    s.users[0].inline.push(inline("nothing", policy(nothing)));
+    let p = preview(&s, &detach(ADMINS, ADMIN_POLICY), None);
+    assert!(only(&p, WarnLevel::Confirm).contains("권한이 줄어요"), "{:?}", p.warnings);
+}
+
+#[test]
 fn becoming_admin_again_is_not_news() {
     let mut s = snapshot();
     let more = add_policy(&mut s, "more-admin", json!([{ "Effect": "Allow", "Action": "*", "Resource": "*" }]));

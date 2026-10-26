@@ -78,6 +78,15 @@ fn universal_resources(stmt: &Statement) -> bool {
     matches!(&stmt.resources, Resources::Resource(patterns) if patterns.iter().any(|p| all_star(p)))
 }
 
+/// 허용 범위로 볼 때 모든 리소스에 열린 문장: `Resource`에 `*`가 있거나, `*`를 빼지 않는 NotResource(몇 곳만 뺀 전부)다.
+/// 권한 계산(`Verdict::full_scope`)도 NotResource 목록만 뺀 전부를 모든 리소스로 센다. 거부 쪽(`blanket_denied`)은 `universal_resources`만 본다.
+fn opens_every_resource(stmt: &Statement) -> bool {
+    match &stmt.resources {
+        Resources::NotResource(excluded) => !excluded.iter().any(|e| all_star(e)),
+        _ => universal_resources(stmt),
+    }
+}
+
 fn statements<'a>(src: &Source<'a>) -> impl Iterator<Item = &'a Statement> + 'a {
     src.document.into_iter().flat_map(|doc| doc.statements.iter())
 }
@@ -111,11 +120,11 @@ fn breadth(stmt: &Statement, count_lists: bool) -> usize {
     }
 }
 
-/// 조건 없이 모든 리소스에 작업을 여는 Allow 문장 하나가 가리키는 작업 수의 최댓값.
+/// 조건 없이 모든 리소스(NotResource 목록만 뺀 전부도)에 작업을 여는 Allow 문장 하나가 가리키는 작업 수의 최댓값.
 fn widest_allow<'a>(sources: impl Iterator<Item = &'a Source<'a>>) -> usize {
     sources
         .flat_map(statements)
-        .filter(|st| st.effect == Effect::Allow && !st.conditional && universal_resources(st))
+        .filter(|st| st.effect == Effect::Allow && !st.conditional && opens_every_resource(st))
         .map(|st| breadth(st, false))
         .max()
         .unwrap_or(0)
@@ -130,8 +139,9 @@ fn blanket_denied<'a>(sources: impl Iterator<Item = &'a Source<'a>>) -> usize {
         .sum()
 }
 
-/// 문장 단위 관리자급 판정(카탈로그 전체를 펼치지 않는다). 조건 없이 모든 리소스에 카탈로그의 90% 이상을 여는
+/// 문장 단위 관리자급 판정(카탈로그 전체를 펼치지 않는다). 조건 없이 모든 리소스(NotResource 목록만 뺀 전부도)에 카탈로그의 90% 이상을 여는
 /// Allow 문장(`*`, 또는 몇 개만 뺀 NotAction)이 있고, 권한 경계와 모든 리소스 대상 Deny를 적용한 뒤에도 그 정도가 남는다.
+/// NotResource로 몇 곳만 뺀 전체 허용도 전체 계산(`PrincipalEval::admin_like`)처럼 관리자급으로 본다(목록 배지·점검이 상세 화면과 같게).
 pub(super) fn admin_like(sources: &[Source], boundary: Option<&Source>) -> bool {
     let total = catalog().all_count();
     let enough = |n: usize| n > 0 && n * 100 >= total * 90;
@@ -310,6 +320,29 @@ mod tests {
         assert!(!admin(json!([{ "Effect": "Allow", "Action": "*", "Resource": "*", "Condition": { "Bool": { "aws:MultiFactorAuthPresent": "true" } } }])));
         assert!(!admin(json!([{ "Effect": "Allow", "Action": "s3:*", "Resource": "*" }])));
         assert!(!admin(json!([{ "Effect": "Deny", "Action": "*", "Resource": "*" }])));
+    }
+
+    #[test]
+    fn a_full_allow_that_leaves_out_a_few_resources_is_admin_like_but_one_that_leaves_out_everything_is_not() {
+        let admin = |statements: serde_json::Value| {
+            let (s, arn) = solo_user(statements);
+            admin_like_statementwise(&s, &arn)
+        };
+        assert!(admin(json!([{ "Effect": "Allow", "Action": "*", "NotResource": "arn:aws:s3:::secret/*" }])));
+        assert!(admin(json!([{ "Effect": "Allow", "Action": "*", "NotResource": ["arn:aws:s3:::a", "arn:aws:s3:::b/*"] }])));
+        // `*`를 빼면 남는 리소스가 없다
+        assert!(!admin(json!([{ "Effect": "Allow", "Action": "*", "NotResource": "*" }])));
+        assert!(!admin(json!([{ "Effect": "Allow", "Action": "*", "NotResource": ["arn:aws:s3:::a", "*"] }])));
+        let mfa = json!({ "Bool": { "aws:MultiFactorAuthPresent": "true" } });
+        assert!(!admin(json!([{ "Effect": "Allow", "Action": "*", "NotResource": "arn:aws:s3:::secret/*", "Condition": mfa }])));
+        // 목록 배지도 같은 판정이다
+        let (s, arn) = solo_user(json!([{ "Effect": "Allow", "Action": "*", "NotResource": "arn:aws:s3:::secret/*" }]));
+        assert_eq!(kinds(&s, &arn), vec![BadgeKind::Admin]);
+        // 권한 경계도 몇 곳만 뺀 전부를 열면 관리자급을 막지 않는다
+        let (s, arn) = solo_user_with_boundary(json!([{ "Effect": "Allow", "Action": "*", "Resource": "*" }]), json!([{ "Effect": "Allow", "Action": "*", "NotResource": "arn:aws:s3:::audit/*" }]));
+        assert!(admin_like_statementwise(&s, &arn));
+        let (s, arn) = solo_user_with_boundary(json!([{ "Effect": "Allow", "Action": "*", "Resource": "*" }]), json!([{ "Effect": "Allow", "Action": "*", "NotResource": "*" }]));
+        assert!(!admin_like_statementwise(&s, &arn));
     }
 
     #[test]

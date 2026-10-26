@@ -47,8 +47,9 @@
     3. 겹친 조각에 조건 없는 Deny를 다시 적용한다. 남는 것이 없으면 `denied`.
     4. 남은 조각 가운데 연 문장(신원 Allow, 경계 Allow)이 모두 조건 없고 조건 있는 Deny도 덮지 않는 것이 있으면 `allowed`, 없으면 `conditional`.
   - 허용 리소스(`resources`)는 남은 조각의 라벨이다. NotResource 조각은 `* (제외: …)`로 적는다. 일부 리소스에만 걸린 Deny는 근거에 함께 보여준다.
+  - 제외 목록에 `*`가 든 NotResource Allow(신원 정책·경계 모두)는 남는 리소스가 없어 조각을 만들지 않는다(아무것도 열지 않는다).
 - 카탈로그에 없는 작업 이름은 `unknownActions`로 따로 보여준다. 정책을 해석하지 못한 주체는 "누가 할 수 있나" 결과에서 빠지고, 안내(`notes`)에 이름을 적는다.
-- 관리자급(`adminLike`): 조건 없는 Allow 문장이 `Action:"*"`(또는 `"*:*"`)와 `Resource:"*"`를 갖거나(경계·Deny 적용 후에도 유지될 때), 아래 `full_scope` 작업이 카탈로그 전체의 90% 이상.
+- 관리자급(`adminLike`): 조건 없는 Allow 문장이 `Action:"*"`(또는 `"*:*"`)와 `Resource:"*"`(또는 `*`를 빼지 않는 NotResource)를 갖거나(경계·Deny 적용 후에도 유지될 때), 아래 `full_scope` 작업이 카탈로그 전체의 90% 이상. 목록 배지와 점검의 adminPrincipal은 앞의 문장 단위 판정을 쓴다.
   - `full_scope`는 판정 결과에 함께 나온다. 조건 없는 (신원 Allow, 경계 Allow) 문장 쌍으로 모든 리소스(NotResource 목록만 뺀 나머지 포함)에서 허용됐다는 뜻이다.
   - 리소스를 좁혀 허용했거나(`Resource:"arn:aws:s3:::b/*"` 위의 `Action:"*"` 등) 조건이 맞아야 모든 리소스에 열리는 작업은 세지 않는다.
   - "모든 리소스에 대한 권한 관리" 위험 표시도 같은 `full_scope`를 쓴다.
