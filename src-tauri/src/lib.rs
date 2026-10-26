@@ -24,6 +24,7 @@ pub fn run() {
                 settings_path: dir.join("settings.json"),
             });
             app.manage(explorer_commands::ExplorerState::default());
+            std::thread::spawn(explorer::external::sweep_stale);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
