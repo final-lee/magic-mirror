@@ -16,6 +16,7 @@ import type { DiffTool, FileRef, TransferRequest } from "./explorer/types";
 import { useTransfers } from "./explorer/useTransfers";
 import type { S3Location } from "./lib/s3";
 import { getVersion } from "@tauri-apps/api/app";
+import { VpcMapTab } from "./vpcmap/VpcMapTab";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { useUpdater } from "./lib/useUpdater";
 
@@ -36,6 +37,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>("resources");
   const [explorerTabs, setExplorerTabs] = useState<{ id: string; location: S3Location }[]>([]);
   const [diffTabs, setDiffTabs] = useState<{ id: string; left: FileRef; right: FileRef }[]>([]);
+  const [vpcTabs, setVpcTabs] = useState<{ id: string; vpcId: string; name: string; region: string }[]>([]);
   const onTransferSettled = useCallback(
     (_req: TransferRequest) => {
       void qc.invalidateQueries({ queryKey: ["s3"] });
@@ -67,6 +69,7 @@ export default function App() {
     void qc.invalidateQueries({ queryKey: ["account", profile] });
     void qc.invalidateQueries({ queryKey: ["local"] });
     void qc.invalidateQueries({ queryKey: ["diff", profile] });
+    void qc.invalidateQueries({ queryKey: ["vpc-topology", profile] });
   }, [qc, profile]);
 
   useEffect(() => {
@@ -118,7 +121,14 @@ export default function App() {
     setActiveTab(id);
     setFilter("");
   };
+  const openVpc = (v: { vpcId: string; name: string; region: string }) => {
+    const id = `vpc:${v.vpcId}`;
+    setVpcTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs : [...tabs, { id, ...v }]));
+    setActiveTab(id);
+    setFilter("");
+  };
   const closeTab = (id: string) => {
+    setVpcTabs((tabs) => tabs.filter((t) => t.id !== id));
     setExplorerTabs((tabs) => tabs.filter((t) => t.id !== id));
     setDiffTabs((tabs) => tabs.filter((t) => t.id !== id));
     if (activeTab === id) {
@@ -134,6 +144,7 @@ export default function App() {
   const tabs: TabInfo[] = [
     { id: "resources", title: "리소스", closable: false },
     ...explorerTabs.map((t) => ({ id: t.id, title: `S3: ${t.location.bucket}`, closable: true })),
+    ...vpcTabs.map((t) => ({ id: t.id, title: `🗺 ${t.name}`, closable: true })),
     ...diffTabs.map((t) => ({ id: t.id, title: diffTitle(t.left, t.right), closable: true })),
   ];
   const diffTool: DiffTool = settings.diffTool ?? "filemerge";
@@ -146,7 +157,8 @@ export default function App() {
     // 버킷은 계정에 속하므로 버킷 탭과 비교 탭을 모두 닫는다.
     setExplorerTabs([]);
     setDiffTabs([]);
-    if (activeTab.startsWith("s3:") || activeTab.startsWith("diff:")) setActiveTab("resources");
+    setVpcTabs([]);
+    if (activeTab.startsWith("s3:") || activeTab.startsWith("vpc:") || activeTab.startsWith("diff:")) setActiveTab("resources");
     update({ lastProfile: name, lastRegion: nextRegion });
   };
 
@@ -202,6 +214,7 @@ export default function App() {
           account={account.data}
           filter={filter}
           onOpenBucket={openExplorer}
+          onOpenVpc={openVpc}
           onRefresh={refresh}
           active={activeTab === "resources"}
         />
@@ -223,6 +236,12 @@ export default function App() {
           />
         </div>
       ))}
+      {profile &&
+        vpcTabs.map((t) => (
+          <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
+            <VpcMapTab profile={profile} region={t.region} vpcId={t.vpcId} name={t.name} active={activeTab === t.id} />
+          </div>
+        ))}
       {diffTabs.map((t) => (
         <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
           <DiffTab

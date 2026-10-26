@@ -1,6 +1,8 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import App from "./App";
 import { api } from "./api/client";
+import { vpcApi } from "./vpcmap/api";
+import { sampleTopology } from "./vpcmap/fixtures";
 import { makeResource, renderWithClient, sampleServices } from "./test/utils";
 
 vi.mock("./api/client", () => ({
@@ -25,6 +27,7 @@ vi.mock("./explorer/api", () => ({
   onTransferProgress: vi.fn(async () => () => {}),
   onMouseNav: vi.fn(async () => () => {}),
 }));
+vi.mock("./vpcmap/api", () => ({ vpcApi: { topology: vi.fn(), savePng: vi.fn() } }));
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: vi.fn(async () => () => {}) }),
 }));
@@ -192,5 +195,47 @@ describe("bucket explorer tabs", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "프로필" }), { target: { value: "dev" } });
     expect(screen.queryByRole("tab", { name: /S3: assets/ })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+describe("VPC 구조도 탭", () => {
+  const vpcService = {
+    id: "vpc",
+    name: "VPC",
+    global: false,
+    types: [{ id: "vpcs", name: "VPCs", columns: [{ key: "name", label: "Name", kind: "text" as const }] }],
+  };
+  beforeEach(() => {
+    m.listServices.mockResolvedValue([...sampleServices, vpcService]);
+    m.getSettings.mockResolvedValue({ enabledServices: ["ec2", "vpc"], favorites: [], lastProfile: "prod", lastRegion: null });
+    m.listResources.mockResolvedValue({ items: [makeResource("vpc-1", { name: "prod-vpc" })], truncated: false });
+    vi.mocked(vpcApi.topology).mockResolvedValue(sampleTopology());
+  });
+  const openVpc = async () => {
+    renderWithClient(<App />);
+    fireEvent.click(await screen.findByText("VPC"));
+    fireEvent.click(screen.getByText("VPCs"));
+    fireEvent.doubleClick(await screen.findByText("prod-vpc"));
+  };
+
+  test("double-clicking a VPC opens a map tab and reuses it", async () => {
+    await openVpc();
+    expect(await screen.findByRole("tab", { name: /🗺 prod-vpc/ })).toBeInTheDocument();
+    expect(vpcApi.topology).toHaveBeenCalledWith("prod", "ap-northeast-2", "vpc-1");
+    expect(await screen.findByText("pub-a")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    fireEvent.doubleClick(screen.getByText("prod-vpc"));
+    expect(screen.getAllByRole("tab", { name: /🗺/ })).toHaveLength(1);
+  });
+
+  test("closing the tab returns to resources; profile change closes it", async () => {
+    await openVpc();
+    await screen.findByRole("tab", { name: /🗺 prod-vpc/ });
+    fireEvent.click(screen.getByRole("button", { name: /닫기/ }));
+    expect(screen.queryByRole("tab", { name: /🗺/ })).not.toBeInTheDocument();
+    fireEvent.doubleClick(screen.getByText("prod-vpc"));
+    await screen.findByRole("tab", { name: /🗺 prod-vpc/ });
+    fireEvent.change(screen.getByRole("combobox", { name: "프로필" }), { target: { value: "dev" } });
+    expect(screen.queryByRole("tab", { name: /🗺/ })).not.toBeInTheDocument();
   });
 });
