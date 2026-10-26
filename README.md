@@ -2,7 +2,7 @@
 
 > Mirror, mirror on the wall — who shows my AWS resources fastest of all?
 
-A macOS desktop app for browsing AWS resources by service, without clicking through the console or typing long CLI commands. It also has a Forklift-style two-pane S3 explorer and a side-by-side file diff.
+A macOS desktop app for browsing AWS resources by service, without clicking through the console or typing long CLI commands. It also has a Forklift-style two-pane S3 explorer, a side-by-side file diff, and an IAM workspace that shows who can do what and lets you fix it safely.
 
 ![Resource browser](docs/screenshots/resources.png)
 
@@ -24,6 +24,23 @@ A macOS desktop app for browsing AWS resources by service, without clicking thro
 - Shows EC2 instances, NAT gateways, load balancers, RDS, Lambda functions, and interface endpoints inside their subnets. Internet, egress-only, and VPN gateways sit on the VPC border. Gateway endpoints, Transit Gateway attachments, and peering connections sit in the bottom band.
 - Click a subnet to see its route table and highlight where its default route goes. Click any resource for details and a console link.
 - Zoom and pan, and save the diagram as a PNG.
+
+### IAM workspace
+![IAM workspace](docs/screenshots/iam.png)
+
+Open **IAM → 🔐 IAM 관리** in the sidebar, or double-click a user, role, or policy in the resource list, to get one tab for the whole account.
+
+- **Effective permissions**: for every user, group, and role, a table of services × access levels (list, read, write, permissions management, tagging). It combines attached and inline policies, group policies, permissions boundaries, Deny statements, and conditions. Click a cell to see each action, the resources it covers, and the policy statement that allows or blocks it.
+- **Who can do this?**: enter an action such as `s3:DeleteObject`, optionally with a resource ARN, to list every user and role that can perform it and why. You can check the results against the IAM policy simulator.
+- **Security checks**: root access keys and MFA, console users without MFA, old or unused access keys, inactive users and roles, admin-level principals, privilege-escalation paths, roles that other accounts or anyone can assume, and policies attached nowhere. Each finding links to the principal, and some can be fixed right from the finding.
+- **Unused permissions**: uses IAM last-accessed data to show the services a user or role hasn't used, suggest policies to detach, and draft a narrower policy from what was actually used. The draft never allows more than the principal can do today: it leaves out conditional allows and keeps existing Deny statements.
+- **Changes from the app**:
+  - Attach or detach managed policies, add or remove group members, and create, edit, or delete inline policies.
+  - Save a new version of a customer managed policy.
+  - Deactivate, reactivate, or delete access keys.
+- **Preview before every change**: every change starts with a preview of the exact API calls, who gains or loses which permissions, and any warnings. Risky changes, such as granting admin access or cutting off the app's own access, ask you to type the target's name or key ID. Before applying, the app re-reads the account and stops if anything changed since the preview. Service-linked and IAM Identity Center roles are managed by AWS and can't be changed.
+- **Change log**: every applied change is recorded locally, and most can be undone. An undo goes through the same preview. Changes AWS can't reverse, such as deleting an access key, are marked as such.
+- **What it doesn't evaluate**: only identity-based policies and permissions boundaries. Organization SCPs and resource-based policies (such as bucket policies) aren't included, and the app says so on screen.
 
 ### S3 explorer
 ![S3 explorer](docs/screenshots/explorer.png)
@@ -59,6 +76,16 @@ The app checks for a new version at launch and every 6 hours, and shows an **Upd
 ### Requirements
 - A profile in `~/.aws/config`. For SSO profiles, sign in with `aws sso login --profile <name>` or with the app's sign-in button.
 - Read permissions for the services you want to browse. The VPC diagram uses EC2 `Describe*` calls plus `rds:DescribeDBInstances`, `elasticloadbalancing:DescribeLoadBalancers`, and `lambda:ListFunctions`; anything it can't read is skipped with a warning. Writing from the S3 explorer needs `s3:PutObject` and `s3:DeleteObject`.
+- The IAM workspace reads with:
+  - `iam:GetAccountAuthorizationDetails`, `iam:ListPolicies`, `iam:GetPolicy`, `iam:GetPolicyVersion`
+  - `iam:ListAccessKeys`, `iam:GetAccessKeyLastUsed`, `iam:GenerateCredentialReport`, `iam:GetCredentialReport`
+  - `iam:GenerateServiceLastAccessedDetails`, `iam:GetServiceLastAccessedDetails`, `iam:SimulatePrincipalPolicy`, `access-analyzer:ValidatePolicy`
+  - If one of these is missing, the screens that need it say which action is missing.
+- Making changes in the IAM workspace also needs the matching write actions:
+  - `iam:AttachUserPolicy`, `iam:AttachGroupPolicy`, `iam:AttachRolePolicy`, and the matching `Detach…Policy`, `Put…Policy`, and `Delete…Policy` actions
+  - `iam:AddUserToGroup`, `iam:RemoveUserFromGroup`
+  - `iam:CreatePolicyVersion`, `iam:DeletePolicyVersion`
+  - `iam:UpdateAccessKey`, `iam:DeleteAccessKey`
 
 ## Development
 
@@ -84,10 +111,13 @@ src/                     React frontend
   components/            resource browser, tab bar, settings, update banner
   explorer/              S3 explorer, transfer queue, diff tab
   vpcmap/                VPC network diagram
+  iam/                   IAM workspace
 src-tauri/src/
   adapters/              per-service read-only adapters
   explorer/              local files, S3 writes and transfers, diff engine
   topology/              VPC topology queries (read-only)
+  iam/                   IAM snapshot, permission evaluation, checks, change previews
+  iam/write.rs           the only place that calls IAM write APIs
   mouse_nav.rs           macOS mouse back/forward buttons
 scripts/release.sh       universal build and GitHub release
 ```

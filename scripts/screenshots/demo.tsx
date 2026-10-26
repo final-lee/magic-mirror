@@ -7,6 +7,7 @@ import { emit } from "@tauri-apps/api/event";
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import App from "../../src/App";
 import "../../src/styles.css";
+import { iamMock } from "./iam";
 import services from "./services.json";
 
 const ACCOUNT = "123456789012";
@@ -279,7 +280,7 @@ mockIPC(
       case "plugin:app|version":
         return "0.1.0";
       default:
-        return null;
+        return cmd.startsWith("iam_") ? iamMock(cmd, a) ?? null : null;
     }
   },
   { shouldMockEvents: true },
