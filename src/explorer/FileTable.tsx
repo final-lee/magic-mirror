@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { Column, Resource } from "../api/types";
 import { Cell } from "../components/Cell";
 import { compareValues } from "../lib/format";
@@ -21,6 +21,16 @@ interface Props {
 export function FileTable({ columns, rows, filter, selection, onSelectionChange, onOpen, onBack, onDragStart, emptyText }: Props) {
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: columns[0]?.key ?? "", dir: 1 });
   const press = useRef<{ id: string; x: number; y: number; started: boolean } | null>(null);
+
+  const justDragged = useRef(false);
+
+  useEffect(() => {
+    const reset = () => {
+      press.current = null;
+    };
+    window.addEventListener("pointerup", reset);
+    return () => window.removeEventListener("pointerup", reset);
+  }, []);
 
   const visible = useMemo(() => {
     const f = filter.trim().toLowerCase();
@@ -48,6 +58,7 @@ export function FileTable({ columns, rows, filter, selection, onSelectionChange,
 
   const onPointerDown = (id: string, e: PointerEvent) => {
     if (e.button !== 0) return;
+    justDragged.current = false;
     press.current = { id, x: e.clientX, y: e.clientY, started: false };
   };
 
@@ -56,7 +67,9 @@ export function FileTable({ columns, rows, filter, selection, onSelectionChange,
     if (!p || p.started || e.buttons !== 1) return;
     if (Math.abs(e.clientX - p.x) + Math.abs(e.clientY - p.y) < DRAG_THRESHOLD * 2) return;
     p.started = true;
-    const ids = selection.selected.includes(p.id) ? selection.selected : [p.id];
+    justDragged.current = true;
+    const visibleSel = selection.selected.filter((id) => order.includes(id));
+    const ids = visibleSel.includes(p.id) ? visibleSel : [p.id];
     onDragStart?.(ids, { clientX: e.clientX, clientY: e.clientY });
   };
 
@@ -83,7 +96,13 @@ export function FileTable({ columns, rows, filter, selection, onSelectionChange,
                 key={r.id}
                 className={on ? "on" : undefined}
                 aria-selected={on}
-                onClick={(e) => onSelectionChange(nextSelection(selection, r.id, order, { meta: e.metaKey, shift: e.shiftKey }))}
+                onClick={(e) => {
+                  if (justDragged.current) {
+                    justDragged.current = false;
+                    return;
+                  }
+                  onSelectionChange(nextSelection(selection, r.id, order, { meta: e.metaKey, shift: e.shiftKey }));
+                }}
                 onDoubleClick={() => onOpen(r.id)}
                 onPointerDown={(e) => onPointerDown(r.id, e)}
                 onPointerMove={onPointerMove}

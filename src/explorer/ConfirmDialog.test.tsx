@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 test("shows details capped at 10 and returns the clicked action", () => {
@@ -38,8 +39,44 @@ test("input mode passes text; Escape and 취소 cancel", () => {
   fireEvent.change(screen.getByLabelText("폴더 이름"), { target: { value: "reports" } });
   fireEvent.keyDown(screen.getByLabelText("폴더 이름"), { key: "Enter" });
   expect(onResult).toHaveBeenLastCalledWith("ok", "reports");
-  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  fireEvent.keyDown(document.body, { key: "Escape" });
   expect(onResult).toHaveBeenLastCalledWith(null, "reports");
   fireEvent.click(screen.getByRole("button", { name: "취소" }));
   expect(onResult).toHaveBeenLastCalledWith(null, "reports");
+});
+
+test("without input, cancel is focused (not danger) and Escape works via real focus", async () => {
+  const onResult = vi.fn();
+  render(
+    <ConfirmDialog
+      title="삭제할까요?"
+      details={["a", "a"]}
+      actions={[{ label: "삭제", value: "delete", danger: true }]}
+      onResult={onResult}
+    />,
+  );
+  expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
+  expect(screen.getByRole("button", { name: "삭제" })).not.toHaveFocus();
+  expect(screen.getByRole("button", { name: "취소" })).toHaveFocus();
+  await userEvent.keyboard("{Escape}");
+  expect(onResult).toHaveBeenCalledWith(null, "");
+  // Tab stays inside the dialog
+  await userEvent.tab();
+  expect(screen.getByRole("button", { name: "삭제" })).toHaveFocus();
+  await userEvent.tab();
+  expect(screen.getByRole("button", { name: "취소" })).toHaveFocus();
+});
+
+test("Enter in input never falls back to a danger action", () => {
+  const onResult = vi.fn();
+  render(
+    <ConfirmDialog
+      title="이름"
+      input={{ label: "파일 이름", initial: "x" }}
+      actions={[{ label: "삭제", value: "delete", danger: true }]}
+      onResult={onResult}
+    />,
+  );
+  fireEvent.keyDown(screen.getByLabelText("파일 이름"), { key: "Enter" });
+  expect(onResult).not.toHaveBeenCalled();
 });

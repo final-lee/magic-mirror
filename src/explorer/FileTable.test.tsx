@@ -79,3 +79,12 @@ test("empty text", () => {
   );
   expect(screen.getByText("비어 있어요")).toBeInTheDocument();
 });
+
+test("click following a drag does not change the selection", () => {
+  const p = setup({ selected: ["/p/a.txt", "/p/b.txt"], anchor: "/p/b.txt" });
+  fireEvent.pointerDown(row("📄 a.txt"), { clientX: 10, clientY: 10, button: 0 });
+  fireEvent.pointerMove(row("📄 a.txt"), { clientX: 30, clientY: 10, buttons: 1 });
+  fireEvent.pointerUp(row("📄 a.txt"));
+  fireEvent.click(row("📄 a.txt"));
+  expect(p.onSelectionChange).not.toHaveBeenCalled();
+});
