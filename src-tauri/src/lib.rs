@@ -32,7 +32,7 @@ pub fn run() {
                 settings_path: dir.join("settings.json"),
             });
             app.manage(explorer_commands::ExplorerState::default());
-            app.manage(iam_commands::IamState::default());
+            app.manage(iam_commands::IamState::new(dir.join("iam-changes.jsonl")));
             std::thread::spawn(explorer::external::sweep_stale);
             mouse_nav::install(app.handle().clone());
             Ok(())
@@ -72,6 +72,10 @@ pub fn run() {
             iam_commands::iam_last_accessed,
             iam_commands::iam_list_policies,
             iam_commands::iam_validate_policy,
+            iam_commands::iam_preview,
+            iam_commands::iam_apply,
+            iam_commands::iam_change_log,
+            iam_commands::iam_undo_change,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
