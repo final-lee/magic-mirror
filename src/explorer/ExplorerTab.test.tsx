@@ -205,6 +205,23 @@ test("Finder drop not over the S3 pane starts nothing", async () => {
   expect(m.planUpload).not.toHaveBeenCalled();
 });
 
+test("drop while a confirm dialog is open is ignored with a notice", async () => {
+  const p = setup();
+  await openBucket();
+  fireEvent.click(screen.getByText("📄 a.txt", { selector: "[data-pane=local] *" }));
+  m.planUpload.mockResolvedValue([req("1", "a.txt")]);
+  m.findConflicts.mockResolvedValue(["1"]);
+  fireEvent.click(screen.getByRole("button", { name: "복사 →" }));
+  await screen.findByRole("button", { name: "모두 덮어쓰기" });
+  m.planUpload.mockClear();
+  document.elementFromPoint = vi.fn(() => screen.getByTestId("pane-s3"));
+  act(() => dropHandler!({ payload: { type: "drop", paths: ["/Users/me/x.png"], position: { x: 10, y: 10 } } }));
+  expect(await screen.findByText("확인 창을 먼저 닫아 주세요")).toBeInTheDocument();
+  expect(m.planUpload).not.toHaveBeenCalled();
+  expect(p.transfers.enqueue).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "모두 덮어쓰기" })).toBeInTheDocument();
+});
+
 test("Finder listener is unlistened on unmount", async () => {
   const { unmount } = renderWithClient(
     <ExplorerTab profile="prod" region="r" s3Service={sampleServices[1]} filter="" active initialLocalPath="/home/me" onLocalPathChange={vi.fn()} transfers={{ items: [], enqueue: vi.fn(), retry: vi.fn(), clearFinished: vi.fn() }} onOpenDiff={vi.fn()} onRefresh={vi.fn()} />,

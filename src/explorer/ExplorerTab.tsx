@@ -29,7 +29,7 @@ interface Props {
   onRefresh: () => void;
 }
 
-interface DialogState {
+interface DialogInput {
   title: string;
   message?: string;
   details?: string[];
@@ -39,6 +39,11 @@ interface DialogState {
   onResult: (value: string | null, text: string) => void | Promise<void>;
 }
 
+interface DialogState extends DialogInput {
+  id: number;
+}
+
+const DIALOG_BUSY = "확인 창을 먼저 닫아 주세요";
 const EMPTY: SelectionState = { selected: [], anchor: null };
 const lastName = (p: string) => p.replace(/\/+$/, "").split("/").pop() ?? p;
 
@@ -50,7 +55,15 @@ export function ExplorerTab(p: Props) {
   const [localSel, setLocalSel] = useState<SelectionState>(EMPTY);
   const [s3Sel, setS3Sel] = useState<SelectionState>(EMPTY);
   const [focused, setFocused] = useState<Pane>("local");
-  const [dialog, setDialog] = useState<DialogState | null>(null);
+  const [dialog, setDialogState] = useState<DialogState | null>(null);
+  const dialogRef = useRef<DialogState | null>(null);
+  const dialogSeq = useRef(0);
+  // 대화상자마다 고유 id를 붙이고 ref도 즉시 갱신해, 드롭 리스너가 항상 최신 상태를 본다.
+  const setDialog = (d: DialogInput | null) => {
+    const next = d ? { ...d, id: ++dialogSeq.current } : null;
+    dialogRef.current = next;
+    setDialogState(next);
+  };
   const [notice, setNotice] = useState<string | null>(null);
   const [finderOver, setFinderOver] = useState(false);
 
@@ -81,6 +94,11 @@ export function ExplorerTab(p: Props) {
   };
   const invalidateS3 = () => {
     if (location) void qc.invalidateQueries({ queryKey: ["s3", p.profile, location.bucket] });
+  };
+  // 이름 변경/삭제 뒤에는 열려 있는 비교 탭의 결과도 낡았으니 함께 무효화한다.
+  const invalidateAfterMutation = () => {
+    invalidateS3();
+    void qc.invalidateQueries({ queryKey: ["diff"] });
   };
 
   const confirmAndEnqueue = useCallback(
@@ -173,7 +191,7 @@ export function ExplorerTab(p: Props) {
       }
       setDialog(null);
       setS3Sel(EMPTY);
-      invalidateS3();
+      invalidateAfterMutation();
     };
     const ask = (error: string | null, initial: string) =>
       setDialog({
@@ -210,7 +228,7 @@ export function ExplorerTab(p: Props) {
           run(async () => {
             await explorerApi.s3Delete(profile, location.bucket, location.region, keys);
             setS3Sel(EMPTY);
-            invalidateS3();
+            invalidateAfterMutation();
           });
         },
       });
@@ -221,6 +239,10 @@ export function ExplorerTab(p: Props) {
   };
 
   const { drag, start } = usePaneDrag((from, to, ids) => {
+    if (dialogRef.current) {
+      setNotice(DIALOG_BUSY);
+      return;
+    }
     if (from === "local" && to === "s3") uploadPaths(ids);
     if (from === "s3" && to === "local") downloadKeys(ids);
   });
@@ -243,7 +265,9 @@ export function ExplorerTab(p: Props) {
         else if (payload.type === "leave") setFinderOver(false);
         else if (payload.type === "drop") {
           setFinderOver(false);
-          if (overS3 && payload.paths?.length) handlers.current.uploadPaths(payload.paths);
+          if (!overS3 || !payload.paths?.length) return;
+          if (dialogRef.current) setNotice(DIALOG_BUSY);
+          else handlers.current.uploadPaths(payload.paths);
         }
       })
       .then((fn) => {
@@ -342,7 +366,7 @@ export function ExplorerTab(p: Props) {
           {drag.ids.length === 1 ? lastName(drag.ids[0]) : `${drag.ids.length}개`} {drag.from === "local" ? "→ S3" : "→ 로컬"}
         </div>
       )}
-      {dialog && <ConfirmDialog key={dialog.title + (dialog.error ?? "")} {...dialog} onResult={(v, t) => void dialog.onResult(v, t)} />}
+      {dialog && <ConfirmDialog key={dialog.id} {...dialog} onResult={(v, t) => void dialog.onResult(v, t)} />}
     </div>
   );
 }
