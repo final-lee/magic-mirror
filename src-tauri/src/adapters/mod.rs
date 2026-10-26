@@ -1,4 +1,5 @@
 pub mod ec2;
+pub mod s3;
 pub mod util;
 pub mod vpc;
 
@@ -27,7 +28,7 @@ pub type AdapterRef = Arc<dyn ResourceAdapter>;
 
 /// 서비스 표시 순서대로 모든 어댑터를 돌려준다.
 pub fn registry() -> Vec<AdapterRef> {
-    vec![Arc::new(ec2::Ec2), Arc::new(vpc::Vpc)]
+    vec![Arc::new(ec2::Ec2), Arc::new(s3::S3), Arc::new(vpc::Vpc)]
 }
 
 pub fn service_info(a: &dyn ResourceAdapter) -> ServiceInfo {
