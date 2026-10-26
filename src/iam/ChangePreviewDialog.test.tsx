@@ -68,10 +68,11 @@ describe("content", () => {
     expect(screen.getByText("되돌릴 수 있어요")).toBeInTheDocument();
   });
 
-  test("says clearly when the change cannot be undone", () => {
+  test("says clearly when the change cannot be undone, without claiming the change log cannot undo it either", () => {
     setup(previewOf({ op: "deleteAccessKey", userName: "bob", accessKeyId: "AKIA" }, { reversible: false }));
-    expect(screen.getByText(/되돌릴 수 없어요/)).toBeInTheDocument();
+    expect(screen.getByText("되돌릴 수 없어요")).toBeInTheDocument();
     expect(screen.queryByText("되돌릴 수 있어요")).not.toBeInTheDocument();
+    expect(screen.queryByText(/변경 기록에서도/)).not.toBeInTheDocument();
   });
 
   test("an undo is labelled as one", () => {

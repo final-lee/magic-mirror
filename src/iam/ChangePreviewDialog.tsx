@@ -154,9 +154,9 @@ const PreviewDetails = memo(function PreviewDetails({ preview }: { preview: Chan
 
       <ImpactList impacts={preview.impacts} omitted={preview.impactsOmitted ?? 0} />
 
-      <p className={`cp-rev${preview.reversible ? "" : " no"}`}>
-        {preview.reversible ? "되돌릴 수 있어요" : "되돌릴 수 없어요. 적용하면 변경 기록에서도 되돌릴 수 없어요"}
-      </p>
+      {/* 되돌릴 수 없는 이유는 확인 경고가 말한다. 이 자격 증명이 되돌릴 권한을 잃는 경우에도 기록의 역변경은 남아서,
+          권한이 있는 다른 자격 증명으로는 되돌릴 수 있다. 그래서 "변경 기록에서도"라고 하지 않는다 */}
+      <p className={`cp-rev${preview.reversible ? "" : " no"}`}>{preview.reversible ? "되돌릴 수 있어요" : "되돌릴 수 없어요"}</p>
     </>
   );
 });

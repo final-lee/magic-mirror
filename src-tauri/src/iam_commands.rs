@@ -405,30 +405,32 @@ async fn gather(state: &AppState, iam: &IamState, profile: &str, change: &IamCha
     Ok((s, Facts { key_status, own_key_id, policy_check, policy_error }, client))
 }
 
-/// 변경 미리보기. 적용할 때와 같은 재료로 계산하고, 사용자가 본 계획을 기억해 둔다. 권한 계산은 CPU를 쓰는 일이라 따로 돌린다.
-#[tauri::command]
-pub async fn iam_preview(state: State<'_, AppState>, iam: State<'_, IamState>, profile: String, change: IamChange) -> Result<ChangePreview, AppError> {
-    let (s, facts, _) = gather(&state, &iam, &profile, &change).await?;
+/// 미리보기를 계산하고 사용자가 본 계획으로 기억해 둔다. 재료(`gather`)는 부르는 쪽이 읽어 넘긴다. 권한 계산은 CPU를 쓰는 일이라 따로 돌린다.
+async fn preview_and_remember(iam: &IamState, profile: &str, s: Arc<Snapshot>, change: IamChange, facts: Facts) -> Result<ChangePreview, AppError> {
     let account_id = s.account_id.clone();
     let shown = tokio::task::spawn_blocking(move || preview(&s, &change, &facts))
         .await
         .map_err(|e| AppError::other(format!("미리보기를 계산하지 못했어요: {e}")))?;
-    locked(&iam.plans).remember(&profile, &shown.change, Plan::of(&account_id, &shown), now_secs());
+    locked(&iam.plans).remember(profile, &shown.change, Plan::of(&account_id, &shown), now_secs());
     Ok(shown)
 }
 
-/// 변경 적용. 최신 스냅숏으로 미리보기를 다시 계산해, 사용자가 미리보기에서 본 계획과 같고 막힘·확인 문구를 통과할 때만 IAM을 바꾸고,
-/// 결과를 변경 기록에 남긴다. 미리보기 하나로는 한 번만 적용한다(꺼낸 계획은 맞든 틀리든 다시 쓰지 않는다).
-#[tauri::command]
-pub async fn iam_apply(
-    state: State<'_, AppState>,
-    iam: State<'_, IamState>,
+/// 적용 요청: 어느 프로필에서 무엇을, 어떤 확인 문구로, (되돌리기면) 어느 기록을 되돌리는지.
+struct ApplyRequest {
     profile: String,
     change: IamChange,
     confirm_text: Option<String>,
     undo_of: Option<String>,
-) -> Result<ApplyResult, AppError> {
-    let (s, facts, client) = gather(&state, &iam, &profile, &change).await?;
+}
+
+/// 미리보기에서 본 계획을 꺼내(꺼낸 계획은 맞든 틀리든 다시 쓰지 않는다) `commit`에 넘기고, IAM에 썼으면 읽어 둔 스냅숏을 버리고
+/// 쓴 시각을 적는다. 쓰기는 `write`로 받는다: `iam_apply`는 실제 쓰기를, 테스트는 가짜 쓰기를 넣는다.
+async fn apply_with<W, Fut>(iam: &IamState, req: ApplyRequest, s: Arc<Snapshot>, facts: Facts, write: W) -> Result<ApplyResult, AppError>
+where
+    W: FnOnce(Vec<ApiCall>) -> Fut,
+    Fut: Future<Output = write::Applied>,
+{
+    let ApplyRequest { profile, change, confirm_text, undo_of } = req;
     let now = now_secs();
     let seen = locked(&iam.plans).take(&profile, &change, now);
     let request = Request {
@@ -443,13 +445,36 @@ pub async fn iam_apply(
         now,
         log_id: new_log_id(now_millis()),
     };
-    let committed = commit(request, move |plan: Vec<ApiCall>| async move { write::apply(&client, &plan).await }).await;
+    let committed = commit(request, write).await;
     if committed.wrote {
         // 일부만 적용되고 실패했을 수도 있으니 성공하지 않았어도 읽어 둔 것을 버린다
-        invalidate(&iam, &profile);
-        mark_written(&iam, &profile, now_secs());
+        invalidate(iam, &profile);
+        mark_written(iam, &profile, now_secs());
     }
     committed.result
+}
+
+/// 변경 미리보기. 적용할 때와 같은 재료로 계산하고, 사용자가 본 계획을 기억해 둔다.
+#[tauri::command]
+pub async fn iam_preview(state: State<'_, AppState>, iam: State<'_, IamState>, profile: String, change: IamChange) -> Result<ChangePreview, AppError> {
+    let (s, facts, _) = gather(&state, &iam, &profile, &change).await?;
+    preview_and_remember(&iam, &profile, s, change, facts).await
+}
+
+/// 변경 적용. 최신 스냅숏으로 미리보기를 다시 계산해, 사용자가 미리보기에서 본 계획과 같고 막힘·확인 문구를 통과할 때만 IAM을 바꾸고,
+/// 결과를 변경 기록에 남긴다. 미리보기 하나로는 한 번만 적용한다.
+#[tauri::command]
+pub async fn iam_apply(
+    state: State<'_, AppState>,
+    iam: State<'_, IamState>,
+    profile: String,
+    change: IamChange,
+    confirm_text: Option<String>,
+    undo_of: Option<String>,
+) -> Result<ApplyResult, AppError> {
+    let (s, facts, client) = gather(&state, &iam, &profile, &change).await?;
+    let req = ApplyRequest { profile, change, confirm_text, undo_of };
+    apply_with(&iam, req, s, facts, move |plan: Vec<ApiCall>| async move { write::apply(&client, &plan).await }).await
 }
 
 /// 변경 기록, 최신순.
@@ -878,6 +903,91 @@ mod tests {
         assert_eq!(locked(&iam.plans).take("prod", &change, 101), None);
         assert_eq!(locked(&iam.plans).take("dev", &change, 101), Some(Plan::of(&s.account_id, &shown)));
         assert_eq!(locked(&iam.plans).take("dev", &change, 102), None);
+    }
+
+    // ── 미리보기 → 적용 ──
+
+    fn attach_s3_to_bob() -> IamChange {
+        IamChange::AttachPolicy { target: crate::iam::fixtures::BOB.into(), policy_arn: crate::iam::fixtures::S3_FULL.into() }
+    }
+
+    fn apply_request(profile: &str, change: &IamChange) -> ApplyRequest {
+        ApplyRequest { profile: profile.into(), change: change.clone(), confirm_text: None, undo_of: None }
+    }
+
+    /// 몇 번 불렸는지 세고, 받은 호출을 모두 성공시키는 가짜 쓰기.
+    fn counting(writes: &AtomicUsize) -> impl FnOnce(Vec<ApiCall>) -> std::future::Ready<write::Applied> + '_ {
+        move |plan| {
+            writes.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(write::Applied { done: plan, result: Ok(()) })
+        }
+    }
+
+    fn with_log() -> (tempfile::TempDir, IamState) {
+        let dir = tempfile::tempdir().unwrap();
+        let iam = IamState::new(dir.path().join("iam-changes.jsonl"));
+        (dir, iam)
+    }
+
+    #[tokio::test]
+    async fn an_apply_without_a_preview_is_refused_and_writes_nothing() {
+        let ((_dir, iam), writes) = (with_log(), AtomicUsize::new(0));
+        let s = Arc::new(crate::iam::fixtures::snapshot());
+        let refused = apply_with(&iam, apply_request("dev", &attach_s3_to_bob()), s, Facts::default(), counting(&writes)).await;
+        assert_eq!(refused, Err(AppError::other(crate::iam::commit::plan::DRIFTED)));
+        assert_eq!(writes.load(Ordering::SeqCst), 0);
+        assert_eq!(written_at(&iam, "dev"), None, "쓰지 않았으면 쓴 시각도 없어요");
+    }
+
+    #[tokio::test]
+    async fn one_preview_allows_exactly_one_apply() {
+        let ((_dir, iam), writes) = (with_log(), AtomicUsize::new(0));
+        let s = Arc::new(crate::iam::fixtures::snapshot());
+        let change = attach_s3_to_bob();
+        let shown = preview_and_remember(&iam, "dev", s.clone(), change.clone(), Facts::default()).await.unwrap();
+        assert_eq!(shown.change, change);
+
+        let first = apply_with(&iam, apply_request("dev", &change), s.clone(), Facts::default(), counting(&writes)).await.unwrap();
+        assert_eq!(first.summary, shown.summary);
+        assert_eq!(writes.load(Ordering::SeqCst), 1);
+        assert!(written_at(&iam, "dev").is_some());
+
+        let second = apply_with(&iam, apply_request("dev", &change), s, Facts::default(), counting(&writes)).await;
+        assert_eq!(second, Err(AppError::other(crate::iam::commit::plan::DRIFTED)));
+        assert_eq!(writes.load(Ordering::SeqCst), 1, "같은 미리보기로 두 번 쓰지 않아요");
+    }
+
+    #[tokio::test]
+    async fn a_preview_made_with_another_profile_does_not_count() {
+        let ((_dir, iam), writes) = (with_log(), AtomicUsize::new(0));
+        let s = Arc::new(crate::iam::fixtures::snapshot());
+        let change = attach_s3_to_bob();
+        preview_and_remember(&iam, "prod", s.clone(), change.clone(), Facts::default()).await.unwrap();
+        let refused = apply_with(&iam, apply_request("dev", &change), s, Facts::default(), counting(&writes)).await;
+        assert_eq!(refused, Err(AppError::other(crate::iam::commit::plan::DRIFTED)));
+        assert_eq!(writes.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn a_write_drops_the_cached_snapshot_and_records_when_it_happened() {
+        let ((_dir, iam), writes) = (with_log(), AtomicUsize::new(0));
+        let s = snapshot_with(&iam, "dev", false, || async { Ok(crate::iam::fixtures::snapshot()) }).await.unwrap();
+        let change = attach_s3_to_bob();
+        preview_and_remember(&iam, "dev", s.clone(), change.clone(), Facts::default()).await.unwrap();
+        let before = now_secs();
+        apply_with(&iam, apply_request("dev", &change), s, Facts::default(), counting(&writes)).await.unwrap();
+        assert!(iam.snapshots.get("dev").is_none());
+        assert!(written_at(&iam, "dev").is_some_and(|at| at >= before));
+    }
+
+    #[tokio::test]
+    async fn the_apps_own_key_id_is_read_from_the_credentials_it_uses() {
+        use aws_credential_types::provider::SharedCredentialsProvider;
+        use aws_credential_types::Credentials;
+        let with_key = |id: &str| SdkConfig::builder().credentials_provider(SharedCredentialsProvider::new(Credentials::new(id, "test-secret", None, None, "test"))).build();
+        assert_eq!(own_key_id(&with_key("AKIAEXAMPLEKEY")).await.as_deref(), Some("AKIAEXAMPLEKEY"));
+        assert_eq!(own_key_id(&with_key("")).await, None);
+        assert_eq!(own_key_id(&SdkConfig::builder().build()).await, None);
     }
 
     fn key(id: &str, status: KeyStatus) -> AccessKeyInfo {

@@ -38,17 +38,22 @@ fn rank(level: WarnLevel) -> u8 {
 /// 변경의 미리보기. 순수 함수이므로 적용할 때 백엔드가 같은 재료(`facts`)로 다시 계산해 같은 규칙으로 거른다.
 ///
 /// 막힌 변경은 영향을 계산하지 않고(적용되지 않으니 보여 줄 영향이 없다) 확인 경고도 내지 않는다.
+/// 되돌리는 변경이 없거나, 적용하면 이 앱의 자격 증명이 그 변경을 실행할 권한을 잃으면(조건부가 되는 것도) 되돌릴 수 없다고 말한다.
+/// 기록에는 역변경이 그대로 남으니 권한이 있는 다른 자격 증명으로는 되돌릴 수 있다.
 pub fn preview(s: &Snapshot, c: &IamChange, facts: &Facts) -> ChangePreview {
     let undo = inverse(s, c, facts);
     let badges = warnings::target_badges(s, c);
     let mut warnings = warnings::blocks(s, c, facts, &badges);
     let mut impacts = Vec::new();
+    let mut undo_lost = false;
     if warnings.is_empty() {
         match apply_to_snapshot(s, c) {
             Err(reason) => warnings.push(Warning::new(WarnLevel::Block, reason)),
             Ok(after) => {
                 let analysis = analyze(s, &after, affected(s, c), s.caller_principal_arn.as_deref());
-                warnings.extend(warnings::from_analysis(s, &after, c, &analysis, undo.as_ref()));
+                let (found, lost) = warnings::from_analysis(s, &after, c, &analysis, undo.as_ref());
+                warnings.extend(found);
+                undo_lost = lost;
                 impacts = analysis.impacts;
             }
         }
@@ -71,6 +76,6 @@ pub fn preview(s: &Snapshot, c: &IamChange, facts: &Facts) -> ChangePreview {
         impacts_omitted,
         warnings,
         confirm_text,
-        reversible: !blocked && undo.is_some(),
+        reversible: !blocked && undo.is_some() && !undo_lost,
     }
 }

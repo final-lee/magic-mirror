@@ -1,6 +1,6 @@
 //! 미리보기에서 사용자가 본 계획. 적용할 때 다시 계산한 계획이 이것과 같아야 IAM을 바꾼다.
-//! 미리보기와 적용 사이에 IAM이 바뀌면(버전이 5개가 돼 DeletePolicyVersion이 생김, 다른 버전 ID, 달라진 확인 이유,
-//! 프로필이 다른 계정을 가리킴 …) 사용자가 보지 않은 일을 하게 되므로 거부한다.
+//! 미리보기와 적용 사이에 IAM이 바뀌면(버전이 5개가 돼 DeletePolicyVersion이 생김, 다른 버전 ID, 달라진 확인 이유·요약,
+//! 되돌릴 수 있는지가 달라짐, 프로필이 다른 계정을 가리킴 …) 사용자가 보지 않은 일을 하게 되므로 거부한다.
 //! 순수 코드다: 시각은 부르는 쪽이 넘긴다.
 
 use std::collections::VecDeque;
@@ -15,24 +15,30 @@ pub const PLAN_TTL_SECS: i64 = 600;
 /// 미리보기가 없거나 다시 계산한 계획이 달라서 거부할 때의 문구.
 pub const DRIFTED: &str = "미리보기 뒤에 IAM이 바뀌었어요. 미리보기를 다시 받아 주세요.";
 
-/// 미리보기 하나에서 사용자가 확인한 것: 어느 계정에서, 어떤 호출을(인자·버전 ID·정책 문서까지), 어떤 막힘·확인 이유와 확인 문구로.
-/// 주의(warn) 경고는 견주지 않는다.
+/// 미리보기 하나에서 사용자가 확인한 것: 어느 계정에서, 어떤 요약으로, 어떤 호출을(인자·버전 ID·정책 문서까지), 어떤 막힘·확인 이유와
+/// 확인 문구로, 되돌릴 수 있다고 했는지. 주의(warn) 경고는 견주지 않는다.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Plan {
     pub account_id: String,
+    /// 한 줄 요약. 호출은 같아도 "추가하기"가 "수정하기"가 됐으면(그 사이 같은 이름의 인라인 정책이 생겼다) 사용자가 본 일이 아니다
+    pub summary: String,
     pub calls: Vec<ApiCall>,
     /// 막힘·확인 경고, 미리보기 순서대로
     pub checks: Vec<Warning>,
     pub confirm_text: Option<String>,
+    /// 되돌릴 수 있다고 보여 줬는지
+    pub reversible: bool,
 }
 
 impl Plan {
     pub fn of(account_id: &str, p: &ChangePreview) -> Plan {
         Plan {
             account_id: account_id.to_string(),
+            summary: p.summary.clone(),
             calls: p.calls.clone(),
             checks: p.warnings.iter().filter(|w| matches!(w.level, WarnLevel::Block | WarnLevel::Confirm)).cloned().collect(),
             confirm_text: p.confirm_text.clone(),
+            reversible: p.reversible,
         }
     }
 }
