@@ -259,6 +259,8 @@ export interface PermDelta {
 export interface ApplyResult {
   logId: string;
   summary: string;
+  /** IAM은 바꿨지만 그 뒤에 하지 못한 일(변경 기록 저장 실패 등). 없으면 [] */
+  notes?: string[];
 } // 실패하면 AppError(기록은 남김)
 export interface ChangeLogEntry {
   id: string;

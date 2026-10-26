@@ -588,6 +588,25 @@ describe("changing IAM", () => {
     expect(screen.queryByText("alice에 AdministratorAccess를 붙였어요")).not.toBeInTheDocument();
   });
 
+  test("a note the backend sends with a success stays on screen until it is closed", async () => {
+    m.apply.mockResolvedValue({
+      logId: "log-9",
+      summary: "alice에 AdministratorAccess를 붙였어요",
+      notes: ["변경 기록을 저장하지 못했어요: 권한이 없어요"],
+    });
+    await openAlice(/^정책/);
+    fireEvent.click(screen.getByRole("button", { name: "정책 붙이기" }));
+    fireEvent.click(await screen.findByRole("option", { name: /AdministratorAccess/ }));
+    await previewDialog();
+    await readyToApply();
+    fireEvent.click(applyButton());
+    const notes = await screen.findByRole("list", { name: "함께 알릴 일" });
+    expect(notes).toHaveTextContent("변경 기록을 저장하지 못했어요: 권한이 없어요");
+    expect(screen.getByText("alice에 AdministratorAccess를 붙였어요")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "알림 닫기" }));
+    expect(screen.queryByRole("list", { name: "함께 알릴 일" })).not.toBeInTheDocument();
+  });
+
   test("after an apply the overview and the open detail are read again", async () => {
     await openAlice(/^정책/);
     await screen.findByRole("table", { name: "붙은 정책" });

@@ -7,8 +7,16 @@ import type { ChangePreview, IamChange } from "./types";
 
 /** 적용한 뒤 IAM이 반영될 때까지 기다렸다가 한 번 더 읽는 시간 */
 export const REFRESH_DELAY_MS = 3_000;
-/** 완료 안내가 저절로 사라지는 시간 */
+/** 완료 안내가 저절로 사라지는 시간. 함께 알릴 일(notes)이 있는 안내는 닫을 때까지 남는다 */
 export const NOTICE_MS = 10_000;
+
+/** 적용을 마친 뒤의 안내 하나 */
+export interface ApplyNotice {
+  id: number;
+  summary: string;
+  /** IAM은 바꿨지만 하지 못한 일(변경 기록을 저장하지 못함 등). 있으면 사용자가 닫을 때까지 남기고, 다음 성공 안내가 덮지 않는다 */
+  notes: string[];
+}
 
 export interface StartOptions {
   /** 되돌리기일 때 되돌리는 기록의 id. iam_apply에 그대로 넘겨서 기록에 "되돌림"으로 남긴다 */
@@ -56,11 +64,13 @@ export function applyGate(preview: ChangePreview, typed: string): ApplyGate {
  * 적용 전에는 반드시 이 변경으로 받은 미리보기가 있어야 하고, 막힘·확인 문구 규칙(applyGate)을 통과해야 한다.
  * 적용에 실패하면 창을 연 채 오류를 보여 주고, 미리보기를 다시 받기 전에는 적용하지 않는다.
  * 성공하면 IAM 쿼리를 바로 무효화하고 3초 뒤에 overview를 force=true로 한 번 더 읽는다(IAM 반영 지연).
+ * 성공 안내(notices)는 10초 뒤 사라지지만, 백엔드가 함께 알린 일(변경 기록을 저장하지 못함 등)이 있으면 닫을 때까지 남는다.
  */
 export function useIamChange(profile: string) {
   const qc = useQueryClient();
   const [pending, setPending] = useState<PendingChange | null>(null);
-  const [notice, setNotice] = useState<{ summary: string } | null>(null);
+  const [notices, setNotices] = useState<ApplyNotice[]>([]);
+  const noticeSeq = useRef(0);
   // 여러 이벤트가 같은 렌더 안에서 연달아 와도 판단이 맞도록, 상태와 같은 값을 ref에도 바로 반영한다.
   const pendingRef = useRef<PendingChange | null>(null);
   const profileRef = useRef(profile);
@@ -114,9 +124,18 @@ export function useIamChange(profile: string) {
     commit(null);
   }, [commit]);
 
-  const dismissNotice = useCallback(() => {
+  const dismissNotice = useCallback((id: number) => {
+    setNotices((all) => all.filter((n) => n.id !== id));
+  }, []);
+
+  /** 성공 안내를 띄운다. 알릴 일이 남은 안내는 그대로 두고, 그렇지 않은 이전 안내만 새 안내로 바꾼다 */
+  const announce = useCallback((summary: string, notes: string[]) => {
+    const id = ++noticeSeq.current;
     clearTimeout(noticeTimer.current);
-    setNotice(null);
+    setNotices((all) => [...all.filter((n) => n.notes.length > 0), { id, summary, notes }]);
+    if (notes.length === 0) {
+      noticeTimer.current = setTimeout(() => setNotices((all) => all.filter((n) => n.id !== id)), NOTICE_MS);
+    }
   }, []);
 
   const apply = useCallback(
@@ -133,9 +152,7 @@ export function useIamChange(profile: string) {
           const result = await iamApi.apply(cur.profile, cur.change, confirmText, cur.undoOf);
           seq.current++;
           commit(null);
-          clearTimeout(noticeTimer.current);
-          setNotice({ summary: result.summary });
-          noticeTimer.current = setTimeout(() => setNotice(null), NOTICE_MS);
+          announce(result.summary, result.notes ?? []);
           void qc.invalidateQueries({ queryKey: iamKeys.root(cur.profile) });
           void qc.invalidateQueries({ queryKey: iamKeys.changeLog });
           const timer = setTimeout(() => {
@@ -155,7 +172,7 @@ export function useIamChange(profile: string) {
         }
       })();
     },
-    [commit, qc],
+    [announce, commit, qc],
   );
 
   // 프로필이 바뀌면 열려 있던 변경을 버린다: 다른 계정에 낡은 미리보기를 적용하면 안 된다.
@@ -173,5 +190,5 @@ export function useIamChange(profile: string) {
     [],
   );
 
-  return { pending, notice, start, apply, retryPreview, cancel, dismissNotice };
+  return { pending, notices, start, apply, retryPreview, cancel, dismissNotice };
 }

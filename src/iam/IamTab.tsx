@@ -230,14 +230,22 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
           </ul>
         )}
         {overview.isError && <ErrorState compact error={overview.error} profile={profile} onRetry={() => void overview.refetch()} />}
-        {change.notice && (
-          <div className="iam-done" role="status">
-            <span aria-hidden="true">✓</span> <span>{change.notice.summary}</span> <span className="dim">반영까지 몇 초 걸릴 수 있어요</span>
-            <button className="icon" aria-label="알림 닫기" onClick={change.dismissNotice}>
+        {change.notices.map((notice) => (
+          <div key={notice.id} className="iam-done" role="status">
+            <span aria-hidden="true">✓</span> <span>{notice.summary}</span> <span className="dim">반영까지 몇 초 걸릴 수 있어요</span>
+            <button className="icon" aria-label="알림 닫기" onClick={() => change.dismissNotice(notice.id)}>
               ✕
             </button>
+            {/* 바꾸기는 했지만 하지 못한 일(변경 기록 저장 등). 이 안내는 닫을 때까지 남는다 */}
+            {notice.notes.length > 0 && (
+              <ul className="iam-done-notes" aria-label="함께 알릴 일">
+                {notice.notes.map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
+            )}
           </div>
-        )}
+        ))}
         <div className="iam-main">{body}</div>
       </div>
       {change.pending && <ChangePreviewDialog pending={change.pending} onApply={change.apply} onRetry={change.retryPreview} onCancel={change.cancel} />}

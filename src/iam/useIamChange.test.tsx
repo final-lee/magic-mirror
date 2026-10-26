@@ -246,13 +246,13 @@ describe("apply", () => {
     const onApplied = vi.fn();
     const h = setup();
     await startAndWait(h, attachReadOnlyToBob, { onApplied });
-    expect(h.flow().notice).toBeNull();
+    expect(h.flow().notices).toEqual([]);
     await act(async () => h.flow().apply(""));
     expect(h.flow().pending).toBeNull();
-    expect(h.flow().notice).toEqual({ summary: "bob에 ReadOnlyAccess를 붙였어요" });
+    expect(h.flow().notices).toEqual([{ id: expect.any(Number), summary: "bob에 ReadOnlyAccess를 붙였어요", notes: [] }]);
     expect(onApplied).toHaveBeenCalledTimes(1);
-    act(() => h.flow().dismissNotice());
-    expect(h.flow().notice).toBeNull();
+    act(() => h.flow().dismissNotice(h.flow().notices[0].id));
+    expect(h.flow().notices).toEqual([]);
   });
 
   test("the notice fades after a while", async () => {
@@ -260,11 +260,46 @@ describe("apply", () => {
     const h = setup();
     await startAndWait(h, attachReadOnlyToBob);
     await act(async () => h.flow().apply(""));
-    expect(h.flow().notice).not.toBeNull();
+    expect(h.flow().notices).toHaveLength(1);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(12_000);
     });
-    expect(h.flow().notice).toBeNull();
+    expect(h.flow().notices).toEqual([]);
+  });
+
+  test("the next success replaces a plain notice", async () => {
+    m.apply.mockResolvedValueOnce(applied).mockResolvedValueOnce({ logId: "log-10", summary: "bob의 액세스 키 비활성화하기" });
+    const h = setup();
+    await startAndWait(h, attachReadOnlyToBob);
+    await act(async () => h.flow().apply(""));
+    await startAndWait(h, deactivateBobKey);
+    await act(async () => h.flow().apply(""));
+    expect(h.flow().notices.map((n) => n.summary)).toEqual(["bob의 액세스 키 비활성화하기"]);
+  });
+
+  test("a notice with notes from the backend stays until it is dismissed, and the next success does not replace it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const unlogged: ApplyResult = { ...applied, notes: ["변경 기록을 저장하지 못했어요: 디스크가 가득 찼어요"] };
+    m.apply.mockResolvedValueOnce(unlogged).mockResolvedValueOnce({ logId: "log-10", summary: "bob의 액세스 키 비활성화하기" });
+    const h = setup();
+    await startAndWait(h, attachReadOnlyToBob);
+    await act(async () => h.flow().apply(""));
+    expect(h.flow().notices).toEqual([{ id: expect.any(Number), summary: applied.summary, notes: unlogged.notes }]);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12_000);
+    });
+    expect(h.flow().notices).toHaveLength(1);
+
+    await startAndWait(h, deactivateBobKey);
+    await act(async () => h.flow().apply(""));
+    expect(h.flow().notices.map((n) => n.summary)).toEqual([applied.summary, "bob의 액세스 키 비활성화하기"]);
+    // 함께 알릴 일이 없는 안내만 저절로 사라진다
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12_000);
+    });
+    expect(h.flow().notices.map((n) => n.summary)).toEqual([applied.summary]);
+    act(() => h.flow().dismissNotice(h.flow().notices[0].id));
+    expect(h.flow().notices).toEqual([]);
   });
 });
 
@@ -327,7 +362,7 @@ describe("a failed apply", () => {
     await act(async () => h.flow().apply(""));
 
     expect(h.flow().pending).toMatchObject({ phase: "ready", stale: true, error: { kind: "apply", message: "정책이 이미 5개 버전을 갖고 있어요" } });
-    expect(h.flow().notice).toBeNull();
+    expect(h.flow().notices).toEqual([]);
     expect(onApplied).not.toHaveBeenCalled();
 
     await act(async () => h.flow().apply(""));

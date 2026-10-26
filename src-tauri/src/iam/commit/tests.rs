@@ -367,7 +367,7 @@ async fn a_successful_change_is_logged_with_its_inverse_and_calls() {
     let committed = commit(req, succeeding(&calls)).await;
 
     assert!(committed.wrote);
-    assert_eq!(committed.result, Ok(ApplyResult { log_id: "log-1".into(), summary: expected_summary.clone() }));
+    assert_eq!(committed.result, Ok(ApplyResult { log_id: "log-1".into(), summary: expected_summary.clone(), notes: vec![] }));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     let entries = read_all(&log);
     assert_eq!(
@@ -564,10 +564,37 @@ async fn a_log_that_cannot_be_written_does_not_hide_a_change_that_was_applied() 
     req.log_path = blocker.join("iam-changes.jsonl");
     let committed = commit(req, succeeding(&calls)).await;
     let result = committed.result.expect("적용은 성공했어요");
-    assert!(result.summary.contains("변경 기록을 저장하지 못했어요"), "{}", result.summary);
-    assert!(result.summary.starts_with(&preview_of(attach(BOB, S3_FULL)).summary));
+    // 요약은 바꾼 일 그대로이고, 하지 못한 일은 닫을 때까지 남는 안내(notes)로 따로 알린다
+    assert_eq!(result.summary, preview_of(attach(BOB, S3_FULL)).summary);
+    assert_eq!(result.notes.len(), 1, "{:?}", result.notes);
+    assert!(result.notes[0].starts_with("변경 기록을 저장하지 못했어요: "), "{:?}", result.notes);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert!(committed.wrote);
+}
+
+#[tokio::test]
+async fn an_undo_whose_original_record_could_not_be_marked_says_so_in_a_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let first = request(dir.path(), attach(BOB, S3_FULL));
+    let log = first.log_path.clone();
+    commit(first, succeeding(&calls)).await.result.unwrap();
+    // 기록을 바꿔치기할 임시 파일 자리에 폴더가 있어서 "되돌림" 표시를 하지 못한다
+    let mut temp = log.as_os_str().to_owned();
+    temp.push(".tmp");
+    std::fs::create_dir(&temp).unwrap();
+
+    let mut undo = request(dir.path(), detach(BOB, S3_FULL));
+    undo.snapshot = Arc::new(apply_to_snapshot(&snapshot(), &attach(BOB, S3_FULL)).unwrap());
+    undo.undo_of = Some("log-1".into());
+    undo.log_id = "log-2".into();
+    let result = commit(previewed(undo), succeeding(&calls)).await.result.expect("되돌리기는 적용됐어요");
+    assert_eq!(result.notes.len(), 1, "{:?}", result.notes);
+    assert!(result.notes[0].starts_with("이전 기록에 '되돌림' 표시를 하지 못했어요: "), "{:?}", result.notes);
+    assert!(!result.summary.contains("되돌림"), "{}", result.summary);
+    let entries = read_all(&log);
+    assert_eq!(entries.len(), 2, "되돌리기 기록은 남았어요");
+    assert!(!entries[0].undone);
 }
 
 #[tokio::test]
@@ -619,6 +646,9 @@ async fn deleting_a_key_needs_its_id_and_leaves_nothing_to_undo() {
 
 #[test]
 fn the_apply_result_has_the_contract_fields() {
-    let value = serde_json::to_value(ApplyResult { log_id: "x".into(), summary: "요약".into() }).unwrap();
+    let value = serde_json::to_value(ApplyResult { log_id: "x".into(), summary: "요약".into(), notes: vec![] }).unwrap();
     assert_eq!(value, serde_json::json!({ "logId": "x", "summary": "요약" }));
+    // 하지 못한 일이 있을 때만 notes를 보낸다
+    let value = serde_json::to_value(ApplyResult { log_id: "x".into(), summary: "요약".into(), notes: vec!["변경 기록을 저장하지 못했어요: 디스크가 가득 찼어요".into()] }).unwrap();
+    assert_eq!(value, serde_json::json!({ "logId": "x", "summary": "요약", "notes": ["변경 기록을 저장하지 못했어요: 디스크가 가득 찼어요"] }));
 }

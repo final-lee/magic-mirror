@@ -251,7 +251,10 @@ interface Impact {
   gainedOmitted?: number; lostOmitted?: number; restrictedOmitted?: number;   // 한도로 뺀 줄 수. 0이면 보내지 않음(없으면 0)
 }
 interface PermDelta { prefix: string; level: AccessLevel; count: number; sample: string[] }   // sample 최대 5개
-interface ApplyResult { logId: string; summary: string }        // 실패하면 AppError(기록은 남김)
+interface ApplyResult {                                          // 실패하면 AppError(기록은 남김)
+  logId: string; summary: string;
+  notes?: string[];                 // IAM은 바꿨지만 하지 못한 일(변경 기록 저장 실패, 되돌린 기록 표시 실패). 비면 보내지 않음(없으면 []). 화면은 닫을 때까지 보여 준다
+}
 interface ChangeLogEntry {
   id: string; at: string; profile: string; accountId: string; callerArn: string;
   change: IamChange; summary: string; calls: string[]; ok: boolean; error: string | null;   // calls: 실제로 성공한 호출(실패하면 그 앞까지)
