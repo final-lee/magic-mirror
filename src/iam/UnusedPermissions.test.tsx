@@ -5,6 +5,7 @@ import { desktop } from "../api/desktop";
 import { renderWithClient } from "../test/utils";
 import { iamApi } from "./api";
 import { alice, deployPolicy, readOnlyPolicy, sampleLastAccessed, scratchInline } from "./fixtures";
+import { formatAgo, formatDay } from "./format";
 import type { LastAccessed } from "./types";
 import { UnusedPermissions } from "./UnusedPermissions";
 
@@ -139,6 +140,67 @@ describe("services", () => {
     setup();
     fireEvent.click(loadButton());
     expect(await screen.findByText("허용된 서비스가 없어요")).toBeInTheDocument();
+  });
+});
+
+describe("services last used long ago", () => {
+  const completedAt = "2026-10-26T03:10:00Z";
+  const before = (days: number) => new Date(Date.parse(completedAt) - days * 86_400_000).toISOString();
+  const service = (prefix: string, name: string, lastUsed: string | null) => ({ prefix, name, lastUsed, actions: null });
+  const rowOf = (name: string) => screen.getByText(name).closest("tr") as HTMLElement;
+  const staleChip = (row: HTMLElement) => within(row).queryByText(/^마지막 사용 \d+일 전$/);
+
+  test("a service last used more than 90 days before the report gets a chip with the days, next to the date and the 'ago' text", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-27T00:00:00Z"));
+    m.lastAccessed.mockResolvedValue(sampleLastAccessed({ completedAt, services: [service("ec2", "Amazon EC2", before(120)), service("s3", "Amazon S3", before(5))] }));
+    setup();
+    await load();
+    const ec2 = rowOf("Amazon EC2");
+    const chip = within(ec2).getByText("마지막 사용 120일 전");
+    // 사용 안 함 칩과 같은 모양이다
+    expect(chip).toHaveClass("iam-chip", "conditional");
+    expect(ec2).toHaveTextContent(formatDay(before(120)));
+    expect(ec2).toHaveTextContent(formatAgo(before(120)));
+    expect(within(ec2).queryByText(/사용 안 함/)).not.toBeInTheDocument();
+    // 최근에 쓴 서비스는 날짜만 보인다
+    const s3 = rowOf("Amazon S3");
+    expect(staleChip(s3)).not.toBeInTheDocument();
+    expect(s3).toHaveTextContent(formatDay(before(5)));
+  });
+
+  test("the rule is the backend's: more than 90 whole days before the report time", async () => {
+    m.lastAccessed.mockResolvedValue(
+      sampleLastAccessed({
+        completedAt,
+        services: [service("s3", "Amazon S3", before(90)), service("ec2", "Amazon EC2", before(90.9)), service("sqs", "Amazon SQS", before(91))],
+      }),
+    );
+    setup();
+    await load();
+    expect(staleChip(rowOf("Amazon S3"))).not.toBeInTheDocument();
+    // 90일하고 몇 시간은 90일로 센다
+    expect(staleChip(rowOf("Amazon EC2"))).not.toBeInTheDocument();
+    expect(within(rowOf("Amazon SQS")).getByText("마지막 사용 91일 전")).toBeInTheDocument();
+  });
+
+  test("a service never used keeps its 'not used' chip and gets no days chip", async () => {
+    m.lastAccessed.mockResolvedValue(sampleLastAccessed({ completedAt, services: [service("sqs", "Amazon SQS", null), service("ec2", "Amazon EC2", before(200))] }));
+    setup();
+    await load();
+    const sqs = rowOf("Amazon SQS");
+    expect(within(sqs).getByText("사용 안 함 (400일)")).toBeInTheDocument();
+    expect(staleChip(sqs)).not.toBeInTheDocument();
+    expect(within(rowOf("Amazon EC2")).getByText("마지막 사용 200일 전")).toBeInTheDocument();
+  });
+
+  test("without the time AWS finished collecting nothing is called stale", async () => {
+    m.lastAccessed.mockResolvedValue(sampleLastAccessed({ completedAt: null, services: [service("ec2", "Amazon EC2", before(300))] }));
+    setup();
+    await load();
+    const ec2 = rowOf("Amazon EC2");
+    expect(staleChip(ec2)).not.toBeInTheDocument();
+    expect(ec2).toHaveTextContent(formatDay(before(300)));
   });
 });
 

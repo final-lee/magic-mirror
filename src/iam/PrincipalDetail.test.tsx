@@ -295,7 +295,7 @@ describe("access keys", () => {
     // 마지막 사용을 못 읽은 키는 "사용 기록 없음"으로 보이면 안 된다
     const third = within(rows[2]);
     expect(third.getByText("AKIAI7UNKNOWNEXAMPLE")).toBeInTheDocument();
-    expect(third.getByText("마지막 사용 확인 못 함 (권한 없음)")).toBeInTheDocument();
+    expect(third.getByText("마지막 사용 확인 못 함")).toBeInTheDocument();
     expect(third.queryByText("사용 기록 없음")).not.toBeInTheDocument();
   });
 

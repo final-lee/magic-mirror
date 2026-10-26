@@ -4,6 +4,9 @@
 //! - 작업 단위 기록이 있으면 AWS가 기록했는데 최근에 안 쓴 작업만 뺀다. 기록하지 않는 작업(데이터 작업 등)은 남긴다.
 //! - 와일드카드(`s3:*`, `s3:Get*`)는 원래 문장이 그 와일드카드를 덮을 때만 쓴다(카탈로그에 없는 새 작업까지 넓어지지 않게).
 //! - 남긴 작업에 걸리는 신원 정책의 거부(Deny) 문장을 원문 그대로 옮긴다(권한 경계는 주체에 그대로 남는다).
+//! - 신원 정책을 하나라도 읽지 못했으면 초안을 만들지 않는다(그 정책에 Deny가 있었는지 알 수 없다).
+//! - 초안은 늘 2012-10-17이라, 다른 버전 문서의 변수(`${…}`)가 든 리소스 문장은 옮기지 않는다(변수가 되면 더 넓게 허용한다).
+//! - 초안이 AWS 크기 한도보다 길면 안내를 붙인다.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -17,13 +20,24 @@ use crate::iam::findings::STALE_DAYS;
 use crate::iam::model::Snapshot;
 use crate::iam::policy::{action_matches, decode_document, Actions, Effect, Resources, Statement};
 use crate::iam::text::shortened;
+use crate::iam::view::PrincipalKind;
 
 /// 안내에 작업·서비스 이름을 이 개수까지만 적고 나머지는 "외 N개"로 줄인다.
 const SHOWN_NAMES: usize = 10;
+/// 읽지 못한 정책 이름은 이 개수까지만 적는다.
+const SHOWN_UNREADABLE: usize = 5;
+
+/// 초안이 쓰는 정책 언어 버전. 정책 변수(`${aws:username}`)는 이 버전부터 변수로 쓰이고, 그 전 버전과 `Version`이 없는 문서에서는 글자 그대로다.
+const CURRENT_VERSION: &str = "2012-10-17";
+
+/// 관리형 정책 문서의 크기 한도(공백을 뺀 글자 수).
+const MANAGED_LIMIT: usize = 6_144;
 
 const NOTE_CONDITION_STATEMENTS: &str = "조건이 걸린 허용 문장은 초안에 옮기지 않았어요";
 const NOTE_NO_ACTION_LEVEL: &str = "작업 단위 기록이 없는 서비스는 지금 허용된 작업을 그대로 남겼어요";
 const NOTE_DENY_UNCOPIED: &str = "거부(Deny) 문장을 원문 그대로 옮기지 못해서 초안을 만들지 않았어요";
+const NOTE_UNREADABLE: &str = "읽지 못한 정책이 있어서 초안을 만들지 않았어요";
+const NOTE_OLD_VERSION_VARIABLES: &str = "버전이 2012-10-17이 아닌 정책의 변수(${…}) 리소스 문장은 초안에서 뺐어요";
 
 /// 작업 이름의 첫 단어: 첫 글자부터 다음 대문자 앞까지. `GetObject` → `Get`.
 pub(super) fn verb(name: &str) -> &str {
@@ -178,12 +192,42 @@ struct Picked<'a> {
     kept_untracked: bool,
     /// 오래 안 써서 뺀 서비스 이름
     stale: BTreeSet<String>,
+    /// 2012-10-17이 아닌 문서에서 리소스에 변수가 든 Allow 문장을 뺀 정책 이름
+    variable_policies: BTreeSet<String>,
 }
 
-fn pick<'a>(eval: &PrincipalEval, sources: &[Source<'a>], usage: &Usage) -> Picked<'a> {
+/// 문장의 Resource/NotResource에 정책 변수(`${…}`)가 있다.
+fn has_variable(stmt: &Statement) -> bool {
+    match &stmt.resources {
+        Resources::Resource(patterns) | Resources::NotResource(patterns) => patterns.iter().any(|pattern| pattern.contains("${")),
+        Resources::Unspecified => false,
+    }
+}
+
+/// 문서 원문의 `Version`이 초안과 같다. 파싱한 문서는 `Version`을 담지 않아서 원문에서 읽는다.
+fn is_current_version(raw: &Value) -> bool {
+    raw.get("Version").and_then(Value::as_str) == Some(CURRENT_VERSION)
+}
+
+/// 이 정책의 문서가 초안과 같은 버전인지. 원문을 찾지 못하면 모르는 것이라 같지 않다고 본다(변수 문장을 빼는 쪽이 안전하다).
+fn same_version_as_draft(s: &Snapshot, src: &Source) -> bool {
+    raw_document(s, src).is_some_and(|raw| is_current_version(&raw))
+}
+
+/// `draft`는 읽지 못한 정책이 없을 때만 이 함수를 부르니 `document`는 늘 있다.
+fn pick<'a>(eval: &PrincipalEval, sources: &[Source<'a>], usage: &Usage, s: &Snapshot) -> Picked<'a> {
     let mut p = Picked::default();
-    for doc in sources.iter().filter_map(|src| src.document) {
+    for src in sources {
+        let Some(doc) = src.document else { continue };
+        // 변수가 든 문장이 나올 때만, 그리고 문서마다 한 번만 원문에서 버전을 읽는다
+        let mut same_version: Option<bool> = None;
         for stmt in doc.statements.iter().filter(|st| st.effect == Effect::Allow) {
+            // 2012-10-17이 아닌 문서의 `${…}`는 글자 그대로 비교되던 것이다. 초안(2012-10-17)에서는 변수가 되어 더 넓게 허용하니 뺀다.
+            // 조건이 걸린 문장은 어차피 초안에 옮기지 않으니 여기서 거르지 않는다(아래에서 조건부 작업으로 안내한다)
+            if !stmt.conditional && has_variable(stmt) && !*same_version.get_or_insert_with(|| same_version_as_draft(s, src)) {
+                p.variable_policies.insert(src.name.clone());
+                continue;
+            }
             let key = res_key(stmt);
             if !stmt.conditional {
                 p.statements.entry(key.clone()).or_default().push(stmt);
@@ -292,7 +336,15 @@ fn deny_applies(stmt: &Statement, kept: &BTreeSet<(String, String)>, wildcard_se
         || unmatched.iter().any(|pattern| wildcard_services.iter().any(|svc| pattern.split_once(':').is_some_and(|(p, _)| action_matches(p, svc))))
 }
 
-/// 초안에 옮길 거부 문장(신원 정책의 것, 원문 그대로, 중복 없이). 옮겨야 하는 문장의 원문을 하나라도 찾지 못하면 None.
+/// 이 거부 문장이 2012-10-17이 아닌 문서에 있었다면, 같은 글자를 2012-10-17 초안에 옮겼을 때 더 적게 막는지.
+/// NotResource나 Condition의 `${…}`는 글자 그대로 비교되던 것이 변수가 되어, 제외 목록이나 조건에 걸리는 범위가 달라진다.
+/// Resource의 변수는 더 많은 리소스에 맞을 뿐이라 더 막기만 한다.
+fn weaker_as_current_version(deny: &DenyStatement) -> bool {
+    [&deny.not_resource, &deny.condition].into_iter().flatten().any(|part| part.to_string().contains("${"))
+}
+
+/// 초안에 옮길 거부 문장(신원 정책의 것, 원문 그대로, 중복 없이). 옮겨야 하는 문장의 원문을 하나라도 찾지 못하거나,
+/// 옮기면 뜻이 달라져 더 적게 막게 되면 None. `draft`가 읽지 못한 정책이 없을 때만 부르니 `document`는 늘 있다.
 fn copied_denies(s: &Snapshot, sources: &[Source], kept: &BTreeSet<(String, String)>, wildcard_services: &BTreeSet<String>) -> Option<Vec<DenyStatement>> {
     let mut out: Vec<DenyStatement> = Vec::new();
     for src in sources {
@@ -305,7 +357,11 @@ fn copied_denies(s: &Snapshot, sources: &[Source], kept: &BTreeSet<(String, Stri
             if raw.is_none() {
                 raw = Some(raw_document(s, src)?);
             }
-            let copied = verbatim_deny(raw_statement(raw.as_ref()?, stmt.index)?)?;
+            let document = raw.as_ref()?;
+            let copied = verbatim_deny(raw_statement(document, stmt.index)?)?;
+            if !is_current_version(document) && weaker_as_current_version(&copied) {
+                return None;
+            }
             if !out.contains(&copied) {
                 out.push(copied);
             }
@@ -324,6 +380,10 @@ fn pick_notes(p: &Picked) -> Vec<String> {
     if p.skipped_conditions {
         notes.push(NOTE_CONDITION_STATEMENTS.to_string());
     }
+    if !p.variable_policies.is_empty() {
+        let names: Vec<String> = p.variable_policies.iter().cloned().collect();
+        notes.push(format!("{NOTE_OLD_VERSION_VARIABLES}: {}", shortened(&names, SHOWN_NAMES)));
+    }
     if !p.stale.is_empty() {
         let names: Vec<String> = p.stale.iter().cloned().collect();
         notes.push(format!("마지막 사용이 {STALE_DAYS}일 넘게 지난 서비스는 안 쓰는 것으로 보고 초안에서 뺐어요: {}", shortened(&names, SHOWN_NAMES)));
@@ -340,9 +400,60 @@ fn pick_notes(p: &Picked) -> Vec<String> {
     notes
 }
 
-/// 줄인 정책 초안(JSON)과 안내. 넣을 작업이 없거나 옮겨야 할 거부 문장을 원문 그대로 옮기지 못하면 초안은 None이다.
-pub(super) fn draft(eval: &PrincipalEval, sources: &[Source], usage: &Usage, s: &Snapshot) -> (Option<String>, Vec<String>) {
-    let picked = pick(eval, sources, usage);
+/// 문서를 읽지 못한 신원 정책의 이름(이름순, 중복 없이). 권한 경계는 신원 정책이 아니라서 `policy_sources`가 따로 돌려주고 여기엔 없다.
+fn unreadable_names(sources: &[Source]) -> Vec<String> {
+    let names: BTreeSet<&str> = sources.iter().filter(|src| src.document.is_none()).map(|src| src.name.as_str()).collect();
+    names.into_iter().map(str::to_owned).collect()
+}
+
+/// 천 단위로 쉼표를 찍는다(6144 → "6,144").
+fn commas(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, digit) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
+/// 주체 하나에 붙은 인라인 정책 전체의 한도(공백을 뺀 글자 수)와 안내에 쓰는 종류 이름.
+fn inline_limit(kind: PrincipalKind) -> (&'static str, usize) {
+    match kind {
+        PrincipalKind::User => ("사용자", 2_048),
+        PrincipalKind::Group => ("그룹", 5_120),
+        PrincipalKind::Role => ("역할", 10_240),
+    }
+}
+
+/// 초안이 AWS 크기 한도보다 길면 그 안내. AWS는 공백을 뺀 글자 수를 센다(`iam/change`의 검사와 같은 규칙이다).
+/// 초안은 그대로 주고 안내만 붙인다. 관리형 정책 한도 안내는 인라인 한도도 넘었을 때만 붙는다:
+/// 첫 안내가 권하는 "관리형 정책으로 만들기"도 안 된다는 뜻이다.
+pub(super) fn size_notes(document: &str, kind: PrincipalKind) -> Vec<String> {
+    let (label, limit) = inline_limit(kind);
+    let size = document.chars().filter(|c| !c.is_whitespace()).count();
+    let mut notes = Vec::new();
+    if size > limit {
+        notes.push(format!("초안이 {}자라 {label} 인라인 정책 한도({}자)를 넘어요. 관리형 정책으로 만들거나 작업을 줄여 주세요", commas(size), commas(limit)));
+        if size > MANAGED_LIMIT {
+            notes.push(format!("초안이 {}자라 관리형 정책 한도({}자)도 넘어요", commas(size), commas(MANAGED_LIMIT)));
+        }
+    }
+    notes
+}
+
+/// 줄인 정책 초안(JSON)과 안내. 신원 정책을 하나라도 읽지 못했거나, 넣을 작업이 없거나, 옮겨야 할 거부 문장을
+/// 원문 그대로 옮기지 못하면 초안은 None이다. `arn`은 초안이 맞춰야 할 크기 한도를 정하는 주체다.
+pub(super) fn draft(eval: &PrincipalEval, sources: &[Source], usage: &Usage, s: &Snapshot, arn: &str) -> (Option<String>, Vec<String>) {
+    // 읽지 못한 정책이 Deny뿐인 정책(AWSDenyAll 등)일 수 있고, 권한 계산도 그 Deny를 놓쳐 막힌 작업이 허용으로 나온다.
+    // 일부만 보고 만든 초안은 지금 막힌 작업을 열 수 있어서 만들지 않는다. 안 쓰는 정책 제안은 읽은 정책만 보니 그대로 둔다
+    let unreadable = unreadable_names(sources);
+    if !unreadable.is_empty() {
+        return (None, vec![format!("{NOTE_UNREADABLE}: {}", shortened(&unreadable, SHOWN_UNREADABLE))]);
+    }
+    let picked = pick(eval, sources, usage, s);
     let mut notes = pick_notes(&picked);
     if picked.groups.is_empty() {
         notes.insert(0, format!("최근 {STALE_DAYS}일 안에 쓴 서비스에 조건 없이 허용된 작업이 없어서 초안을 만들지 않았어요"));
@@ -363,5 +474,9 @@ pub(super) fn draft(eval: &PrincipalEval, sources: &[Source], usage: &Usage, s: 
         notes.push(format!("지금 걸려 있는 거부(Deny) 문장 {}개를 초안에 그대로 옮겼어요. 초안으로 바꿔 써도 지금 막힌 작업은 계속 막혀요", denies.len()));
     }
     let statement = allows.into_iter().map(DraftStatement::Allow).chain(denies.into_iter().map(DraftStatement::Deny)).collect();
-    (serde_json::to_string(&DraftDocument { version: "2012-10-17", statement }).ok(), notes)
+    let document = serde_json::to_string(&DraftDocument { version: CURRENT_VERSION, statement }).ok();
+    if let (Some(document), Some(principal)) = (&document, find_principal(s, arn)) {
+        notes.extend(size_notes(document, principal.kind()));
+    }
+    (document, notes)
 }

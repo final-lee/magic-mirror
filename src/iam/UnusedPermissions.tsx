@@ -26,6 +26,23 @@ const CAUTIONS = [
   "저장해도 지금 붙어 있는 정책은 그대로예요. 권한을 실제로 줄이려면 저장한 뒤 넓은 정책을 떼세요.",
 ];
 
+/** 마지막 사용이 집계 시각보다 이 일수를 넘게 앞이면 안 쓰는 것으로 본다. 백엔드의 `STALE_DAYS`(findings.rs)와 같은 값이다. */
+const STALE_DAYS = 90;
+const DAY_MS = 86_400_000;
+
+/**
+ * 마지막 사용이 집계 시각보다 며칠 앞인지(내림). `STALE_DAYS`를 넘을 때만 돌려준다.
+ * 백엔드와 같은 규칙이라 집계 시각을 모르면 오래됐는지 판단하지 않는다.
+ */
+function staleDays(lastUsed: string | null, completedAt: string | null): number | null {
+  if (!lastUsed || !completedAt) return null;
+  const used = Date.parse(lastUsed);
+  const done = Date.parse(completedAt);
+  if (Number.isNaN(used) || Number.isNaN(done)) return null;
+  const days = Math.max(0, Math.floor((done - used) / DAY_MS));
+  return days > STALE_DAYS ? days : null;
+}
+
 /** 안 쓴 서비스가 먼저, 그다음은 마지막 사용이 오래된 순. 같으면 이름순이다. */
 function sortServices(services: Service[]): Service[] {
   const time = (s: Service) => (s.lastUsed ? Date.parse(s.lastUsed) || -Infinity : -Infinity);
@@ -107,22 +124,31 @@ export function UnusedPermissions({ profile, arn, onOpenPolicy, onOpenGroup, onF
             </tr>
           </thead>
           <tbody>
-            {services.map((s) => (
-              <tr key={s.prefix}>
-                <td>
-                  {s.name} <small className="mx-prefix mono">{s.prefix}</small>
-                </td>
-                <td>
-                  {s.lastUsed ? (
-                    <>
-                      {formatDay(s.lastUsed)} <span className="dim">{formatAgo(s.lastUsed)}</span>
-                    </>
-                  ) : (
-                    <span className="iam-chip conditional">{`사용 안 함 (${data.trackingDays}일)`}</span>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {services.map((s) => {
+              const stale = staleDays(s.lastUsed, data.completedAt);
+              return (
+                <tr key={s.prefix}>
+                  <td>
+                    {s.name} <small className="mx-prefix mono">{s.prefix}</small>
+                  </td>
+                  <td>
+                    {s.lastUsed ? (
+                      <>
+                        {formatDay(s.lastUsed)} <span className="dim">{formatAgo(s.lastUsed)}</span>
+                        {stale !== null && (
+                          <>
+                            {" "}
+                            <span className="iam-chip conditional">{`마지막 사용 ${stale}일 전`}</span>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <span className="iam-chip conditional">{`사용 안 함 (${data.trackingDays}일)`}</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

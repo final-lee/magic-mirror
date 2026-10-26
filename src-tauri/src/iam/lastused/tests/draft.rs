@@ -7,10 +7,6 @@ use super::*;
 use crate::iam::eval::{evaluate_action, policy_sources, statement_actions, ActionEval, Status};
 use crate::iam::policy::{Effect, Resources};
 
-fn deny(action: Value, resource: Value) -> Value {
-    json!({ "Effect": "Deny", "Action": action, "Resource": resource })
-}
-
 #[test]
 fn conditionally_allowed_actions_are_excluded_and_listed() {
     let w = world(
@@ -285,4 +281,76 @@ fn drafts_never_allow_more_than_today_for_tricky_policies() {
         let (s, arn) = fixtures::solo_user_with_boundary(statements, json!([allow(json!(["s3:Get*", "sqs:*", "ec2:Describe*"]), "*")]));
         assert_no_wider_than_today(&s, &arn);
     }
+}
+
+// ---- 정책을 못 읽은 주체에는 초안이 없다 ----
+
+/// 스냅숏에서 이 출처(관리형 ARN 또는 `inline:<소유자 ARN>:<이름>`)의 문서를 못 읽은 것처럼 만든다.
+fn without_document(s: &Snapshot, id: &str) -> Snapshot {
+    let mut s = s.clone();
+    match id.strip_prefix("inline:").and_then(|rest| rest.rsplit_once(':')) {
+        Some((owner, name)) => {
+            let policies = s
+                .users
+                .iter_mut()
+                .filter(|u| u.arn == owner)
+                .flat_map(|u| u.inline.iter_mut())
+                .chain(s.groups.iter_mut().filter(|g| g.arn == owner).flat_map(|g| g.inline.iter_mut()))
+                .chain(s.roles.iter_mut().filter(|r| r.arn == owner).flat_map(|r| r.inline.iter_mut()));
+            for policy in policies.filter(|p| p.name == name) {
+                policy.document = None;
+            }
+        }
+        None => {
+            s.policies.remove(id);
+        }
+    }
+    s
+}
+
+#[test]
+fn no_principal_gets_a_draft_while_one_of_its_policies_cannot_be_read() {
+    // 정책 하나를 못 읽어도 나머지로 초안이 나올 수 있도록, 모든 주체에 읽을 수 있는 정책 하나를 더 붙인다
+    let mut s = fixtures::snapshot();
+    let extra = || String::from(fixtures::UNUSED_POLICY);
+    s.users.iter_mut().for_each(|u| u.attached.push(extra()));
+    s.groups.iter_mut().for_each(|g| g.attached.push(extra()));
+    s.roles.iter_mut().for_each(|r| r.attached.push(extra()));
+
+    let mut exercised = 0;
+    for arn in [fixtures::ALICE, fixtures::BOB, fixtures::CAROL, fixtures::ADMINS, fixtures::DEPLOY, fixtures::CI, fixtures::VENDOR, fixtures::OPEN, fixtures::SLR, fixtures::SSO] {
+        let eval = evaluate(&s, arn).unwrap();
+        let (_, whole, _) = least_privilege(&eval, &report_for(&eval, false), &s, arn);
+        assert!(whole.is_some(), "{arn}");
+        for source in policy_sources(&s, arn).0 {
+            let blind = without_document(&s, &source.id);
+            let eval = evaluate(&blind, arn).unwrap();
+            // 나머지 정책만으로는 지금 할 수 있는 작업이 남아 있으니, 계산만 보면 초안을 만들 수 있다
+            exercised += usize::from(!eval.actions.is_empty());
+            let (_, draft, notes) = least_privilege(&eval, &report_for(&eval, false), &blind, arn);
+            assert_eq!(draft, None, "{arn}: {}", source.id);
+            assert!(has_note(&notes, &format!("읽지 못한 정책이 있어서 초안을 만들지 않았어요: {}", source.name)), "{arn}: {notes:?}");
+        }
+    }
+    assert!(exercised >= 10, "{exercised}");
+}
+
+#[test]
+fn a_deny_all_policy_that_could_not_be_read_cannot_leak_into_a_draft() {
+    // 진짜 모습: AWSDenyAll이 붙어 있어 아무것도 못 한다
+    let deny_all = "arn:aws:iam::aws:policy/AWSDenyAll";
+    let (mut truth, arn) = fixtures::solo_user(json!([allow(json!("s3:*"), "*")]));
+    truth.policies.insert(deny_all.into(), managed(deny_all, Scope::Aws, 1, policy(json!([deny(json!("*"), json!("*"))]))));
+    truth.users[0].attached.push(deny_all.into());
+    let today = evaluate(&truth, &arn).unwrap();
+    assert!(!today.actions.is_empty() && today.actions.values().all(|(_, e)| e.status == Status::Denied));
+
+    // 앱이 본 모습: 그 정책의 본문을 못 읽었다(GetPolicy가 AccessDenied). 이것만으로 계산하면 s3 작업이 허용으로 나온다
+    let mut seen = truth.clone();
+    seen.policies.remove(deny_all);
+    let eval = evaluate(&seen, &arn).unwrap();
+    assert!(eval.actions.values().any(|(_, e)| e.status == Status::Allowed));
+    let (_, draft, notes) = least_privilege(&eval, &report_for(&eval, false), &seen, &arn);
+    assert_eq!(draft, None, "초안을 쓰면 지금 막힌 s3 작업이 열려요");
+    assert!(has_note(&notes, "읽지 못한 정책이 있어서 초안을 만들지 않았어요: AWSDenyAll"), "{notes:?}");
 }

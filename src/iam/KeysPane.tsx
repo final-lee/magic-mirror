@@ -13,7 +13,7 @@ interface Props {
 /** 마지막 사용 칸. 읽지 못한 경우(권한 없음 등)는 "사용 기록 없음"과 구분해서 보여준다. */
 function lastUse(k: AccessKeyInfo) {
   if (k.lastUsedAt) return formatDay(k.lastUsedAt);
-  return <span className="dim">{k.lastUsedUnknown ? "마지막 사용 확인 못 함 (권한 없음)" : "사용 기록 없음"}</span>;
+  return <span className="dim">{k.lastUsedUnknown ? "마지막 사용 확인 못 함" : "사용 기록 없음"}</span>;
 }
 
 function KeyRow({ k, userName, onFix }: { k: AccessKeyInfo; userName: string; onFix: Props["onFix"] }) {
