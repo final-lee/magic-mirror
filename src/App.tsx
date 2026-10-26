@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { errorMessage } from "./api/errors";
 import { useAccount, useProfiles, useServices, useSettings } from "./api/queries";
 import type { Favorite } from "./api/types";
 import { MainArea } from "./components/MainArea";
@@ -15,7 +16,7 @@ export default function App() {
   const qc = useQueryClient();
   const services = useServices();
   const profiles = useProfiles();
-  const { settings, update } = useSettings();
+  const { settings, update, ...settingsQuery } = useSettings();
   const [profile, setProfile] = useState<string | null>(null);
   const [region, setRegion] = useState("us-east-1");
   const [selection, setSelection] = useState<Favorite | null>(null);
@@ -56,6 +57,21 @@ export default function App() {
   }, [refresh]);
 
   if (profiles.data && profiles.data.length === 0) return <NoProfiles />;
+  const failed = [
+    { isError: services.isError && !services.data, error: services.error, refetch: services.refetch },
+    { isError: settingsQuery.isError && !settings, error: settingsQuery.error, refetch: settingsQuery.refetch },
+    { isError: profiles.isError && !profiles.data, error: profiles.error, refetch: profiles.refetch },
+  ].filter((q) => q.isError);
+  if (failed.length > 0) {
+    return (
+      <div className="empty full">
+        <div className="err">{errorMessage(failed[0].error)}</div>
+        <button className="btn" onClick={() => failed.forEach((q) => void q.refetch())}>
+          다시 시도
+        </button>
+      </div>
+    );
+  }
   if (!services.data || !settings || !profiles.data) return <div className="empty full">불러오는 중…</div>;
 
   const enabled = services.data.filter((s) => settings.enabledServices.includes(s.id));
