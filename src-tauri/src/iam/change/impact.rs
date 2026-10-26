@@ -2,6 +2,8 @@
 //! 작업 하나가 "허용"인지는 판정(`Status`)만 본다: 허용·조건부 허용이면 쓸 수 있는 것이고, 거부·권한 경계 차단이거나 허용 문장이 없으면 못 쓰는 것이다.
 //! 허용이던 작업이 조건부가 되면(예: MFA가 없으면 거부하는 Deny) 잃은 것은 아니지만 조건에 따라 막힐 수 있으니 따로 센다(`restricted`).
 //! 문서를 읽지 못한 정책은 계산에서 빠지므로, 그런 정책이 붙거나 떨어지면 증감을 다 계산하지 못한 것으로 따로 모은다(`unreadable_changed`).
+//! 앱이 쓰는 자격 증명의 주체는 그런 정책이 그대로 남아도 따로 모은다(`caller_unreadable_kept`): 그 정책 위에 Deny를 더하면 그 정책이
+//! 주던 권한을 잃는데, 계산에 없는 권한이라 잃는 것으로 나오지 않는다.
 //! 화면으로 보내는 양은 줄인다: 증감마다 작업이 많은 줄 `MAX_ROWS`개, 주체는 `MAX_SHOWN`명까지 자세히 보내고 나머지는 수만 센다.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -79,7 +81,13 @@ pub(super) struct Analysis {
     /// 문서를 읽지 못해 계산에서 빠지는 정책(`unreadable_of`) 가운데 이 변경으로 영향받는 주체에게 새로 적용되거나 더는 적용되지 않는 것의 이름.
     /// 그 정책이 주던(또는 줄) 권한을 몰라서 증감을 다 계산하지 못했다
     pub unreadable_changed: Vec<String>,
-    /// 문서를 읽지 못해 계산에서 빠지는데 변경 전후에 그대로 적용되는 정책의 이름(`unreadable_changed`에 든 것은 뺀다)
+    /// 앱이 쓰는 자격 증명의 주체가 영향받는데, 문서를 읽지 못한 정책이 그 주체에게 변경 전후에 그대로 적용된다: 그 이름
+    /// (`unreadable_changed`에 든 것은 뺀다). 그 정책이 주는 권한을 몰라서 이 앱이 무엇을 잃는지 다 계산하지 못한다
+    pub caller_unreadable_kept: Vec<String>,
+    /// 앱이 쓰는 자격 증명의 주체가 영향받는데 그 주체에게 문서를 읽지 못한 정책이 있다(새로 붙거나, 떨어지거나, 그대로 남거나).
+    /// 그 정책이 되돌리는 데 필요한 권한을 주는지(또는 막는지) 몰라서 되돌릴 수 있다고 말하지 않는다
+    pub caller_unreadable: bool,
+    /// 문서를 읽지 못해 계산에서 빠지는데 변경 전후에 그대로 적용되는 정책의 이름(`unreadable_changed`·`caller_unreadable_kept`에 든 것은 뺀다)
     pub unreadable_kept: Vec<String>,
     /// 영향받는 주체가 한도를 넘어 일부만 계산했다
     pub truncated: bool,
@@ -307,13 +315,24 @@ pub(super) fn analyze(before: &Snapshot, after: &Snapshot, mut affected: Vec<Str
 
     let mut out = Analysis { truncated, ..Default::default() };
     let mut unknown = BTreeSet::new();
-    let (mut unreadable_changed, mut unreadable_kept) = (Labels::default(), Labels::default());
+    let (mut unreadable_changed, mut unreadable_kept, mut caller_kept) = (Labels::default(), Labels::default(), Labels::default());
     for arn in &affected {
+        let is_caller = caller == Some(arn.as_str());
         // 읽지 못한 정책은 아래 권한 계산에서 빠진다. 그런 정책이 붙거나 떨어지면 계산한 증감이 전부가 아니다
         let (was_unreadable, now_unreadable) = (unreadable_of(before, arn), unreadable_of(after, arn));
+        if is_caller && !(was_unreadable.is_empty() && now_unreadable.is_empty()) {
+            out.caller_unreadable = true;
+        }
         for (key, label) in &was_unreadable {
-            let bucket = if now_unreadable.iter().any(|(other, _)| other == key) { &mut unreadable_kept } else { &mut unreadable_changed };
-            bucket.push(key, label);
+            if !now_unreadable.iter().any(|(other, _)| other == key) {
+                unreadable_changed.push(key, label);
+                continue;
+            }
+            unreadable_kept.push(key, label);
+            // 앱의 자격 증명에게는 그대로 남는 것도 따로 센다: 그 정책 위에 Deny를 더하면 그 정책이 주던 권한을 잃는데 계산에는 나오지 않는다
+            if is_caller {
+                caller_kept.push(key, label);
+            }
         }
         for (key, label) in now_unreadable.iter().filter(|(key, _)| !was_unreadable.iter().any(|(other, _)| other == key)) {
             unreadable_changed.push(key, label);
@@ -329,7 +348,6 @@ pub(super) fn analyze(before: &Snapshot, after: &Snapshot, mut affected: Vec<Str
             out.newly_privesc.push(arn.clone());
         }
         unknown.extend(now.unknown.iter().filter(|pattern| !was.unknown.contains(pattern)).cloned());
-        let is_caller = caller == Some(arn.as_str());
         if is_caller && !d.lost.is_empty() {
             out.caller_lost = true;
         }
@@ -348,8 +366,12 @@ pub(super) fn analyze(before: &Snapshot, after: &Snapshot, mut affected: Vec<Str
         }
     }
     out.new_unknown = unknown.into_iter().collect();
-    // 어떤 주체에게는 그대로이고 다른 주체에게는 새로 붙는 정책(그룹에 붙이는데 구성원 하나는 이미 직접 받았다 등)은 바뀐 쪽으로만 센다
-    out.unreadable_kept = unreadable_kept.names_except(&unreadable_changed.keys);
+    // 정책 하나는 한 번만 말한다. 어떤 주체에게는 그대로이고 다른 주체에게는 새로 붙는 정책(그룹에 붙이는데 구성원 하나는 이미 직접
+    // 받았다 등)은 바뀐 쪽으로만, 앱의 자격 증명에게 그대로 남는 정책은 그쪽으로만 센다
+    let mut told = unreadable_changed.keys.clone();
+    told.extend(caller_kept.keys.iter().cloned());
+    out.unreadable_kept = unreadable_kept.names_except(&told);
+    out.caller_unreadable_kept = caller_kept.names_except(&unreadable_changed.keys);
     out.unreadable_changed = unreadable_changed.names_except(&HashSet::new());
     out
 }

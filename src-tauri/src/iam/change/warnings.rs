@@ -23,6 +23,7 @@ const MANY_IMPACTS: usize = 5;
 const SHOWN_NAMES: usize = 5;
 const CFN_STACK_TAG: &str = "aws:cloudformation:stack-name";
 const UNREADABLE_CHANGED: &str = "문서를 읽지 못한 정책이 있어 권한 변화를 다 계산하지 못했어요";
+const CALLER_UNREADABLE: &str = "문서를 읽지 못한 정책이 있어 이 앱 자격 증명의 권한 변화를 다 계산하지 못했어요";
 const UNREADABLE_KEPT: &str = "문서를 읽지 못한 정책은 계산에서 뺐어요";
 const CALLER_RESTRICTED: &str = "조건에 따라 이 앱의 자격 증명이 막힐 수 있어요 (예: MFA·IP 조건)";
 const OWN_KEY: &str = "적용하면 이 앱이 바로 AWS에 접근하지 못하고, 여기서는 되돌릴 수 없어요";
@@ -246,22 +247,29 @@ fn names(s: &Snapshot, arns: &[String]) -> String {
     shortened(&labels, SHOWN_NAMES)
 }
 
-/// 영향 계산에서 나오는 확인·주의: 문서를 읽지 못한 정책이 붙거나 떨어짐(증감을 다 계산하지 못했다), 앱 자격 증명의 권한 축소(잃거나
-/// 조건부로 바뀜), 새 관리자급·권한 상승, 카탈로그에 없는 작업, 다른 주체의 권한이 조건부로 바뀜, 그대로 계산에서 빠진 정책, 영향받는 주체 수.
-/// `inverse`는 되돌리는 변경이다(적용 뒤에도 되돌릴 권한이 남는지 본다). 두 번째 값은 앱이 쓰는 자격 증명이 되돌릴 권한을 잃거나
-/// 그 권한이 조건부가 되는지다(그러면 미리보기는 되돌릴 수 없다고 말한다).
+/// 영향 계산에서 나오는 확인·주의: 문서를 읽지 못한 정책이 붙거나 떨어짐(증감을 다 계산하지 못했다), 앱 자격 증명에게 그대로 남는 읽지 못한
+/// 정책, 앱 자격 증명의 권한 축소(잃거나 조건부로 바뀜), 새 관리자급·권한 상승, 카탈로그에 없는 작업, 다른 주체의 권한이 조건부로 바뀜,
+/// 그대로 계산에서 빠진 정책, 영향받는 주체 수. `inverse`는 되돌리는 변경이다(적용 뒤에도 되돌릴 권한이 남는지 본다). 두 번째 값은 앱이
+/// 쓰는 자격 증명이 되돌릴 권한을 잃거나 그 권한이 조건부가 되는지, 또는 문서를 읽지 못한 정책 때문에 그것을 알 수 없는지다(그러면
+/// 미리보기는 되돌릴 수 없다고 말한다).
 pub(super) fn from_analysis(before: &Snapshot, after: &Snapshot, c: &IamChange, a: &Analysis, inverse: Option<&IamChange>) -> (Vec<Warning>, bool) {
     let mut out = Vec::new();
-    let mut undo_lost = false;
+    // 앱 자격 증명의 권한에 읽지 못한 정책이 끼어 있으면(붙거나 떨어지거나 그대로 남거나) 되돌릴 권한이 남는지 모른다
+    let mut undo_lost = a.caller_unreadable;
     // 읽지 못한 정책이 주던 권한을 잃는지(앱의 자격 증명이 관리자 권한을 잃는 것일 수도 있다), 그런 정책으로 무엇을 얻는지 모른다.
     // 계산한 증감이 비어 보여도 확인받는다
     if !a.unreadable_changed.is_empty() {
         out.push(confirm(format!("{UNREADABLE_CHANGED}: {}", shortened(&a.unreadable_changed, SHOWN_NAMES))));
     }
+    // 앱 자격 증명에게 그대로 남는 정책이어도, 그 위에 Deny를 더하거나 경계를 바꾸면 그 정책이 주던 권한을 잃는지 모른다(계산에 없는
+    // 권한은 잃는 것으로 나오지 않는다). 드문 일이라 변경의 방향과 상관없이 확인받는다
+    if !a.caller_unreadable_kept.is_empty() {
+        out.push(confirm(format!("{CALLER_UNREADABLE}: {}", shortened(&a.caller_unreadable_kept, SHOWN_NAMES))));
+    }
     if let (true, Some(caller)) = (a.caller_lost || a.caller_restricted, before.caller_principal_arn.as_deref()) {
         // 되돌릴 권한이 없다는 말은 앞의 확인 하나에만 붙인다
         let mut undo = undo_problem(before, after, caller, inverse);
-        undo_lost = undo.is_some();
+        undo_lost |= undo.is_some();
         let mut with_undo = |mut message: String| {
             if let Some(problem) = undo.take() {
                 message.push_str(". ");

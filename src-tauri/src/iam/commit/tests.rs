@@ -348,6 +348,31 @@ async fn removing_the_caller_from_a_group_whose_admin_policy_could_not_be_read_n
 }
 
 #[tokio::test]
+async fn a_deny_on_the_caller_over_a_policy_that_could_not_be_read_needs_the_name_before_writing() {
+    // 재검토 I-1 P8a: alice의 권한은 전부 읽지 못한 AdministratorAccess에서 온다. iam:* Deny를 더하면 이 앱은 IAM을 못 쓰는데 계산에는 안 나온다
+    let dir = tempfile::tempdir().unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut s = snapshot();
+    s.policies.remove(ADMIN_POLICY);
+    let lock = policy(serde_json::json!([{ "Effect": "Deny", "Action": "iam:*", "Resource": "*" }])).to_string();
+    let change = IamChange::PutInlinePolicy { target: ALICE.into(), name: "lock".into(), document: lock };
+    let req = previewed(Request { snapshot: Arc::new(s.clone()), ..request(dir.path(), change.clone()) });
+    let seen = req.seen.clone().unwrap();
+    assert_eq!(seen.confirm_text.as_deref(), Some("alice"));
+    assert!(!seen.reversible);
+    let committed = commit(req, succeeding(&calls)).await;
+    assert!(refusal(&committed).contains("확인 문구"));
+    assert!(!committed.wrote);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    // 같은 스냅숏으로 다시 계산한 계획은 미리보기에서 본 것과 같다: 이름을 넣으면 적용된다
+    let mut req = previewed(Request { snapshot: Arc::new(s), ..request(dir.path(), change) });
+    req.confirm_text = Some("alice".into());
+    assert!(commit(req, succeeding(&calls)).await.result.is_ok());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn a_change_that_cannot_hold_in_the_current_state_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
