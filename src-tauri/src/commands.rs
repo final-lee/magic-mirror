@@ -5,6 +5,7 @@ use tauri::State;
 use tokio::process::Command;
 
 use crate::adapters::{effective_region, find_adapter, service_info, AdapterRef};
+use crate::adapters::s3::{self, S3Listing};
 use crate::aws::context::{self, AwsContext, ProfileInfo};
 use crate::error::AppError;
 use crate::model::{ListResult, ServiceInfo};
@@ -77,4 +78,18 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
 #[tauri::command]
 pub fn save_settings(state: State<'_, AppState>, settings: Settings) -> Result<(), AppError> {
     settings::save(&state.settings_path, &settings)
+}
+
+#[tauri::command]
+pub async fn list_s3_objects(
+    state: State<'_, AppState>,
+    profile: String,
+    region: String,
+    bucket: String,
+    prefix: String,
+    continuation_token: Option<String>,
+) -> Result<S3Listing, AppError> {
+    let region = if region.is_empty() { context::GLOBAL_REGION.to_string() } else { region };
+    let cfg = state.ctx.config(&profile, &region).await?;
+    s3::list_objects(&cfg, &bucket, &prefix, continuation_token).await
 }

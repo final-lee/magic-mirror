@@ -31,6 +31,7 @@ pub fn run() {
             commands::sso_login,
             commands::get_settings,
             commands::save_settings,
+            commands::list_s3_objects,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
