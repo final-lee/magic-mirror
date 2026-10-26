@@ -183,7 +183,9 @@ export function DiffTab({ profile, left, right, active, transfers }: Props) {
             </div>
           ) : (
             <div className="diff-body">
-              {sameText && <div className="notice">두 파일이 같아요</div>}
+              {sameText && (
+                <div className="notice">{d?.eolOnly ? "줄바꿈(CRLF/LF)이나 파일 끝 줄바꿈만 달라요" : "두 파일이 같아요"}</div>
+              )}
               {d.rows.map((row, i) => (
                 <Fragment key={i}>
                   {row.kind === "collapsed" ? (

@@ -82,6 +82,8 @@ pub struct DiffResult {
     pub stats: DiffStats,
     pub meta_verdict: Option<Verdict>,
     pub reason: Option<String>,
+    /// 텍스트 비교에서 줄 내용은 같은데 바이트만 다른 경우(CRLF/LF, 파일 끝 줄바꿈).
+    pub eol_only: bool,
 }
 
 fn line(no: usize, segments: Vec<Segment>) -> Option<DiffLine> {
@@ -238,16 +240,17 @@ pub fn meta_verdict(left: &SideMeta, right: &SideMeta) -> Verdict {
 pub fn assemble(left: SideMeta, lc: Content, right: SideMeta, rc: Content) -> DiffResult {
     if let (Content::Text(a), Content::Text(b)) = (&lc, &rc) {
         let d = build_text_diff(a, b);
+        let eol_only = a != b && d.stats.added + d.stats.removed + d.stats.changed == 0;
         return DiffResult {
             left, right, mode: DiffMode::Text, rows: d.rows, hunks: d.hunks, stats: d.stats,
-            meta_verdict: None, reason: None,
+            meta_verdict: None, reason: None, eol_only,
         };
     }
     let reason = if lc == Content::Binary || rc == Content::Binary { "binary" } else { "tooLarge" };
     let verdict = meta_verdict(&left, &right);
     DiffResult {
         left, right, mode: DiffMode::Meta, rows: Vec::new(), hunks: Vec::new(), stats: DiffStats::default(),
-        meta_verdict: Some(verdict), reason: Some(reason.to_string()),
+        meta_verdict: Some(verdict), reason: Some(reason.to_string()), eol_only: false,
     }
 }
 
@@ -356,5 +359,16 @@ mod tests {
         assert!(v["rows"][0]["hiddenRows"].is_array());
         assert_eq!(v["rows"][0]["kind"], "equal");
         assert!(v.get("metaVerdict").is_some());
+    }
+
+    #[test]
+    fn eol_only_detected_for_crlf_and_trailing_newline() {
+        let t = |a: &str, b: &str| {
+            assemble(meta(1, None), Content::Text(a.into()), meta(1, None), Content::Text(b.into())).eol_only
+        };
+        assert!(t("a\r\nb\n", "a\nb\n"));
+        assert!(t("a", "a\n"));
+        assert!(!t("a\nb\n", "a\nb\n"));
+        assert!(!t("a\n", "b\n"));
     }
 }

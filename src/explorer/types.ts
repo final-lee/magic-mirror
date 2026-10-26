@@ -75,6 +75,7 @@ export interface DiffResult {
   stats: DiffStats;
   metaVerdict: "same" | "different" | "unknown" | null;
   reason: "binary" | "tooLarge" | null;
+  eolOnly: boolean;
 }
 
 export type DiffTool = "filemerge" | "vscode" | "custom";

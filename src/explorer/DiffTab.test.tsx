@@ -36,6 +36,7 @@ const textResult: DiffResult = {
   stats: { added: 1, removed: 0, changed: 1 },
   metaVerdict: null,
   reason: null,
+  eolOnly: false,
 };
 
 function setup(extra = {}) {
@@ -82,6 +83,19 @@ test("identical files show a same banner", async () => {
   expect(await screen.findByText("두 파일이 같아요")).toBeInTheDocument();
 });
 
+test("eol-only difference shows its own banner", async () => {
+  vi.mocked(explorerApi.diffFiles).mockResolvedValue({
+    ...textResult,
+    rows: [eq(1, "a")],
+    hunks: [],
+    stats: { added: 0, removed: 0, changed: 0 },
+    eolOnly: true,
+  });
+  setup();
+  expect(await screen.findByText("줄바꿈(CRLF/LF)이나 파일 끝 줄바꿈만 달라요")).toBeInTheDocument();
+  expect(screen.queryByText("두 파일이 같아요")).not.toBeInTheDocument();
+});
+
 test("meta mode shows verdict and reason", async () => {
   vi.mocked(explorerApi.diffFiles).mockResolvedValue({
     left: { label: "/w/a.png", size: 2048, modified: null, md5: "aaa" },
@@ -92,6 +106,7 @@ test("meta mode shows verdict and reason", async () => {
     stats: { added: 0, removed: 0, changed: 0 },
     metaVerdict: "same",
     reason: "binary",
+    eolOnly: false,
   });
   setup();
   expect(await screen.findByText("같은 파일로 보여요")).toBeInTheDocument();
