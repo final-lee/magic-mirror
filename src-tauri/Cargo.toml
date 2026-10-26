@@ -23,6 +23,8 @@ aws-config = { version = "1", features = ["behavior-version-latest"] }
 aws-credential-types = "1"
 aws-sdk-sts = "1"
 tokio = { version = "1", features = ["sync", "process", "macros", "rt-multi-thread"] }
+async-trait = "0.1"
+futures = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
