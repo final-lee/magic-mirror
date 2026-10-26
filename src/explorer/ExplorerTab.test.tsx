@@ -267,3 +267,62 @@ test("initialLocation opens that bucket's objects right away", async () => {
   expect(await screen.findByText("📄 a.txt", { selector: "[data-pane=s3] *" })).toBeInTheDocument();
   expect(vi.mocked(api.listS3Objects)).toHaveBeenCalledWith("prod", "us-west-2", "assets", "", null);
 });
+
+describe("navigation history", () => {
+  const dirs: Record<string, { name: string; path: string; isDir: boolean; size: number; modified: null }[]> = {
+    "/home/me": [{ name: "d1", path: "/home/me/d1", isDir: true, size: 0, modified: null }],
+    "/home/me/d1": [{ name: "d2", path: "/home/me/d1/d2", isDir: true, size: 0, modified: null }],
+    "/home/me/d1/d2": [{ name: "z.txt", path: "/home/me/d1/d2/z.txt", isDir: false, size: 1, modified: null }],
+  };
+  const pathText = (t: string) => screen.getByText(t, { selector: "[data-pane=local] .path b" });
+
+  async function enterTwo() {
+    m.localList.mockImplementation(async (path: string) => dirs[path] ?? []);
+    const p = setup();
+    fireEvent.doubleClick(await screen.findByText("📁 d1"));
+    fireEvent.doubleClick(await screen.findByText("📁 d2"));
+    await screen.findByText("📄 z.txt");
+    return p;
+  }
+
+  test("mouse back/forward buttons move through local history", async () => {
+    const p = await enterTwo();
+    const pane = screen.getByTestId("pane-local");
+    fireEvent.mouseUp(pane, { button: 3 });
+    await screen.findByText("📁 d2");
+    expect(pathText("/home/me/d1")).toBeInTheDocument();
+    expect(p.onLocalPathChange).toHaveBeenLastCalledWith("/home/me/d1");
+    fireEvent.mouseUp(pane, { button: 4 });
+    await screen.findByText("📄 z.txt");
+    expect(pathText("/home/me/d1/d2")).toBeInTheDocument();
+  });
+
+  test("a new navigation clears forward history", async () => {
+    await enterTwo();
+    const pane = screen.getByTestId("pane-local");
+    fireEvent.mouseUp(pane, { button: 3 });
+    await screen.findByText("📁 d2");
+    fireEvent.click(screen.getAllByRole("button", { name: "상위 폴더" })[0]);
+    await screen.findByText("📁 d1");
+    fireEvent.mouseUp(pane, { button: 4 });
+    expect(pathText("/home/me")).toBeInTheDocument();
+  });
+
+  test("meta+[ and meta+] navigate the focused pane; inactive tab ignores them", async () => {
+    await enterTwo();
+    fireEvent.keyDown(window, { key: "[", metaKey: true });
+    await screen.findByText("📁 d2");
+    fireEvent.keyDown(window, { key: "]", metaKey: true });
+    await screen.findByText("📄 z.txt");
+  });
+
+  test("inactive tab ignores back button", async () => {
+    m.localList.mockImplementation(async (path: string) => dirs[path] ?? []);
+    setup({ active: false });
+    fireEvent.doubleClick(await screen.findByText("📁 d1"));
+    await screen.findByText("📁 d2");
+    fireEvent.mouseUp(screen.getByTestId("pane-local"), { button: 3 });
+    expect(m.localList).not.toHaveBeenLastCalledWith("/home/me");
+    expect(pathText("/home/me/d1")).toBeInTheDocument();
+  });
+});
