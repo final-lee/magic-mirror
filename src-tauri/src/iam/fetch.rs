@@ -64,6 +64,7 @@ async fn caller_identity(sts: &aws_sdk_sts::Client) -> Result<(String, String), 
 /// 계정의 사용자·그룹·역할, 고객 관리형 정책 전부와 어딘가에 쓰이는 AWS 관리형 정책, 자격 증명 보고서를 읽어 스냅숏으로 만든다.
 /// 사용자·그룹·역할·정책을 못 읽거나 SSO 만료·요청 제한이면 오류이고, 자격 증명 보고서나 일부 정책을 못 읽은 것은 `warnings`에 남기고 계속한다.
 pub async fn fetch_snapshot(cfg: &SdkConfig) -> Result<Snapshot, AppError> {
+    let started = now_secs();
     let iam = aws_sdk_iam::Client::new(cfg);
     let sts = aws_sdk_sts::Client::new(cfg);
     // 보고서는 못 만들어도 계속하니 오류 대신 결과로 감싼다. 사용자·정책을 못 읽으면 보고서를 기다리지 않고 바로 끝낸다.
@@ -95,6 +96,7 @@ pub async fn fetch_snapshot(cfg: &SdkConfig) -> Result<Snapshot, AppError> {
         caller_arn: caller_arn.clone(),
         caller_principal_arn: None,
         fetched_at: iso(now_secs()),
+        read_started_at: Some(started),
         users: details.users,
         groups: details.groups,
         roles: details.roles,

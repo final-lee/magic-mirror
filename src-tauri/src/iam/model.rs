@@ -118,7 +118,11 @@ pub struct Snapshot {
     pub caller_arn: String,
     /// 앱이 쓰는 자격 증명의 IAM 사용자·역할 ARN. 알 수 없으면 None
     pub caller_principal_arn: Option<String>,
+    /// 읽기를 마친 시각(화면에 보이는 조회 시각, 60초가 지났는지 볼 때 쓴다)
     pub fetched_at: String,
+    /// 읽기를 시작한 시각(유닉스 초). IAM을 바꾼 뒤 10초 안에 시작한 읽기인지 볼 때 쓴다: 읽는 데 몇 초가 걸리면 끝난 시각으로는
+    /// 그 변경을 못 봤을 수 있는 읽기를 놓친다. 모르면 None이고 `fetched_at`으로 본다
+    pub read_started_at: Option<i64>,
     pub users: Vec<UserRec>,
     pub groups: Vec<GroupRec>,
     pub roles: Vec<RoleRec>,

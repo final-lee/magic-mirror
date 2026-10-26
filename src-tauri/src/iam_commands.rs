@@ -52,7 +52,7 @@ impl<T> Default for Slot<T> {
 
 /// 프로필마다 한 번 읽어 두는 값의 캐시. 같은 프로필에서 읽는 동안 다른 요청은 기다렸다가 그 결과를 쓴다(같은 일을 또 하지 않는다).
 /// 읽기는 시작할 때의 세대를 기억해 두고, 끝났을 때 세대가 그대로일 때만 결과를 담는다. 읽는 도중에 무효화됐으면
-/// 그 결과는 무효화 전의 상태일 수 있어서 담지 않는다(그 읽기를 기다리던 요청에게만 돌려준다).
+/// 그 결과는 무효화 전의 상태일 수 있어서 담지 않는다: 그 읽기를 시작한 요청만 그 결과를 받고, 기다리던 요청은 차례가 오면 다시 읽는다.
 struct Cache<T> {
     slots: Mutex<HashMap<String, Slot<T>>>,
     /// 프로필마다 하나씩 읽는 차례를 지키는 자물쇠
@@ -136,11 +136,22 @@ where
     Fut: Future<Output = Result<Snapshot, AppError>>,
 {
     if force {
-        // 새로 고침은 읽어 둔 것을 모두 버리고, 새로 고침보다 먼저 시작한 읽기의 결과도 쓰지 않는다. 정책 목록은 다음에 필요할 때 읽는다.
+        // 새로 고침(⌘R)은 읽어 둔 것을 모두 버리고, 새로 고침보다 먼저 시작한 읽기의 결과도 쓰지 않는다. 정책 목록은 다음에 필요할 때 읽는다.
         // 새로 고침 뒤에 시작한 읽기는 함께 쓴다(새로 고침 여러 개가 같은 읽기를 기다리면 한 번만 읽는다)
-        invalidate(iam, profile);
         iam.policy_lists.invalidate(profile);
+        return reread(iam, profile, fetch).await;
     }
+    iam.snapshots.get_or_fetch(profile, fetch).await
+}
+
+/// 스냅숏만 버리고 새로 읽는다. 정책 붙이기 선택 목록은 그대로 둔다: 미리보기·적용 전에 낡은 스냅숏을 다시 읽을 때 쓰고,
+/// 그 목록(정책 이름과 ARN)은 IAM 변경으로 달라지지 않는다.
+async fn reread<F, Fut>(iam: &IamState, profile: &str, fetch: F) -> Result<Arc<Snapshot>, AppError>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<Snapshot, AppError>>,
+{
+    invalidate(iam, profile);
     iam.snapshots.get_or_fetch(profile, fetch).await
 }
 
@@ -316,8 +327,9 @@ fn written_at(iam: &IamState, profile: &str) -> Option<i64> {
 }
 
 /// 미리보기·적용에 쓰는 스냅숏: 읽은 지 60초가 넘었으면 새로 읽는다. 미리보기를 본 뒤에 계정이 바뀌었을 수 있어서다.
-/// 이 프로필에서 IAM을 바꾼 뒤 10초 동안은 나이와 상관없이 늘 새로 읽고, 그 10초 안에 읽은 스냅숏은 그 뒤에 한 번 더 읽는다.
-/// 바꾸기 전에 시작한 읽기의 결과는 세대 캐시가 담지 않는다.
+/// 이 프로필에서 IAM을 바꾼 뒤 10초 동안은 나이와 상관없이 늘 새로 읽고, 그 10초 안에 시작한 읽기의 스냅숏은 그 뒤에 한 번 더 읽는다
+/// (읽기를 시작한 시각으로 본다: 끝난 시각은 10초가 지났어도 앞부분은 그 변경이 반영되기 전에 읽었을 수 있다).
+/// 바꾸기 전에 시작한 읽기의 결과는 세대 캐시가 담지 않는다. 다시 읽을 때 정책 붙이기 선택 목록은 버리지 않는다.
 async fn fresh_snapshot_with<F, Fut>(iam: &IamState, profile: &str, now: i64, fetch: F) -> Result<Arc<Snapshot>, AppError>
 where
     F: Fn() -> Fut,
@@ -325,12 +337,13 @@ where
 {
     let written = written_at(iam, profile);
     if written.is_some_and(|at| now - at < SETTLE_SECS) {
-        return snapshot_with(iam, profile, true, &fetch).await;
+        return reread(iam, profile, &fetch).await;
     }
     let cached = snapshot_with(iam, profile, false, &fetch).await?;
-    let unsettled = written.is_some_and(|at| parse_iso(&cached.fetched_at).is_none_or(|read| read - at < SETTLE_SECS));
+    let read_from = cached.read_started_at.or_else(|| parse_iso(&cached.fetched_at));
+    let unsettled = written.is_some_and(|at| read_from.is_none_or(|read| read - at < SETTLE_SECS));
     if is_stale(&cached.fetched_at, now) || unsettled {
-        return snapshot_with(iam, profile, true, &fetch).await;
+        return reread(iam, profile, &fetch).await;
     }
     Ok(cached)
 }
@@ -447,9 +460,10 @@ where
     };
     let committed = commit(request, write).await;
     if committed.wrote {
-        // 일부만 적용되고 실패했을 수도 있으니 성공하지 않았어도 읽어 둔 것을 버린다
-        invalidate(iam, &profile);
+        // 일부만 적용되고 실패했을 수도 있으니 성공하지 않았어도 읽어 둔 것을 버린다. 쓴 시각을 먼저 적는다: 버린 직후에 들어온
+        // 미리보기가 쓴 시각을 못 보면, 변경이 반영되기 전에 읽은 스냅숏을 "쓰기 뒤 10초" 규칙 없이 그대로 쓴다
         mark_written(iam, &profile, now_secs());
+        invalidate(iam, &profile);
     }
     committed.result
 }
@@ -718,6 +732,42 @@ mod tests {
         assert!(iam.policy_lists.get("dev").is_none());
         let second = iam.policy_lists.get_or_fetch("dev", || async { Ok::<_, AppError>(one_policy("second")) }).await.unwrap();
         assert_eq!(second[0].name, "second");
+    }
+
+    #[tokio::test]
+    async fn reading_again_before_a_preview_keeps_the_policy_list() {
+        let iam = IamState::default();
+        iam.policy_lists.get_or_fetch("dev", || async { Ok::<_, AppError>(one_policy("first")) }).await.unwrap();
+        let now = crate::iam::clock::parse_iso("2026-10-27T00:00:00Z").unwrap();
+        // 61초 전에 읽은 스냅숏이라 미리보기 전에 다시 읽는다
+        snapshot_with(&iam, "dev", false, || async { Ok(read_at(&crate::iam::clock::iso(now - 61))) }).await.unwrap();
+        let again = fresh_snapshot_with(&iam, "dev", now, || async { Ok(read_at(&crate::iam::clock::iso(now))) }).await.unwrap();
+        assert_eq!(again.fetched_at, crate::iam::clock::iso(now));
+        // 쓴 뒤 10초 동안 늘 다시 읽을 때도 마찬가지다
+        mark_written(&iam, "dev", now);
+        fresh_snapshot_with(&iam, "dev", now + 1, || async { Ok(read_at(&crate::iam::clock::iso(now + 1))) }).await.unwrap();
+        assert_eq!(iam.policy_lists.get("dev").unwrap()[0].name, "first");
+    }
+
+    #[tokio::test]
+    async fn a_read_that_started_within_ten_seconds_of_a_write_is_read_again_even_if_it_ended_later() {
+        let (iam, calls) = (IamState::default(), AtomicUsize::new(0));
+        let written = crate::iam::clock::parse_iso("2026-10-27T00:00:00Z").unwrap();
+        mark_written(&iam, "dev", written);
+        // 쓰고 8초 뒤에 시작해서 15초 뒤에 끝난 읽기(큰 계정)
+        let slow = Snapshot { read_started_at: Some(written + 8), ..read_at(&crate::iam::clock::iso(written + 15)) };
+        snapshot_with(&iam, "dev", false, || async { Ok(slow) }).await.unwrap();
+        let read = || async {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Snapshot { read_started_at: Some(written + 20), ..read_at(&crate::iam::clock::iso(written + 21)) })
+        };
+        let used = fresh_snapshot_with(&iam, "dev", written + 30, &read).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "끝난 시각(15초)이 아니라 시작한 시각(8초)으로 봐서 다시 읽어요");
+        assert_eq!(used.read_started_at, Some(written + 20));
+        // 다시 읽은 것은 10초가 지난 뒤에 시작했으니 그대로 쓴다
+        let cached = fresh_snapshot_with(&iam, "dev", written + 35, &read).await.unwrap();
+        assert!(Arc::ptr_eq(&used, &cached));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

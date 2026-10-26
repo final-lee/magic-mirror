@@ -15,6 +15,7 @@ use serde_json::Value;
 
 use super::{Usage, Use};
 use crate::iam::catalog::catalog;
+use crate::iam::change::document::{commas, inline_limit, kind_label, size, MANAGED_LIMIT};
 use crate::iam::eval::{find_principal, statement_actions, PrincipalEval, Source, Status};
 use crate::iam::findings::STALE_DAYS;
 use crate::iam::model::Snapshot;
@@ -29,9 +30,6 @@ const SHOWN_UNREADABLE: usize = 5;
 
 /// 초안이 쓰는 정책 언어 버전. 정책 변수(`${aws:username}`)는 이 버전부터 변수로 쓰이고, 그 전 버전과 `Version`이 없는 문서에서는 글자 그대로다.
 const CURRENT_VERSION: &str = "2012-10-17";
-
-/// 관리형 정책 문서의 크기 한도(공백을 뺀 글자 수).
-const MANAGED_LIMIT: usize = 6_144;
 
 const NOTE_CONDITION_STATEMENTS: &str = "조건이 걸린 허용 문장은 초안에 옮기지 않았어요";
 const NOTE_NO_ACTION_LEVEL: &str = "작업 단위 기록이 없는 서비스는 지금 허용된 작업을 그대로 남겼어요";
@@ -406,39 +404,17 @@ fn unreadable_names(sources: &[Source]) -> Vec<String> {
     names.into_iter().map(str::to_owned).collect()
 }
 
-/// 천 단위로 쉼표를 찍는다(6144 → "6,144").
-fn commas(n: usize) -> String {
-    let digits = n.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (i, digit) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(digit);
-    }
-    out
-}
-
-/// 주체 하나에 붙은 인라인 정책 전체의 한도(공백을 뺀 글자 수)와 안내에 쓰는 종류 이름.
-fn inline_limit(kind: PrincipalKind) -> (&'static str, usize) {
-    match kind {
-        PrincipalKind::User => ("사용자", 2_048),
-        PrincipalKind::Group => ("그룹", 5_120),
-        PrincipalKind::Role => ("역할", 10_240),
-    }
-}
-
-/// 초안이 AWS 크기 한도보다 길면 그 안내. AWS는 공백을 뺀 글자 수를 센다(`iam/change`의 검사와 같은 규칙이다).
+/// 초안이 AWS 크기 한도보다 길면 그 안내. AWS는 공백을 뺀 글자 수를 센다(변경 미리보기의 문서 검사와 같은 도우미를 쓴다).
 /// 초안은 그대로 주고 안내만 붙인다. 관리형 정책 한도 안내는 인라인 한도도 넘었을 때만 붙는다:
 /// 첫 안내가 권하는 "관리형 정책으로 만들기"도 안 된다는 뜻이다.
 pub(super) fn size_notes(document: &str, kind: PrincipalKind) -> Vec<String> {
-    let (label, limit) = inline_limit(kind);
-    let size = document.chars().filter(|c| !c.is_whitespace()).count();
+    let (label, limit) = (kind_label(kind), inline_limit(kind));
+    let total = size(document);
     let mut notes = Vec::new();
-    if size > limit {
-        notes.push(format!("초안이 {}자라 {label} 인라인 정책 한도({}자)를 넘어요. 관리형 정책으로 만들거나 작업을 줄여 주세요", commas(size), commas(limit)));
-        if size > MANAGED_LIMIT {
-            notes.push(format!("초안이 {}자라 관리형 정책 한도({}자)도 넘어요", commas(size), commas(MANAGED_LIMIT)));
+    if total > limit {
+        notes.push(format!("초안이 {}자라 {label} 인라인 정책 한도({}자)를 넘어요. 관리형 정책으로 만들거나 작업을 줄여 주세요", commas(total), commas(limit)));
+        if total > MANAGED_LIMIT {
+            notes.push(format!("초안이 {}자라 관리형 정책 한도({}자)도 넘어요", commas(total), commas(MANAGED_LIMIT)));
         }
     }
     notes

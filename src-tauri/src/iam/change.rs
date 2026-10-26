@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 
 mod calls;
-mod document;
+pub(crate) mod document;
 mod facts;
 mod impact;
 mod inverse;
