@@ -149,10 +149,17 @@ fn policy_names_are_listed_once_each_and_shortened() {
 }
 
 #[test]
-fn a_deny_with_a_variable_resource_is_copied_verbatim() {
-    // 변수가 되면 더 많이 막을 뿐이라 지금보다 넓어지지 않는다
-    let w = world_with("p", versioned(Some("2008-10-17"), json!([allow(json!("s3:GetObject"), "*"), deny(json!("s3:GetObject"), json!(HOME))])));
-    let (_, draft, notes) = run(&w, &s3_used());
+fn a_deny_with_a_variable_resource_is_not_copied_from_an_old_version() {
+    // 지금은 글자 그대로 `home/${aws:username}/…`인 리소스를 막는다. 2012-10-17 초안에서는 변수가 되어 그 리소스가 열리고,
+    // 값이 없는 키면 아무것도 막지 않는다: 원문 그대로 옮길 수 없다
+    let old = world_with("p", versioned(Some("2008-10-17"), json!([allow(json!("s3:GetObject"), "*"), deny(json!("s3:GetObject"), json!(HOME))])));
+    let (_, draft, notes) = run(&old, &s3_used());
+    assert_eq!(draft, None);
+    assert!(has_note(&notes, DENY_UNCOPIED), "{notes:?}");
+
+    // 2012-10-17 원문이면 뜻이 그대로라 옮긴다
+    let current = world_with("p", versioned(Some("2012-10-17"), json!([allow(json!("s3:GetObject"), "*"), deny(json!("s3:GetObject"), json!(HOME))])));
+    let (_, draft, notes) = run(&current, &s3_used());
     assert_eq!(statements(&draft), vec![list_allow("s3:GetObject", "*"), json!({ "Effect": "Deny", "Action": "s3:GetObject", "Resource": HOME })]);
     assert!(has_note(&notes, "거부(Deny) 문장 1개를 초안에 그대로 옮겼어요"), "{notes:?}");
 }
