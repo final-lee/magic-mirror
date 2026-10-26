@@ -39,9 +39,9 @@
 - 리소스 매칭: 대소문자 구분 glob(`*`, `?`). `${...}` 정책 변수가 있으면 판단 불가 → 조건부.
 - 카탈로그: AWS Service Reference(https://servicereference.us-east-1.amazonaws.com/)에서 만든 스냅숏을 앱에 넣는다(`src-tauri/src/iam/catalog.json`, `scripts/update-iam-catalog.mjs`로 갱신). 작업별 접근 수준: IsPermissionManagement → permissions, IsTaggingOnly → tagging, IsWrite → write, IsList → list, 그 외 read.
 - 주체의 정책 출처: 사용자 = 사용자 인라인 + 사용자 관리형 + 소속 그룹 인라인·관리형, 역할 = 역할 인라인 + 관리형, 그룹 = 그룹 인라인 + 관리형. 권한 경계는 별도.
-- 작업별 판정(우선순위 순):
-  1. 조건 없는 Deny가 매칭 → `denied`
-  2. Allow가 하나도 매칭 안 됨 → 표에서 제외
+- 작업별 판정(우선순위 순). Allow가 하나도 매칭되지 않는 작업은 Deny만 있어도 표와 "누가 할 수 있나"에서 제외한다(원래 허용되지 않으므로).
+  1. Allow가 매칭되고 조건 없는 Deny도 매칭 → `denied` (대상 리소스를 지정하지 않았고 Deny가 일부 리소스에만 걸리면 `allowed`로 두고 근거에 Deny를 함께 표시)
+  2. (제외 규칙은 위에 적음)
   3. 권한 경계가 있고 경계가 이 작업을 조건 없이 허용하지 않음 → 경계가 아예 허용 안 하면 `boundary`, 조건부로만 허용하면 `conditional`
   4. 조건 있는 Deny가 매칭되거나, 조건 없는 Allow가 없고 조건 있는 Allow만 있음 → `conditional`
   5. 그 외 → `allowed`
