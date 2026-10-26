@@ -38,7 +38,7 @@ Open **IAM → 🔐 IAM 관리** in the sidebar, or double-click a user, role, o
   - Attach or detach managed policies, add or remove group members, and create, edit, or delete inline policies.
   - Save a new version of a customer managed policy.
   - Deactivate, reactivate, or delete access keys.
-- **Preview before every change**: every change starts with a preview of the exact API calls, who gains or loses which permissions, and any warnings. Risky changes, such as granting admin access or cutting off the app's own access, ask you to type the target's name or key ID. Before applying, the app re-reads the account and stops if anything changed since the preview. Service-linked and IAM Identity Center roles are managed by AWS and can't be changed.
+- **Preview before every change**: every change starts with a preview of the exact API calls, who gains or loses which permissions, and any warnings. Risky changes, such as granting admin access or cutting off the app's own access, ask you to type the target's name or key ID. When you apply, the app recomputes the change and stops if it no longer matches the preview you confirmed. Service-linked and IAM Identity Center roles are managed by AWS and can't be changed.
 - **Change log**: every applied change is recorded locally, and most can be undone. An undo goes through the same preview. Changes AWS can't reverse, such as deleting an access key, are marked as such.
 - **What it doesn't evaluate**: only identity-based policies and permissions boundaries. Organization SCPs and resource-based policies (such as bucket policies) aren't included, and the app says so on screen.
 
