@@ -90,3 +90,16 @@ test("no bottom band without endpoints or peerings", () => {
   t.peerings = [];
   expect(layoutTopology(t).band).toBeNull();
 });
+
+test("legend sits inside the VPC bounds, bottom-right, below the content", () => {
+  const l = layoutTopology(sampleTopology());
+  const g = l.legend;
+  expect(g.items.map((i) => i.key)).toEqual(["public", "private", "isolated", "route"]);
+  expect(g.x).toBeGreaterThanOrEqual(l.vpc.x);
+  expect(g.x + g.w).toBeLessThanOrEqual(l.vpc.x + l.vpc.w);
+  expect(g.y + g.h).toBeLessThanOrEqual(l.vpc.y + l.vpc.h);
+  for (const c of l.chips) expect(overlap(g, c)).toBe(false);
+  for (const s of l.subnets) expect(overlap(g, s)).toBe(false);
+  if (l.band) expect(overlap(g, l.band)).toBe(false);
+  expect(g.x + g.w).toBeGreaterThan(l.vpc.x + l.vpc.w - 40);
+});

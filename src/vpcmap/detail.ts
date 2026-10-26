@@ -17,12 +17,18 @@ const isDefaultRoute = (r: RouteInfo) => r.destination === "0.0.0.0/0" || r.dest
 export function defaultRouteTargets(t: VpcTopology, subnet: SubnetInfo | null): string[] {
   if (!subnet) return [];
   const rt = t.routeTables.find((r) => r.id === subnet.routeTableId);
-  return (rt?.routes ?? []).filter((r) => isDefaultRoute(r) && r.state !== "blackhole" && r.targetKind !== "local").map((r) => r.target);
+  return (rt?.routes ?? [])
+    .filter((r) => isDefaultRoute(r) && r.state !== "blackhole" && r.targetKind !== "local")
+    .map((r) => r.target)
+    .filter((x) => x !== "");
 }
 
 /** 게이트웨이 칩이 라우트 대상과 같은지 (TGW attachment는 name/label에 TGW id가 들어온다) */
 export function gatewayMatchesTarget(g: GatewayInfo, target: string) {
-  return g.id === target || g.label === target || g.name.includes(target);
+  if (!target) return false;
+  if (g.id === target) return true;
+  // TGW attachment는 label/name에 TGW id가 들어온다
+  return g.kind === "tgw" && target.startsWith("tgw-") && (g.label === target || g.name === target);
 }
 
 export function subnetDetail(t: VpcTopology, s: SubnetInfo): DetailData {
@@ -35,8 +41,11 @@ export function subnetDetail(t: VpcTopology, s: SubnetInfo): DetailData {
   ];
   if (s.availableIps !== null) rows.push({ label: "남은 IP", value: String(s.availableIps) });
   if (rt) rows.push({ label: "라우팅 테이블", value: `${rt.id}${rt.name && rt.name !== rt.id ? ` (${rt.name})` : ""}${rt.main ? " · main" : ""}` });
-  (rt?.routes ?? []).forEach((r, i) => {
-    rows.push({ label: `경로 ${i + 1}`, value: `${r.destination} → ${r.target}${r.state !== "active" ? ` (${r.state})` : ""}` });
+  const seen = new Map<string, number>();
+  (rt?.routes ?? []).forEach((r) => {
+    const n = (seen.get(r.destination) ?? 0) + 1;
+    seen.set(r.destination, n);
+    rows.push({ label: n > 1 ? `${r.destination} (${n})` : r.destination, value: `${r.target || "-"} (${r.state})` });
   });
   return {
     title: s.name || s.id,

@@ -23,6 +23,8 @@ export const CHIP_GAP = 10;
 export const BAND_HEADER = 28;
 export const BAND_PAD = 14;
 export const MIN_VPC_W = 560;
+export const LEGEND_H = 26;
+export const ROUTE_LEGEND_LABEL = "기본 경로 대상";
 
 export const TIER_ORDER: Tier[] = ["public", "private", "isolated"];
 export const TIER_LABEL: Record<Tier, string> = { public: "퍼블릭", private: "프라이빗", isolated: "격리" };
@@ -55,6 +57,17 @@ export interface ChipLayout extends Box {
   gateway: GatewayInfo | null;
   peering: PeeringInfo | null;
 }
+export type LegendKey = Tier | "route";
+export interface LegendItem {
+  key: LegendKey;
+  label: string;
+  /** 색 견본의 x (범례 박스 기준이 아닌 절대 좌표) */
+  x: number;
+  textX: number;
+}
+export interface LegendLayout extends Box {
+  items: LegendItem[];
+}
 export interface Layout {
   width: number;
   height: number;
@@ -65,6 +78,8 @@ export interface Layout {
   chips: ChipLayout[];
   /** 아래쪽 "외부 연결" 띠 (칩이 없으면 null) */
   band: Box | null;
+  /** VPC 안쪽 오른쪽 아래 범례 (PNG 내보내기에도 포함된다) */
+  legend: LegendLayout;
 }
 
 const ellipsize = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
@@ -216,7 +231,8 @@ export function layoutTopology(t: VpcTopology): Layout {
     bandBottom = bandY + bandH + 6;
   }
 
-  const vpcH = bandBottom + 10 - vpcY;
+  const vpcH = bandBottom + 10 + LEGEND_H + 8 - vpcY;
+  const legend = layoutLegend(vpcX + vpcW - 14, vpcY + vpcH - LEGEND_H - 8);
   return {
     width: vpcX + vpcW + PAD,
     height: vpcY + vpcH + PAD,
@@ -226,7 +242,29 @@ export function layoutTopology(t: VpcTopology): Layout {
     subnets,
     chips,
     band,
+    legend,
   };
+}
+
+const textW = (s: string) => Math.round(s.length * 11.5);
+
+function layoutLegend(right: number, y: number): LegendLayout {
+  const entries: { key: LegendKey; label: string }[] = [
+    ...TIER_ORDER.map((tier) => ({ key: tier as LegendKey, label: TIER_LABEL[tier] })),
+    { key: "route", label: ROUTE_LEGEND_LABEL },
+  ];
+  const widths = entries.map((e) => 12 + 6 + textW(e.label));
+  const gap = 14;
+  const inner = widths.reduce((a, b) => a + b, 0) + gap * (entries.length - 1);
+  const w = inner + 20;
+  const x = right - w;
+  let cx = x + 10;
+  const items = entries.map((e, i) => {
+    const item = { key: e.key, label: e.label, x: cx, textX: cx + 18 };
+    cx += widths[i] + gap;
+    return item;
+  });
+  return { x, y, w, h: LEGEND_H, items };
 }
 
 function tilePos(sx: number, sy: number, i: number) {

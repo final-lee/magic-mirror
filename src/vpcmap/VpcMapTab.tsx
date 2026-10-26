@@ -1,11 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as RPointerEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as RPointerEvent } from "react";
 import { errorMessage } from "../api/errors";
 import { DetailPanel } from "../components/DetailPanel";
 import { ErrorState } from "../components/ErrorState";
 import { vpcApi } from "./api";
 import { defaultRouteTargets, gatewayDetail, gatewayMatchesTarget, peeringDetail, resourceNodeDetail, subnetDetail } from "./detail";
-import { layoutTopology, TIER_LABEL, TIER_ORDER, type ChipLayout, type Layout, type SubnetLayout, type TileLayout } from "./layout";
+import { layoutTopology, type ChipLayout, type Layout, type SubnetLayout, type TileLayout } from "./layout";
 import { C, CHIP_BADGE_COLOR, KIND_BADGE, stateColor, TIER_COLOR } from "./palette";
 import { topologyKey, useVpcTopology } from "./queries";
 import { svgToPng } from "./toPng";
@@ -237,29 +237,11 @@ export function VpcMapTab({ profile, region, vpcId, name, active }: Props) {
                 />
               </g>
             </svg>
-            <Legend />
           </div>
         )}
       </div>
       <DetailPanel detail={detail} onShowRaw={() => {}} />
     </>
-  );
-}
-
-function Legend() {
-  return (
-    <div className="vm-legend" aria-hidden="true">
-      {TIER_ORDER.map((t) => (
-        <span key={t} className="vm-leg">
-          <i style={{ background: TIER_COLOR[t].stroke }} />
-          {TIER_LABEL[t]}
-        </span>
-      ))}
-      <span className="vm-leg">
-        <i style={{ background: C.route }} />
-        기본 경로 대상
-      </span>
-    </div>
   );
 }
 
@@ -326,12 +308,23 @@ function Diagram({ topo, layout, selection, focusId, routeTargets, onSelect, onH
           </text>
         </g>
       )}
+      <g aria-hidden="true">
+        <rect x={layout.legend.x} y={layout.legend.y} width={layout.legend.w} height={layout.legend.h} rx={6} fill={C.tile} fillOpacity={0.8} stroke={C.tileLine} />
+        {layout.legend.items.map((it) => (
+          <g key={it.key}>
+            <rect x={it.x} y={layout.legend.y + layout.legend.h / 2 - 6} width={12} height={12} rx={3} fill={it.key === "route" ? C.route : TIER_COLOR[it.key].stroke} />
+            <text x={it.textX} y={layout.legend.y + layout.legend.h / 2 + 4} fontSize={11} fill={C.dim}>
+              {it.label}
+            </text>
+          </g>
+        ))}
+      </g>
       {layout.chips.map((c) => (
         <Chip
           key={c.key}
           c={c}
           selected={selection?.kind === "chip" && selection.id === c.id}
-          routeTarget={!!c.gateway && routeTargets.some((t) => gatewayMatchesTarget(c.gateway!, t))}
+          routeTarget={c.gateway ? routeTargets.some((t) => gatewayMatchesTarget(c.gateway!, t)) : !!c.peering && routeTargets.includes(c.peering.id)}
           onSelect={onSelect}
         />
       ))}
@@ -347,7 +340,7 @@ const activate = (fn: () => void) => (e: KeyboardEvent) => {
   }
 };
 
-function SubnetBox({ s, selected, onSelect }: { s: SubnetLayout; selected: boolean; onSelect: (s: Selection) => void }) {
+const SubnetBox = memo(function SubnetBox({ s, selected, onSelect }: { s: SubnetLayout; selected: boolean; onSelect: (s: Selection) => void }) {
   const col = TIER_COLOR[s.subnet.tier];
   const select = () => onSelect({ kind: "subnet", id: s.subnet.id });
   return (
@@ -376,9 +369,9 @@ function SubnetBox({ s, selected, onSelect }: { s: SubnetLayout; selected: boole
       </text>
     </g>
   );
-}
+});
 
-function Tile({ t, selected, focused, routeTarget, onSelect, onHover }: {
+const Tile = memo(function Tile({ t, selected, focused, routeTarget, onSelect, onHover }: {
   t: TileLayout;
   selected: boolean;
   focused: boolean;
@@ -432,7 +425,7 @@ function Tile({ t, selected, focused, routeTarget, onSelect, onHover }: {
       </text>
     </g>
   );
-}
+});
 
 function Chip({ c, selected, routeTarget, onSelect }: { c: ChipLayout; selected: boolean; routeTarget: boolean; onSelect: (s: Selection) => void }) {
   const select = () => onSelect({ kind: "chip", id: c.id });
