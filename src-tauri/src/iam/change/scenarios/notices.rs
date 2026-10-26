@@ -124,6 +124,51 @@ fn a_policy_whose_document_is_unknown_needs_confirmation_because_the_effect_coul
 }
 
 #[test]
+fn a_deny_on_some_resources_only_says_the_impact_list_cannot_show_it() {
+    // P4: 이 앱이 쓰는 alice의 ARN에만 건 iam:* Deny. 영향 계산에는 아무것도 나오지 않는다
+    let s = snapshot();
+    let lock = doc(json!([{ "Sid": "NoSelfIam", "Effect": "Deny", "Action": "iam:*", "Resource": ALICE }]));
+    let p = preview(&s, &put_inline(ALICE, "lock", lock), None);
+    assert!(p.impacts.is_empty());
+    let message = only(&p, WarnLevel::Warn);
+    assert!(message.starts_with("일부 리소스에만 거는 거부(Deny) 문장을 더해요: NoSelfIam. "), "{message}");
+    assert!(message.contains("되돌리지 못할 수도"), "{message}");
+    assert!(!has_level(&p, WarnLevel::Confirm), "{:?}", p.warnings);
+
+    // 운영 버킷에만 건 삭제 Deny(Sid 없음)와 NotResource Deny도 마찬가지다
+    let guard = doc(json!([
+        { "Effect": "Allow", "Action": "s3:*", "Resource": "*" },
+        { "Effect": "Deny", "Action": "s3:DeleteObject", "Resource": "arn:aws:s3:::prod/*" },
+        { "Effect": "Deny", "Action": "s3:PutObject", "NotResource": "arn:aws:s3:::uploads/*" }
+    ]));
+    let p = preview(&s, &put_inline(BOB, "guard", guard), None);
+    assert!(messages(&p, WarnLevel::Warn).iter().any(|m| m.contains("Deny) 문장을 더해요: 문장 2, 문장 3.")), "{:?}", p.warnings);
+
+    // 관리형 정책 편집에서도 본다
+    let edit = doc(json!([{ "Sid": "KeepProd", "Effect": "Deny", "Action": "s3:DeleteBucket", "Resource": "arn:aws:s3:::prod" }]));
+    assert!(only(&preview(&s, &update_managed(UNUSED_POLICY, edit), None), WarnLevel::Warn).contains("KeepProd"));
+}
+
+#[test]
+fn a_deny_on_every_resource_or_one_that_was_already_there_is_not_pointed_out() {
+    let s = snapshot();
+    let scoped = |p: &ChangePreview| messages(p, WarnLevel::Warn).iter().any(|m| m.contains("일부 리소스"));
+    // 모든 리소스에 거는 Deny는 영향 목록에 잃는 권한으로 나온다
+    let p = preview(&s, &put_inline(BOB, "no-s3", doc(json!([{ "Effect": "Deny", "Action": "s3:*", "Resource": "*" }]))), None);
+    assert!(!scoped(&p), "{:?}", p.warnings);
+    assert!(!p.impacts.is_empty());
+    // bob의 assets-read에는 secret/*에 거는 Deny가 원래 있다. Sid만 바꿔 그대로 둔 편집은 새로 더하는 것이 아니다
+    let same_deny = doc(json!([
+        { "Sid": "ReadAssets", "Effect": "Allow", "Action": ["s3:Get*"], "Resource": "arn:aws:s3:::prod-assets*" },
+        { "Sid": "Renamed", "Effect": "Deny", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::prod-assets/secret/*" }
+    ]));
+    assert!(!scoped(&preview(&s, &put_inline(BOB, "assets-read", same_deny), None)));
+    // 대상을 바꾼 Deny는 새 문장이다
+    let moved = doc(json!([{ "Effect": "Deny", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::prod-assets/private/*" }]));
+    assert!(scoped(&preview(&s, &put_inline(BOB, "assets-read", moved), None)));
+}
+
+#[test]
 fn warnings_are_listed_block_first_then_confirm_then_warn() {
     let mut s = snapshot();
     s.policies.get_mut(ADMIN_POLICY).unwrap().versions = versions(&["v1", "v2", "v3", "v4", "v5"], "v1");

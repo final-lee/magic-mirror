@@ -6,12 +6,14 @@ use super::calls::calls;
 use super::document;
 use super::facts::{deletes_policy_version, stops_own_key, Facts, PolicyCheck};
 use super::impact::{Analysis, MAX_AFFECTED};
-use super::state::{is_attached, is_member};
+use super::state::{inline_policy, is_attached, is_member};
 use super::text::{policy_name, principal_label};
 use super::IamChange;
+use crate::iam::catalog::is_match_all;
 use crate::iam::danger::policy_badges;
 use crate::iam::eval::{evaluate_action, find_principal, Status};
 use crate::iam::model::{Scope, Snapshot};
+use crate::iam::policy::{parse_document, Effect, Resources, Statement};
 use crate::iam::text::shortened;
 use crate::iam::view::{Badge, BadgeKind};
 
@@ -25,6 +27,8 @@ const UNREADABLE_KEPT: &str = "문서를 읽지 못한 정책은 계산에서 �
 const CALLER_RESTRICTED: &str = "조건에 따라 이 앱의 자격 증명이 막힐 수 있어요 (예: MFA·IP 조건)";
 const OWN_KEY: &str = "적용하면 이 앱이 바로 AWS에 접근하지 못하고, 여기서는 되돌릴 수 없어요";
 const POLICY_UNCHECKED: &str = "정책 검사를 할 수 없어 버전 삭제 뒤 저장이 실패할 수 있어요";
+const SCOPED_DENY: &str = "일부 리소스에만 거는 거부(Deny) 문장을 더해요";
+const SCOPED_DENY_HINT: &str = "영향받는 주체 목록은 서비스·접근 수준 단위라 이 문장이 막는 것은 나오지 않아요. 이 앱의 자격 증명에 걸리면 되돌리지 못할 수도 있어요";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -128,7 +132,8 @@ fn cfn_warning(stack: &str) -> Warning {
 }
 
 /// 가상 스냅숏 없이 알 수 있는 확인·주의: 키·인라인 정책 삭제, 이 앱이 쓰는 키 끄기, 검사하지 못한 문서로 버전 지우기,
-/// CloudFormation 스택 대상, 버전이 가득 찬 정책, 이미 그 상태인 변경, 붙일 정책을 읽지 못한 이유. `badges`는 `target_badges`다.
+/// CloudFormation 스택 대상, 버전이 가득 찬 정책, 이미 그 상태인 변경, 붙일 정책을 읽지 못한 이유, 일부 리소스에만 거는 Deny를 더하는 문서.
+/// `badges`는 `target_badges`다.
 /// 읽지 못한 정책이 붙거나 떨어지는 것 자체는 영향 계산에서 확인으로 나온다(`from_analysis`).
 pub(super) fn notices(s: &Snapshot, c: &IamChange, facts: &Facts, badges: &[Badge]) -> Vec<Warning> {
     let key_status = facts.key_status.as_deref();
@@ -171,7 +176,44 @@ pub(super) fn notices(s: &Snapshot, c: &IamChange, facts: &Facts, badges: &[Badg
     if let (IamChange::AttachPolicy { policy_arn, .. }, Some(reason)) = (c, facts.policy_error.as_deref()) {
         out.push(warn(format!("{} 정책을 읽지 못했어요: {reason}", policy_name(s, policy_arn))));
     }
+    let scoped = scoped_denies_added(s, c);
+    if !scoped.is_empty() {
+        out.push(warn(format!("{SCOPED_DENY}: {}. {SCOPED_DENY_HINT}", shortened(&scoped, SHOWN_NAMES))));
+    }
     out
+}
+
+/// Deny 문장이 영향 계산(서비스·접근 수준 단위)에 그대로 드러나는지: 모든 리소스(`*`)에 걸리거나 어떤 리소스에도 걸리지 않는다.
+fn deny_shows_in_impacts(st: &Statement) -> bool {
+    match &st.resources {
+        Resources::Resource(patterns) => patterns.is_empty() || patterns.iter().any(|p| is_match_all(p)),
+        Resources::NotResource(excluded) => excluded.is_empty() || excluded.iter().any(|p| is_match_all(p)),
+        Resources::Unspecified => true,
+    }
+}
+
+/// 같은 규칙의 문장인지(번호와 Sid는 보지 않는다).
+fn same_rule(a: &Statement, b: &Statement) -> bool {
+    a.effect == b.effect && a.actions == b.actions && a.resources == b.resources && a.conditions == b.conditions
+}
+
+/// 인라인 정책 저장·관리형 정책 편집이 새로 더하는, 일부 리소스에만 걸리는 Deny 문장(Sid, 없으면 "문장 N"). 지금 문서에 같은 규칙의
+/// 문장이 있으면 새로 더하는 것이 아니다. 영향 계산은 서비스·접근 수준 단위라 이런 Deny가 막는 것(예: 이 앱의 자격 증명 ARN에 건
+/// `iam:*` Deny, 운영 버킷에만 건 삭제 Deny)을 보여 주지 못하고, 되돌릴 권한이 남는지도 리소스를 가리지 않고 본다.
+fn scoped_denies_added(s: &Snapshot, c: &IamChange) -> Vec<String> {
+    let (document, current) = match c {
+        IamChange::PutInlinePolicy { target, name, document } => (document, inline_policy(s, target, name).and_then(|p| p.document.as_ref())),
+        IamChange::UpdateManagedPolicy { policy_arn, document } => (document, s.policies.get(policy_arn).and_then(|p| p.document.as_ref())),
+        _ => return Vec::new(),
+    };
+    // 읽을 수 없는 문서는 막힘으로 이미 알렸다
+    let Ok(next) = parse_document(document) else { return Vec::new() };
+    next.statements
+        .iter()
+        .filter(|st| st.effect == Effect::Deny && !deny_shows_in_impacts(st))
+        .filter(|st| !current.is_some_and(|doc| doc.statements.iter().any(|old| same_rule(old, st))))
+        .map(|st| st.sid.clone().unwrap_or_else(|| format!("문장 {}", st.index + 1)))
+        .collect()
 }
 
 /// 이 변경 뒤에 앱이 쓰는 주체(`caller`)가 `inverse`를 실행할 IAM 권한을 갖고 있지 않거나, 조건 없이 갖고 있던 그 권한이 조건부가 되면

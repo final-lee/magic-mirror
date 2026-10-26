@@ -171,7 +171,8 @@ function ImpactList({ impacts, omitted }: { impacts: Impact[]; omitted: number }
         영향받는 주체 <span className="dim">{total}</span>
       </h4>
       {total === 0 ? (
-        <p className="cp-none">권한이 달라지는 주체가 없어요</p>
+        // 영향은 서비스·접근 수준 단위로 계산한다: 일부 리소스에만 걸린 변화(특정 ARN에 건 Deny 등)는 여기서 비어 보인다
+        <p className="cp-none">서비스·접근 수준 단위로는 권한이 달라지는 주체가 없어요. 일부 리소스에만 걸리는 변화는 이 목록에 나오지 않아요</p>
       ) : (
         <ul className="cp-impacts" aria-label="영향받는 주체">
           {shown.map((impact) => (

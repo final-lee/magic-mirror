@@ -393,9 +393,11 @@ describe("impacts", () => {
     expect(within(groupItem).queryByTestId("lost")).not.toBeInTheDocument();
   });
 
-  test("says when no principal's permissions change", () => {
+  test("says when no principal's permissions change, and that changes limited to some resources do not show here", () => {
     setup(previewOf(attachReadOnlyToBob, { impacts: [] }));
-    expect(screen.getByText("권한이 달라지는 주체가 없어요")).toBeInTheDocument();
+    const empty = screen.getByText(/권한이 달라지는 주체가 없어요/);
+    expect(empty).toHaveTextContent("서비스·접근 수준 단위로는 권한이 달라지는 주체가 없어요");
+    expect(empty).toHaveTextContent("일부 리소스에만 걸리는 변화는 이 목록에 나오지 않아요");
   });
 
   test("a principal with neither gains nor losses says so", () => {
