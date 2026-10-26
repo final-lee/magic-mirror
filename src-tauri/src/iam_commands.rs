@@ -25,7 +25,7 @@ use crate::iam::fetch::keys::{self, AccessKeyInfo, KeyStatus};
 use crate::iam::fetch::policies::{self, PolicyRef};
 use crate::iam::fetch::{self, usage};
 use crate::iam::fetch_policy::ensure_policy;
-use crate::iam::findings::{findings, Findings};
+use crate::iam::findings::{add_key_fixes, findings, key_fix_users, Findings};
 use crate::iam::lastused::{last_accessed, LastAccessed};
 use crate::iam::log::{self as change_log, ChangeLogEntry};
 use crate::iam::model::Snapshot;
@@ -263,10 +263,17 @@ pub async fn iam_simulate(
     checks::simulate(&client, principal_arns, action.trim(), clean_resource(resource).as_deref()).await
 }
 
+/// 보안 점검. 액세스 키 점검에 걸린 사용자가 있으면 그 사용자들의 키 목록을 읽어(읽기만) 키를 찾고 빠른 조치를 단다.
 #[tauri::command]
 pub async fn iam_findings(state: State<'_, AppState>, iam: State<'_, IamState>, profile: String) -> Result<Findings, AppError> {
     let s = snapshot(&state, &iam, &profile, false).await?;
-    Ok(findings(&s, now_secs()))
+    let mut found = findings(&s, now_secs());
+    let users = key_fix_users(&found);
+    if !users.is_empty() {
+        let client = iam_client(&state, &profile).await?;
+        add_key_fixes(&mut found, &keys::list_keys(&client, users).await?);
+    }
+    Ok(found)
 }
 
 #[tauri::command]

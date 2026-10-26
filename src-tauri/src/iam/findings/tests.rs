@@ -127,13 +127,14 @@ fn json_shape_matches_the_contract() {
 
 #[test]
 fn a_quick_fix_serializes_as_the_change_object() {
-    // 자격 증명 보고서에는 키 ID가 없어서 지금은 항상 null이지만, 키 ID를 아는 쪽이 채우면 이 모양으로 나간다
+    // 키 목록에서 키를 찾으면 이 모양으로 나간다. 키를 찾는 데 쓴 교체 시각은 보내지 않는다
     let fix = IamChange::SetAccessKeyStatus { user_name: "bob".into(), access_key_id: "AKIAEXAMPLE".into(), status: "Inactive".into() };
-    let item = FindingItem { target_arn: "arn".into(), target_name: "bob".into(), detail: "d".into(), cli: None, fix: Some(fix) };
-    assert_eq!(
-        serde_json::to_value(&item).unwrap()["fix"],
-        json!({ "op": "setAccessKeyStatus", "userName": "bob", "accessKeyId": "AKIAEXAMPLE", "status": "Inactive" })
-    );
+    let item = FindingItem { target_arn: "arn".into(), target_name: "bob".into(), detail: "d".into(), cli: None, fix: Some(fix), key_rotated: Some(1_700_000_000) };
+    let value = serde_json::to_value(&item).unwrap();
+    assert_eq!(value["fix"], json!({ "op": "setAccessKeyStatus", "userName": "bob", "accessKeyId": "AKIAEXAMPLE", "status": "Inactive" }));
+    let mut keys: Vec<&str> = value.as_object().unwrap().keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, vec!["cli", "detail", "fix", "targetArn", "targetName"]);
 }
 
 #[test]
@@ -249,7 +250,7 @@ fn old_access_keys_are_active_keys_rotated_over_90_days_ago() {
     assert_eq!(alice.target_arn, user_arn("alice"));
     assert!(alice.detail.contains("200일"), "{}", alice.detail);
     assert!(alice.detail.contains("키 1번"), "{}", alice.detail);
-    // 보고서에는 키 ID가 없으니 빠른 조치는 없고, CLI는 자리 표시자를 쓰고 키 탭을 안내한다
+    // 보고서에는 키 ID가 없으니 키 목록을 읽기 전에는 빠른 조치가 없고, CLI는 자리 표시자를 쓰고 키 탭을 안내한다(`add_key_fixes`가 채운다)
     assert_eq!(alice.fix, None);
     assert_eq!(
         alice.cli.as_deref(),
@@ -329,6 +330,90 @@ fn unused_key_thresholds() {
         r.key1_last_used = None;
         r.key1_rotated = None;
     }));
+}
+
+// ---- 액세스 키 빠른 조치 ----
+
+/// 보고서 형식 시각(`days`일 전)과 같은 초에 만든 키.
+fn listed(id: &str, active: bool, days: i64) -> ListedKey {
+    ListedKey { id: id.into(), active, created: crate::iam::clock::parse_iso(&ago(days)) }
+}
+
+#[test]
+fn a_report_key_slot_is_matched_to_the_one_key_created_in_the_same_second() {
+    use super::creds::matching_key;
+    let rotated = crate::iam::clock::parse_iso(&ago(200)).unwrap();
+    let keys = [listed("AKIAOLD", true, 200), listed("AKIANEW", true, 3)];
+    assert_eq!(matching_key(rotated, &keys), Some("AKIAOLD"));
+    // 한 초라도 다르면 다른 키다
+    assert_eq!(matching_key(rotated + 1, &keys), None);
+    // 같은 초에 만든 키가 둘이면 어느 칸의 키인지 모른다
+    assert_eq!(matching_key(rotated, &[listed("AKIAA", true, 200), listed("AKIAB", true, 200)]), None);
+    // 보고서가 묵은 사이 꺼진 키에는 끄는 조치를 달지 않는다
+    assert_eq!(matching_key(rotated, &[listed("AKIAOLD", false, 200)]), None);
+    // 만든 시각을 모르는 키는 짝짓지 않는다
+    assert_eq!(matching_key(rotated, &[ListedKey { id: "AKIAX".into(), active: true, created: None }]), None);
+    assert_eq!(matching_key(rotated, &[]), None);
+}
+
+#[test]
+fn users_whose_keys_need_listing_are_the_ones_with_key_findings() {
+    let f = run();
+    // alice·bob·carol은 오래된(또는 안 쓰는) 키가 있다. 비활성 키만 있는 gina와 키가 없는 사용자는 읽지 않는다
+    assert_eq!(key_fix_users(&f), vec!["alice", "bob", "carol"]);
+    assert!(key_fix_users(&findings(&fixtures::snapshot(), now())).is_empty(), "보고서가 없으면 키 점검도 없어요");
+}
+
+#[test]
+fn a_key_found_in_the_users_key_list_gets_a_quick_fix_and_its_id_in_the_cli() {
+    let mut s = snap();
+    // alice는 키 2번도 300일 전에 만들어 오래됐다
+    edit_row(&mut s, "alice", |r| {
+        r.key2_active = true;
+        r.key2_rotated = Some(ago(300));
+        r.key2_last_used = Some(ago(2));
+    });
+    let mut f = findings(&s, now());
+    let denied = AppError::AccessDenied { action: "iam:ListAccessKeys".into() };
+    let keys: ListedKeys = [
+        ("alice".to_string(), Ok(vec![listed("AKIAALICE1", true, 200), listed("AKIAALICE2", true, 300), listed("AKIAALICE3", true, 1)])),
+        ("bob".to_string(), Err(denied)),
+        // carol의 키 칸과 같은 초에 만든 키가 둘이다
+        ("carol".to_string(), Ok(vec![listed("AKIACAROL1", true, 150), listed("AKIACAROL2", true, 150)])),
+    ]
+    .into_iter()
+    .collect();
+    add_key_fixes(&mut f, &keys);
+
+    let alice: Vec<&FindingItem> = group(&f, OldAccessKey).items.iter().filter(|i| i.target_name == "alice").collect();
+    let off = |id: &str| Some(IamChange::SetAccessKeyStatus { user_name: "alice".into(), access_key_id: id.into(), status: "Inactive".into() });
+    assert_eq!((alice[0].fix.clone(), alice[1].fix.clone()), (off("AKIAALICE1"), off("AKIAALICE2")), "칸마다 그 칸의 키다");
+    assert_eq!(alice[0].cli.as_deref(), Some("aws iam update-access-key --user-name alice --access-key-id AKIAALICE1 --status Inactive"));
+    assert_eq!(alice[1].cli.as_deref(), Some("aws iam update-access-key --user-name alice --access-key-id AKIAALICE2 --status Inactive"));
+
+    // 목록을 못 읽은 bob과 키를 가리지 못한 carol은 그대로다
+    for kind in [OldAccessKey, UnusedAccessKey] {
+        for name in ["bob", "carol"] {
+            let found = item(&f, kind, name);
+            assert_eq!(found.fix, None, "{kind:?} {name}");
+            assert_eq!(found.cli, Some(format!("aws iam update-access-key --user-name {name} --access-key-id <ACCESS_KEY_ID> --status Inactive")));
+        }
+    }
+    assert_eq!(f.warnings, vec!["액세스 키 목록을 읽지 못해 사용자 1명의 키 점검에는 빠른 조치가 없어요: 권한 없음 (iam:ListAccessKeys)".to_string()]);
+    // 키 점검이 아닌 항목에는 손대지 않는다
+    assert_eq!(item(&f, ConsoleNoMfa, "bob").fix, None);
+    // 화면으로 나가는 모양은 계약 그대로다
+    let value = serde_json::to_value(&f).unwrap();
+    assert_eq!(value["groups"][3]["items"][0]["fix"]["accessKeyId"], json!("AKIAALICE1"));
+    assert!(value["groups"][3]["items"][0].get("keyRotated").is_none());
+}
+
+#[test]
+fn without_any_listed_keys_nothing_changes() {
+    let mut f = run();
+    let before = f.clone();
+    add_key_fixes(&mut f, &ListedKeys::new());
+    assert_eq!(f, before);
 }
 
 #[test]

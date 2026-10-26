@@ -1,11 +1,14 @@
 //! 보안 점검: 자격 증명 보고서와 스냅숏을 보고 설계 문서 "보안 점검 규칙"의 11가지를 찾는다. 순수 코드다.
 
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 
 use super::change::IamChange;
 use super::eval::cmp_ignore_case;
 use super::model::Snapshot;
 use super::view::Level;
+use crate::error::AppError;
 
 mod creds;
 mod principals;
@@ -15,7 +18,7 @@ pub(super) mod sample;
 #[cfg(test)]
 mod tests;
 
-pub use creds::{credential_badges, user_last_used};
+pub use creds::{add_key_fixes, credential_badges, key_fix_users, user_last_used};
 #[cfg(test)]
 pub use report::parse_credential_report;
 pub use report::read_credential_report;
@@ -65,9 +68,24 @@ pub struct FindingItem {
     pub detail: String,
     /// 복사해서 쓰는 AWS CLI 명령
     pub cli: Option<String>,
-    /// 변경 미리보기로 바로 이어지는 빠른 조치. 대상 키 ID를 알 때만 채운다(자격 증명 보고서에는 키 ID가 없다)
+    /// 변경 미리보기로 바로 이어지는 빠른 조치. 대상 키 ID를 알 때만 채운다: 자격 증명 보고서에는 키 ID가 없어서
+    /// 액세스 키 점검은 키 목록에서 그 키를 찾았을 때만 단다(`add_key_fixes`)
     pub fix: Option<IamChange>,
+    /// 액세스 키 점검이면 보고서의 그 키 칸에 적힌 마지막 교체 시각(유닉스 초, 키를 만든 시각과 같다). 키 ID를 찾는 데만 쓰고 보내지 않는다
+    #[serde(skip)]
+    pub(crate) key_rotated: Option<i64>,
 }
+
+/// `ListAccessKeys`로 읽은 액세스 키 하나: 키 ID, 지금 활성인지, 만든 시각(유닉스 초).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ListedKey {
+    pub id: String,
+    pub active: bool,
+    pub created: Option<i64>,
+}
+
+/// 사용자 이름별 키 목록. 목록을 읽지 못한 사용자는 그 오류다.
+pub type ListedKeys = BTreeMap<String, Result<Vec<ListedKey>, AppError>>;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -97,7 +115,7 @@ fn push(items: &mut Items, kind: FindingKind, item: FindingItem) {
 }
 
 fn item(target_arn: &str, target_name: &str, detail: String, cli: Option<String>) -> FindingItem {
-    FindingItem { target_arn: target_arn.to_string(), target_name: target_name.to_string(), detail, cli, fix: None }
+    FindingItem { target_arn: target_arn.to_string(), target_name: target_name.to_string(), detail, cli, fix: None, key_rotated: None }
 }
 
 /// 복사해 붙여 넣는 명령에 들어가는 값. 정책 경로에는 `$`나 `;` 같은 글자가 올 수 있어서, 안전한 글자만 있을 때를 빼고는 따옴표로 싼다.

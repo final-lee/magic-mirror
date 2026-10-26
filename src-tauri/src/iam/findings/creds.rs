@@ -1,13 +1,20 @@
 //! 자격 증명 보고서로 찾는 점검: 루트, MFA, 액세스 키, 안 쓰는 사용자. 사용자 목록의 배지도 같은 규칙으로 만든다.
+//! 보고서에는 키 ID가 없어서, 액세스 키 점검의 빠른 조치는 키 목록을 따로 읽은 뒤 `add_key_fixes`가 단다.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
-use super::{item, push, sh_quote, FindingKind, Items, STALE_DAYS};
+use super::{item, push, sh_quote, FindingItem, FindingKind, Findings, Items, ListedKey, ListedKeys, STALE_DAYS};
+use crate::error::AppError;
+use crate::iam::change::IamChange;
 use crate::iam::clock::{days_between, iso, parse_iso};
 use crate::iam::model::{CredRow, Snapshot};
 use crate::iam::view::{Badge, BadgeKind, Level};
 
 const KEY_TAB_HINT: &str = "액세스 키 탭에서 바로 비활성화할 수 있어요";
+/// 키 ID를 모를 때 CLI 명령에 넣는 자리 표시자.
+const KEY_ID_PLACEHOLDER: &str = "<ACCESS_KEY_ID>";
+/// 키 점검의 종류. 빠른 조치는 이 둘에만 단다.
+const KEY_KINDS: [FindingKind; 2] = [FindingKind::OldAccessKey, FindingKind::UnusedAccessKey];
 
 fn time(text: &Option<String>) -> Option<i64> {
     text.as_deref().and_then(parse_iso)
@@ -126,8 +133,58 @@ pub fn user_last_used(s: &Snapshot, user_arn: &str) -> Option<String> {
     [&row.password_last_used, &row.key1_last_used, &row.key2_last_used].into_iter().filter_map(time).max().map(iso)
 }
 
-fn key_cli(user: &str) -> String {
-    format!("aws iam update-access-key --user-name {} --access-key-id <ACCESS_KEY_ID> --status Inactive", sh_quote(user))
+/// 키를 끄는 CLI 명령. 키 ID를 모르면 직접 채울 자리 표시자를 넣는다.
+fn key_cli(user: &str, key_id: Option<&str>) -> String {
+    let key = key_id.map_or_else(|| KEY_ID_PLACEHOLDER.to_string(), sh_quote);
+    format!("aws iam update-access-key --user-name {} --access-key-id {key} --status Inactive", sh_quote(user))
+}
+
+/// 액세스 키 점검 항목. 키 ID를 모르니 CLI 명령은 자리 표시자로 두고, 그 키 칸의 마지막 교체 시각을 함께 둔다(`add_key_fixes`가 쓴다).
+fn key_item(arn: &str, name: &str, detail: String, key: &KeyUse) -> FindingItem {
+    FindingItem { key_rotated: key.rotated, ..item(arn, name, detail, Some(key_cli(name, None))) }
+}
+
+/// 보고서의 키 칸과 같은 키를 사용자의 키 목록에서 찾는다. 보고서의 `access_key_N_last_rotated`는 그 칸의 키를 만든 시각과 같다(키는
+/// 고쳐 쓸 수 없고 새로 만들어 바꾼다). 초까지 같은 키가 꼭 하나이고 지금 활성일 때만 그 키 ID다: 보고서는 4시간까지 묵을 수 있어서,
+/// 그 사이 지우고 새로 만들었거나 같은 초에 만든 키가 둘이면 어느 키인지 모른다.
+pub(super) fn matching_key(rotated: i64, keys: &[ListedKey]) -> Option<&str> {
+    let mut same = keys.iter().filter(|k| k.created == Some(rotated));
+    let key = same.next()?;
+    (same.next().is_none() && key.active).then_some(key.id.as_str())
+}
+
+fn key_items(f: &mut Findings) -> impl Iterator<Item = &mut FindingItem> {
+    f.groups.iter_mut().filter(|g| KEY_KINDS.contains(&g.kind)).flat_map(|g| g.items.iter_mut())
+}
+
+/// 빠른 조치를 달려면 키 목록을 읽어야 하는 사용자(이름순, 중복 없음): 액세스 키 점검에 걸렸고 그 키 칸의 교체 시각을 아는 사용자.
+pub fn key_fix_users(f: &Findings) -> Vec<String> {
+    let users: BTreeSet<&str> = f
+        .groups
+        .iter()
+        .filter(|g| KEY_KINDS.contains(&g.kind))
+        .flat_map(|g| g.items.iter())
+        .filter(|item| item.key_rotated.is_some())
+        .map(|item| item.target_name.as_str())
+        .collect();
+    users.into_iter().map(str::to_owned).collect()
+}
+
+/// 액세스 키 점검 항목마다 키 목록에서 그 키를 찾아(`matching_key`) 빠른 조치(그 키 비활성화, 같은 미리보기를 거친다)를 달고 CLI 명령에
+/// 실제 키 ID를 넣는다. 찾지 못했거나 목록을 읽지 못한 사용자의 항목은 그대로 두고, 읽지 못한 사용자가 있으면 그 이유를 경고에 남긴다.
+pub fn add_key_fixes(f: &mut Findings, listed: &ListedKeys) {
+    for item in key_items(f) {
+        let Some(rotated) = item.key_rotated else { continue };
+        let Some(Ok(keys)) = listed.get(&item.target_name) else { continue };
+        if let Some(id) = matching_key(rotated, keys) {
+            item.cli = Some(key_cli(&item.target_name, Some(id)));
+            item.fix = Some(IamChange::SetAccessKeyStatus { user_name: item.target_name.clone(), access_key_id: id.to_string(), status: "Inactive".to_string() });
+        }
+    }
+    let failed: Vec<&AppError> = listed.values().filter_map(|r| r.as_ref().err()).collect();
+    if let Some(first) = failed.first() {
+        f.warnings.push(format!("액세스 키 목록을 읽지 못해 사용자 {}명의 키 점검에는 빠른 조치가 없어요: {first}", failed.len()));
+    }
 }
 
 fn root_findings(row: &CredRow, out: &mut Items) {
@@ -153,14 +210,14 @@ fn user_findings(row: &CredRow, now: i64, out: &mut Items) {
         let slot = key.slot;
         if let Some(days) = key.old_days(now) {
             let detail = format!("액세스 키 {slot}번은 마지막으로 교체한 지 {days}일 지났어요. {KEY_TAB_HINT}");
-            push(out, FindingKind::OldAccessKey, item(arn, name, detail, Some(key_cli(name))));
+            push(out, FindingKind::OldAccessKey, key_item(arn, name, detail, &key));
         }
         if let Some(idle) = key.idle(now) {
             let what = match idle {
                 Idle::Since(days) => format!("액세스 키 {slot}번을 마지막으로 쓴 지 {days}일 지났어요"),
                 Idle::Never(age) => format!("액세스 키 {slot}번은 만든 지 {age}일 지났는데 한 번도 안 썼어요"),
             };
-            push(out, FindingKind::UnusedAccessKey, item(arn, name, format!("{what}. {KEY_TAB_HINT}"), Some(key_cli(name))));
+            push(out, FindingKind::UnusedAccessKey, key_item(arn, name, format!("{what}. {KEY_TAB_HINT}"), &key));
         }
     }
     if let Some(inactive) = inactivity(row, now) {

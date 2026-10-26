@@ -1,11 +1,13 @@
-//! 사용자의 액세스 키: 상태·나이·마지막 사용. 키 ID만 다루고 비밀 키는 다루지 않는다.
+//! 사용자의 액세스 키: 상태·나이·마지막 사용, 그리고 점검의 빠른 조치에 쓰는 키 목록. 키 ID만 다루고 비밀 키는 다루지 않는다.
 
 use aws_sdk_iam::types::{AccessKeyLastUsed, AccessKeyMetadata, StatusType};
 use futures::future::join_all;
 use serde::Serialize;
 
+use crate::adapters::util::map_concurrent;
 use crate::error::{from_sdk, AppError};
 use crate::iam::clock::{days_between, iso_of};
+use crate::iam::findings::{ListedKey, ListedKeys};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum KeyStatus {
@@ -74,16 +76,44 @@ async fn last_used(client: &aws_sdk_iam::Client, key_id: &str) -> Result<Option<
     Ok(out.access_key_last_used().cloned())
 }
 
-/// 사용자의 액세스 키를 만든 순서대로. 마지막 사용을 못 읽어도(권한 없음 등) 키 목록은 보여 주되 그 키는 `last_used_unknown`으로 표시하고,
-/// SSO 만료·요청 제한은 오류로 돌려준다.
-pub(crate) async fn fetch_keys(client: &aws_sdk_iam::Client, user_name: &str, now: i64) -> Result<Vec<AccessKeyInfo>, AppError> {
+/// 사용자의 액세스 키 목록(`ListAccessKeys`, 끝까지).
+async fn list_metadata(client: &aws_sdk_iam::Client, user_name: &str) -> Result<Vec<AccessKeyMetadata>, AppError> {
     let mut pages = client.list_access_keys().user_name(user_name).into_paginator().send();
     let mut metas: Vec<AccessKeyMetadata> = Vec::new();
     while let Some(page) = pages.next().await {
         metas.extend(page.map_err(|e| from_sdk(e, "iam:ListAccessKeys"))?.access_key_metadata().iter().cloned());
     }
+    Ok(metas)
+}
+
+/// 사용자의 액세스 키를 만든 순서대로. 마지막 사용을 못 읽어도(권한 없음 등) 키 목록은 보여 주되 그 키는 `last_used_unknown`으로 표시하고,
+/// SSO 만료·요청 제한은 오류로 돌려준다.
+pub(crate) async fn fetch_keys(client: &aws_sdk_iam::Client, user_name: &str, now: i64) -> Result<Vec<AccessKeyInfo>, AppError> {
+    let metas = list_metadata(client, user_name).await?;
     let used = join_all(metas.iter().map(|meta| last_used(client, meta.access_key_id().unwrap_or_default()))).await;
     key_infos(&metas, used, now)
+}
+
+fn listed_key(meta: &AccessKeyMetadata) -> ListedKey {
+    ListedKey {
+        id: meta.access_key_id().unwrap_or_default().to_string(),
+        active: meta.status() == Some(&StatusType::Active),
+        created: meta.create_date().map(|created| created.secs()),
+    }
+}
+
+/// 점검의 빠른 조치를 만들려고 사용자들의 키 목록을 읽는다(읽기만, 8명씩 동시에, 마지막 사용은 읽지 않는다).
+/// 목록을 못 읽은 사용자(권한 없음 등)는 그 오류로 남기고, SSO 만료·요청 제한은 다시 로그인하거나 잠시 뒤에 하면 되는 오류라 전체 오류다.
+pub(crate) async fn list_keys(client: &aws_sdk_iam::Client, users: Vec<String>) -> Result<ListedKeys, AppError> {
+    let results = map_concurrent(users, |user| async move {
+        let keys = list_metadata(client, &user).await.map(|metas| metas.iter().map(listed_key).collect());
+        (user, keys)
+    })
+    .await;
+    if let Some(fatal) = results.iter().filter_map(|(_, keys)| keys.as_ref().err()).find(|e| matches!(e, AppError::SsoExpired | AppError::Throttled)) {
+        return Err(fatal.clone());
+    }
+    Ok(results.into_iter().collect())
 }
 
 #[cfg(test)]
@@ -93,6 +123,7 @@ mod tests {
 
     use super::*;
     use crate::iam::clock::{iso, parse_iso, DAY_SECS};
+    use crate::iam::mock_aws::{error_xml, ok_with, Recorder, Sent};
 
     fn now() -> i64 {
         parse_iso("2026-10-26T00:00:00Z").unwrap()
@@ -174,6 +205,49 @@ mod tests {
         assert!(!keys[2].last_used_unknown && keys[2].last_used_at.is_none());
         // 성공했는데 마지막 사용 정보가 비어 있으면 그것도 모르는 것이다
         assert!(keys[3].last_used_unknown);
+    }
+
+    fn keys_xml(members: &[(&str, &str, &str)]) -> String {
+        let members: String = members
+            .iter()
+            .map(|(id, status, created)| format!("<member><UserName>u</UserName><AccessKeyId>{id}</AccessKeyId><Status>{status}</Status><CreateDate>{created}</CreateDate></member>"))
+            .collect();
+        ok_with("ListAccessKeys", &format!("<AccessKeyMetadata>{members}</AccessKeyMetadata><IsTruncated>false</IsTruncated>"))
+    }
+
+    #[tokio::test]
+    async fn key_lists_for_quick_fixes_are_read_per_user_and_failures_stay_with_their_user() {
+        let recorder = Recorder::new(|sent: &Sent| match sent.params.get("UserName").map(String::as_str) {
+            Some("alice") => (200, keys_xml(&[("AKIAALICE1", "Active", "2026-04-09T00:00:00Z"), ("AKIAALICE2", "Inactive", "2026-10-01T12:30:15Z")])),
+            Some("bob") => (403, error_xml("AccessDenied", "no")),
+            _ => (200, keys_xml(&[])),
+        });
+        let listed = list_keys(&recorder.client(), vec!["alice".into(), "bob".into(), "carol".into()]).await.unwrap();
+        assert_eq!(
+            listed["alice"],
+            Ok(vec![
+                ListedKey { id: "AKIAALICE1".into(), active: true, created: parse_iso("2026-04-09T00:00:00Z") },
+                ListedKey { id: "AKIAALICE2".into(), active: false, created: parse_iso("2026-10-01T12:30:15Z") },
+            ])
+        );
+        assert_eq!(listed["bob"], Err(AppError::AccessDenied { action: "iam:ListAccessKeys".into() }));
+        assert_eq!(listed["carol"], Ok(Vec::new()));
+        // 키 목록만 읽는다: 마지막 사용(GetAccessKeyLastUsed)도, 쓰기 호출도 없다
+        let sent = recorder.sent();
+        assert_eq!(sent.len(), 3);
+        assert!(sent.iter().all(|s| s.action == "ListAccessKeys"), "{sent:?}");
+    }
+
+    #[tokio::test]
+    async fn sso_expiry_and_throttling_while_listing_keys_for_quick_fixes_are_errors() {
+        for (code, expected) in [("ExpiredToken", AppError::SsoExpired), ("Throttling", AppError::Throttled)] {
+            let recorder = Recorder::new(move |sent: &Sent| match sent.params.get("UserName").map(String::as_str) {
+                Some("bob") => (400, error_xml(code, "no")),
+                _ => (200, keys_xml(&[])),
+            });
+            assert_eq!(list_keys(&recorder.client(), vec!["alice".into(), "bob".into()]).await, Err(expected), "{code}");
+        }
+        assert_eq!(list_keys(&Recorder::ok().client(), Vec::new()).await, Ok(ListedKeys::new()));
     }
 
     #[test]
