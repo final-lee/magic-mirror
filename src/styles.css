@@ -153,6 +153,5 @@ tbody tr.on td { background: var(--accent) !important; color: #fff; }
 .vm-canvas:active { cursor: grabbing; }
 .vm-canvas svg text { user-select: none; }
 .vm-canvas [role="button"]:focus-visible rect { stroke: var(--accent); }
-.vm-legend { position: absolute; right: 12px; bottom: 10px; display: flex; gap: 12px; padding: 5px 10px; background: #2b2b2ecc; border: 1px solid var(--line); border-radius: 6px; font-size: 11px; color: var(--dim); pointer-events: none; }
 .vm-leg { display: flex; align-items: center; gap: 5px; }
 .vm-leg i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }

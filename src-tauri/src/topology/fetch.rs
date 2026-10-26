@@ -28,14 +28,23 @@ fn tags_map<'a>(pairs: impl Iterator<Item = (Option<&'a str>, Option<&'a str>)>)
         .collect()
 }
 
-fn warn<T>(label: &str, r: Result<Vec<T>, AppError>, warnings: &mut Vec<String>) -> Vec<T> {
+fn warn<T>(label: &str, r: Result<Vec<T>, AppError>, subject: &str, warnings: &mut Vec<String>) -> Vec<T> {
     match r {
-        Ok(v) => v,
+        Ok(v) => cap(subject, v, warnings),
         Err(e) => {
             warnings.push(format!("{label}을(를) 불러오지 못했어요: {e}"));
             Vec::new()
         }
     }
+}
+
+/// 조회 함수는 상한보다 1개 더 모아 오므로, 초과하면 잘라 내고 경고를 남긴다.
+fn cap<T>(subject: &str, mut v: Vec<T>, warnings: &mut Vec<String>) -> Vec<T> {
+    if v.len() > MAX_ITEMS {
+        v.truncate(MAX_ITEMS);
+        warnings.push(format!("{subject} 1,000개를 넘어 일부만 표시해요"));
+    }
+    v
 }
 
 pub async fn fetch(cfg: &SdkConfig, region: &str, vpc_id: &str) -> Result<VpcTopology, AppError> {
@@ -48,6 +57,9 @@ pub async fn fetch(cfg: &SdkConfig, region: &str, vpc_id: &str) -> Result<VpcTop
         let (a, b, c) = tokio::join!(fetch_vpc(&ec2, vpc_id), fetch_subnets(&ec2, vpc_id), fetch_route_tables(&ec2, vpc_id));
         (a?, b?, c?)
     };
+    let mut warnings = Vec::new();
+    let subnets_raw = cap("서브넷이", subnets_raw, &mut warnings);
+    let tables = cap("라우팅 테이블이", tables, &mut warnings);
 
     let (igw, eigw, vgw, tgw, endpoints, peer_req, peer_acc, nat, instances, rds_r, elb_r, lambda_r) = tokio::join!(
         fetch_igw(&ec2, vpc_id),
@@ -64,35 +76,37 @@ pub async fn fetch(cfg: &SdkConfig, region: &str, vpc_id: &str) -> Result<VpcTop
         fetch_lambda(&lambda, vpc_id, region),
     );
 
-    let mut warnings = Vec::new();
     let mut gateways: Vec<GatewayInfo> = Vec::new();
-    gateways.extend(warn("인터넷 게이트웨이", igw, &mut warnings));
-    gateways.extend(warn("Egress-only 인터넷 게이트웨이", eigw, &mut warnings));
-    gateways.extend(warn("VPN 게이트웨이", vgw, &mut warnings));
-    gateways.extend(warn("Transit Gateway 연결", tgw, &mut warnings));
+    gateways.extend(warn("인터넷 게이트웨이", igw, "인터넷 게이트웨이가", &mut warnings));
+    gateways.extend(warn("Egress-only 인터넷 게이트웨이", eigw, "Egress-only 인터넷 게이트웨이가", &mut warnings));
+    gateways.extend(warn("VPN 게이트웨이", vgw, "VPN 게이트웨이가", &mut warnings));
+    gateways.extend(warn("Transit Gateway 연결", tgw, "Transit Gateway 연결이", &mut warnings));
 
     let mut resources: Vec<NodeResource> = Vec::new();
     let (ep_gw, ep_res) = match endpoints {
         Ok(v) => v,
         Err(e) => {
-            warnings.push(format!("VPC 엔드포인트을(를) 불러오지 못했어요: {e}"));
+            warnings.push(format!("VPC 엔드포인트를 불러오지 못했어요: {e}"));
             (Vec::new(), Vec::new())
         }
     };
-    gateways.extend(ep_gw);
-    resources.extend(ep_res);
+    if ep_gw.len() + ep_res.len() > MAX_ITEMS {
+        warnings.push("VPC 엔드포인트가 1,000개를 넘어 일부만 표시해요".to_string());
+    }
+    gateways.extend(ep_gw.into_iter().take(MAX_ITEMS));
+    resources.extend(ep_res.into_iter().take(MAX_ITEMS));
 
-    let mut peerings = warn("피어링 연결", peer_req, &mut warnings);
-    peerings.extend(warn("피어링 연결", peer_acc, &mut warnings));
+    let mut peerings = warn("피어링 연결", peer_req, "피어링 연결이", &mut warnings);
+    peerings.extend(warn("피어링 연결", peer_acc, "피어링 연결이", &mut warnings));
     let mut seen = BTreeSet::new();
     peerings.retain(|p| seen.insert(p.id.clone()));
     peerings.sort_by(|a, b| a.id.cmp(&b.id));
 
-    resources.extend(warn("NAT 게이트웨이", nat, &mut warnings));
-    resources.extend(warn("EC2 인스턴스", instances, &mut warnings));
-    resources.extend(warn("RDS 인스턴스", rds_r, &mut warnings));
-    resources.extend(warn("로드 밸런서", elb_r, &mut warnings));
-    resources.extend(warn("Lambda 함수", lambda_r, &mut warnings));
+    resources.extend(warn("NAT 게이트웨이", nat, "NAT 게이트웨이가", &mut warnings));
+    resources.extend(warn("EC2 인스턴스", instances, "EC2 인스턴스가", &mut warnings));
+    resources.extend(warn("RDS 인스턴스", rds_r, "RDS 인스턴스가", &mut warnings));
+    resources.extend(warn("로드 밸런서", elb_r, "로드 밸런서가", &mut warnings));
+    resources.extend(warn("Lambda 함수", lambda_r, "Lambda 함수가", &mut warnings));
     warnings.dedup();
 
     let mut subnets: Vec<SubnetInfo> = subnets_raw
@@ -113,6 +127,15 @@ pub async fn fetch(cfg: &SdkConfig, region: &str, vpc_id: &str) -> Result<VpcTop
     gateways.sort_by(|a, b| a.id.cmp(&b.id));
 
     Ok(VpcTopology { vpc, azs, subnets, route_tables: tables, gateways, peerings, resources, warnings })
+}
+
+fn is_dead(state: Option<&str>, dead: &[&str]) -> bool {
+    state.is_some_and(|s| dead.contains(&s))
+}
+
+/// Lambda 함수의 실제 상태(소문자). 값이 없으면 "active".
+fn lambda_state(state: Option<&str>) -> String {
+    state.filter(|s| !s.is_empty()).map(str::to_lowercase).unwrap_or_else(|| "active".to_string())
 }
 
 async fn fetch_vpc(ec2: &aws_sdk_ec2::Client, vpc_id: &str) -> Result<VpcInfo, AppError> {
@@ -150,7 +173,7 @@ async fn fetch_subnets(ec2: &aws_sdk_ec2::Client, vpc_id: &str) -> Result<Vec<Su
     'pages: while let Some(page) = pages.next().await {
         let page = page.map_err(|e| from_sdk(e, "ec2:DescribeSubnets"))?;
         for sn in page.subnets() {
-            if out.len() >= MAX_ITEMS {
+            if out.len() > MAX_ITEMS {
                 break 'pages;
             }
             let id = s(sn.subnet_id());
@@ -176,16 +199,18 @@ fn route_info(r: &Route) -> RouteInfo {
         .or(r.destination_prefix_list_id())
         .unwrap_or_default()
         .to_string();
-    let target = r
-        .gateway_id()
-        .or(r.nat_gateway_id())
-        .or(r.transit_gateway_id())
-        .or(r.vpc_peering_connection_id())
-        .or(r.egress_only_internet_gateway_id())
-        .or(r.network_interface_id())
-        .or(r.instance_id())
-        .unwrap_or_default()
-        .to_string();
+    let target = route_target([
+        r.gateway_id(),
+        r.nat_gateway_id(),
+        r.transit_gateway_id(),
+        r.vpc_peering_connection_id(),
+        r.egress_only_internet_gateway_id(),
+        r.network_interface_id(),
+        r.instance_id(),
+        r.carrier_gateway_id(),
+        r.local_gateway_id(),
+        r.core_network_arn(),
+    ]);
     RouteInfo {
         destination,
         target_kind: target_kind(&target),
@@ -194,13 +219,18 @@ fn route_info(r: &Route) -> RouteInfo {
     }
 }
 
+/// 라우트의 대상 id 후보 중 첫 번째(우선순위 순)를 고른다. 비어 있는 값은 건너뛴다.
+fn route_target(candidates: [Option<&str>; 10]) -> String {
+    candidates.into_iter().flatten().find(|v| !v.is_empty()).unwrap_or_default().to_string()
+}
+
 async fn fetch_route_tables(ec2: &aws_sdk_ec2::Client, vpc_id: &str) -> Result<Vec<RouteTableInfo>, AppError> {
     let mut out = Vec::new();
     let mut pages = ec2.describe_route_tables().filters(filter("vpc-id", vpc_id)).into_paginator().send();
     'pages: while let Some(page) = pages.next().await {
         let page = page.map_err(|e| from_sdk(e, "ec2:DescribeRouteTables"))?;
         for t in page.route_tables() {
-            if out.len() >= MAX_ITEMS {
+            if out.len() > MAX_ITEMS {
                 break 'pages;
             }
             let id = s(t.route_table_id());
@@ -226,7 +256,7 @@ async fn fetch_igw(ec2: &aws_sdk_ec2::Client, vpc_id: &str) -> Result<Vec<Gatewa
     'pages: while let Some(page) = pages.next().await {
         let page = page.map_err(|e| from_sdk(e, "ec2:DescribeInternetGateways"))?;
         for g in page.internet_gateways() {
-            if out.len() >= MAX_ITEMS {
+            if out.len() > MAX_ITEMS {
                 break 'pages;
             }
             let id = s(g.internet_gateway_id());
@@ -251,7 +281,7 @@ async fn fetch_eigw(ec2: &aws_sdk_ec2::Client, vpc_id: &str) -> Result<Vec<Gatew
             let Some(att) = g.attachments().iter().find(|a| a.vpc_id() == Some(vpc_id)) else {
                 continue;
             };
-            if out.len() >= MAX_ITEMS {
+            if out.len() > MAX_ITEMS {
                 break 'pages;
             }
             let id = s(g.egress_only_internet_gateway_id());
@@ -278,7 +308,8 @@ async fn fetch_vgw(ec2: &aws_sdk_ec2::Client, vpc_id: &str) -> Result<Vec<Gatewa
     Ok(res
         .vpn_gateways()
         .iter()
-        .take(MAX_ITEMS)
+        .filter(|g| !is_dead(g.state().map(|st| st.as_str()), &["deleted", "deleting"]))
+        .take(MAX_ITEMS + 1)
         .map(|g| {
             let id = s(g.vpn_gateway_id());
             GatewayInfo {
@@ -303,7 +334,10 @@ async fn fetch_tgw(ec2: &aws_sdk_ec2::Client, vpc_id: &str) -> Result<Vec<Gatewa
     'pages: while let Some(page) = pages.next().await {
         let page = page.map_err(|e| from_sdk(e, "ec2:DescribeTransitGatewayAttachments"))?;
         for a in page.transit_gateway_attachments() {
-            if out.len() >= MAX_ITEMS {
+            if is_dead(a.state().map(|st| st.as_str()), &["deleted", "deleting"]) {
+                continue;
+            }
+            if out.len() > MAX_ITEMS {
                 break 'pages;
             }
             let id = s(a.transit_gateway_attachment_id());
@@ -330,7 +364,10 @@ async fn fetch_endpoints(
     'pages: while let Some(page) = pages.next().await {
         let page = page.map_err(|e| from_sdk(e, "ec2:DescribeVpcEndpoints"))?;
         for e in page.vpc_endpoints() {
-            if gws.len() + res.len() >= MAX_ITEMS {
+            if is_dead(e.state().map(|st| st.as_str()), &["deleted", "deleting", "failed", "rejected"]) {
+                continue;
+            }
+            if gws.len() + res.len() > MAX_ITEMS {
                 break 'pages;
             }
             let id = s(e.vpc_endpoint_id());
@@ -363,7 +400,11 @@ async fn fetch_peerings(ec2: &aws_sdk_ec2::Client, filter_name: &str, vpc_id: &s
     'pages: while let Some(page) = pages.next().await {
         let page = page.map_err(|e| from_sdk(e, "ec2:DescribeVpcPeeringConnections"))?;
         for p in page.vpc_peering_connections() {
-            if out.len() >= MAX_ITEMS {
+            let code = p.status().and_then(|st| st.code()).map(|c| c.as_str());
+            if is_dead(code, &["deleted", "deleting", "rejected", "expired", "failed"]) {
+                continue;
+            }
+            if out.len() > MAX_ITEMS {
                 break 'pages;
             }
             let req = p.requester_vpc_info();
@@ -389,10 +430,10 @@ async fn fetch_nat(ec2: &aws_sdk_ec2::Client, vpc_id: &str, region: &str) -> Res
         let page = page.map_err(|e| from_sdk(e, "ec2:DescribeNatGateways"))?;
         for n in page.nat_gateways() {
             let state = s(n.state().map(|st| st.as_str()));
-            if state == "deleted" || state == "deleting" {
+            if is_dead(Some(&state), &["deleted", "deleting", "failed"]) {
                 continue;
             }
-            if out.len() >= MAX_ITEMS {
+            if out.len() > MAX_ITEMS {
                 break 'pages;
             }
             let id = s(n.nat_gateway_id());
@@ -421,7 +462,7 @@ async fn fetch_instances(ec2: &aws_sdk_ec2::Client, vpc_id: &str, region: &str) 
                 if state == "terminated" {
                     continue;
                 }
-                if out.len() >= MAX_ITEMS {
+                if out.len() > MAX_ITEMS {
                     break 'pages;
                 }
                 let id = s(i.instance_id());
@@ -454,7 +495,7 @@ async fn fetch_rds(
             let Some(group) = d.db_subnet_group().filter(|g| g.vpc_id() == Some(vpc_id)) else {
                 continue;
             };
-            if out.len() >= MAX_ITEMS {
+            if out.len() > MAX_ITEMS {
                 break 'pages;
             }
             let members: Vec<(String, String)> = group
@@ -491,7 +532,7 @@ async fn fetch_elb(
             if lb.vpc_id() != Some(vpc_id) {
                 continue;
             }
-            if out.len() >= MAX_ITEMS {
+            if out.len() > MAX_ITEMS {
                 break 'pages;
             }
             let name = s(lb.load_balancer_name());
@@ -518,16 +559,58 @@ async fn fetch_lambda(lambda: &aws_sdk_lambda::Client, vpc_id: &str, region: &st
             let Some(cfg) = f.vpc_config().filter(|c| c.vpc_id() == Some(vpc_id)) else {
                 continue;
             };
-            if out.len() >= MAX_ITEMS {
+            if out.len() > MAX_ITEMS {
                 break 'pages;
             }
             let name = s(f.function_name());
             out.push(
-                NodeResource::new(&name, &name, ResourceKind::Lambda, cfg.subnet_ids().to_vec(), "active")
+                NodeResource::new(&name, &name, ResourceKind::Lambda, cfg.subnet_ids().to_vec(), &lambda_state(f.state().map(|st| st.as_str())))
                     .field("Runtime", s(f.runtime().map(|r| r.as_str())))
                     .console(full("lambda", region, &format!("/functions/{name}"))),
             );
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn route_target_precedence_and_extras() {
+        let mut c = [None; 10];
+        c[7] = Some("cagw-1");
+        c[9] = Some("arn:core");
+        assert_eq!(route_target(c), "cagw-1");
+        let mut c = [None; 10];
+        c[9] = Some("arn:core");
+        assert_eq!(route_target(c), "arn:core");
+        let mut c = [None; 10];
+        c[0] = Some("local");
+        c[2] = Some("tgw-1");
+        assert_eq!(route_target(c), "local");
+        let mut c = [None; 10];
+        c[0] = Some("");
+        c[3] = Some("pcx-1");
+        assert_eq!(route_target(c), "pcx-1");
+        assert_eq!(route_target([None; 10]), "");
+    }
+
+    #[test]
+    fn dead_states_and_lambda_state() {
+        assert!(is_dead(Some("deleted"), &["deleted"]));
+        assert!(!is_dead(None, &["deleted"]));
+        assert_eq!(lambda_state(Some("Pending")), "pending");
+        assert_eq!(lambda_state(None), "active");
+    }
+
+    #[test]
+    fn cap_warns_only_over_limit() {
+        let mut w = Vec::new();
+        assert_eq!(cap("서브넷이", vec![0; MAX_ITEMS], &mut w).len(), MAX_ITEMS);
+        assert!(w.is_empty());
+        assert_eq!(cap("서브넷이", vec![0; MAX_ITEMS + 1], &mut w).len(), MAX_ITEMS);
+        assert_eq!(w, vec!["서브넷이 1,000개를 넘어 일부만 표시해요"]);
+    }
 }
