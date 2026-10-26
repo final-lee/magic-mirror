@@ -261,3 +261,9 @@ test("dragging from s3 to local pane checks conflicts then downloads", async () 
   await waitFor(() => expect(m.findConflicts).toHaveBeenCalledWith("prod", [dl]));
   await waitFor(() => expect(p.transfers.enqueue).toHaveBeenCalledWith([dl]));
 });
+
+test("initialLocation opens that bucket's objects right away", async () => {
+  setup({ initialLocation: { bucket: "assets", region: "us-west-2", prefix: "" } });
+  expect(await screen.findByText("📄 a.txt", { selector: "[data-pane=s3] *" })).toBeInTheDocument();
+  expect(vi.mocked(api.listS3Objects)).toHaveBeenCalledWith("prod", "us-west-2", "assets", "", null);
+});

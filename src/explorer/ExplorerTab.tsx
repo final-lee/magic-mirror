@@ -27,6 +27,7 @@ interface Props {
   transfers: Transfers;
   onOpenDiff: (left: FileRef, right: FileRef) => void;
   onRefresh: () => void;
+  initialLocation?: S3Location | null;
 }
 
 interface DialogInput {
@@ -51,7 +52,7 @@ export function ExplorerTab(p: Props) {
   const qc = useQueryClient();
   const home = useLocalHome();
   const [localPath, setLocalPath] = useState<string | null>(p.initialLocalPath);
-  const [location, setLocation] = useState<S3Location | null>(null);
+  const [location, setLocation] = useState<S3Location | null>(p.initialLocation ?? null);
   const [localSel, setLocalSel] = useState<SelectionState>(EMPTY);
   const [s3Sel, setS3Sel] = useState<SelectionState>(EMPTY);
   const [focused, setFocused] = useState<Pane>("local");
@@ -70,7 +71,11 @@ export function ExplorerTab(p: Props) {
   useEffect(() => {
     if (!localPath && home.data) setLocalPath(home.data);
   }, [localPath, home.data]);
+  const prevProfile = useRef(p.profile);
   useEffect(() => {
+    // 마운트 직후에는 initialLocation을 지우지 않고, 프로필이 실제로 바뀔 때만 초기화한다.
+    if (prevProfile.current === p.profile) return;
+    prevProfile.current = p.profile;
     setLocation(null);
     setS3Sel(EMPTY);
     setLocalSel(EMPTY);

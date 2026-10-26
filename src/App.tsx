@@ -26,12 +26,12 @@ export default function App() {
   const [profile, setProfile] = useState<string | null>(null);
   const [region, setRegion] = useState("us-east-1");
   const [selection, setSelection] = useState<Favorite | null>(null);
-  const [s3, setS3] = useState<S3Location | null>(null);
   const [filter, setFilter] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const filterRef = useRef<HTMLInputElement>(null);
   const account = useAccount(profile);
   const [activeTab, setActiveTab] = useState<string>("resources");
+  const [explorerTabs, setExplorerTabs] = useState<{ id: string; location: S3Location }[]>([]);
   const [diffTabs, setDiffTabs] = useState<{ id: string; left: FileRef; right: FileRef }[]>([]);
   const onTransferSettled = useCallback(
     (_req: TransferRequest) => {
@@ -103,7 +103,14 @@ export default function App() {
     setDiffTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs : [...tabs, { id, left, right }]));
     setActiveTab(id);
   };
+  const openExplorer = (loc: S3Location) => {
+    const id = `s3:${loc.bucket}`;
+    setExplorerTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs : [...tabs, { id, location: { ...loc, prefix: "" } }]));
+    setActiveTab(id);
+    setFilter("");
+  };
   const closeTab = (id: string) => {
+    setExplorerTabs((tabs) => tabs.filter((t) => t.id !== id));
     setDiffTabs((tabs) => tabs.filter((t) => t.id !== id));
     if (activeTab === id) setActiveTab("explorer");
   };
@@ -115,6 +122,7 @@ export default function App() {
   const tabs: TabInfo[] = [
     { id: "resources", title: "리소스", closable: false },
     { id: "explorer", title: "S3 탐색기", closable: false },
+    ...explorerTabs.map((t) => ({ id: t.id, title: `S3: ${t.location.bucket}`, closable: true })),
     ...diffTabs.map((t) => ({ id: t.id, title: diffTitle(t.left, t.right), closable: true })),
   ];
   const diffTool: DiffTool = settings.diffTool ?? "filemerge";
@@ -124,19 +132,20 @@ export default function App() {
     const nextRegion = info?.region ?? region;
     setProfile(name);
     setRegion(nextRegion);
-    setS3(null);
+    // 버킷은 계정에 속하므로 버킷 탭과 비교 탭을 모두 닫는다.
+    setExplorerTabs([]);
+    setDiffTabs([]);
+    if (activeTab.startsWith("s3:") || activeTab.startsWith("diff:")) setActiveTab("resources");
     update({ lastProfile: name, lastRegion: nextRegion });
   };
 
   const changeRegion = (r: string) => {
     setRegion(r);
-    setS3(null);
     update({ lastRegion: r });
   };
 
   const select = (sel: Favorite) => {
     setSelection(sel);
-    setS3(null);
     setFilter("");
   };
 
@@ -145,7 +154,7 @@ export default function App() {
     update({ favorites: exists ? settings.favorites.filter((f) => !sameFav(f, sel)) : [...settings.favorites, sel] });
   };
 
-  const mainKey = [profile, region, selection?.service, selection?.type, s3?.bucket, s3?.prefix].join("|");
+  const mainKey = [profile, region, selection?.service, selection?.type].join("|");
 
   return (
     <div className="app">
@@ -180,8 +189,7 @@ export default function App() {
           region={region}
           account={account.data}
           filter={filter}
-          s3={s3}
-          onS3Change={setS3}
+          onOpenBucket={openExplorer}
           onRefresh={refresh}
           active={activeTab === "resources"}
         />
@@ -200,6 +208,23 @@ export default function App() {
           onRefresh={refresh}
         />
       </div>
+      {explorerTabs.map((t) => (
+        <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
+          <ExplorerTab
+            profile={profile}
+            region={region}
+            s3Service={s3Service}
+            initialLocation={t.location}
+            filter={activeTab === t.id ? filter : ""}
+            active={activeTab === t.id}
+            initialLocalPath={settings.explorerLocalPath ?? null}
+            onLocalPathChange={(path) => update({ explorerLocalPath: path })}
+            transfers={transfers}
+            onOpenDiff={openDiff}
+            onRefresh={refresh}
+          />
+        </div>
+      ))}
       {diffTabs.map((t) => (
         <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
           <DiffTab
