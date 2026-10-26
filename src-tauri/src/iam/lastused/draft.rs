@@ -336,11 +336,11 @@ fn deny_applies(stmt: &Statement, kept: &BTreeSet<(String, String)>, wildcard_se
         || unmatched.iter().any(|pattern| wildcard_services.iter().any(|svc| pattern.split_once(':').is_some_and(|(p, _)| action_matches(p, svc))))
 }
 
-/// 이 거부 문장이 2012-10-17이 아닌 문서에 있었다면, 같은 글자를 2012-10-17 초안에 옮겼을 때 더 적게 막는지.
-/// NotResource나 Condition의 `${…}`는 글자 그대로 비교되던 것이 변수가 되어, 제외 목록이나 조건에 걸리는 범위가 달라진다.
-/// Resource의 변수는 더 많은 리소스에 맞을 뿐이라 더 막기만 한다.
+/// 이 거부 문장이 2012-10-17이 아닌 문서에 있었다면, 같은 글자를 2012-10-17 초안에 옮겼을 때 더 적게 막을 수 있는지.
+/// 지금은 `${…}`를 글자 그대로 비교하지만 초안에서는 변수가 된다. Resource에서는 글자 그대로의 이름을 가진 리소스가
+/// 더는 막히지 않고(값이 없는 키면 아무것에도 안 맞는다), NotResource와 Condition에서는 제외 범위나 조건이 달라진다.
 fn weaker_as_current_version(deny: &DenyStatement) -> bool {
-    [&deny.not_resource, &deny.condition].into_iter().flatten().any(|part| part.to_string().contains("${"))
+    [&deny.resource, &deny.not_resource, &deny.condition].into_iter().flatten().any(|part| part.to_string().contains("${"))
 }
 
 /// 초안에 옮길 거부 문장(신원 정책의 것, 원문 그대로, 중복 없이). 옮겨야 하는 문장의 원문을 하나라도 찾지 못하거나,
