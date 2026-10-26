@@ -1,7 +1,7 @@
 //! 위험 판정과 배지: 관리자급, 권한 상승 위험, 외부 신뢰, 서비스 연결·Identity Center 역할.
 
 use super::catalog::{catalog, AccessLevel};
-use super::eval::{all_star, decide_action, find_principal, policy_sources, ActionEval, Principal, Source, SourceKind, Status};
+use super::eval::{all_star, decide_action, find_principal, policy_sources, Principal, Source, SourceKind, Status, Verdict};
 use super::model::{ManagedPolicyRec, Scope, Snapshot};
 use super::policy::{Actions, Effect, PolicyDocument, Resources, Statement};
 use super::trust::parse_trust;
@@ -55,15 +55,16 @@ fn is_privesc(prefix: &str, action: &str) -> bool {
 }
 
 /// 작업 하나가 위험한 이유(한국어). 위험하지 않으면 None.
-/// 권한 상승 작업이거나, 모든 리소스에 대한 권한 관리 작업이거나, 모든 작업을 여는 와일드카드 문장으로 허용된 경우다.
-pub(super) fn danger_reason(prefix: &str, action: &str, level: AccessLevel, eval: &ActionEval, admin_statement: bool) -> Option<&'static str> {
+/// 권한 상승 작업이거나, 모든 리소스에서 조건 없이 허용된 권한 관리 작업이거나(`Verdict::full_scope`: NotResource 목록만 뺀 전부도 포함하고,
+/// 조건이 맞아야 모든 리소스에 열리는 것은 뺀다), 모든 작업을 여는 와일드카드 문장으로 허용된 경우다.
+pub(super) fn danger_reason(prefix: &str, action: &str, level: AccessLevel, verdict: &Verdict, admin_statement: bool) -> Option<&'static str> {
     if is_privesc(prefix, action) {
         return Some(REASON_PRIVESC);
     }
-    if level == AccessLevel::Permissions && eval.resources.iter().any(|r| all_star(r)) {
+    if level == AccessLevel::Permissions && verdict.full_scope {
         return Some(REASON_PERMISSIONS);
     }
-    if admin_statement && eval.status == Status::Allowed {
+    if admin_statement && verdict.eval.status == Status::Allowed {
         return Some(REASON_WILDCARD);
     }
     None
@@ -255,14 +256,15 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::iam::eval::ActionEval;
     use crate::iam::fixtures::*;
 
     fn kinds(s: &Snapshot, arn: &str) -> Vec<BadgeKind> {
         policy_badges(s, arn).iter().map(|b| b.kind).collect()
     }
 
-    fn eval_of(status: Status, resources: &[&str]) -> ActionEval {
-        ActionEval { status, resources: resources.iter().map(|r| r.to_string()).collect(), sources: Vec::new() }
+    fn verdict_of(status: Status, resources: &[&str], full_scope: bool) -> Verdict {
+        Verdict { eval: ActionEval { status, resources: resources.iter().map(|r| r.to_string()).collect(), sources: Vec::new() }, full_scope }
     }
 
     #[test]
@@ -436,16 +438,22 @@ mod tests {
 
     #[test]
     fn danger_reasons() {
-        let allowed_everywhere = eval_of(Status::Allowed, &["*"]);
+        let allowed_everywhere = verdict_of(Status::Allowed, &["*"], true);
         assert_eq!(danger_reason("iam", "PassRole", AccessLevel::Write, &allowed_everywhere, false), Some(REASON_PRIVESC));
-        assert_eq!(danger_reason("IAM", "passrole", AccessLevel::Write, &eval_of(Status::Conditional, &["arn:x"]), false), Some(REASON_PRIVESC));
+        assert_eq!(danger_reason("IAM", "passrole", AccessLevel::Write, &verdict_of(Status::Conditional, &["arn:x"], false), false), Some(REASON_PRIVESC));
         assert_eq!(danger_reason("sts", "AssumeRole", AccessLevel::Write, &allowed_everywhere, false), Some(REASON_PRIVESC));
         assert_eq!(danger_reason("s3", "PutBucketPolicy", AccessLevel::Permissions, &allowed_everywhere, false), Some(REASON_PERMISSIONS));
-        assert_eq!(danger_reason("s3", "PutBucketPolicy", AccessLevel::Permissions, &eval_of(Status::Allowed, &["arn:aws:s3:::b"]), false), None);
+        assert_eq!(danger_reason("s3", "PutBucketPolicy", AccessLevel::Permissions, &verdict_of(Status::Allowed, &["arn:aws:s3:::b"], false), false), None);
+        // "모든 리소스"는 라벨이 아니라 판정이 정한 범위로 가른다: NotResource 목록만 뺀 전부는 모든 리소스이고,
+        // `*`가 라벨에 있어도 조건이 맞아야 열리는 것이면 아니다
+        let all_but_secret = verdict_of(Status::Allowed, &["* (제외: arn:aws:s3:::secret/*)"], true);
+        assert_eq!(danger_reason("s3", "PutBucketPolicy", AccessLevel::Permissions, &all_but_secret, false), Some(REASON_PERMISSIONS));
+        let star_needs_a_condition = verdict_of(Status::Allowed, &["arn:aws:s3:::b", "*"], false);
+        assert_eq!(danger_reason("s3", "PutBucketPolicy", AccessLevel::Permissions, &star_needs_a_condition, false), None);
         assert_eq!(danger_reason("s3", "GetObject", AccessLevel::Read, &allowed_everywhere, false), None);
         assert_eq!(danger_reason("s3", "GetObject", AccessLevel::Read, &allowed_everywhere, true), Some(REASON_WILDCARD));
-        assert_eq!(danger_reason("s3", "GetObject", AccessLevel::Read, &eval_of(Status::Conditional, &["*"]), true), None);
-        assert_eq!(danger_reason("s3", "GetObject", AccessLevel::Read, &eval_of(Status::Denied, &["*"]), true), None);
+        assert_eq!(danger_reason("s3", "GetObject", AccessLevel::Read, &verdict_of(Status::Conditional, &["*"], false), true), None);
+        assert_eq!(danger_reason("s3", "GetObject", AccessLevel::Read, &verdict_of(Status::Denied, &["*"], false), true), None);
         assert_eq!(danger_reason("iam", "GetUser", AccessLevel::Read, &allowed_everywhere, false), None);
     }
 }

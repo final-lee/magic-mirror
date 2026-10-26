@@ -1,11 +1,16 @@
 //! 평가 엔진 테스트: 판정 규칙은 작은 정책으로, 화면 값은 `fixtures::snapshot()`으로 확인한다.
 
+mod scope;
 mod verdicts;
 mod views;
 mod who;
 
+use std::collections::HashMap;
+
 use serde_json::json;
 
+use super::index::{index, ActionId};
+use super::{decide_verdict, evaluate_ids, Verdict};
 use crate::iam::catalog::{catalog, AccessLevel};
 use crate::iam::danger::{admin_like_statementwise, policy_badges, privesc_reasons};
 use crate::iam::eval::{evaluate, evaluate_action, policy_sources, principal_view, statement_actions, ActionEval, SourceKind, Status};
@@ -25,6 +30,55 @@ fn status(s: &Snapshot, arn: &str, action: &str, resource: Option<&str>) -> Opti
 /// 전체 계산에서 그 작업의 판정.
 fn table_status(s: &Snapshot, arn: &str, prefix: &str, action: &str) -> Option<Status> {
     evaluate(s, arn).unwrap().actions.get(&key(prefix, action)).map(|(_, eval)| eval.status)
+}
+
+fn strings(items: &[&str]) -> Vec<String> {
+    items.iter().map(|s| s.to_string()).collect()
+}
+
+/// 전체 계산과 한 건 계산이 같은 판정(리소스·근거·범위 플래그까지)을 내는지 확인하고 그 판정을 돌려준다.
+fn verdict_of(s: &Snapshot, arn: &str, action: &str) -> Option<Verdict> {
+    let (prefix, name) = action.split_once(':').unwrap();
+    let listed = evaluate(s, arn).unwrap().actions.get(&key(prefix, name)).map(|(_, e)| e.clone());
+    assert_eq!(evaluate_action(s, arn, action, None), listed, "{action}: 전체 계산과 한 건 계산이 달라요");
+    let (sources, boundary) = policy_sources(s, arn);
+    let single = decide_verdict(&sources, boundary.as_ref(), action, None);
+    let done = evaluate_ids(&sources, boundary.as_ref(), true);
+    let table = done.verdicts.iter().find(|(id, _)| index().names(*id) == (prefix, name)).map(|(_, v)| done.distinct[*v].clone());
+    assert_eq!(single, table, "{action}: 범위 플래그까지 같아야 해요");
+    single
+}
+
+/// `verdict_of`의 판정과 리소스.
+fn resources_of(s: &Snapshot, arn: &str, action: &str) -> Option<(Status, Vec<String>)> {
+    verdict_of(s, arn, action).map(|v| (v.eval.status, v.eval.resources))
+}
+
+/// 한 주체의 판정을 두 길로 구해 견준다: 전체 계산(같은 문장들에 맞은 작업끼리 판정을 나눠 쓴다)과 작업 하나씩 계산.
+/// `prefixes`의 서비스(비었으면 카탈로그 전체)의 작업마다 판정·리소스·근거·범위 플래그와 접근 수준이 같아야 한다. 견준 작업 수를 돌려준다.
+fn assert_paths_agree(s: &Snapshot, arn: &str, prefixes: &[&str]) -> usize {
+    let (sources, boundary) = policy_sources(s, arn);
+    let ix = index();
+    let named = evaluate(s, arn).unwrap();
+    let done = evaluate_ids(&sources, boundary.as_ref(), true);
+    let table: HashMap<ActionId, &Verdict> = done.verdicts.iter().map(|(id, v)| (*id, &done.distinct[*v])).collect();
+    let mut checked = 0;
+    for id in 0..ix.total() as ActionId {
+        let (prefix, name) = ix.names(id);
+        if !prefixes.is_empty() && !prefixes.contains(&prefix) {
+            continue;
+        }
+        let action = format!("{prefix}:{name}");
+        let single = decide_verdict(&sources, boundary.as_ref(), &action, None);
+        assert_eq!(single.as_ref(), table.get(&id).copied(), "{arn} {action}");
+        let listed = named.actions.get(&key(prefix, name));
+        assert_eq!(single.as_ref().map(|v| &v.eval), listed.map(|(_, e)| e), "{arn} {action}");
+        if let Some((level, _)) = listed {
+            assert_eq!(Some(*level), catalog().level(prefix, name), "{arn} {action}");
+        }
+        checked += 1;
+    }
+    checked
 }
 
 #[test]
@@ -441,16 +495,16 @@ fn the_full_expansion_agrees_with_the_single_action_path() {
     s.users.extend(mixed_snapshot.users);
     s.groups.extend(mixed_snapshot.groups);
     s.policies.extend(mixed_snapshot.policies);
+    let prefixes = ["s3", "iam", "lambda", "sts", "ec2"];
+    let in_catalog: usize = prefixes.iter().map(|prefix| catalog().actions(prefix).len()).sum();
     for arn in [ALICE, BOB, CAROL, DEPLOY, mixed_arn.as_str()] {
+        assert_eq!(assert_paths_agree(&s, arn, &prefixes), in_catalog, "{arn}");
+        // 공개 함수(`evaluate_action`)로 물어도 같다
         let eval = evaluate(&s, arn).unwrap();
-        for prefix in ["s3", "iam", "lambda", "sts", "ec2"] {
-            for (name, level) in catalog().actions(prefix) {
-                let single = evaluate_action(&s, arn, &format!("{prefix}:{name}"), None);
-                let table = eval.actions.get(&key(prefix, name));
-                assert_eq!(single.as_ref(), table.map(|(_, e)| e), "{arn} {prefix}:{name}");
-                if let Some((table_level, _)) = table {
-                    assert_eq!(table_level, level);
-                }
+        for prefix in prefixes {
+            for (name, _) in catalog().actions(prefix) {
+                let table = eval.actions.get(&key(prefix, name)).map(|(_, e)| e);
+                assert_eq!(evaluate_action(&s, arn, &format!("{prefix}:{name}"), None).as_ref(), table, "{arn} {prefix}:{name}");
             }
         }
     }
