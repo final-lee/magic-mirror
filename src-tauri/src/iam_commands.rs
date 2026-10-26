@@ -8,17 +8,19 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use aws_config::SdkConfig;
+use aws_credential_types::provider::ProvideCredentials;
 use tauri::State;
 
 use crate::aws::context::GLOBAL_REGION;
 use crate::commands::AppState;
 use crate::error::AppError;
 use crate::iam::catalog::{catalog, AccessLevel};
-use crate::iam::change::{preview, ChangePreview, IamChange};
-use crate::iam::clock::now_secs;
-use crate::iam::commit::{commit, is_stale, new_log_id, undo_change_of, ApplyResult, Request};
+use crate::iam::change::{deletes_policy_version, preview, ApiCall, ChangePreview, Facts, IamChange, PolicyCheck};
+use crate::iam::clock::{now_secs, parse_iso};
+use crate::iam::commit::{commit, is_stale, new_log_id, undo_change_of, ApplyResult, Plan, PlanStore, Request};
 use crate::iam::eval::{evaluate, principal_actions, principal_view, who_can};
-use crate::iam::fetch::checks::{self, SimulateResult, ValidationResult};
+use crate::iam::fetch::checks::{self, FindingLevel, SimulateResult, ValidationResult};
 use crate::iam::fetch::keys::{self, AccessKeyInfo, KeyStatus};
 use crate::iam::fetch::policies::{self, PolicyRef};
 use crate::iam::fetch::{self, usage};
@@ -111,6 +113,10 @@ pub struct IamState {
     policy_lists: Cache<Vec<PolicyRef>>,
     /// 변경 기록 파일(`iam-changes.jsonl`)의 경로
     log_path: PathBuf,
+    /// 미리보기에서 사용자가 본 계획. 적용할 때 다시 계산한 계획과 견준다
+    plans: Mutex<PlanStore>,
+    /// 프로필마다 마지막으로 IAM을 바꾼 시각(유닉스 초)
+    written: Mutex<HashMap<String, i64>>,
 }
 
 impl IamState {
@@ -297,14 +303,33 @@ fn now_millis() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis())
 }
 
-/// 적용 직전의 스냅숏: 읽은 지 60초가 넘었으면 새로 읽는다. 미리보기를 본 뒤에 계정이 바뀌었을 수 있어서다.
+/// IAM을 바꾼 뒤 그 변경이 모든 곳에 반영될 때까지 기다리는 시간(초). 이 사이에 읽은 스냅숏은 그 변경을 아직 못 봤을 수 있다.
+const SETTLE_SECS: i64 = 10;
+
+/// 이 프로필에서 IAM을 바꾼 시각을 적어 둔다. 실패했어도 일부가 적용됐을 수 있으니 쓰기를 시도했으면 적는다.
+fn mark_written(iam: &IamState, profile: &str, at: i64) {
+    locked(&iam.written).insert(profile.to_string(), at);
+}
+
+fn written_at(iam: &IamState, profile: &str) -> Option<i64> {
+    locked(&iam.written).get(profile).copied()
+}
+
+/// 미리보기·적용에 쓰는 스냅숏: 읽은 지 60초가 넘었으면 새로 읽는다. 미리보기를 본 뒤에 계정이 바뀌었을 수 있어서다.
+/// 이 프로필에서 IAM을 바꾼 뒤 10초 동안은 나이와 상관없이 늘 새로 읽고, 그 10초 안에 읽은 스냅숏은 그 뒤에 한 번 더 읽는다.
+/// 바꾸기 전에 시작한 읽기의 결과는 세대 캐시가 담지 않는다.
 async fn fresh_snapshot_with<F, Fut>(iam: &IamState, profile: &str, now: i64, fetch: F) -> Result<Arc<Snapshot>, AppError>
 where
     F: Fn() -> Fut,
     Fut: Future<Output = Result<Snapshot, AppError>>,
 {
+    let written = written_at(iam, profile);
+    if written.is_some_and(|at| now - at < SETTLE_SECS) {
+        return snapshot_with(iam, profile, true, &fetch).await;
+    }
     let cached = snapshot_with(iam, profile, false, &fetch).await?;
-    if is_stale(&cached.fetched_at, now) {
+    let unsettled = written.is_some_and(|at| parse_iso(&cached.fetched_at).is_none_or(|read| read - at < SETTLE_SECS));
+    if is_stale(&cached.fetched_at, now) || unsettled {
         return snapshot_with(iam, profile, true, &fetch).await;
     }
     Ok(cached)
@@ -336,19 +361,63 @@ async fn key_status_of(client: &aws_sdk_iam::Client, change: &IamChange) -> Resu
     key_status_in(&keys, access_key_id).map(|status| Some(status.to_string()))
 }
 
-/// 변경 미리보기. 권한 계산이 CPU를 쓰는 일이라 비동기 실행기를 막지 않게 따로 돌린다.
-#[tauri::command]
-pub async fn iam_preview(state: State<'_, AppState>, iam: State<'_, IamState>, profile: String, change: IamChange) -> Result<ChangePreview, AppError> {
-    let s = snapshot(&state, &iam, &profile, false).await?;
-    let client = iam_client(&state, &profile).await?;
-    let key_status = key_status_of(&client, &change).await?;
-    let s = ensure_policy(&client, s, &change).await;
-    tokio::task::spawn_blocking(move || preview(&s, &change, key_status.as_deref()))
-        .await
-        .map_err(|e| AppError::other(format!("미리보기를 계산하지 못했어요: {e}")))
+/// 앱이 이 프로필로 쓰는 자격 증명의 액세스 키 ID. 읽지 못하면 None. 비밀 키와 세션 토큰은 꺼내지도 돌려주지도 않는다.
+async fn own_key_id(cfg: &SdkConfig) -> Option<String> {
+    let provider = cfg.credentials_provider()?;
+    let credentials = provider.provide_credentials().await.ok()?;
+    Some(credentials.access_key_id().to_string()).filter(|id| !id.is_empty())
 }
 
-/// 변경 적용. 최신 스냅숏으로 미리보기를 다시 계산해 막힘·확인 문구를 거른 뒤에만 IAM을 바꾸고, 결과를 변경 기록에 남긴다.
+/// 정책 검사 결과를 미리보기의 재료로. 문법 오류와 Access Analyzer의 ERROR 결과는 오류이고, 검사기를 못 썼으면 그렇다고 적는다.
+fn policy_check_of(result: &ValidationResult) -> PolicyCheck {
+    if let Some(error) = &result.syntax_error {
+        return PolicyCheck::Errors(vec![error.clone()]);
+    }
+    if !result.analyzer_available {
+        return PolicyCheck::Unavailable;
+    }
+    let errors: Vec<String> =
+        result.findings.iter().filter(|f| f.level == FindingLevel::Error).map(|f| if f.message.is_empty() { f.code.clone() } else { f.message.clone() }).collect();
+    if errors.is_empty() {
+        PolicyCheck::Passed
+    } else {
+        PolicyCheck::Errors(errors)
+    }
+}
+
+/// 미리보기와 적용이 똑같이 읽는 재료: 최신 스냅숏(붙일 정책의 문서를 채운 것)과 스냅숏 밖의 사실들(키 상태, 이 앱이 쓰는 키,
+/// 버전을 지워야 하는 편집이면 새 문서의 검사 결과). 적용은 이것을 다시 읽어 미리보기를 다시 계산하고 사용자가 본 계획과 견준다.
+async fn gather(state: &AppState, iam: &IamState, profile: &str, change: &IamChange) -> Result<(Arc<Snapshot>, Facts, aws_sdk_iam::Client), AppError> {
+    let s = fresh_snapshot(state, iam, profile).await?;
+    let cfg = state.ctx.config(profile, GLOBAL_REGION).await?;
+    let client = aws_sdk_iam::Client::new(&cfg);
+    let key_status = key_status_of(&client, change).await?;
+    let own_key_id = match change {
+        IamChange::SetAccessKeyStatus { .. } | IamChange::DeleteAccessKey { .. } => own_key_id(&cfg).await,
+        _ => None,
+    };
+    let s = ensure_policy(&client, s, change).await;
+    let policy_check = match change {
+        IamChange::UpdateManagedPolicy { document, .. } if deletes_policy_version(&s, change) => policy_check_of(&checks::validate(&cfg, document).await?),
+        _ => PolicyCheck::NotRun,
+    };
+    Ok((s, Facts { key_status, own_key_id, policy_check }, client))
+}
+
+/// 변경 미리보기. 적용할 때와 같은 재료로 계산하고, 사용자가 본 계획을 기억해 둔다. 권한 계산은 CPU를 쓰는 일이라 따로 돌린다.
+#[tauri::command]
+pub async fn iam_preview(state: State<'_, AppState>, iam: State<'_, IamState>, profile: String, change: IamChange) -> Result<ChangePreview, AppError> {
+    let (s, facts, _) = gather(&state, &iam, &profile, &change).await?;
+    let account_id = s.account_id.clone();
+    let shown = tokio::task::spawn_blocking(move || preview(&s, &change, &facts))
+        .await
+        .map_err(|e| AppError::other(format!("미리보기를 계산하지 못했어요: {e}")))?;
+    locked(&iam.plans).remember(&profile, &shown.change, Plan::of(&account_id, &shown), now_secs());
+    Ok(shown)
+}
+
+/// 변경 적용. 최신 스냅숏으로 미리보기를 다시 계산해, 사용자가 미리보기에서 본 계획과 같고 막힘·확인 문구를 통과할 때만 IAM을 바꾸고,
+/// 결과를 변경 기록에 남긴다. 미리보기 하나로는 한 번만 적용한다(꺼낸 계획은 맞든 틀리든 다시 쓰지 않는다).
 #[tauri::command]
 pub async fn iam_apply(
     state: State<'_, AppState>,
@@ -358,26 +427,26 @@ pub async fn iam_apply(
     confirm_text: Option<String>,
     undo_of: Option<String>,
 ) -> Result<ApplyResult, AppError> {
-    let s = fresh_snapshot(&state, &iam, &profile).await?;
-    let client = iam_client(&state, &profile).await?;
-    let key_status = key_status_of(&client, &change).await?;
-    let s = ensure_policy(&client, s, &change).await;
+    let (s, facts, client) = gather(&state, &iam, &profile, &change).await?;
     let now = now_secs();
+    let seen = locked(&iam.plans).take(&profile, &change, now);
     let request = Request {
         profile: profile.clone(),
-        snapshot: s.clone(),
-        key_status,
-        change: change.clone(),
+        snapshot: s,
+        facts,
+        change,
         confirm_text,
         undo_of,
+        seen,
         log_path: iam.log_path.clone(),
         now,
         log_id: new_log_id(now_millis()),
     };
-    let committed = commit(request, || write::apply(&client, &s, &change)).await;
+    let committed = commit(request, move |plan: Vec<ApiCall>| async move { write::apply(&client, &plan).await }).await;
     if committed.wrote {
         // 일부만 적용되고 실패했을 수도 있으니 성공하지 않았어도 읽어 둔 것을 버린다
         invalidate(&iam, &profile);
+        mark_written(&iam, &profile, now_secs());
     }
     committed.result
 }
@@ -725,6 +794,89 @@ mod tests {
         let failed = fresh_snapshot_with(&iam, "dev", now, || async { Err::<Snapshot, _>(AppError::SsoExpired) }).await;
         assert_eq!(failed.err(), Some(AppError::SsoExpired));
         assert!(iam.snapshots.get("dev").is_none());
+    }
+
+    /// 읽을 때마다 번호를 올리고, 읽은 시각을 `at()`으로 찍는 읽기.
+    fn read_now<'a>(calls: &'a AtomicUsize, at: &'a dyn Fn() -> i64) -> impl Fn() -> std::future::Ready<Result<Snapshot, AppError>> + 'a {
+        move || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(Ok(read_at(&crate::iam::clock::iso(at()))))
+        }
+    }
+
+    #[tokio::test]
+    async fn for_ten_seconds_after_a_write_every_preview_and_apply_reads_again() {
+        let (iam, calls) = (IamState::default(), AtomicUsize::new(0));
+        let written = crate::iam::clock::parse_iso("2026-10-27T00:00:00Z").unwrap();
+        let clock = std::cell::Cell::new(written - 5);
+        let at = || clock.get();
+        let read = read_now(&calls, &at);
+        fresh_snapshot_with(&iam, "dev", clock.get(), &read).await.unwrap();
+        mark_written(&iam, "dev", written);
+        // 방금 읽은 스냅숏이 있어도 쓴 뒤 10초 동안은 매번 새로 읽는다
+        for after in [1, 4, 9] {
+            clock.set(written + after);
+            fresh_snapshot_with(&iam, "dev", clock.get(), &read).await.unwrap();
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 4);
+        // 다른 프로필은 상관없다
+        snapshot_with(&iam, "prod", false, &read).await.unwrap();
+        fresh_snapshot_with(&iam, "prod", clock.get(), &read).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 5);
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_read_while_the_write_was_settling_is_read_once_more_afterwards() {
+        let (iam, calls) = (IamState::default(), AtomicUsize::new(0));
+        let written = crate::iam::clock::parse_iso("2026-10-27T00:00:00Z").unwrap();
+        let clock = std::cell::Cell::new(written);
+        let at = || clock.get();
+        let read = read_now(&calls, &at);
+        mark_written(&iam, "dev", written);
+        clock.set(written + 8);
+        let settling = fresh_snapshot_with(&iam, "dev", clock.get(), &read).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        // 10초가 지난 뒤 처음 쓸 때: 8초에 읽은 것은 아직 그 변경을 못 봤을 수 있어 한 번 더 읽는다
+        clock.set(written + 12);
+        let settled = fresh_snapshot_with(&iam, "dev", clock.get(), &read).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(!Arc::ptr_eq(&settling, &settled));
+        // 그 뒤로는 다시 캐시를 쓴다
+        clock.set(written + 20);
+        let cached = fresh_snapshot_with(&iam, "dev", clock.get(), &read).await.unwrap();
+        assert!(Arc::ptr_eq(&settled, &cached));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    fn validation(syntax_error: Option<&str>, analyzer_available: bool, findings: &[(FindingLevel, &str, &str)]) -> ValidationResult {
+        ValidationResult {
+            syntax_error: syntax_error.map(str::to_string),
+            analyzer_available,
+            findings: findings.iter().map(|(level, code, message)| checks::ValidationFinding { level: *level, code: code.to_string(), message: message.to_string() }).collect(),
+        }
+    }
+
+    #[test]
+    fn only_analyzer_errors_and_syntax_errors_stop_a_version_from_being_deleted() {
+        assert_eq!(policy_check_of(&validation(None, true, &[])), PolicyCheck::Passed);
+        let advice = [(FindingLevel::SecurityWarning, "PASS_ROLE_WITH_STAR_IN_RESOURCE", "경고"), (FindingLevel::Suggestion, "EMPTY_ARRAY", "제안"), (FindingLevel::Warning, "W", "주의")];
+        assert_eq!(policy_check_of(&validation(None, true, &advice)), PolicyCheck::Passed);
+        let errors = [(FindingLevel::Error, "INVALID_ACTION", "작업 이름이 올바르지 않아요"), (FindingLevel::Suggestion, "S", "제안"), (FindingLevel::Error, "INVALID_ARN", "")];
+        assert_eq!(policy_check_of(&validation(None, true, &errors)), PolicyCheck::Errors(vec!["작업 이름이 올바르지 않아요".into(), "INVALID_ARN".into()]));
+        assert_eq!(policy_check_of(&validation(None, false, &[])), PolicyCheck::Unavailable);
+        assert_eq!(policy_check_of(&validation(Some("JSON 형식이 올바르지 않아요"), true, &[])), PolicyCheck::Errors(vec!["JSON 형식이 올바르지 않아요".into()]));
+    }
+
+    #[test]
+    fn previews_are_remembered_per_profile_and_taken_once() {
+        let iam = IamState::default();
+        let s = crate::iam::fixtures::snapshot();
+        let change = IamChange::AttachPolicy { target: crate::iam::fixtures::BOB.into(), policy_arn: crate::iam::fixtures::S3_FULL.into() };
+        let shown = preview(&s, &change, &Facts::default());
+        locked(&iam.plans).remember("dev", &change, Plan::of(&s.account_id, &shown), 100);
+        assert_eq!(locked(&iam.plans).take("prod", &change, 101), None);
+        assert_eq!(locked(&iam.plans).take("dev", &change, 101), Some(Plan::of(&s.account_id, &shown)));
+        assert_eq!(locked(&iam.plans).take("dev", &change, 102), None);
     }
 
     fn key(id: &str, status: KeyStatus) -> AccessKeyInfo {

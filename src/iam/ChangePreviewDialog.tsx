@@ -1,10 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { KIND_LABEL, LEVEL_LABEL } from "./labels";
-import type { ChangePreview, PermDelta } from "./types";
+import type { ChangePreview, Impact, PermDelta } from "./types";
 import { applyGate, type PendingChange } from "./useIamChange";
 import { useModal } from "./useModal";
 
+/** 자세히 보여 주는 주체 수. 백엔드도 이만큼만 자세히 보내고 나머지는 수(impactsOmitted)만 보낸다 */
 const MAX_IMPACTS = 30;
+
+const DELTA = {
+  gained: { className: "cp-gain", label: "얻는 권한", sign: "＋" },
+  lost: { className: "cp-lose", label: "잃는 권한", sign: "－" },
+  restricted: { className: "cp-cond", label: "조건부로 바뀜", sign: "～" },
+} as const;
 
 const WARN_LEVELS = ["block", "confirm", "warn"] as const;
 const WARN_TITLE: Record<(typeof WARN_LEVELS)[number], string> = {
@@ -68,7 +75,8 @@ function Sheet({ pending, onApply, onRetry, onCancel }: Props) {
         <div className="cp-body">
           <h3>{title}</h3>
           {phase === "loading" && <p>미리보기를 불러오는 중이에요…</p>}
-          {preview && <PreviewBody preview={preview} typed={typed} onTyped={setTyped} locked={applying} />}
+          {preview && <PreviewDetails preview={preview} />}
+          {preview?.confirmText && <ConfirmField required={preview.confirmText} typed={typed} onTyped={setTyped} locked={applying} />}
         </div>
         {/* 오류는 스크롤되는 본문 밖, 버튼 바로 위에 둔다: 미리보기가 길어도 가려지지 않는다 */}
         {(error || stale) && (
@@ -101,9 +109,11 @@ function Sheet({ pending, onApply, onRetry, onCancel }: Props) {
   );
 }
 
-function PreviewBody({ preview, typed, onTyped, locked }: { preview: ChangePreview; typed: string; onTyped: (v: string) => void; locked: boolean }) {
-  const required = preview.confirmText;
-  const shown = preview.impacts.slice(0, MAX_IMPACTS);
+/**
+ * 미리보기 본문: 요약, 경고, 호출할 API, 영향받는 주체, 되돌릴 수 있는지.
+ * 관리자 정책 같은 큰 변경은 영향 목록이 길어서, 확인 문구를 한 글자씩 입력할 때마다 다시 그리지 않도록 미리보기가 바뀔 때만 그린다.
+ */
+const PreviewDetails = memo(function PreviewDetails({ preview }: { preview: ChangePreview }) {
   return (
     <>
       <p className="cp-sum">{preview.summary}</p>
@@ -142,68 +152,96 @@ function PreviewBody({ preview, typed, onTyped, locked }: { preview: ChangePrevi
         </>
       )}
 
-      <h4>
-        영향받는 주체 <span className="dim">{preview.impacts.length}</span>
-      </h4>
-      {preview.impacts.length === 0 ? (
-        <p className="cp-none">권한이 달라지는 주체가 없어요</p>
-      ) : (
-        <ul className="cp-impacts" aria-label="영향받는 주체">
-          {shown.map((impact) => (
-            <li key={impact.principal.arn} data-testid={`impact-${impact.principal.arn}`}>
-              <div className="cp-who">
-                <b>{impact.principal.name}</b> <span className="iam-kind">{KIND_LABEL[impact.principal.kind]}</span>
-              </div>
-              {impact.gained.length > 0 && <Deltas kind="gained" deltas={impact.gained} />}
-              {impact.lost.length > 0 && <Deltas kind="lost" deltas={impact.lost} />}
-              {impact.gained.length === 0 && impact.lost.length === 0 && <div className="dim">권한 변화 없음</div>}
-            </li>
-          ))}
-          {preview.impacts.length > shown.length && <li className="dim">외 {preview.impacts.length - shown.length}명</li>}
-        </ul>
-      )}
+      <ImpactList impacts={preview.impacts} omitted={preview.impactsOmitted ?? 0} />
 
       <p className={`cp-rev${preview.reversible ? "" : " no"}`}>
         {preview.reversible ? "되돌릴 수 있어요" : "되돌릴 수 없어요. 적용하면 변경 기록에서도 되돌릴 수 없어요"}
       </p>
+    </>
+  );
+});
 
-      {required && (
-        <label className="field cp-confirm">
-          <span>확인하려면 {required}를 입력하세요</span>
-          <input
-            aria-label={`확인하려면 ${required}를 입력하세요`}
-            value={typed}
-            disabled={locked}
-            autoComplete="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            onChange={(e) => onTyped(e.target.value)}
-            // Enter로는 아무것도 실행하지 않는다: 위험한 변경은 버튼을 직접 눌러야 한다
-            onKeyDown={(e) => {
-              if (e.key === "Enter") e.preventDefault();
-            }}
-          />
-          {typed !== "" && typed !== required && <span className="err">입력한 이름이 달라요</span>}
-        </label>
+/** 영향받는 주체. `omitted`는 백엔드가 자세히 보내지 않은 주체 수다 */
+function ImpactList({ impacts, omitted }: { impacts: Impact[]; omitted: number }) {
+  const shown = impacts.slice(0, MAX_IMPACTS);
+  const total = impacts.length + omitted;
+  return (
+    <>
+      <h4>
+        영향받는 주체 <span className="dim">{total}</span>
+      </h4>
+      {total === 0 ? (
+        <p className="cp-none">권한이 달라지는 주체가 없어요</p>
+      ) : (
+        <ul className="cp-impacts" aria-label="영향받는 주체">
+          {shown.map((impact) => (
+            <ImpactItem key={impact.principal.arn} impact={impact} />
+          ))}
+          {total > shown.length && <li className="dim">외 {total - shown.length}명</li>}
+        </ul>
       )}
     </>
   );
 }
 
-function Deltas({ kind, deltas }: { kind: "gained" | "lost"; deltas: PermDelta[] }) {
-  const gained = kind === "gained";
+function ImpactItem({ impact }: { impact: Impact }) {
+  const restricted = impact.restricted ?? [];
+  const unchanged = impact.gained.length === 0 && impact.lost.length === 0 && restricted.length === 0;
   return (
-    <ul className={gained ? "cp-gain" : "cp-lose"} data-testid={kind} aria-label={gained ? "얻는 권한" : "잃는 권한"}>
-      {deltas.map((d) => (
-        <li key={`${d.prefix}|${d.level}`}>
-          <span className="cp-sign" aria-hidden="true">
-            {gained ? "＋" : "－"}
-          </span>
-          <b>{d.prefix}</b> · {LEVEL_LABEL[d.level]} {d.count}개
-          {d.sample.length > 0 && <span className="mono dim"> {d.sample.join(", ")}</span>}
-          {d.count > d.sample.length && <span className="dim"> 외 {d.count - d.sample.length}개</span>}
-        </li>
-      ))}
-    </ul>
+    <li data-testid={`impact-${impact.principal.arn}`}>
+      <div className="cp-who">
+        <b>{impact.principal.name}</b> <span className="iam-kind">{KIND_LABEL[impact.principal.kind]}</span>
+      </div>
+      {impact.gained.length > 0 && <Deltas kind="gained" deltas={impact.gained} omitted={impact.gainedOmitted ?? 0} />}
+      {impact.lost.length > 0 && <Deltas kind="lost" deltas={impact.lost} omitted={impact.lostOmitted ?? 0} />}
+      {restricted.length > 0 && <Deltas kind="restricted" deltas={restricted} omitted={impact.restrictedOmitted ?? 0} />}
+      {unchanged && <div className="dim">권한 변화 없음</div>}
+    </li>
+  );
+}
+
+/** 한 방향의 증감 줄. 조건부로 바뀐 작업은 이름을 붙여 따로 보여 준다(잃은 것은 아니지만 조건이 맞지 않으면 막힌다) */
+function Deltas({ kind, deltas, omitted }: { kind: keyof typeof DELTA; deltas: PermDelta[]; omitted: number }) {
+  const { className, label, sign } = DELTA[kind];
+  return (
+    <>
+      {kind === "restricted" && <div className="cp-cap cp-cond">{label}</div>}
+      <ul className={className} data-testid={kind} aria-label={label}>
+        {deltas.map((d) => (
+          <li key={`${d.prefix}|${d.level}`}>
+            <span className="cp-sign" aria-hidden="true">
+              {sign}
+            </span>
+            <b>{d.prefix}</b> · {LEVEL_LABEL[d.level]} {d.count}개
+            {d.sample.length > 0 && <span className="mono dim"> {d.sample.join(", ")}</span>}
+            {d.count > d.sample.length && <span className="dim"> 외 {d.count - d.sample.length}개</span>}
+          </li>
+        ))}
+        {omitted > 0 && <li className="dim">외 {omitted}개</li>}
+      </ul>
+    </>
+  );
+}
+
+/** 확인 문구 입력. 입력할 때마다 다시 그려지는 것은 이 칸과 버튼뿐이다 */
+function ConfirmField({ required, typed, onTyped, locked }: { required: string; typed: string; onTyped: (v: string) => void; locked: boolean }) {
+  return (
+    <label className="field cp-confirm">
+      <span>확인하려면 {required}를 입력하세요</span>
+      <input
+        aria-label={`확인하려면 ${required}를 입력하세요`}
+        value={typed}
+        disabled={locked}
+        autoComplete="off"
+        autoCapitalize="off"
+        spellCheck={false}
+        onChange={(e) => onTyped(e.target.value)}
+        // Enter로는 아무것도 실행하지 않는다: 위험한 변경은 버튼을 직접 눌러야 한다
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.preventDefault();
+        }}
+      />
+      {typed !== "" && typed !== required && <span className="err">입력한 이름이 달라요</span>}
+    </label>
   );
 }

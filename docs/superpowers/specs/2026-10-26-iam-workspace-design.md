@@ -91,11 +91,13 @@
 ## 직접 변경
 변경 종류(`IamChange`): attachPolicy, detachPolicy, addToGroup, removeFromGroup, setAccessKeyStatus, deleteAccessKey, putInlinePolicy, deleteInlinePolicy, updateManagedPolicy(CreatePolicyVersion SetAsDefault=true, 버전이 5개면 가장 오래된 비기본 버전을 먼저 삭제).
 - 모든 변경은 `iam_preview` → 사용자 확인 → `iam_apply`. 백엔드가 apply 때 미리보기를 다시 계산해 막힘이면 거부, 확인 문구가 필요하면 일치해야 진행.
+  - 미리보기와 적용은 같은 방법으로 최신 스냅숏(60초가 넘었거나 쓰기 뒤 10초 안이면 다시 읽음)과 키 상태 등을 읽는다. 미리보기가 본 계획(계정, 호출과 모든 인자, 막힘·확인 문구, 확인 문구)을 (프로필, 변경)마다 10분 동안 최대 50개 기억하고, 적용 때 다시 계산한 계획이 다르거나 미리보기가 없으면 "미리보기 뒤에 IAM이 바뀌었어요. 미리보기를 다시 받아 주세요."로 거부. 미리보기 하나로는 한 번만 적용.
 - 미리보기: 호출할 API와 인자, 영향받는 주체별 권한 증감(서비스·접근 수준 단위), 경고.
 - 경고 규칙:
   - block: 대상이 서비스 연결 역할(path `/aws-service-role/`), Identity Center 역할(path `/aws-reserved/sso.amazonaws.com/` 또는 이름 `AWSReservedSSO_*`), AWS 관리형 정책 편집, 잘못된 JSON, 정책 문서 6,144자(관리형)/2,048자(사용자 인라인)/5,120자(그룹 인라인)/10,240자(역할 인라인) 초과
-  - confirm(대상 이름 입력): 앱이 지금 쓰는 자격 증명의 주체(호출자 사용자/역할, 또는 호출자가 속한 그룹)에 대한 권한 축소, 변경 결과 영향받는 주체가 새로 adminLike/privesc가 됨, deleteAccessKey, deleteInlinePolicy
-  - warn: 태그 `aws:cloudformation:stack-name`이 있는 대상(스택이 되돌릴 수 있음), 버전 5개라 가장 오래된 버전 삭제, 영향받는 주체가 5명 이상
+  - confirm(대상 이름 입력): 앱이 지금 쓰는 자격 증명의 주체(호출자 사용자/역할, 또는 호출자가 속한 그룹)에 대한 권한 축소(허용 → 조건부도 포함), 변경 결과 영향받는 주체가 새로 adminLike/privesc가 됨, deleteAccessKey, deleteInlinePolicy, 앱이 쓰는 액세스 키를 끄거나 지움(되돌릴 수 없음, 확인 문구는 키 ID), 버전을 지워야 하는 관리형 편집인데 Access Analyzer로 문서를 검사하지 못함
+  - block 추가: 버전을 지워야 하는 관리형 편집에서 Access Analyzer가 ERROR를 냄(적용 때도 다시 검사해 거부)
+  - warn: 태그 `aws:cloudformation:stack-name`이 있는 대상(스택이 되돌릴 수 있음), 버전 5개라 가장 오래된 버전 삭제, 영향받는 주체가 5명 이상, 다른 사용자·역할의 일부 권한이 조건부로 바뀜
 - 변경 기록: 앱 데이터 폴더 `iam-changes.jsonl`(한 줄 = 한 변경). 되돌리기용 역변경 저장: attach↔detach, add↔remove, 키 상태 반대, 인라인 put/delete는 이전 문서로 복원(없었으면 delete), 관리형 편집은 이전 기본 버전 문서로 다시 편집. deleteAccessKey는 되돌릴 수 없음.
 - 적용 후 스냅숏 캐시 무효화. IAM 반영 지연을 고려해 화면은 3초 뒤 강제 새로고침.
 - IAM 쓰기 API 호출은 `src-tauri/src/iam/write.rs`에만 둔다. 리소스 브라우저 어댑터는 읽기 전용 유지.
@@ -232,16 +234,23 @@ type IamChange =
 interface ChangePreview {
   change: IamChange; summary: string;
   calls: { api: string; params: Record<string, string> }[];
-  impacts: { principal: PrincipalSummary; gained: PermDelta[]; lost: PermDelta[] }[];
+  impacts: Impact[];                // 최대 30명(앱이 쓰는 주체는 늘 포함)
+  impactsOmitted?: number;          // impacts에 넣지 못한 주체 수. 0이면 보내지 않음(없으면 0)
   warnings: { level: "block" | "confirm" | "warn"; message: string }[];
   confirmText: string | null;       // confirm 경고가 있으면 입력해야 할 문자열(대상 이름)
   reversible: boolean;
+}
+interface Impact {
+  principal: PrincipalSummary;
+  gained: PermDelta[]; lost: PermDelta[];   // 방향마다 작업이 많은 (prefix, level) 줄 최대 20개, 순서는 prefix·level
+  restricted?: PermDelta[];                 // 조건 없이 허용되다가 조건부가 된 작업. 비면 보내지 않음(없으면 [])
+  gainedOmitted?: number; lostOmitted?: number; restrictedOmitted?: number;   // 한도로 뺀 줄 수. 0이면 보내지 않음(없으면 0)
 }
 interface PermDelta { prefix: string; level: AccessLevel; count: number; sample: string[] }   // sample 최대 5개
 interface ApplyResult { logId: string; summary: string }        // 실패하면 AppError(기록은 남김)
 interface ChangeLogEntry {
   id: string; at: string; profile: string; accountId: string; callerArn: string;
-  change: IamChange; summary: string; calls: string[]; ok: boolean; error: string | null;
+  change: IamChange; summary: string; calls: string[]; ok: boolean; error: string | null;   // calls: 실제로 성공한 호출(실패하면 그 앞까지)
   inverse: IamChange | null; undoOf: string | null; undone: boolean;
 }
 ```

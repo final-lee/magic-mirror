@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 import { iamApi } from "./api";
-import { attachReadOnlyToBob, deactivateBobKey, previewOf, sampleOverview } from "./fixtures";
+import { attachReadOnlyToBob, deactivateBobKey, PLAN_DRIFTED, previewOf, sampleOverview } from "./fixtures";
 import { iamKeys, useIamOverview } from "./queries";
 import type { ApplyResult, ChangePreview, IamChange } from "./types";
 import { applyGate, useIamChange, type StartOptions } from "./useIamChange";
@@ -339,6 +339,30 @@ describe("a failed apply", () => {
     expect(h.flow().pending?.error).toBeNull();
     await act(async () => h.flow().apply(""));
     expect(m.apply).toHaveBeenCalledTimes(2);
+    expect(h.flow().pending).toBeNull();
+  });
+
+  test("the backend's refusal after IAM changed behind the preview leads to a fresh preview, which can then be applied", async () => {
+    m.apply.mockRejectedValueOnce({ kind: "other", message: PLAN_DRIFTED });
+    const h = setup();
+    await startAndWait(h, attachReadOnlyToBob);
+    await act(async () => h.flow().apply(""));
+    expect(h.flow().pending).toMatchObject({ phase: "ready", stale: true, error: { kind: "apply", message: PLAN_DRIFTED } });
+
+    // 다시 받은 미리보기는 그 사이 달라진 IAM을 보여 준다(여기서는 호출이 하나 늘었다)
+    const changed = previewOf(attachReadOnlyToBob, {
+      calls: [
+        { api: "iam:DeletePolicyVersion", params: { PolicyArn: "arn:aws:iam::123456789012:policy/x", VersionId: "v1" } },
+        { api: "iam:AttachUserPolicy", params: { UserName: "bob", PolicyArn: "arn:aws:iam::123456789012:policy/x" } },
+      ],
+    });
+    m.preview.mockResolvedValueOnce(changed);
+    act(() => h.flow().retryPreview());
+    await waitFor(() => expect(h.flow().pending?.preview).toBe(changed));
+    expect(h.flow().pending).toMatchObject({ stale: false, error: null });
+    await act(async () => h.flow().apply(""));
+    expect(m.apply).toHaveBeenCalledTimes(2);
+    expect(m.apply).toHaveBeenLastCalledWith("prod", attachReadOnlyToBob, null, null);
     expect(h.flow().pending).toBeNull();
   });
 

@@ -1,7 +1,7 @@
 //! 변경 기록: 앱 데이터 폴더의 `iam-changes.jsonl`. 한 줄이 변경 하나이고 새 기록은 맨 아래에 붙는다.
 //! 읽을 수 없는 줄(깨진 줄, 빈 줄)은 건너뛰고, 고칠 때도 다른 줄은 그대로 둔다.
 
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -100,8 +100,19 @@ pub fn mark_undone(path: &Path, id: &str) -> io::Result<()> {
     }
     let mut temp = path.as_os_str().to_owned();
     temp.push(".tmp");
-    fs::write(&temp, out)?;
-    fs::rename(&temp, path)
+    let replaced = write_synced(Path::new(&temp), out.as_bytes()).and_then(|()| fs::rename(&temp, path));
+    if replaced.is_err() {
+        // 바꿔치기 전에 실패했으면 원래 파일은 그대로다. 남은 임시 파일만 치운다
+        let _ = fs::remove_file(&temp);
+    }
+    replaced
+}
+
+/// 파일을 새로 쓰고 디스크까지 내려보낸다: 바꿔치기한 뒤 전원이 꺼져도 반쯤 쓴 기록이 남지 않게.
+fn write_synced(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 #[cfg(test)]

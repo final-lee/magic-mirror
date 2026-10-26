@@ -1,9 +1,22 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { alice, attachReadOnlyToBob, bob, deactivateBobKey, devTeam, permDelta, previewOf } from "./fixtures";
+import { alice, attachReadOnlyToBob, bob, cappedImpact, deactivateBobKey, devTeam, impactOf, permDelta, PLAN_DRIFTED, previewOf } from "./fixtures";
 import { ChangePreviewDialog } from "./ChangePreviewDialog";
 import type { PendingChange } from "./useIamChange";
 import type { ChangePreview } from "./types";
+
+// 영향 줄을 그릴 때마다 접근 수준 이름을 읽는다. 읽은 횟수로 영향 목록을 다시 그렸는지 본다(값은 그대로 돌려준다)
+const labelReads = vi.hoisted(() => ({ count: 0 }));
+vi.mock("./labels", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./labels")>();
+  const LEVEL_LABEL = new Proxy(actual.LEVEL_LABEL, {
+    get(target, key, receiver) {
+      labelReads.count++;
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  return { ...actual, LEVEL_LABEL };
+});
 
 function pendingOf(preview: ChangePreview | null, extra: Partial<PendingChange> = {}): PendingChange {
   return {
@@ -287,6 +300,15 @@ describe("loading, errors and progress", () => {
     expect(props.onRetry).toHaveBeenCalledTimes(1);
   });
 
+  test("when IAM changed after the preview, the backend's refusal asks for a fresh preview", () => {
+    const { props } = setup(previewOf(attachReadOnlyToBob), { error: { kind: "apply", message: PLAN_DRIFTED }, stale: true });
+    expect(within(screen.getByRole("alert")).getByText(PLAN_DRIFTED)).toBeInTheDocument();
+    expect(applyButton()).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "미리보기 다시 받기" }));
+    expect(props.onRetry).toHaveBeenCalledTimes(1);
+    expect(props.onApply).not.toHaveBeenCalled();
+  });
+
   test("a failed apply keeps the preview, shows the error, and needs a fresh preview before applying again", () => {
     const { props } = setup(previewOf(attachReadOnlyToBob, { summary: "bob에 붙여요" }), {
       error: { kind: "apply", message: "정책이 이미 붙어 있어요" },
@@ -386,5 +408,59 @@ describe("impacts", () => {
     expect(screen.getByText("외 10명")).toBeInTheDocument();
     expect(screen.getByText("u29")).toBeInTheDocument();
     expect(screen.queryByText("u30")).not.toBeInTheDocument();
+  });
+
+  const thirty = () => Array.from({ length: 30 }, (_, i) => impactOf({ ...bob, arn: `arn:aws:iam::123456789012:user/u${i}`, name: `u${i}` }, { gained: [permDelta("s3", "read", 1)] }));
+  const lastRow = (list: HTMLElement) => {
+    const rows = within(list).getAllByRole("listitem");
+    return rows[rows.length - 1];
+  };
+
+  test("counts the principals the backend did not send in detail", () => {
+    setup(previewOf(attachReadOnlyToBob, { impacts: thirty(), impactsOmitted: 20 }));
+    expect(screen.getByRole("heading", { name: /영향받는 주체/ })).toHaveTextContent("50");
+    expect(screen.getByText("외 20명")).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "영향받는 주체" })).getAllByTestId(/^impact-/)).toHaveLength(30);
+  });
+
+  test("a preview without the omitted count shows every principal it got", () => {
+    setup(previewOf(attachReadOnlyToBob, { impacts: thirty() }));
+    expect(screen.getByRole("heading", { name: /영향받는 주체/ })).toHaveTextContent("30");
+    expect(screen.queryByText(/^외 \d+명$/)).not.toBeInTheDocument();
+  });
+
+  test("tells how many rows were left out in each direction", () => {
+    const big = cappedImpact(alice);
+    setup(previewOf(attachReadOnlyToBob, { impacts: [{ ...big, lost: [permDelta("ec2", "write", 300)], lostOmitted: 7 }] }));
+    const item = screen.getByTestId(`impact-${alice.arn}`);
+    const gained = within(item).getByTestId("gained");
+    expect(within(gained).getAllByRole("listitem")).toHaveLength(21);
+    expect(lastRow(gained)).toHaveTextContent(/^외 1630개$/);
+    expect(lastRow(within(item).getByTestId("lost"))).toHaveTextContent(/^외 7개$/);
+  });
+
+  test("shows actions that become conditional under their own label", () => {
+    const restricted = [permDelta("s3", "read", 40, ["s3:GetObject"]), permDelta("ec2", "write", 300)];
+    setup(previewOf(attachReadOnlyToBob, { impacts: [impactOf(alice, { restricted, restrictedOmitted: 3 })] }));
+    const item = screen.getByTestId(`impact-${alice.arn}`);
+    expect(within(item).getByText("조건부로 바뀜", { selector: "div" })).toBeInTheDocument();
+    const list = within(item).getByRole("list", { name: "조건부로 바뀜" });
+    expect(list).toHaveClass("cp-cond");
+    expect(list).toHaveTextContent("s3");
+    expect(list).toHaveTextContent("40개");
+    expect(list).toHaveTextContent("s3:GetObject");
+    expect(lastRow(list)).toHaveTextContent(/^외 3개$/);
+    expect(within(item).queryByText("권한 변화 없음")).not.toBeInTheDocument();
+    expect(within(item).queryByTestId("gained")).not.toBeInTheDocument();
+  });
+
+  test("typing the confirm text does not redraw the impact list", () => {
+    labelReads.count = 0;
+    setup(confirmPreview({ impacts: [cappedImpact(alice), impactOf(bob, { restricted: [permDelta("s3", "read", 4)] })] }));
+    const drawn = labelReads.count;
+    expect(drawn).toBeGreaterThanOrEqual(21); // 줄 21개를 한 번은 그렸다
+    for (const value of ["b", "bo", "bob"]) fireEvent.change(confirmInput("bob"), { target: { value } });
+    expect(applyButton()).toBeEnabled();
+    expect(labelReads.count).toBe(drawn);
   });
 });

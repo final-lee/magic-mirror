@@ -3,10 +3,10 @@
 use serde_json::json;
 
 use super::*;
-use crate::iam::change::calls;
+use crate::iam::change::{calls, IamChange};
 use crate::iam::fixtures::*;
 use crate::iam::mock_aws::{error_xml, Recorder, Sent};
-use crate::iam::model::VersionRec;
+use crate::iam::model::{Snapshot, VersionRec};
 
 fn doc(actions: &[&str]) -> String {
     policy(json!([{ "Effect": "Allow", "Action": actions, "Resource": "*" }])).to_string()
@@ -17,14 +17,15 @@ fn listed(s: &Snapshot, c: &IamChange) -> Vec<Sent> {
     calls(s, c).into_iter().map(|call| Sent { action: call.api.strip_prefix("iam:").unwrap().to_string(), params: call.params }).collect()
 }
 
-fn names(s: &Snapshot, c: &IamChange) -> Vec<String> {
-    calls(s, c).into_iter().map(|call| call.api).collect()
+fn names(done: &[ApiCall]) -> Vec<&str> {
+    done.iter().map(|call| call.api.as_str()).collect()
 }
 
-async fn run(s: &Snapshot, c: &IamChange) -> (Result<Vec<String>, AppError>, Vec<Sent>) {
+/// 변경의 호출 목록(미리보기에 보인 것)을 실행한다.
+async fn run(s: &Snapshot, c: &IamChange) -> (Applied, Vec<Sent>) {
     let recorder = Recorder::ok();
-    let result = apply(&recorder.client(), s, c).await;
-    (result, recorder.sent())
+    let applied = apply(&recorder.client(), &calls(s, c)).await;
+    (applied, recorder.sent())
 }
 
 fn sent(action: &str, params: &[(&str, &str)]) -> Sent {
@@ -70,10 +71,10 @@ async fn every_change_sends_exactly_the_calls_the_preview_listed() {
         IamChange::UpdateManagedPolicy { policy_arn: CAROL_BOUNDARY.into(), document: doc(&["s3:ListBucket"]) },
     ];
     for change in changes {
-        let (result, wire) = run(&s, &change).await;
+        let (applied, wire) = run(&s, &change).await;
         assert!(!wire.is_empty(), "{change:?}");
         assert_eq!(wire, listed(&s, &change), "{change:?}");
-        assert_eq!(result, Ok(names(&s, &change)), "{change:?}");
+        assert_eq!(applied, Applied { done: calls(&s, &change), result: Ok(()) }, "{change:?}");
     }
 }
 
@@ -100,8 +101,8 @@ async fn the_wire_requests_have_the_aws_api_names_and_parameters() {
 async fn a_policy_document_goes_out_exactly_as_given() {
     let s = snapshot();
     let document = "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [{ \"Sid\": \"한글 & 공백\", \"Effect\": \"Allow\", \"Action\": \"s3:GetObject\", \"Resource\": \"*\" }]\n}";
-    let (result, wire) = run(&s, &IamChange::PutInlinePolicy { target: BOB.into(), name: "p".into(), document: document.into() }).await;
-    result.unwrap();
+    let (applied, wire) = run(&s, &IamChange::PutInlinePolicy { target: BOB.into(), name: "p".into(), document: document.into() }).await;
+    applied.result.unwrap();
     assert_eq!(wire, vec![sent("PutUserPolicy", &[("PolicyDocument", document), ("PolicyName", "p"), ("UserName", "bob")])]);
 }
 
@@ -109,8 +110,8 @@ async fn a_policy_document_goes_out_exactly_as_given() {
 async fn editing_a_managed_policy_creates_a_default_version() {
     let s = snapshot();
     let document = doc(&["s3:ListBucket"]);
-    let (result, wire) = run(&s, &IamChange::UpdateManagedPolicy { policy_arn: UNUSED_POLICY.into(), document: document.clone() }).await;
-    result.unwrap();
+    let (applied, wire) = run(&s, &IamChange::UpdateManagedPolicy { policy_arn: UNUSED_POLICY.into(), document: document.clone() }).await;
+    applied.result.unwrap();
     assert_eq!(wire, vec![sent("CreatePolicyVersion", &[("PolicyArn", UNUSED_POLICY), ("PolicyDocument", &document), ("SetAsDefault", "true")])]);
 }
 
@@ -118,8 +119,9 @@ async fn editing_a_managed_policy_creates_a_default_version() {
 async fn a_full_policy_loses_its_oldest_non_default_version_before_the_new_one_is_made() {
     let s = full_policy_snapshot();
     let document = doc(&["s3:ListBucket"]);
-    let (result, wire) = run(&s, &IamChange::UpdateManagedPolicy { policy_arn: UNUSED_POLICY.into(), document: document.clone() }).await;
-    assert_eq!(result, Ok(vec!["iam:DeletePolicyVersion".to_string(), "iam:CreatePolicyVersion".to_string()]));
+    let (applied, wire) = run(&s, &IamChange::UpdateManagedPolicy { policy_arn: UNUSED_POLICY.into(), document: document.clone() }).await;
+    assert_eq!(applied.result, Ok(()));
+    assert_eq!(names(&applied.done), vec!["iam:DeletePolicyVersion", "iam:CreatePolicyVersion"]);
     assert_eq!(
         wire,
         vec![
@@ -134,8 +136,9 @@ async fn a_failure_stops_there_and_keeps_the_kind_of_error() {
     let s = full_policy_snapshot();
     let change = IamChange::UpdateManagedPolicy { policy_arn: UNUSED_POLICY.into(), document: doc(&["s3:ListBucket"]) };
     let recorder = failing("DeletePolicyVersion", 403, "AccessDenied");
-    let result = apply(&recorder.client(), &s, &change).await;
-    assert_eq!(result, Err(AppError::AccessDenied { action: "iam:DeletePolicyVersion".into() }));
+    let applied = apply(&recorder.client(), &calls(&s, &change)).await;
+    assert_eq!(applied.result, Err(AppError::AccessDenied { action: "iam:DeletePolicyVersion".into() }));
+    assert!(applied.done.is_empty(), "성공한 호출이 없어요");
     let actions: Vec<String> = recorder.sent().into_iter().map(|s| s.action).collect();
     assert_eq!(actions, vec!["DeletePolicyVersion"], "앞 호출이 실패하면 새 버전을 만들지 않아요");
 }
@@ -145,9 +148,13 @@ async fn a_failure_after_an_earlier_call_is_reported_with_the_awss_message() {
     let s = full_policy_snapshot();
     let change = IamChange::UpdateManagedPolicy { policy_arn: UNUSED_POLICY.into(), document: doc(&["s3:ListBucket"]) };
     let recorder = failing("CreatePolicyVersion", 400, "MalformedPolicyDocument");
-    let Err(AppError::Other { message }) = apply(&recorder.client(), &s, &change).await else { panic!("Other 오류여야 해요") };
+    let applied = apply(&recorder.client(), &calls(&s, &change)).await;
+    let Err(AppError::Other { message }) = &applied.result else { panic!("Other 오류여야 해요: {:?}", applied.result) };
     assert!(message.contains("MalformedPolicyDocument"), "{message}");
     assert_eq!(recorder.sent().len(), 2);
+    // 실패해도 이미 지운 버전은 지워졌으니 그 호출을 알려 준다
+    assert_eq!(names(&applied.done), vec!["iam:DeletePolicyVersion"]);
+    assert_eq!(applied.done[0].params["VersionId"], "v1");
 }
 
 #[tokio::test]
@@ -155,26 +162,26 @@ async fn throttling_and_expired_sessions_are_told_apart() {
     let s = snapshot();
     let change = IamChange::AttachPolicy { target: BOB.into(), policy_arn: S3_FULL.into() };
     let throttled = failing("AttachUserPolicy", 400, "Throttling");
-    assert_eq!(apply(&throttled.client(), &s, &change).await, Err(AppError::Throttled));
+    assert_eq!(apply(&throttled.client(), &calls(&s, &change)).await.result, Err(AppError::Throttled));
     let expired = failing("AttachUserPolicy", 400, "ExpiredToken");
-    assert_eq!(apply(&expired.client(), &s, &change).await, Err(AppError::SsoExpired));
+    assert_eq!(apply(&expired.client(), &calls(&s, &change)).await.result, Err(AppError::SsoExpired));
 }
 
 #[tokio::test]
 async fn a_change_with_no_calls_sends_nothing_and_fails() {
     let s = snapshot();
     let missing = format!("arn:aws:iam::{ACCOUNT}:user/nobody");
-    let (result, wire) = run(&s, &IamChange::AttachPolicy { target: missing, policy_arn: S3_FULL.into() }).await;
-    assert!(matches!(result, Err(AppError::Other { .. })), "{result:?}");
-    assert!(wire.is_empty());
+    let (applied, wire) = run(&s, &IamChange::AttachPolicy { target: missing, policy_arn: S3_FULL.into() }).await;
+    assert!(matches!(applied.result, Err(AppError::Other { .. })), "{applied:?}");
+    assert!(applied.done.is_empty() && wire.is_empty());
 }
 
 #[tokio::test]
 async fn a_key_status_other_than_active_or_inactive_is_never_sent() {
     let s = snapshot();
     for status in ["Disabled", "active", ""] {
-        let (result, wire) = run(&s, &IamChange::SetAccessKeyStatus { user_name: "bob".into(), access_key_id: "AKIA1".into(), status: status.into() }).await;
-        assert!(matches!(result, Err(AppError::Other { .. })), "{status}: {result:?}");
-        assert!(wire.is_empty(), "{status}");
+        let (applied, wire) = run(&s, &IamChange::SetAccessKeyStatus { user_name: "bob".into(), access_key_id: "AKIA1".into(), status: status.into() }).await;
+        assert!(matches!(applied.result, Err(AppError::Other { .. })), "{status}: {applied:?}");
+        assert!(applied.done.is_empty() && wire.is_empty(), "{status}");
     }
 }

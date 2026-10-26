@@ -14,6 +14,7 @@ import type {
   GrantSource,
   IamChange,
   IamOverview,
+  Impact,
   LastAccessed,
   Level,
   LevelCell,
@@ -554,6 +555,18 @@ export function previewOf(change: IamChange, extra: Partial<ChangePreview> = {})
 }
 
 export const permDelta = (prefix: string, level: AccessLevel, count: number, sample: string[] = []): PermDelta => ({ prefix, level, count, sample });
+
+/** 영향 하나. 선택 필드(restricted, *Omitted)는 백엔드가 보낼 때처럼 필요할 때만 넣는다 */
+export const impactOf = (who: PrincipalSummary, extra: Partial<Impact> = {}): Impact => ({ principal: who, gained: [], lost: [], ...extra });
+
+/** 관리자 정책을 붙인 큰 그룹처럼 백엔드가 줄인 영향: 줄은 방향마다 20개, 나머지는 수만 온다 */
+export function cappedImpact(who: PrincipalSummary): Impact {
+  const rows = Array.from({ length: 20 }, (_, i) => permDelta(`svc${String(i).padStart(2, "0")}`, "write", 100 - i, [`svc${i}:Do${i}`]));
+  return impactOf(who, { gained: rows, gainedOmitted: 1630 });
+}
+
+/** 백엔드가 계획이 달라져 적용을 거부할 때의 문구 */
+export const PLAN_DRIFTED = "미리보기 뒤에 IAM이 바뀌었어요. 미리보기를 다시 받아 주세요.";
 
 export function logEntry(extra: Partial<ChangeLogEntry> = {}): ChangeLogEntry {
   return {
