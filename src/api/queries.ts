@@ -37,12 +37,13 @@ export function useResources(profile: string | null, region: string, service: Se
   });
 }
 
-export function useS3Objects(profile: string, region: string, bucket: string, prefix: string) {
+export function useS3Objects(profile: string, region: string, bucket: string, prefix: string, enabled = true) {
   return useInfiniteQuery({
     queryKey: ["s3", profile, bucket, prefix],
     queryFn: ({ pageParam }) => api.listS3Objects(profile, region, bucket, prefix, pageParam),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextToken,
+    enabled,
     staleTime: Infinity,
     retry: false,
   });

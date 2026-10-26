@@ -1,0 +1,176 @@
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { ExplorerTab } from "./ExplorerTab";
+import { explorerApi } from "./api";
+import { api } from "../api/client";
+import { makeResource, renderWithClient, sampleServices } from "../test/utils";
+import type { TransferRequest } from "./types";
+
+vi.mock("./api", () => ({
+  explorerApi: {
+    localHome: vi.fn(),
+    localList: vi.fn(),
+    planUpload: vi.fn(),
+    planDownload: vi.fn(),
+    findConflicts: vi.fn(),
+    s3CreateFolder: vi.fn(),
+    s3Rename: vi.fn(),
+    s3CountUnder: vi.fn(),
+    s3Delete: vi.fn(),
+  },
+  onTransferProgress: vi.fn(async () => () => {}),
+}));
+vi.mock("../api/client", () => ({ api: { listResources: vi.fn(), listS3Objects: vi.fn(), ssoLogin: vi.fn() } }));
+let dropHandler: ((e: { payload: { type: string; paths?: string[]; position?: { x: number; y: number } } }) => void) | null = null;
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({
+    onDragDropEvent: vi.fn(async (cb) => {
+      dropHandler = cb;
+      return () => {};
+    }),
+  }),
+}));
+
+const m = vi.mocked(explorerApi);
+const req = (id: string, key: string): TransferRequest => ({ id, direction: "upload", localPath: `/home/me/${key}`, bucket: "assets", region: "us-west-2", key });
+
+function setup(extra = {}) {
+  const transfers = { items: [], enqueue: vi.fn(), retry: vi.fn(), clearFinished: vi.fn() };
+  const props = {
+    profile: "prod",
+    region: "ap-northeast-2",
+    s3Service: sampleServices[1],
+    filter: "",
+    active: true,
+    initialLocalPath: "/home/me",
+    onLocalPathChange: vi.fn(),
+    transfers,
+    onOpenDiff: vi.fn(),
+    onRefresh: vi.fn(),
+    ...extra,
+  };
+  renderWithClient(<ExplorerTab {...props} />);
+  return props;
+}
+
+async function openBucket() {
+  fireEvent.doubleClick(await screen.findByText("assets"));
+  await screen.findByText("📄 a.txt", { selector: "[data-pane=s3] *" });
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  dropHandler = null;
+  m.localHome.mockResolvedValue("/home/me");
+  m.localList.mockResolvedValue([
+    { name: "a.txt", path: "/home/me/a.txt", isDir: false, size: 1, modified: null },
+    { name: "b.txt", path: "/home/me/b.txt", isDir: false, size: 1, modified: null },
+  ]);
+  vi.mocked(api.listResources).mockResolvedValue({ items: [makeResource("assets", { name: "assets", region: "us-west-2" })], truncated: false });
+  vi.mocked(api.listS3Objects).mockResolvedValue({
+    entries: [{ name: "a.txt", key: "a.txt", isFolder: false, size: 1, lastModified: null, storageClass: null }],
+    nextToken: null,
+  });
+});
+
+test("copy → uploads selection after conflict confirmation (skip conflicts)", async () => {
+  const p = setup();
+  await openBucket();
+  fireEvent.click(screen.getByText("📄 a.txt", { selector: "[data-pane=local] *" }));
+  fireEvent.click(screen.getByText("📄 b.txt"), { metaKey: true });
+  m.planUpload.mockResolvedValue([req("1", "a.txt"), req("2", "b.txt")]);
+  m.findConflicts.mockResolvedValue(["1"]);
+  fireEvent.click(screen.getByRole("button", { name: "복사 →" }));
+  expect(await screen.findByRole("dialog", { name: "덮어쓸까요?" })).toBeInTheDocument();
+  expect(m.planUpload).toHaveBeenCalledWith(["/home/me/a.txt", "/home/me/b.txt"], "assets", "us-west-2", "");
+  fireEvent.click(screen.getByRole("button", { name: "충돌 건너뛰기" }));
+  await waitFor(() => expect(p.transfers.enqueue).toHaveBeenCalledWith([req("2", "b.txt")]));
+});
+
+test("← copy downloads without dialog when there are no conflicts", async () => {
+  const p = setup();
+  await openBucket();
+  fireEvent.click(screen.getByText("📄 a.txt", { selector: "[data-pane=s3] *" }));
+  const dl = { ...req("9", "a.txt"), direction: "download" as const };
+  m.planDownload.mockResolvedValue([dl]);
+  m.findConflicts.mockResolvedValue([]);
+  fireEvent.click(screen.getByRole("button", { name: "← 복사" }));
+  await waitFor(() => expect(p.transfers.enqueue).toHaveBeenCalledWith([dl]));
+  expect(m.planDownload).toHaveBeenCalledWith("prod", "assets", "us-west-2", ["a.txt"], "/home/me");
+});
+
+test("delete asks with object count then deletes", async () => {
+  setup();
+  await openBucket();
+  fireEvent.click(screen.getByText("📄 a.txt", { selector: "[data-pane=s3] *" }));
+  m.s3CountUnder.mockResolvedValue(1);
+  m.s3Delete.mockResolvedValue(1);
+  fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+  expect(await screen.findByText("객체 1개를 삭제할까요? 되돌릴 수 없어요.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "삭제하기" }));
+  await waitFor(() => expect(m.s3Delete).toHaveBeenCalledWith("prod", "assets", "us-west-2", ["a.txt"]));
+});
+
+test("rename conflict asks to overwrite then retries with overwrite", async () => {
+  setup();
+  await openBucket();
+  fireEvent.click(screen.getByText("📄 a.txt", { selector: "[data-pane=s3] *" }));
+  m.s3Rename.mockResolvedValueOnce({ kind: "conflict", target: "b.txt" }).mockResolvedValueOnce({ kind: "done" });
+  fireEvent.click(screen.getByRole("button", { name: "이름 변경" }));
+  fireEvent.change(await screen.findByLabelText("새 이름"), { target: { value: "b.txt" } });
+  fireEvent.click(screen.getByRole("button", { name: "바꾸기" }));
+  fireEvent.click(await screen.findByRole("button", { name: "덮어쓰기" }));
+  await waitFor(() => expect(m.s3Rename).toHaveBeenLastCalledWith("prod", "assets", "us-west-2", "a.txt", "b.txt", true));
+});
+
+test("new folder error keeps dialog open", async () => {
+  setup();
+  await openBucket();
+  m.s3CreateFolder.mockRejectedValue({ kind: "other", message: "이름을 입력하세요" });
+  fireEvent.click(screen.getByRole("button", { name: "+ 폴더" }));
+  fireEvent.click(await screen.findByRole("button", { name: "만들기" }));
+  expect(await screen.findByText("이름을 입력하세요")).toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: "새 폴더" })).toBeInTheDocument();
+});
+
+test("compare opens diff for one local and one S3 file", async () => {
+  const p = setup();
+  await openBucket();
+  fireEvent.click(screen.getByText("📄 a.txt", { selector: "[data-pane=local] *" }));
+  fireEvent.click(screen.getByText("📄 a.txt", { selector: "[data-pane=s3] *" }));
+  fireEvent.click(screen.getByRole("button", { name: "비교 ⌘D" }));
+  expect(p.onOpenDiff).toHaveBeenCalledWith(
+    { source: "local", path: "/home/me/a.txt" },
+    { source: "s3", bucket: "assets", region: "us-west-2", key: "a.txt" },
+  );
+});
+
+test("dragging from local to s3 pane uploads", async () => {
+  setup();
+  await openBucket();
+  const s3Pane = screen.getByTestId("pane-s3");
+  document.elementFromPoint = vi.fn(() => s3Pane);
+  m.planUpload.mockResolvedValue([req("1", "b.txt")]);
+  m.findConflicts.mockResolvedValue([]);
+  const row = screen.getByText("📄 b.txt").closest("tr")!;
+  fireEvent.pointerDown(row, { clientX: 0, clientY: 0, button: 0 });
+  fireEvent.pointerMove(row, { clientX: 40, clientY: 0, buttons: 1 });
+  act(() => {
+    window.dispatchEvent(new MouseEvent("pointerup", { clientX: 400, clientY: 10 }));
+  });
+  await waitFor(() => expect(m.planUpload).toHaveBeenCalledWith(["/home/me/b.txt"], "assets", "us-west-2", ""));
+});
+
+test("Finder drop on the S3 pane uploads; before opening a bucket it explains", async () => {
+  setup();
+  await waitFor(() => expect(dropHandler).not.toBeNull());
+  const s3Pane = screen.getByTestId("pane-s3");
+  document.elementFromPoint = vi.fn(() => s3Pane);
+  act(() => dropHandler!({ payload: { type: "drop", paths: ["/Users/me/x.png"], position: { x: 10, y: 10 } } }));
+  expect(await screen.findByText("버킷을 먼저 여세요")).toBeInTheDocument();
+
+  await openBucket();
+  m.planUpload.mockResolvedValue([req("5", "x.png")]);
+  m.findConflicts.mockResolvedValue([]);
+  act(() => dropHandler!({ payload: { type: "drop", paths: ["/Users/me/x.png"], position: { x: 10, y: 10 } } }));
+  await waitFor(() => expect(m.planUpload).toHaveBeenCalledWith(["/Users/me/x.png"], "assets", "us-west-2", ""));
+});
