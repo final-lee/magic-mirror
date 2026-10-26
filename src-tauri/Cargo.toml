@@ -34,6 +34,8 @@ aws-sdk-eks = "1"
 aws-sdk-iam = "1"
 aws-sdk-route53 = "1"
 aws-sdk-cloudfront = "1"
+aws-sdk-dynamodb = "1"
+aws-sdk-cloudwatchlogs = "1"
 
 [dev-dependencies]
 tempfile = "3"
