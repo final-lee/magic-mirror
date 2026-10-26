@@ -79,6 +79,7 @@ struct Piece<'a> {
 }
 
 /// 문장들의 리소스 범위를 조각으로 편다. Resource가 없는 문장(신원·경계 정책에서는 쓸 수 없다)은 모든 리소스로 본다.
+/// `*`를 빼는 NotResource는 남는 리소스가 없어서 조각을 만들지 않는다(신원 정책 Allow든 경계 Allow든 아무것도 열지 않는다).
 fn pieces_of<'a>(hits: &[Hit<'a>]) -> Vec<Piece<'a>> {
     let mut out = Vec::new();
     for hit in hits {
@@ -86,6 +87,7 @@ fn pieces_of<'a>(hits: &[Hit<'a>]) -> Vec<Piece<'a>> {
         let conditional = hit.conditional();
         match &stmt.resources {
             Resources::Resource(patterns) => out.extend(patterns.iter().map(|pattern| Piece { reach: Reach::Pattern(pattern), conditional })),
+            Resources::NotResource(excluded) if excluded.iter().any(|e| all_star(e)) => {}
             Resources::NotResource(excluded) => out.push(Piece { reach: Reach::AllBut(excluded, &[]), conditional }),
             Resources::Unspecified => out.push(Piece { reach: Reach::Pattern("*"), conditional }),
         }
