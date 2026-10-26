@@ -1,6 +1,7 @@
 pub mod diff;
 pub mod keys;
 pub mod local;
+pub mod s3ops;
 pub mod textfile;
 
 use serde::{Deserialize, Serialize};
