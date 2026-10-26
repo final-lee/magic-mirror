@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { ResourceArea } from "./ResourceArea";
 import { makeResource, renderWithClient, sampleServices } from "../test/utils";
 import { api } from "../api/client";
@@ -50,4 +50,18 @@ test("double clicking a bucket opens it with its region", async () => {
   fireEvent.doubleClick(await screen.findByText("assets"));
   expect(onOpenBucket).toHaveBeenCalledWith({ bucket: "assets", region: "us-west-2", prefix: "" });
   expect(screen.getByText(/· global/)).toBeInTheDocument();
+});
+
+test("keeps loaded rows and shows an inline banner when a refetch fails", async () => {
+  vi.mocked(api.listResources).mockResolvedValueOnce({ items: [makeResource("i-1", { name: "web-1" })], truncated: false });
+  const { qc } = renderWithClient(<ResourceArea {...props} service={ec2} type={ec2.types[0]} />);
+  expect(await screen.findByText("web-1")).toBeInTheDocument();
+  vi.mocked(api.listResources).mockRejectedValueOnce({ kind: "network", message: "timeout" });
+  await act(async () => {
+    await qc.invalidateQueries();
+  });
+  expect(await screen.findByText("네트워크 오류: timeout")).toBeInTheDocument();
+  expect(screen.getByText("web-1")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+  expect(props.onRefresh).toHaveBeenCalled();
 });

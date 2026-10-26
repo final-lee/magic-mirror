@@ -41,7 +41,8 @@ export function ResourceArea({ service, type, profile, region, account, filter, 
       <section className="center">
         <Breadcrumb service={service} segments={[{ label: type.name }]} count={q.data ? items.length : undefined} />
         {q.data?.truncated && <div className="notice">1,000개까지만 표시해요</div>}
-        {q.isError ? (
+        {q.isError && q.data && <ErrorState compact error={q.error} profile={profile} onRetry={onRefresh} />}
+        {q.isError && !q.data ? (
           <ErrorState error={q.error} profile={profile} onRetry={onRefresh} />
         ) : q.isPending ? (
           <div className="empty">불러오는 중…</div>

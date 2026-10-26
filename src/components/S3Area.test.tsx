@@ -52,3 +52,21 @@ test("loads more pages", async () => {
   expect(api.listS3Objects).toHaveBeenLastCalledWith("prod", "ap-northeast-2", "assets", "images/", "t1");
   expect(screen.queryByRole("button", { name: "더 보기" })).not.toBeInTheDocument();
 });
+
+test("keeps loaded entries and shows an inline banner when the next page fails", async () => {
+  vi.mocked(api.listS3Objects)
+    .mockResolvedValueOnce({
+      entries: [{ name: "a", key: "images/a", isFolder: false, size: 1, lastModified: null, storageClass: null }],
+      nextToken: "t1",
+    })
+    .mockRejectedValueOnce({ kind: "network", message: "timeout" });
+  const onRefresh = vi.fn();
+  renderWithClient(
+    <S3Area profile="prod" account="1" location={location} filter="" onNavigate={() => {}} onBack={() => {}} onRefresh={onRefresh} />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "더 보기" }));
+  expect(await screen.findByText("네트워크 오류: timeout")).toBeInTheDocument();
+  expect(screen.getByText("📄 a")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+  expect(onRefresh).toHaveBeenCalled();
+});
