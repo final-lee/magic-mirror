@@ -1,4 +1,4 @@
-import { formatAgo, formatDateTime, formatDay } from "./format";
+import { formatAgo, formatDateTime, formatDay, prettyJson } from "./format";
 
 describe("formatDay", () => {
   test("formats an ISO time as a local date", () => {
@@ -35,5 +35,15 @@ describe("formatAgo", () => {
     expect(formatAgo("2026-10-27T12:00:00Z", now)).toBe("방금");
     expect(formatAgo(null, now)).toBe("");
     expect(formatAgo("nope", now)).toBe("");
+  });
+});
+
+describe("prettyJson", () => {
+  test("indents a JSON document by two spaces", () => {
+    expect(prettyJson('{"a":[1,2]}')).toBe('{\n  "a": [\n    1,\n    2\n  ]\n}');
+  });
+  test("hands anything that is not JSON back unchanged", () => {
+    expect(prettyJson("{not json")).toBe("{not json");
+    expect(prettyJson("")).toBe("");
   });
 });

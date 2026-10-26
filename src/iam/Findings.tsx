@@ -11,8 +11,8 @@ interface Props {
   /** 점검 대상(사용자·역할·정책)을 상세 화면으로 연결하는 데 쓴다 */
   overview: IamOverview;
   onOpen: (route: IamRoute) => void;
-  /** 빠른 조치를 누르면 그 변경을 넘긴다. 없으면 조치 버튼은 꺼져 있다(변경 흐름이 연결되기 전) */
-  onFix?: (change: IamChange) => void;
+  /** 빠른 조치를 누르면 그 변경을 넘긴다(변경 미리보기가 열린다) */
+  onFix: (change: IamChange) => void;
   /** 뒤로 가기로 돌아왔을 때 고른 카드를 되살린다 */
   initialKind?: string;
   onViewState?: (state: { tab: string }) => void;
@@ -22,6 +22,9 @@ const LEVEL_TEXT: Record<Level, string> = { danger: "위험", warn: "주의", in
 
 /** 액세스 키 점검은 대상 사용자의 키 탭을 바로 열어서, 키 ID를 보고 조치할 수 있게 한다. */
 const KEY_KINDS: FindingKind[] = ["oldAccessKey", "unusedAccessKey"];
+
+/** 자격 증명 보고서로만 알 수 있는 점검. 보고서를 못 받았으면 "문제 없음"이 아니라 "확인 못 함"이다. */
+const CREDENTIAL_KINDS: FindingKind[] = ["rootAccessKey", "rootNoMfa", "consoleNoMfa", "oldAccessKey", "unusedAccessKey", "inactiveUser"];
 
 function fixLabel(change: IamChange): string {
   switch (change.op) {
@@ -85,19 +88,27 @@ export function Findings({ profile, overview, onOpen, onFix, initialKind, onView
       {data.generatedAt && <div className="fx-time dim">기준 {formatDateTime(data.generatedAt)}</div>}
       <div className="fx-cards" role="group" aria-label="점검 항목">
         {data.groups.map((g) => (
-          <Card key={g.kind} group={g} selected={g === current} onPick={() => pick(g.kind)} />
+          <Card
+            key={g.kind}
+            group={g}
+            selected={g === current}
+            unchecked={data.generatedAt === null && CREDENTIAL_KINDS.includes(g.kind)}
+            onPick={() => pick(g.kind)}
+          />
         ))}
       </div>
       {current ? (
         <Items group={current} overview={overview} onOpen={onOpen} onFix={onFix} />
       ) : (
-        <div className="empty small">발견된 문제가 없어요</div>
+        <div className="empty small">
+          {data.generatedAt === null ? "확인된 문제가 없어요. 자격 증명 보고서가 없어서 일부 점검은 하지 못했어요" : "발견된 문제가 없어요"}
+        </div>
       )}
     </section>
   );
 }
 
-function Card({ group, selected, onPick }: { group: FindingGroup; selected: boolean; onPick: () => void }) {
+function Card({ group, selected, unchecked, onPick }: { group: FindingGroup; selected: boolean; unchecked: boolean; onPick: () => void }) {
   const n = group.items.length;
   return (
     <button
@@ -109,7 +120,7 @@ function Card({ group, selected, onPick }: { group: FindingGroup; selected: bool
     >
       <span className="fx-title">{group.title}</span>
       {n === 0 ? (
-        <span className="fx-ok">문제 없음</span>
+        <span className="fx-ok">{unchecked ? "확인할 수 없어요 (자격 증명 보고서 없음)" : "문제 없음"}</span>
       ) : (
         <span className="fx-count">
           <b className="fx-n">
@@ -162,7 +173,7 @@ function Items({ group, overview, onOpen, onFix }: { group: FindingGroup; overvi
                     </button>
                   )}
                   {item.fix && (
-                    <button className="btn small" disabled={!onFix} title={onFix ? undefined : "변경 기능은 곧 추가돼요"} onClick={() => onFix?.(item.fix!)}>
+                    <button className="btn small" onClick={() => onFix(item.fix!)}>
                       {fixLabel(item.fix)}
                     </button>
                   )}

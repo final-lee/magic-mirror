@@ -32,9 +32,9 @@ test("shows the service prefix next to the name", () => {
 
 test("conditional and denied counts appear as markers with explanations", () => {
   setup();
-  const write = screen.getByRole("button", { name: "Amazon S3 쓰기 허용 6/60, 조건부 2, 거부 1" });
+  const write = screen.getByRole("button", { name: "Amazon S3 쓰기 허용 6/60, 조건부 2, 거부·경계 1" });
   expect(within(write).getByTitle("조건부 2")).toBeInTheDocument();
-  expect(within(write).getByTitle("거부 1")).toBeInTheDocument();
+  expect(within(write).getByTitle("거부·경계 1")).toBeInTheDocument();
 });
 
 test("marks rows that include dangerous actions", () => {

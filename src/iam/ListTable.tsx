@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 export interface ListColumn<T> {
   key: string;
@@ -28,6 +28,12 @@ function compare(a: string | number, b: string | number): number {
 /** 사용자·그룹·역할·정책 목록이 함께 쓰는 정렬·선택 가능한 표. 첫 열을 기준으로 처음 정렬한다. */
 export function ListTable<T>({ label, rows, columns, rowKey, selectedId, onSelect, onOpen, empty }: Props<T>) {
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: columns[0].key, dir: 1 });
+  const box = useRef<HTMLDivElement>(null);
+
+  // 상세를 보고 돌아왔을 때나 ↑↓로 옮길 때 고른 행이 화면 밖에 있으면 보이는 곳까지 스크롤한다
+  useEffect(() => {
+    box.current?.querySelector('tr[aria-selected="true"]')?.scrollIntoView?.({ block: "nearest" });
+  }, [selectedId]);
 
   const sorted = useMemo(() => {
     const get = columns.find((c) => c.key === sort.key)?.sort;
@@ -55,7 +61,7 @@ export function ListTable<T>({ label, rows, columns, rowKey, selectedId, onSelec
   };
 
   return (
-    <div className="tbl iam-list" tabIndex={0} onKeyDown={onKeyDown} data-testid="iam-list">
+    <div className="tbl iam-list" tabIndex={0} onKeyDown={onKeyDown} data-testid="iam-list" ref={box}>
       <table aria-label={label}>
         <thead>
           <tr>

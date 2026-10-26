@@ -1,5 +1,5 @@
 import { admins, adminPolicy, alice, appRole, devTeam, deployPolicy, sampleOverview } from "./fixtures";
-import { policyNameFromId, principalRoute, routeForFocus, sameRoute } from "./route";
+import { inlineOwnerFromId, policyNameFromId, principalRoute, routeForFocus, sameRoute } from "./route";
 
 describe("sameRoute", () => {
   test("compares view and id only", () => {
@@ -57,5 +57,20 @@ describe("policyNameFromId", () => {
 
   test("uses the part after the owner ARN for inline policies", () => {
     expect(policyNameFromId("inline:arn:aws:iam::123456789012:user/alice:s3-scratch")).toBe("s3-scratch");
+  });
+});
+
+describe("inlineOwnerFromId", () => {
+  test("returns the user, group or role that owns the inline policy", () => {
+    expect(inlineOwnerFromId("inline:arn:aws:iam::123456789012:user/alice:s3-scratch")).toBe("arn:aws:iam::123456789012:user/alice");
+    expect(inlineOwnerFromId("inline:arn:aws:iam::123456789012:group/dev-team:notes")).toBe("arn:aws:iam::123456789012:group/dev-team");
+    expect(inlineOwnerFromId("inline:arn:aws:iam::123456789012:role/svc/app-role:queue-access")).toBe("arn:aws:iam::123456789012:role/svc/app-role");
+  });
+
+  test("is null for a managed policy id or an owner that is not an IAM principal", () => {
+    expect(inlineOwnerFromId("arn:aws:iam::123456789012:policy/app-deploy")).toBeNull();
+    expect(inlineOwnerFromId("inline:foo")).toBeNull();
+    expect(inlineOwnerFromId("inline:arn:aws:s3:::bucket:name")).toBeNull();
+    expect(inlineOwnerFromId("")).toBeNull();
   });
 });

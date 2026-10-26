@@ -1,8 +1,9 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { desktop } from "../api/desktop";
 import { renderWithClient } from "../test/utils";
 import { iamApi } from "./api";
 import {
+  adminPolicy,
   alice,
   aliceView,
   appRole,
@@ -18,10 +19,24 @@ import {
   sampleLastAccessed,
   sampleOverview,
   scratchInline,
+  scratchInlineView,
+  supportRole,
 } from "./fixtures";
+import { NEW_POLICY_TEMPLATE } from "./PolicyEditor";
 import { PrincipalDetail } from "./PrincipalDetail";
+import type { PolicyRef, PolicySummary } from "./types";
 
-vi.mock("./api", () => ({ iamApi: { principal: vi.fn(), principalActions: vi.fn(), accessKeys: vi.fn(), lastAccessed: vi.fn() } }));
+vi.mock("./api", () => ({
+  iamApi: {
+    principal: vi.fn(),
+    principalActions: vi.fn(),
+    accessKeys: vi.fn(),
+    lastAccessed: vi.fn(),
+    policy: vi.fn(),
+    listPolicies: vi.fn(),
+    validatePolicy: vi.fn(),
+  },
+}));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 vi.mock("../api/desktop", () => ({ desktop: { copy: vi.fn(), openUrl: vi.fn() } }));
 
@@ -384,5 +399,297 @@ describe("unused permissions", () => {
     const direct = screen.getByRole("button", { name: "ReadOnlyAccess" }).closest("tr") as HTMLElement;
     fireEvent.click(within(direct).getByRole("button", { name: "떼기" }));
     expect(props.onFix).toHaveBeenCalledWith({ op: "detachPolicy", target: alice.arn, policyArn: readOnlyPolicy.id });
+  });
+});
+
+// ── 변경 버튼 ──
+const refOf = (p: PolicySummary): PolicyRef => ({ arn: p.arn, name: p.name, scope: p.scope, description: null, badges: p.badges });
+const rowOf = (name: string) => screen.getByRole("button", { name }).closest("tr") as HTMLElement;
+const buttonNames = (row: HTMLElement) => within(row).getAllByRole("button").map((b) => b.textContent);
+
+describe("policy changes", () => {
+  async function openPolicies(view = aliceView(), arn = alice.arn) {
+    m.principal.mockResolvedValue(view);
+    const utils = setup(arn);
+    fireEvent.click(await tab(/^정책/));
+    return utils;
+  }
+
+  beforeEach(() => {
+    m.listPolicies.mockResolvedValue([refOf(readOnlyPolicy), refOf(adminPolicy)]);
+    m.policy.mockResolvedValue(scratchInlineView());
+  });
+
+  test("[정책 붙이기] opens the picker; the chosen policy starts attachPolicy for this principal", async () => {
+    const { props } = await openPolicies();
+    fireEvent.click(screen.getByRole("button", { name: "정책 붙이기" }));
+    expect(await screen.findByRole("dialog", { name: "정책 붙이기" })).toBeInTheDocument();
+    expect(m.listPolicies).toHaveBeenCalledWith("prod", "");
+    // 이미 직접 붙은 정책은 고를 수 없다
+    expect(await screen.findByRole("option", { name: /ReadOnlyAccess/ })).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(screen.getByRole("option", { name: /AdministratorAccess/ }));
+    expect(props.onFix).toHaveBeenCalledTimes(1);
+    expect(props.onFix).toHaveBeenCalledWith({ op: "attachPolicy", target: alice.arn, policyArn: adminPolicy.arn });
+    expect(screen.queryByRole("dialog", { name: "정책 붙이기" })).not.toBeInTheDocument();
+  });
+
+  test("closing the picker changes nothing", async () => {
+    const { props } = await openPolicies();
+    fireEvent.click(screen.getByRole("button", { name: "정책 붙이기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "취소" }));
+    expect(screen.queryByRole("dialog", { name: "정책 붙이기" })).not.toBeInTheDocument();
+    expect(props.onFix).not.toHaveBeenCalled();
+  });
+
+  test("the toolbar is there even when nothing is attached yet", async () => {
+    await openPolicies(aliceView({ policies: [] }));
+    expect(screen.getByText("붙은 정책이 없어요")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "정책 붙이기" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "인라인 정책 추가" })).toBeEnabled();
+  });
+
+  test("[떼기] on a directly attached managed policy starts detachPolicy", async () => {
+    const { props } = await openPolicies();
+    fireEvent.click(within(rowOf("ReadOnlyAccess")).getByRole("button", { name: "ReadOnlyAccess 떼기" }));
+    expect(props.onFix).toHaveBeenCalledTimes(1);
+    expect(props.onFix).toHaveBeenCalledWith({ op: "detachPolicy", target: alice.arn, policyArn: readOnlyPolicy.id });
+  });
+
+  test("a policy inherited from a group has no [떼기]: it says to detach it from the group, which is a link", async () => {
+    const { props } = await openPolicies();
+    const row = rowOf("app-deploy");
+    expect(buttonNames(row)).toEqual(["app-deploy", "dev-team"]);
+    expect(within(row).getByText("그룹 dev-team에서 떼야 해요")).toBeInTheDocument();
+    fireEvent.click(within(row).getByRole("button", { name: "dev-team" }));
+    expect(props.onOpen).toHaveBeenCalledWith({ view: "groups", id: devTeam.arn });
+    expect(props.onFix).not.toHaveBeenCalled();
+  });
+
+  test("an inline policy of a group says to delete it from the group", async () => {
+    const inherited = { ...scratchInline, id: "inline:arn:aws:iam::123456789012:group/dev-team:team-notes", name: "team-notes", via: "dev-team" };
+    await openPolicies(aliceView({ policies: [inherited] }));
+    const row = rowOf("team-notes");
+    expect(within(row).getByText("그룹 dev-team에서 지워야 해요")).toBeInTheDocument();
+    expect(buttonNames(row)).toEqual(["team-notes", "dev-team"]);
+  });
+
+  test("a permissions boundary has no actions: changing it is out of scope", async () => {
+    await openPolicies();
+    expect(buttonNames(rowOf("dev-boundary"))).toEqual(["dev-boundary"]);
+  });
+
+  test("an inline policy has [편집] and [삭제]; [삭제] starts deleteInlinePolicy", async () => {
+    const { props } = await openPolicies();
+    const row = rowOf("s3-scratch");
+    expect(buttonNames(row)).toEqual(["s3-scratch", "편집", "삭제"]);
+    fireEvent.click(within(row).getByRole("button", { name: "s3-scratch 삭제" }));
+    expect(props.onFix).toHaveBeenCalledWith({ op: "deleteInlinePolicy", target: alice.arn, name: "s3-scratch" });
+  });
+
+  test("[인라인 정책 추가] opens the editor; its preview starts putInlinePolicy and the editor closes once applied", async () => {
+    const { props } = await openPolicies();
+    fireEvent.click(screen.getByRole("button", { name: "인라인 정책 추가" }));
+    expect(screen.getByRole("heading", { name: "인라인 정책 추가" })).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "붙은 정책" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "정책 이름" }), { target: { value: "queue-access" } });
+    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    expect(props.onFix).toHaveBeenCalledTimes(1);
+    expect(props.onFix).toHaveBeenCalledWith(
+      { op: "putInlinePolicy", target: alice.arn, name: "queue-access", document: NEW_POLICY_TEMPLATE },
+      { onApplied: expect.any(Function) },
+    );
+    // 미리보기를 취소하면 편집기는 그대로다. 적용에 성공하면(onApplied) 편집기가 닫힌다.
+    expect(screen.getByRole("heading", { name: "인라인 정책 추가" })).toBeInTheDocument();
+    act(() => props.onFix.mock.calls[0][1].onApplied());
+    expect(screen.queryByRole("heading", { name: "인라인 정책 추가" })).not.toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "붙은 정책" })).toBeInTheDocument();
+  });
+
+  test("a new inline policy cannot reuse the name of one this principal already has", async () => {
+    await openPolicies();
+    fireEvent.click(screen.getByRole("button", { name: "인라인 정책 추가" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "정책 이름" }), { target: { value: "s3-scratch" } });
+    expect(screen.getByText(/같은 이름의 인라인 정책이 이미 있어요/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "미리보기" })).toBeDisabled();
+  });
+
+  test("[편집] on an inline policy loads its document; the preview starts putInlinePolicy with the same name", async () => {
+    const { props } = await openPolicies();
+    fireEvent.click(within(rowOf("s3-scratch")).getByRole("button", { name: "s3-scratch 편집" }));
+    const editor = (await screen.findByRole("textbox", { name: "정책 JSON" })) as HTMLTextAreaElement;
+    expect(m.policy).toHaveBeenCalledWith("prod", scratchInline.id);
+    expect(JSON.parse(editor.value)).toEqual(JSON.parse(scratchInlineView().document));
+    expect(screen.getByRole("button", { name: "미리보기" })).toBeDisabled(); // 바꾼 게 없다
+
+    const changed = editor.value.replace("s3:PutObject", "s3:PutObjectAcl");
+    fireEvent.change(editor, { target: { value: changed } });
+    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    expect(props.onFix).toHaveBeenCalledWith(
+      { op: "putInlinePolicy", target: alice.arn, name: "s3-scratch", document: changed },
+      { onApplied: expect.any(Function) },
+    );
+  });
+
+  test("취소 in the editor goes back to the list; a failing load can be left the same way", async () => {
+    m.policy.mockRejectedValue({ kind: "accessDenied", action: "iam:GetUserPolicy" });
+    const { props } = await openPolicies();
+    fireEvent.click(within(rowOf("s3-scratch")).getByRole("button", { name: "s3-scratch 편집" }));
+    expect(await screen.findByText("권한 없음 (iam:GetUserPolicy)")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "취소" }));
+    expect(screen.getByRole("table", { name: "붙은 정책" })).toBeInTheDocument();
+    expect(props.onFix).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ["service-linked", supportRole, "서비스 연결 역할은 AWS가 관리해서 바꿀 수 없어요"],
+  ])("a %s role has every change button off, with the reason on screen", async (_label, summary, reason) => {
+    const { props } = await openPolicies(appRoleView({ summary }), summary.arn);
+    expect(screen.getByText(reason)).toBeInTheDocument();
+    for (const name of ["정책 붙이기", "인라인 정책 추가", "ReadOnlyAccess 떼기", "queue-access 편집", "queue-access 삭제"]) {
+      const button = screen.getByRole("button", { name });
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("title", reason);
+      fireEvent.click(button);
+    }
+    expect(props.onFix).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  test("the unused-permissions tab of a service-linked role is off as well", async () => {
+    m.principal.mockResolvedValue(appRoleView({ summary: supportRole }));
+    const { props } = setup(supportRole.arn);
+    fireEvent.click(await tab("안 쓰는 권한"));
+    fireEvent.click(screen.getByRole("button", { name: "불러오기" }));
+    await screen.findByRole("table", { name: "서비스별 마지막 사용" });
+    expect(within(screen.getByRole("button", { name: "ReadOnlyAccess" }).closest("tr") as HTMLElement).getByRole("button", { name: "떼기" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "인라인 정책으로 저장" })).toBeDisabled();
+    expect(props.onFix).not.toHaveBeenCalled();
+  });
+
+  test("an Identity Center role is off too", async () => {
+    const sso = { ...appRole, name: "AWSReservedSSO_Admin_0123", arn: "arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_Admin_0123", path: "/aws-reserved/sso.amazonaws.com/" };
+    await openPolicies(appRoleView({ summary: sso }), sso.arn);
+    expect(screen.getByText("Identity Center가 관리하는 역할이라 바꿀 수 없어요")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "정책 붙이기" })).toBeDisabled();
+  });
+});
+
+describe("saving the reduced policy draft", () => {
+  afterEach(() => vi.useRealTimers());
+
+  async function saveDraft(view = aliceView()) {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 9, 26, 10, 30));
+    m.principal.mockResolvedValue(view);
+    const utils = setup();
+    fireEvent.click(await tab("안 쓰는 권한"));
+    fireEvent.click(screen.getByRole("button", { name: "불러오기" }));
+    await screen.findByRole("table", { name: "서비스별 마지막 사용" });
+    fireEvent.click(screen.getByRole("button", { name: "인라인 정책으로 저장" }));
+    return utils;
+  }
+  const inlineNamed = (name: string) => ({ ...scratchInline, id: `inline:${alice.arn}:${name}`, name });
+
+  test("uses the dated name when it is free", async () => {
+    const { props } = await saveDraft();
+    expect(props.onFix).toHaveBeenCalledWith(expect.objectContaining({ op: "putInlinePolicy", name: "least-privilege-20261026" }));
+  });
+
+  test("never overwrites a policy of the same name that this principal already has: the name gets a number", async () => {
+    const { props } = await saveDraft(aliceView({ policies: [inlineNamed("least-privilege-20261026"), inlineNamed("least-privilege-20261026-2")] }));
+    expect(props.onFix).toHaveBeenCalledTimes(1);
+    expect(props.onFix).toHaveBeenCalledWith(expect.objectContaining({ op: "putInlinePolicy", target: alice.arn, name: "least-privilege-20261026-3" }));
+  });
+
+  test("an inline policy of a group with that name is a different policy and does not count", async () => {
+    const { props } = await saveDraft(aliceView({ policies: [{ ...inlineNamed("least-privilege-20261026"), via: "dev-team" }] }));
+    expect(props.onFix).toHaveBeenCalledWith(expect.objectContaining({ name: "least-privilege-20261026" }));
+  });
+
+  test("other changes from the tab are handed over untouched", async () => {
+    const { props } = await saveDraft();
+    fireEvent.click(within(screen.getByRole("button", { name: "ReadOnlyAccess" }).closest("tr") as HTMLElement).getByRole("button", { name: "떼기" }));
+    expect(props.onFix).toHaveBeenLastCalledWith({ op: "detachPolicy", target: alice.arn, policyArn: readOnlyPolicy.id });
+  });
+});
+
+describe("group membership changes", () => {
+  test("a user's [그룹에 추가] picks from the account's groups, without the ones the user is already in", async () => {
+    const { props } = setup();
+    fireEvent.click(await tab(/^그룹/));
+    fireEvent.click(screen.getByRole("button", { name: "그룹에 추가" }));
+    expect(screen.getByRole("dialog", { name: "그룹에 추가" })).toBeInTheDocument();
+    const current = screen.getByRole("option", { name: /dev-team/ });
+    expect(current).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(current);
+    expect(props.onFix).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("option", { name: /admins/ }));
+    expect(props.onFix).toHaveBeenCalledWith({ op: "addToGroup", userName: "alice", groupName: "admins" });
+    expect(screen.queryByRole("dialog", { name: "그룹에 추가" })).not.toBeInTheDocument();
+  });
+
+  test("a user's [빼기] starts removeFromGroup", async () => {
+    const { props } = setup();
+    fireEvent.click(await tab(/^그룹/));
+    fireEvent.click(screen.getByRole("button", { name: "dev-team 빼기" }));
+    expect(props.onFix).toHaveBeenCalledWith({ op: "removeFromGroup", userName: "alice", groupName: "dev-team" });
+  });
+
+  test("a group's [사용자 추가] picks from the account's users, without the current members", async () => {
+    m.principal.mockResolvedValue(devTeamView());
+    const { props } = setup(devTeam.arn);
+    fireEvent.click(await tab(/^구성원/));
+    fireEvent.click(screen.getByRole("button", { name: "사용자 추가" }));
+    expect(screen.getByRole("option", { name: /alice/ })).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(screen.getByRole("option", { name: /ci-bot/ }));
+    expect(props.onFix).toHaveBeenCalledWith({ op: "addToGroup", userName: "ci-bot", groupName: "dev-team" });
+  });
+
+  test("a group's member [빼기] starts removeFromGroup for that user", async () => {
+    m.principal.mockResolvedValue(devTeamView());
+    const { props } = setup(devTeam.arn);
+    fireEvent.click(await tab(/^구성원/));
+    fireEvent.click(screen.getByRole("button", { name: "bob 빼기" }));
+    expect(props.onFix).toHaveBeenCalledWith({ op: "removeFromGroup", userName: "bob", groupName: "dev-team" });
+  });
+
+  test("names missing from the overview can still be removed", async () => {
+    m.principal.mockResolvedValue(aliceView({ groups: ["ghost"] }));
+    const { props } = setup();
+    fireEvent.click(await tab(/^그룹/));
+    fireEvent.click(screen.getByRole("button", { name: "ghost 빼기" }));
+    expect(props.onFix).toHaveBeenCalledWith({ op: "removeFromGroup", userName: "alice", groupName: "ghost" });
+  });
+});
+
+describe("access key changes", () => {
+  async function openKeys() {
+    m.principal.mockResolvedValue(aliceView({ summary: bob }));
+    const utils = setup(bob.arn);
+    fireEvent.click(await tab("액세스 키"));
+    await screen.findByRole("table", { name: "액세스 키" });
+    return utils;
+  }
+  const keyRow = (id: string) => screen.getByText(id).closest("tr") as HTMLElement;
+
+  test("an active key can be deactivated", async () => {
+    const { props } = await openKeys();
+    expect(buttonNames(keyRow("AKIAIOSFODNN7EXAMPLE"))).toEqual(["비활성화", "삭제"]);
+    fireEvent.click(within(keyRow("AKIAIOSFODNN7EXAMPLE")).getByRole("button", { name: "AKIAIOSFODNN7EXAMPLE 비활성화" }));
+    expect(props.onFix).toHaveBeenCalledWith({ op: "setAccessKeyStatus", userName: "bob", accessKeyId: "AKIAIOSFODNN7EXAMPLE", status: "Inactive" });
+  });
+
+  test("an inactive key can be activated", async () => {
+    const { props } = await openKeys();
+    expect(buttonNames(keyRow("AKIAI44QH8DHBEXAMPLE"))).toEqual(["활성화", "삭제"]);
+    fireEvent.click(within(keyRow("AKIAI44QH8DHBEXAMPLE")).getByRole("button", { name: "AKIAI44QH8DHBEXAMPLE 활성화" }));
+    expect(props.onFix).toHaveBeenCalledWith({ op: "setAccessKeyStatus", userName: "bob", accessKeyId: "AKIAI44QH8DHBEXAMPLE", status: "Active" });
+  });
+
+  test("[삭제] starts deleteAccessKey", async () => {
+    const { props } = await openKeys();
+    fireEvent.click(within(keyRow("AKIAI44QH8DHBEXAMPLE")).getByRole("button", { name: "AKIAI44QH8DHBEXAMPLE 삭제" }));
+    expect(props.onFix).toHaveBeenCalledWith({ op: "deleteAccessKey", userName: "bob", accessKeyId: "AKIAI44QH8DHBEXAMPLE" });
   });
 });

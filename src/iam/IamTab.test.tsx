@@ -3,16 +3,23 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { renderWithClient } from "../test/utils";
 import { iamApi } from "./api";
 import {
+  activateBobKey,
+  adminPolicy,
   alice,
   aliceView,
   appRole,
   appRoleView,
   bob,
+  bobKeys,
   catalogActions,
+  deactivateBobKey,
   deployPolicy,
   deployPolicyView,
   devTeam,
   devTeamView,
+  logEntry,
+  previewOf,
+  readOnlyPolicy,
   s3WriteGrants,
   sampleFindings,
   sampleLastAccessed,
@@ -21,6 +28,7 @@ import {
   whoCanResult,
 } from "./fixtures";
 import { IamTab } from "./IamTab";
+import type { IamChange } from "./types";
 
 vi.mock("./api", () => ({
   iamApi: {
@@ -34,6 +42,12 @@ vi.mock("./api", () => ({
     whoCan: vi.fn(),
     simulate: vi.fn(),
     lastAccessed: vi.fn(),
+    preview: vi.fn(),
+    apply: vi.fn(),
+    changeLog: vi.fn(),
+    undoChange: vi.fn(),
+    listPolicies: vi.fn(),
+    validatePolicy: vi.fn(),
   },
 }));
 let mouseNav: ((dir: "back" | "forward") => void) | null = null;
@@ -97,6 +111,10 @@ beforeEach(() => {
   m.whoCan.mockResolvedValue(whoCanResult());
   m.simulate.mockResolvedValue(simulateResults);
   m.lastAccessed.mockResolvedValue(sampleLastAccessed());
+  m.preview.mockImplementation(async (_p, change) => previewOf(change));
+  m.apply.mockResolvedValue({ logId: "log-9", summary: "변경을 적용했어요" });
+  m.changeLog.mockResolvedValue([]);
+  m.listPolicies.mockImplementation(async () => [readOnlyPolicy, adminPolicy].map((p) => ({ arn: p.arn, name: p.name, scope: p.scope, description: null, badges: p.badges })));
 });
 
 describe("loading", () => {
@@ -159,13 +177,16 @@ describe("menu and lists", () => {
     expect(screen.getByText("bob")).toBeInTheDocument();
   });
 
-  test("the who-can view has its search form; the change log is still a placeholder", async () => {
+  test("the who-can view has its search form and the change log view lists the recorded changes", async () => {
+    m.changeLog.mockResolvedValue([logEntry()]);
     setup();
     fireEvent.click(await nav(/누가 할 수 있나/));
     expect(await screen.findByRole("combobox", { name: "작업" })).toBeInTheDocument();
     expect(menu().getByRole("button", { name: /누가 할 수 있나/ })).toHaveAttribute("aria-current", "page");
     fireEvent.click(menu().getByRole("button", { name: /변경 기록/ }));
-    expect(screen.getByText("변경 기록 화면은 곧 추가돼요")).toBeInTheDocument();
+    expect(menu().getByRole("button", { name: /변경 기록/ })).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("table", { name: "변경 기록" })).toBeInTheDocument();
+    expect(screen.getByText("bob의 액세스 키 AKIAIOSFODNN7EXAMPLE를 비활성화했어요")).toBeInTheDocument();
   });
 
   test("the findings view comes back from the other views", async () => {
@@ -182,6 +203,18 @@ describe("menu and lists", () => {
     update({ filter: "bob" });
     expect(screen.queryByText("alice")).not.toBeInTheDocument();
     expect(screen.getByText("bob")).toBeInTheDocument();
+  });
+
+  test("the sort order chosen in one list does not carry over to the next one", async () => {
+    setup();
+    await openUsersList();
+    fireEvent.click(await screen.findByRole("columnheader", { name: /마지막 사용/ }));
+    expect(screen.getByRole("columnheader", { name: /마지막 사용/ })).toHaveAttribute("aria-sort", "ascending");
+    fireEvent.click(menu().getByRole("button", { name: /그룹/ }));
+    expect(screen.getByRole("columnheader", { name: /이름/ })).toHaveAttribute("aria-sort", "ascending");
+    expect(screen.getAllByRole("row").slice(1).map((r) => r.textContent?.slice(0, 5))).toEqual([expect.stringContaining("admin"), expect.stringContaining("dev-t")]);
+    fireEvent.click(menu().getByRole("button", { name: /역할/ }));
+    expect(screen.getByRole("columnheader", { name: /이름/ })).toHaveAttribute("aria-sort", "ascending");
   });
 
   test("shows the item count of the list in the header", async () => {
@@ -441,12 +474,6 @@ describe("security findings", () => {
     expect(checkCard(/루트 MFA 없음/)).toHaveAttribute("aria-pressed", "false");
   });
 
-  test("the fix button is disabled until the change flow is connected", async () => {
-    setup();
-    await findingCards();
-    fireEvent.click(checkCard(/오래된 액세스 키/));
-    expect(screen.getByRole("button", { name: "키 비활성화" })).toBeDisabled();
-  });
 
   test("refreshing re-reads the findings", async () => {
     setup();
@@ -520,5 +547,179 @@ describe("unused permissions", () => {
     expect(await screen.findByRole("tab", { name: "안 쓰는 권한" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("table", { name: "서비스별 마지막 사용" })).toBeInTheDocument();
     expect(m.lastAccessed).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("changing IAM", () => {
+  const previewDialog = () => screen.findByRole("dialog", { name: "변경 미리보기" });
+  const applyButton = () => screen.getByRole("button", { name: /^적용/ });
+  const readyToApply = () => waitFor(() => expect(applyButton()).toBeEnabled());
+  const attachAdmin: IamChange = { op: "attachPolicy", target: alice.arn, policyArn: adminPolicy.arn };
+  const openAlice = async (tabName: RegExp | string) => {
+    const utils = setup({ focus: alice.arn, nonce: 1 });
+    fireEvent.click(await screen.findByRole("tab", { name: tabName }));
+    return utils;
+  };
+  /** 점검 화면의 빠른 조치(bob의 키 비활성화)로 미리보기를 연다 */
+  const openFixPreview = async () => {
+    setup();
+    await findingCards();
+    fireEvent.click(screen.getByRole("button", { name: /오래된 액세스 키/ }));
+    fireEvent.click(screen.getByRole("button", { name: "키 비활성화" }));
+    await previewDialog();
+  };
+
+  test("attaching a policy goes picker → preview → apply, with exactly the previewed change", async () => {
+    m.apply.mockResolvedValue({ logId: "log-9", summary: "alice에 AdministratorAccess를 붙였어요" });
+    await openAlice(/^정책/);
+    fireEvent.click(screen.getByRole("button", { name: "정책 붙이기" }));
+    fireEvent.click(await screen.findByRole("option", { name: /AdministratorAccess/ }));
+
+    await previewDialog();
+    expect(m.preview).toHaveBeenCalledWith("prod", attachAdmin);
+    expect(m.apply).not.toHaveBeenCalled(); // 미리보기를 보기 전에는 적용하지 않는다
+    await readyToApply();
+    fireEvent.click(applyButton());
+    await waitFor(() => expect(m.apply).toHaveBeenCalledWith("prod", attachAdmin, null, null));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByText("alice에 AdministratorAccess를 붙였어요")).toBeInTheDocument();
+    expect(screen.getByText("반영까지 몇 초 걸릴 수 있어요")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "알림 닫기" }));
+    expect(screen.queryByText("alice에 AdministratorAccess를 붙였어요")).not.toBeInTheDocument();
+  });
+
+  test("after an apply the overview and the open detail are read again", async () => {
+    await openAlice(/^정책/);
+    await screen.findByRole("table", { name: "붙은 정책" });
+    const reads = { overview: m.overview.mock.calls.length, principal: m.principal.mock.calls.length };
+    fireEvent.click(screen.getByRole("button", { name: "ReadOnlyAccess 떼기" }));
+    await previewDialog();
+    await readyToApply();
+    fireEvent.click(applyButton());
+    await waitFor(() => expect(m.overview.mock.calls.length).toBe(reads.overview + 1));
+    expect(m.overview).toHaveBeenLastCalledWith("prod", false);
+    await waitFor(() => expect(m.principal.mock.calls.length).toBe(reads.principal + 1));
+  });
+
+  test("deleting an access key keeps the apply off until the key id is typed exactly", async () => {
+    const del: IamChange = { op: "deleteAccessKey", userName: "bob", accessKeyId: "AKIAIOSFODNN7EXAMPLE" };
+    m.accessKeys.mockResolvedValue(bobKeys);
+    m.preview.mockImplementation(async (_p, change) =>
+      previewOf(change, {
+        summary: "bob의 액세스 키 AKIAIOSFODNN7EXAMPLE를 삭제해요",
+        reversible: false,
+        warnings: [{ level: "confirm", message: "삭제한 키는 되살릴 수 없어요" }],
+        confirmText: "AKIAIOSFODNN7EXAMPLE", // 백엔드는 키 삭제의 확인 문구로 키 ID를 준다
+      }),
+    );
+    setup({ focus: bob.arn, nonce: 1 });
+    fireEvent.click(await screen.findByRole("tab", { name: "액세스 키" }));
+    fireEvent.click(await screen.findByRole("button", { name: "AKIAIOSFODNN7EXAMPLE 삭제" }));
+    await previewDialog();
+    const input = await screen.findByLabelText("확인하려면 AKIAIOSFODNN7EXAMPLE를 입력하세요");
+    expect(applyButton()).toBeDisabled();
+    fireEvent.change(input, { target: { value: "bob" } }); // 사용자 이름으로는 안 된다
+    expect(applyButton()).toBeDisabled();
+    fireEvent.change(input, { target: { value: "akiaiosfodnn7example" } });
+    expect(applyButton()).toBeDisabled();
+    fireEvent.click(applyButton());
+    expect(m.apply).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: "AKIAIOSFODNN7EXAMPLE" } });
+    expect(applyButton()).toBeEnabled();
+    fireEvent.click(applyButton());
+    await waitFor(() => expect(m.apply).toHaveBeenCalledWith("prod", del, "AKIAIOSFODNN7EXAMPLE", null));
+  });
+
+  test("a blocking warning keeps the apply off for good; 취소 closes the preview", async () => {
+    m.preview.mockImplementation(async (_p, change) => previewOf(change, { warnings: [{ level: "block", message: "서비스 연결 역할은 바꿀 수 없어요" }] }));
+    await openFixPreview();
+    expect(await screen.findByText("서비스 연결 역할은 바꿀 수 없어요")).toBeInTheDocument();
+    expect(applyButton()).toBeDisabled();
+    fireEvent.click(applyButton());
+    expect(m.apply).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "취소" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(m.apply).not.toHaveBeenCalled();
+  });
+
+  test("a failed apply keeps the dialog open with the error; only a fresh preview can be applied", async () => {
+    m.apply.mockRejectedValueOnce({ kind: "accessDenied", action: "iam:UpdateAccessKey" });
+    await openFixPreview();
+    await readyToApply();
+    fireEvent.click(applyButton());
+    expect(await screen.findByText("권한 없음 (iam:UpdateAccessKey)")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "변경 미리보기" })).toBeInTheDocument();
+    expect(applyButton()).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "미리보기 다시 받기" }));
+    await readyToApply();
+    expect(m.preview).toHaveBeenCalledTimes(2);
+    fireEvent.click(applyButton());
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(m.apply).toHaveBeenCalledTimes(2);
+  });
+
+  test("a findings quick fix opens the preview of exactly that change", async () => {
+    await openFixPreview();
+    expect(m.preview).toHaveBeenCalledWith("prod", deactivateBobKey);
+    await readyToApply();
+    fireEvent.click(applyButton());
+    await waitFor(() => expect(m.apply).toHaveBeenCalledWith("prod", deactivateBobKey, null, null));
+  });
+
+  test("an unused-permissions quick fix opens the preview too", async () => {
+    await openAlice("안 쓰는 권한");
+    fireEvent.click(screen.getByRole("button", { name: "불러오기" }));
+    await screen.findByRole("table", { name: "서비스별 마지막 사용" });
+    const row = screen.getByRole("button", { name: "ReadOnlyAccess" }).closest("tr") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "떼기" }));
+    await previewDialog();
+    expect(m.preview).toHaveBeenCalledWith("prod", { op: "detachPolicy", target: alice.arn, policyArn: readOnlyPolicy.id });
+  });
+
+  test("undoing from the change log passes the entry id as undoOf, and the log is read again afterwards", async () => {
+    m.changeLog.mockResolvedValue([logEntry()]);
+    m.undoChange.mockResolvedValue(activateBobKey);
+    setup();
+    fireEvent.click(await nav(/변경 기록/));
+    fireEvent.click(await screen.findByRole("button", { name: "되돌리기" }));
+    await screen.findByRole("dialog", { name: "되돌리기 미리보기" });
+    expect(m.undoChange).toHaveBeenCalledWith("log-1");
+    expect(m.preview).toHaveBeenCalledWith("prod", activateBobKey);
+    await readyToApply();
+
+    m.changeLog.mockResolvedValue([logEntry({ id: "log-2", undoOf: "log-1", change: activateBobKey, inverse: deactivateBobKey }), logEntry({ undone: true })]);
+    fireEvent.click(applyButton());
+    await waitFor(() => expect(m.apply).toHaveBeenCalledWith("prod", activateBobKey, null, "log-1"));
+    await waitFor(() => expect(m.changeLog).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("되돌림")).toBeInTheDocument();
+  });
+
+  test("editing a managed policy goes editor → preview → apply, and the editor closes once applied", async () => {
+    setup({ focus: deployPolicy.arn, nonce: 1 });
+    fireEvent.click(await screen.findByRole("button", { name: "편집" }));
+    const box = (await screen.findByRole("textbox", { name: "정책 JSON" })) as HTMLTextAreaElement;
+    const changed = box.value.replace("s3:GetObject", "s3:GetObjectVersion");
+    fireEvent.change(box, { target: { value: changed } });
+    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    await previewDialog();
+    const update: IamChange = { op: "updateManagedPolicy", policyArn: deployPolicy.arn, document: changed };
+    expect(m.preview).toHaveBeenCalledWith("prod", update);
+    await readyToApply();
+    fireEvent.click(applyButton());
+    await waitFor(() => expect(m.apply).toHaveBeenCalledWith("prod", update, null, null));
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "정책 JSON" })).not.toBeInTheDocument());
+  });
+
+  test("with the preview open, ⌘[ does not navigate; Escape closes it without applying", async () => {
+    await openAlice(/^정책/);
+    fireEvent.click(screen.getByRole("button", { name: "ReadOnlyAccess 떼기" }));
+    await previewDialog();
+    metaKey("[");
+    expect(screen.getByRole("heading", { name: "alice" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(m.apply).not.toHaveBeenCalled();
   });
 });

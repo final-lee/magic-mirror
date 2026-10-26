@@ -15,7 +15,7 @@ vi.mock("../api/desktop", () => ({ desktop: { copy: vi.fn(), openUrl: vi.fn() } 
 const m = vi.mocked(iamApi);
 
 type Props = React.ComponentProps<typeof UnusedPermissions>;
-const element = (props: Partial<Props>) => <UnusedPermissions profile="prod" arn={alice.arn} onOpenPolicy={vi.fn()} onOpenGroup={vi.fn()} {...props} />;
+const element = (props: Partial<Props>) => <UnusedPermissions profile="prod" arn={alice.arn} onOpenPolicy={vi.fn()} onOpenGroup={vi.fn()} onFix={vi.fn()} {...props} />;
 
 function setup(extra: Partial<Props> = {}) {
   const props = { onOpenPolicy: vi.fn(), onOpenGroup: vi.fn(), onFix: vi.fn() };
@@ -186,10 +186,12 @@ describe("policies that are not used at all", () => {
     expect(props.onFix).toHaveBeenCalledWith({ op: "deleteInlinePolicy", target: alice.arn, name: "s3-scratch" });
   });
 
-  test("the buttons stay disabled while no change handler is connected", async () => {
-    setup({ onFix: undefined });
+  test("the buttons are plain action buttons: no 'coming soon' placeholder state", async () => {
+    setup();
     await load();
-    expect(within(policyRow("ReadOnlyAccess")).getByRole("button", { name: "떼기" })).toBeDisabled();
+    const button = within(policyRow("ReadOnlyAccess")).getByRole("button", { name: "떼기" });
+    expect(button).toBeEnabled();
+    expect(button).not.toHaveAttribute("title");
   });
 
   test("says so when every policy is in use", async () => {
@@ -242,11 +244,11 @@ describe("reduced policy draft", () => {
     expect(screen.getByText(/사용 기록이 없는 권한은 빠져 있어요/)).toBeInTheDocument();
   });
 
-  test("the save button stays disabled while no change handler is connected", async () => {
-    setup({ onFix: undefined });
+  test("the save button is a plain action button: no 'coming soon' placeholder state", async () => {
+    setup();
     await load();
-    expect(screen.getByRole("button", { name: "인라인 정책으로 저장" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "초안 복사" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "인라인 정책으로 저장" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "인라인 정책으로 저장" })).not.toHaveAttribute("title");
   });
 
   test("without a draft there is nothing to copy or save, but the notes still show", async () => {
@@ -264,5 +266,45 @@ describe("reduced policy draft", () => {
     setup();
     await load();
     expect(screen.getByTestId("draft-json").textContent).toBe("{not json");
+  });
+});
+
+describe("principals that cannot be changed", () => {
+  const reason = "서비스 연결 역할은 AWS가 관리해서 바꿀 수 없어요";
+
+  test("떼기, 삭제 and 저장 are off with the reason, and nothing is handed to onFix", async () => {
+    m.lastAccessed.mockResolvedValue(
+      sampleLastAccessed({
+        unusedPolicies: [
+          { policyId: readOnlyPolicy.id, name: "ReadOnlyAccess", via: null, reason: "안 썼어요" },
+          { policyId: scratchInline.id, name: "s3-scratch", via: null, reason: "안 썼어요" },
+        ],
+      }),
+    );
+    const { props } = setup({ blockedReason: reason });
+    await load();
+    expect(screen.getByText(reason)).toBeInTheDocument();
+    for (const [row, name] of [
+      [policyRow("ReadOnlyAccess"), "떼기"],
+      [policyRow("s3-scratch"), "삭제"],
+    ] as const) {
+      const button = within(row).getByRole("button", { name });
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("title", reason);
+      fireEvent.click(button);
+    }
+    const save = screen.getByRole("button", { name: "인라인 정책으로 저장" });
+    expect(save).toBeDisabled();
+    expect(save).toHaveAttribute("title", reason);
+    fireEvent.click(save);
+    expect(props.onFix).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "초안 복사" })).toBeEnabled();
+  });
+
+  test("without a reason nothing is disabled and no reason is shown", async () => {
+    setup({ blockedReason: null });
+    await load();
+    expect(screen.queryByText(reason)).not.toBeInTheDocument();
+    expect(within(policyRow("ReadOnlyAccess")).getByRole("button", { name: "떼기" })).toBeEnabled();
   });
 });

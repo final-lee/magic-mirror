@@ -1,18 +1,18 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { desktop } from "../api/desktop";
 import { renderWithClient } from "../test/utils";
 import { iamApi } from "./api";
-import { alice, appRole, BADGES, deployPolicy, deployPolicyView, devTeam, inlineId } from "./fixtures";
+import { alice, appRole, BADGES, deployPolicy, deployPolicyView, devTeam, inlineId, scratchInline, scratchInlineView } from "./fixtures";
 import { PolicyDetail } from "./PolicyDetail";
 
-vi.mock("./api", () => ({ iamApi: { policy: vi.fn() } }));
+vi.mock("./api", () => ({ iamApi: { policy: vi.fn(), validatePolicy: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 vi.mock("../api/desktop", () => ({ desktop: { copy: vi.fn(), openUrl: vi.fn() } }));
 
 const m = vi.mocked(iamApi);
 
 function setup(policyId = deployPolicy.id, extra: Partial<React.ComponentProps<typeof PolicyDetail>> = {}) {
-  const props = { onOpen: vi.fn(), onViewState: vi.fn() };
+  const props = { onOpen: vi.fn(), onViewState: vi.fn(), onFix: vi.fn() };
   renderWithClient(<PolicyDetail profile="prod" policyId={policyId} {...props} {...extra} />);
   return props;
 }
@@ -186,5 +186,77 @@ describe("attached principals", () => {
     setup();
     fireEvent.click(await tab(/^붙어 있는 대상/));
     expect(screen.getByText("붙어 있는 곳이 없어요")).toBeInTheDocument();
+  });
+});
+
+describe("editing", () => {
+  const editor = () => screen.findByRole("textbox", { name: "정책 JSON" }) as Promise<HTMLTextAreaElement>;
+  const editButton = () => screen.findByRole("button", { name: "편집" });
+
+  test("a customer managed policy can be edited: the editor starts from the current document", async () => {
+    setup();
+    fireEvent.click(await editButton());
+    const box = await editor();
+    expect(screen.getByRole("heading", { name: "정책 편집 · app-deploy" })).toBeInTheDocument();
+    expect(box.value).toBe(prettyJson());
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "미리보기" })).toBeDisabled(); // 바꾼 게 없다
+  });
+
+  test("the preview hands updateManagedPolicy to the change flow; the editor closes once it is applied", async () => {
+    const props = setup();
+    fireEvent.click(await editButton());
+    const box = await editor();
+    const changed = box.value.replace("s3:GetObject", "s3:GetObjectVersion");
+    fireEvent.change(box, { target: { value: changed } });
+    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    expect(props.onFix).toHaveBeenCalledTimes(1);
+    expect(props.onFix).toHaveBeenCalledWith({ op: "updateManagedPolicy", policyArn: deployPolicy.arn, document: changed }, { onApplied: expect.any(Function) });
+    expect(screen.getByRole("textbox", { name: "정책 JSON" })).toBeInTheDocument(); // 미리보기를 취소하면 편집기는 그대로
+    act(() => props.onFix.mock.calls[0][1].onApplied());
+    expect(screen.queryByRole("textbox", { name: "정책 JSON" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tablist")).toBeInTheDocument();
+  });
+
+  test("취소 goes back to the tabs without changing anything", async () => {
+    const props = setup();
+    fireEvent.click(await editButton());
+    await editor();
+    fireEvent.click(screen.getByRole("button", { name: "취소" }));
+    expect(screen.getByRole("tab", { name: /^문장/ })).toBeInTheDocument();
+    expect(props.onFix).not.toHaveBeenCalled();
+  });
+
+  test("an inline policy is saved back with putInlinePolicy to the principal that owns it", async () => {
+    m.policy.mockResolvedValue(scratchInlineView());
+    const props = setup(scratchInline.id);
+    fireEvent.click(await editButton());
+    const box = await editor();
+    expect(screen.getByRole("heading", { name: "인라인 정책 편집 · s3-scratch" })).toBeInTheDocument();
+    const changed = box.value.replace("s3:PutObject", "s3:PutObjectAcl");
+    fireEvent.change(box, { target: { value: changed } });
+    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    expect(props.onFix).toHaveBeenCalledWith({ op: "putInlinePolicy", target: alice.arn, name: "s3-scratch", document: changed }, { onApplied: expect.any(Function) });
+  });
+
+  test("no edit button when the backend says the policy is not editable (AWS managed, protected owner)", async () => {
+    m.policy.mockResolvedValue(deployPolicyView({ scope: "aws", editable: false }));
+    setup();
+    await screen.findByRole("heading", { name: "app-deploy" });
+    expect(screen.queryByRole("button", { name: "편집" })).not.toBeInTheDocument();
+  });
+
+  test("no edit button for an AWS managed policy even if it were flagged editable", async () => {
+    m.policy.mockResolvedValue(deployPolicyView({ scope: "aws", editable: true }));
+    setup();
+    await screen.findByRole("heading", { name: "app-deploy" });
+    expect(screen.queryByRole("button", { name: "편집" })).not.toBeInTheDocument();
+  });
+
+  test("no edit button for an inline policy whose owner cannot be told from its id", async () => {
+    m.policy.mockResolvedValue(deployPolicyView({ id: "inline-without-owner", scope: "inline", arn: null, editable: true }));
+    setup("inline-without-owner");
+    await screen.findByRole("heading", { name: "app-deploy" });
+    expect(screen.queryByRole("button", { name: "편집" })).not.toBeInTheDocument();
   });
 });
