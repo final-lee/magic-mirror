@@ -316,15 +316,31 @@ pub fn action_matches(pattern: &str, action: &str) -> bool {
     glob(pattern, action, true)
 }
 
-/// 리소스 ARN 매칭: 대소문자를 구분하는 glob. `${...}` 정책 변수가 있으면 값을 알 수 없어 Unknown이다.
+/// 리소스 ARN 매칭: 대소문자를 구분하는 glob. `${...}` 정책 변수는 값을 알 수 없으니 `*`로 바꿔 맞춰 본다.
+/// 그래도 안 맞으면 어떤 값이어도 안 맞으므로 No, 맞으면 값에 따라 달라지므로 Unknown이다.
 pub fn resource_matches(pattern: &str, arn: &str) -> ResMatch {
     if pattern.contains("${") {
-        ResMatch::Unknown
-    } else if glob(pattern, arn, false) {
+        return if glob(&variables_as_wildcards(pattern), arn, false) { ResMatch::Unknown } else { ResMatch::No };
+    }
+    if glob(pattern, arn, false) {
         ResMatch::Yes
     } else {
         ResMatch::No
     }
+}
+
+/// `${aws:username}` 같은 정책 변수를 각각 `*`로 바꾼다. 닫히지 않은 `${`는 그대로 둔다.
+fn variables_as_wildcards(pattern: &str) -> String {
+    let mut out = String::with_capacity(pattern.len());
+    let mut rest = pattern;
+    while let Some(start) = rest.find("${") {
+        let Some(len) = rest[start..].find('}') else { break };
+        out.push_str(&rest[..start]);
+        out.push('*');
+        rest = &rest[start + len + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// 문장의 Resource/NotResource가 `arn`에 적용되는지. `arn`이 없으면(대상 지정 안 함) 항상 Yes,
@@ -473,9 +489,29 @@ mod tests {
     }
 
     #[test]
-    fn resource_with_policy_variable_is_unknown() {
-        assert_eq!(resource_matches("arn:aws:s3:::${aws:username}/*", "arn:aws:s3:::alice/a.txt"), ResMatch::Unknown);
-        assert_eq!(resource_matches("arn:aws:s3:::${aws:username}/*", "arn:aws:ec2:::x"), ResMatch::Unknown);
+    fn resource_with_policy_variable_is_unknown_only_when_the_rest_can_match() {
+        let var = "arn:aws:s3:::${aws:username}/*";
+        assert_eq!(resource_matches(var, "arn:aws:s3:::alice/a.txt"), ResMatch::Unknown);
+        // 변수를 무엇으로 바꿔도 변수 밖의 글자가 다르면 맞을 수 없다
+        assert_eq!(resource_matches(var, "arn:aws:ec2:::x"), ResMatch::No);
+        assert_eq!(resource_matches("home/${aws:username}/*", "payroll/x"), ResMatch::No);
+        assert_eq!(resource_matches("home/${aws:username}/*", "home/alice/x"), ResMatch::Unknown);
+        // 변수가 여러 개여도 같다
+        assert_eq!(resource_matches("a/${aws:userid}-${aws:username}/z", "a/1-bob/z"), ResMatch::Unknown);
+        assert_eq!(resource_matches("a/${aws:userid}-${aws:username}/z", "a/1-bob/y"), ResMatch::No);
+        // 대소문자는 구분한다
+        assert_eq!(resource_matches("Home/${aws:username}", "home/alice"), ResMatch::No);
+        // 닫히지 않은 `${`는 변수로 보지 않고 글자 그대로 맞춘다
+        assert_eq!(resource_matches("a/${unclosed", "a/x"), ResMatch::No);
+    }
+
+    #[test]
+    fn variables_become_wildcards() {
+        assert_eq!(variables_as_wildcards("a/${aws:username}/b"), "a/*/b");
+        assert_eq!(variables_as_wildcards("${a}${b}"), "**");
+        assert_eq!(variables_as_wildcards("no variables"), "no variables");
+        assert_eq!(variables_as_wildcards("x${open"), "x${open");
+        assert_eq!(variables_as_wildcards("${a}x${open"), "*x${open");
     }
 
     // ---- decode / parse ----

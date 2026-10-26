@@ -3,12 +3,12 @@
 use std::collections::{BTreeSet, HashSet};
 
 use super::catalog::{catalog, AccessLevel};
-use super::danger::{badges_from, document_badges, is_service_linked, is_sso_role, managed_policy_badges};
+use super::danger::{badges_from, document_badges, is_locked_role, managed_policy_badges};
 use super::eval::{cmp_ignore_case, find_principal, policy_sources, statement_actions, Principal, Source};
 use super::model::{ManagedPolicyRec, Scope, Snapshot};
 use super::policy::{pretty, Actions, Resources, Statement};
 use super::view::{
-    AttachedTo, PolicyScope, PolicySummary, PolicyView, PrincipalKind, PrincipalSummary, StatementService, StatementView, VersionView,
+    AttachedTo, Badge, BadgeKind, PolicyScope, PolicySummary, PolicyView, PrincipalKind, PrincipalSummary, StatementService, StatementView, VersionView,
 };
 
 /// 주체 한 명의 목록용 요약. 정책 출처는 이미 구해 둔 것을 받는다.
@@ -44,7 +44,41 @@ fn sorted_by_name(mut list: Vec<PrincipalSummary>) -> Vec<PrincipalSummary> {
     list
 }
 
-fn policy_summary(p: &ManagedPolicyRec) -> PolicySummary {
+/// 사용자·그룹·역할이 붙였거나 권한 경계로 쓰는 관리형 정책 ARN들.
+fn referenced_policy_arns(s: &Snapshot) -> HashSet<&str> {
+    let mut referenced: HashSet<&str> = HashSet::new();
+    referenced.extend(s.users.iter().flat_map(|u| u.attached.iter().map(String::as_str).chain(u.boundary.as_deref())));
+    referenced.extend(s.groups.iter().flat_map(|g| g.attached.iter().map(String::as_str)));
+    referenced.extend(s.roles.iter().flat_map(|r| r.attached.iter().map(String::as_str).chain(r.boundary.as_deref())));
+    referenced
+}
+
+/// 관리형 정책이 어딘가에 쓰이는지: `AttachmentCount`가 0보다 크거나, 스냅숏의 사용자·그룹·역할이 붙였거나 권한 경계로 쓴다.
+/// (AWS의 `AttachmentCount`는 권한 경계로 쓰는 것을 세지 않는다.)
+pub fn policy_in_use(s: &Snapshot, arn: &str) -> bool {
+    if s.policies.get(arn).is_some_and(|p| p.attachment_count > 0) {
+        return true;
+    }
+    let uses = |attached: &[String], boundary: Option<&str>| attached.iter().any(|a| a == arn) || boundary == Some(arn);
+    s.users.iter().any(|u| uses(&u.attached, u.boundary.as_deref()))
+        || s.groups.iter().any(|g| uses(&g.attached, None))
+        || s.roles.iter().any(|r| uses(&r.attached, r.boundary.as_deref()))
+}
+
+/// `managed_policy_badges`에서 쓰이는 정책의 "안 붙음"을 뺀다. 그 함수는 정책 하나만 보므로 권한 경계로만 쓰이는 정책도 안 붙었다고 한다.
+fn without_unattached_if_used(mut badges: Vec<Badge>, in_use: bool) -> Vec<Badge> {
+    if in_use {
+        badges.retain(|b| b.kind != BadgeKind::Unattached);
+    }
+    badges
+}
+
+/// 스냅숏을 아는 곳에서 쓰는 관리형 정책 배지. `managed_policy_badges`와 같되, 권한 경계로 쓰이는 정책에는 "안 붙음"을 달지 않는다.
+pub(super) fn managed_badges_in(s: &Snapshot, p: &ManagedPolicyRec) -> Vec<Badge> {
+    without_unattached_if_used(managed_policy_badges(p), policy_in_use(s, &p.arn))
+}
+
+fn policy_summary(p: &ManagedPolicyRec, in_use: bool) -> PolicySummary {
     PolicySummary {
         id: p.arn.clone(),
         arn: p.arn.clone(),
@@ -53,7 +87,7 @@ fn policy_summary(p: &ManagedPolicyRec) -> PolicySummary {
         attachment_count: p.attachment_count,
         default_version_id: p.default_version_id.clone(),
         updated_at: p.updated_at.clone(),
-        badges: managed_policy_badges(p),
+        badges: without_unattached_if_used(managed_policy_badges(p), in_use),
     }
 }
 
@@ -68,15 +102,14 @@ pub fn summaries(s: &Snapshot) -> (Vec<PrincipalSummary>, Vec<PrincipalSummary>,
     let groups = sorted_by_name(s.groups.iter().map(|g| summarize(Principal::Group(g))).collect());
     let roles = sorted_by_name(s.roles.iter().map(|r| summarize(Principal::Role(r))).collect());
 
-    let mut in_use: HashSet<&str> = HashSet::new();
-    in_use.extend(s.users.iter().flat_map(|u| u.attached.iter().map(String::as_str).chain(u.boundary.as_deref())));
-    in_use.extend(s.groups.iter().flat_map(|g| g.attached.iter().map(String::as_str)));
-    in_use.extend(s.roles.iter().flat_map(|r| r.attached.iter().map(String::as_str).chain(r.boundary.as_deref())));
+    let referenced = referenced_policy_arns(s);
     let mut policies: Vec<PolicySummary> = s
         .policies
         .values()
-        .filter(|p| p.scope == Scope::Local || p.attachment_count > 0 || in_use.contains(p.arn.as_str()))
-        .map(policy_summary)
+        .filter_map(|p| {
+            let in_use = p.attachment_count > 0 || referenced.contains(p.arn.as_str());
+            (p.scope == Scope::Local || in_use).then(|| policy_summary(p, in_use))
+        })
         .collect();
     policies.sort_by(|a, b| cmp_ignore_case(&a.name, &b.name).then_with(|| a.arn.cmp(&b.arn)));
     (users, groups, roles, policies)
@@ -161,14 +194,14 @@ fn managed_view(s: &Snapshot, rec: &ManagedPolicyRec) -> PolicyView {
         attached_to: attached_to(s, &rec.arn),
         // AWS 관리형 정책은 고칠 수 없다
         editable: rec.scope == Scope::Local,
-        badges: managed_policy_badges(rec),
+        badges: managed_badges_in(s, rec),
     }
 }
 
 fn inline_view(owner: Principal, policy_id: &str, name: &str) -> Option<PolicyView> {
     let inline = owner.inline().iter().find(|p| p.name == name)?;
     // 서비스 연결·Identity Center 역할의 정책은 바꿀 수 없다
-    let locked = matches!(owner, Principal::Role(role) if is_service_linked(&role.path) || is_sso_role(&role.name, &role.path));
+    let locked = is_locked_role(owner);
     Some(PolicyView {
         id: policy_id.to_string(),
         name: inline.name.clone(),
@@ -247,6 +280,51 @@ mod tests {
         let kinds: Vec<BadgeKind> = admin.badges.iter().map(|b| b.kind).collect();
         assert_eq!(kinds, vec![BadgeKind::Admin, BadgeKind::AwsManaged]);
         assert_eq!(policies[3].badges.iter().map(|b| b.kind).collect::<Vec<_>>(), vec![BadgeKind::Unattached]);
+        // 권한 경계로만 쓰이는 정책(AttachmentCount 0)은 안 붙은 정책이 아니다
+        assert_eq!((policies[2].name.as_str(), policies[2].attachment_count), ("carol-boundary", 0));
+        assert!(policies[2].badges.is_empty(), "{:?}", policies[2].badges);
+    }
+
+    #[test]
+    fn a_policy_is_in_use_when_counted_attached_or_a_boundary() {
+        let mut s = snapshot();
+        assert!(policy_in_use(&s, ADMIN_POLICY), "AttachmentCount가 있어요");
+        assert!(policy_in_use(&s, CAROL_BOUNDARY), "AttachmentCount는 0이지만 carol의 권한 경계예요");
+        assert!(!policy_in_use(&s, UNUSED_POLICY));
+        assert!(!policy_in_use(&s, "arn:aws:iam::111111111111:policy/nope"));
+        // 개수가 0이어도 스냅숏의 어느 주체가 붙였거나 경계로 쓰면 쓰이는 정책이다
+        let uses = |s: &Snapshot| policy_in_use(s, UNUSED_POLICY);
+        s.users[1].attached.push(UNUSED_POLICY.into());
+        assert!(uses(&s));
+        s.users[1].attached.clear();
+        assert!(!uses(&s));
+        s.groups[0].attached.push(UNUSED_POLICY.into());
+        assert!(uses(&s));
+        s.groups[0].attached.pop();
+        s.roles[0].attached.push(UNUSED_POLICY.into());
+        assert!(uses(&s));
+        s.roles[0].attached.clear();
+        s.roles[0].boundary = Some(UNUSED_POLICY.into());
+        assert!(uses(&s));
+        s.roles[0].boundary = None;
+        s.users[0].boundary = Some(UNUSED_POLICY.into());
+        assert!(uses(&s));
+        s.users[0].boundary = None;
+        assert!(!uses(&s));
+        // 스냅숏에 정책 본문이 없어도 붙인 주체가 있으면 쓰이는 정책이다
+        s.users[0].attached.push("arn:aws:iam::aws:policy/Gone".into());
+        assert!(policy_in_use(&s, "arn:aws:iam::aws:policy/Gone"));
+
+        // 스냅숏에서 붙인 주체를 못 찾아도(예: 읽지 못한 역할) AttachmentCount가 있으면 쓰이는 정책이다
+        let counted_arn = "arn:aws:iam::111111111111:policy/counted";
+        let counted = managed(counted_arn, Scope::Local, 3, policy(json!([{ "Effect": "Allow", "Action": "s3:GetObject", "Resource": "*" }])));
+        s.policies.insert(counted_arn.to_string(), counted);
+        assert!(policy_in_use(&s, counted_arn));
+        let (_, _, _, policies) = summaries(&s);
+        let counted_summary = policies.iter().find(|p| p.arn == counted_arn).unwrap();
+        assert!(counted_summary.badges.is_empty(), "{:?}", counted_summary.badges);
+        s.policies.get_mut(counted_arn).unwrap().attachment_count = 0;
+        assert!(!policy_in_use(&s, counted_arn));
     }
 
     #[test]
@@ -297,6 +375,7 @@ mod tests {
         // 권한 경계로 쓰는 것도 붙어 있는 곳으로 센다
         let boundary = policy_view(&s, CAROL_BOUNDARY).unwrap();
         assert_eq!((boundary.scope, boundary.editable), (PolicyScope::Local, true));
+        assert!(boundary.badges.is_empty(), "권한 경계로 쓰는 정책은 안 붙음 배지가 없어요: {:?}", boundary.badges);
         assert_eq!(boundary.attached_to.iter().map(|a| a.arn.as_str()).collect::<Vec<_>>(), vec![CAROL]);
         let svc = &boundary.statements[0].services[0];
         assert_eq!(svc.levels, vec![AccessLevel::Read]);

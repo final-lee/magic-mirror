@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use super::eval::all_star;
+use super::catalog::is_match_all;
 use super::policy::{statement_action_matches, Effect, PolicyDocument, Statement};
 use super::view::{TrustEntry, TrustKind};
 
@@ -79,7 +79,7 @@ fn entry_for(key: &str, value: &str, stmt: &Statement, actions: &[String], own_a
             entry.kind = TrustKind::Federated;
             entry.value = provider_name(value);
         }
-        "AWS" if all_star(value) => {
+        "AWS" if is_match_all(value) => {
             entry.kind = TrustKind::Anyone;
             entry.value = "*".to_string();
             entry.external = true;

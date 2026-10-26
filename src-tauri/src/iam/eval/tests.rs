@@ -1,5 +1,6 @@
 //! 평가 엔진 테스트: 판정 규칙은 작은 정책으로, 화면 값은 `fixtures::snapshot()`으로 확인한다.
 
+mod verdicts;
 mod views;
 mod who;
 
@@ -7,7 +8,7 @@ use serde_json::json;
 
 use crate::iam::catalog::{catalog, AccessLevel};
 use crate::iam::danger::{admin_like_statementwise, policy_badges, privesc_reasons};
-use crate::iam::eval::{evaluate, evaluate_action, policy_sources, principal_view, ActionEval, SourceKind, Status};
+use crate::iam::eval::{evaluate, evaluate_action, policy_sources, principal_view, statement_actions, ActionEval, SourceKind, Status};
 use crate::iam::fixtures::*;
 use crate::iam::model::{InlinePolicy, Scope, Snapshot};
 use crate::iam::policy::Effect;
@@ -337,6 +338,29 @@ fn not_resource_allows_are_labeled_with_their_exclusions() {
     assert_eq!(status(&s, &arn, "s3:GetObject", Some("arn:aws:s3:::secret/x")), None);
     assert_eq!(status(&s, &arn, "s3:GetObject", Some("arn:aws:s3:::other/x")), Some(Status::Allowed));
     assert_eq!(status(&s, &arn, "s3:GetObject", Some("arn:aws:s3:::open/x")), Some(Status::Allowed));
+}
+
+#[test]
+fn statement_actions_lists_names_in_byte_order_for_other_modules() {
+    let d = doc(policy(json!([
+        { "Effect": "Allow", "Action": ["s3:Get*", "S3:GETOBJECT", "foo:Bar", "iam:CreateUser", "iam:createuser"], "Resource": "*" },
+        { "Effect": "Allow", "NotAction": ["iam:*", "foo:Bar"], "Resource": "*" }
+    ])));
+    let cat = catalog();
+    let (found, unmatched) = statement_actions(&d.statements[0]);
+    assert_eq!(unmatched, vec!["foo:Bar"]);
+    assert!(found.windows(2).all(|w| (&w[0].0, &w[0].1) < (&w[1].0, &w[1].1)), "(접두어, 작업)의 바이트순이고 중복이 없어야 해요");
+    let expected: std::collections::BTreeSet<(String, String, AccessLevel)> =
+        ["s3:Get*", "iam:CreateUser"].iter().flat_map(|pattern| cat.expand(pattern)).collect();
+    assert_eq!(found.iter().cloned().collect::<std::collections::BTreeSet<_>>(), expected);
+    assert!(found.iter().any(|(prefix, action, level)| (prefix.as_str(), action.as_str(), *level) == ("s3", "GetObject", AccessLevel::Read)));
+
+    // NotAction은 카탈로그에서 뺀 나머지이고 맞지 않은 패턴을 알리지 않는다
+    let (rest, unmatched) = statement_actions(&d.statements[1]);
+    assert!(unmatched.is_empty());
+    assert_eq!(rest.len(), cat.all_count() - cat.actions("iam").len());
+    assert!(rest.windows(2).all(|w| (&w[0].0, &w[0].1) < (&w[1].0, &w[1].1)));
+    assert!(rest.iter().all(|(prefix, _, _)| prefix != "iam"));
 }
 
 #[test]
