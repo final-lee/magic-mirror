@@ -30,6 +30,7 @@ aws-sdk-s3 = "1"
 aws-sdk-lambda = "1"
 aws-sdk-rds = "1"
 aws-sdk-ecs = "1"
+aws-sdk-eks = "1"
 
 [dev-dependencies]
 tempfile = "3"
