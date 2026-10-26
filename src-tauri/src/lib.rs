@@ -7,6 +7,8 @@ mod explorer_commands;
 mod model;
 mod mouse_nav;
 mod settings;
+mod topology;
+mod topology_commands;
 
 use tauri::Manager;
 
@@ -19,6 +21,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             app.manage(AppState {
@@ -52,6 +55,8 @@ pub fn run() {
             explorer_commands::s3_delete,
             explorer_commands::diff_files,
             explorer_commands::open_external_diff,
+            topology_commands::vpc_topology,
+            topology_commands::save_png,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

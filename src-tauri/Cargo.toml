@@ -45,6 +45,8 @@ md-5 = "0.10"
 similar = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+aws-sdk-elasticloadbalancingv2 = "1"
+tauri-plugin-dialog = "2"
 
 [dev-dependencies]
 tempfile = "3"
