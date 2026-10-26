@@ -3,7 +3,9 @@ use aws_config::SdkConfig;
 use aws_sdk_eks::types::{Cluster, Nodegroup};
 use aws_sdk_eks::Client;
 
-use super::util::{dt, hash_tags, map_concurrent, opt, region, s, unknown_type, Capped};
+use super::util::{
+    degraded, dt, hash_tags, map_concurrent, opt, region, s, settle, unknown_type, Capped,
+};
 use super::ResourceAdapter;
 use crate::error::{from_sdk, AppError};
 use crate::model::{col, ColumnKind::*, ListResult, Resource, ResourceType};
@@ -61,40 +63,66 @@ impl ResourceAdapter for Eks {
         match type_id {
             "clusters" => {
                 let names = cluster_names(&client).await?;
-                let results = map_concurrent(names, |name| {
+                let results = map_concurrent(names.clone(), |name| {
                     let client = client.clone();
-                    async move { client.describe_cluster().name(name).send().await }
+                    let region = region.clone();
+                    async move {
+                        client
+                            .describe_cluster()
+                            .name(name)
+                            .send()
+                            .await
+                            .map(|res| res.cluster().map(|c| cluster(c, &region)))
+                            .map_err(|e| from_sdk(e, "eks:DescribeCluster"))
+                    }
                 })
                 .await;
-                for res in results {
-                    let res = res.map_err(|e| from_sdk(e, "eks:DescribeCluster"))?;
-                    if let Some(c) = res.cluster() {
-                        if !out.push(cluster(c, &region)) {
-                            break;
-                        }
+                let rows = settle(results, |i, e| {
+                    Some(degraded(&names[i], &names[i], None, e))
+                })?;
+                for r in rows.into_iter().flatten() {
+                    if !out.push(r) {
+                        break;
                     }
                 }
             }
             "node-groups" => {
                 'outer: for cluster_name in cluster_names(&client).await? {
                     let mut ng_names = Vec::new();
-                    let mut pages = client.list_nodegroups().cluster_name(&cluster_name).into_paginator().send();
+                    let mut pages = client
+                        .list_nodegroups()
+                        .cluster_name(&cluster_name)
+                        .into_paginator()
+                        .send();
                     while let Some(page) = pages.next().await {
                         let page = page.map_err(|e| from_sdk(e, "eks:ListNodegroups"))?;
                         ng_names.extend(page.nodegroups().iter().cloned());
                     }
-                    let results = map_concurrent(ng_names, |ng| {
+                    let results = map_concurrent(ng_names.clone(), |ng| {
                         let client = client.clone();
                         let cluster_name = cluster_name.clone();
-                        async move { client.describe_nodegroup().cluster_name(cluster_name).nodegroup_name(ng).send().await }
+                        let region = region.clone();
+                        async move {
+                            client
+                                .describe_nodegroup()
+                                .cluster_name(cluster_name)
+                                .nodegroup_name(ng)
+                                .send()
+                                .await
+                                .map(|res| res.nodegroup().map(|n| nodegroup(n, &region)))
+                                .map_err(|e| from_sdk(e, "eks:DescribeNodegroup"))
+                        }
                     })
                     .await;
-                    for res in results {
-                        let res = res.map_err(|e| from_sdk(e, "eks:DescribeNodegroup"))?;
-                        if let Some(ng) = res.nodegroup() {
-                            if !out.push(nodegroup(ng, &region)) {
-                                break 'outer;
-                            }
+                    let rows = settle(results, |i, e| {
+                        let mut r = degraded(&ng_names[i], &ng_names[i], None, e)
+                            .value("cluster", &cluster_name);
+                        r.id = format!("{cluster_name}/{}", ng_names[i]);
+                        Some(r)
+                    })?;
+                    for r in rows.into_iter().flatten() {
+                        if !out.push(r) {
+                            break 'outer;
                         }
                     }
                 }
@@ -118,7 +146,9 @@ fn cluster(c: &Cluster, region: &str) -> Resource {
         .field("Created", dt(c.created_at()))
         .tags(hash_tags(c.tags()))
         .raw(c)
-        .console(format!("https://{region}.console.aws.amazon.com/eks/home?region={region}#/clusters/{name}"))
+        .console(format!(
+            "https://{region}.console.aws.amazon.com/eks/home?region={region}#/clusters/{name}"
+        ))
 }
 
 fn nodegroup(ng: &Nodegroup, region: &str) -> Resource {
@@ -126,7 +156,14 @@ fn nodegroup(ng: &Nodegroup, region: &str) -> Resource {
     let cluster = s(ng.cluster_name());
     let size = ng
         .scaling_config()
-        .map(|sc| format!("{}/{}/{}", opt(sc.min_size()), opt(sc.desired_size()), opt(sc.max_size())))
+        .map(|sc| {
+            format!(
+                "{}/{}/{}",
+                opt(sc.min_size()),
+                opt(sc.desired_size()),
+                opt(sc.max_size())
+            )
+        })
         .unwrap_or_default();
     Resource::new(s(ng.nodegroup_arn()), &name)
         .arn(ng.nodegroup_arn())
@@ -174,11 +211,20 @@ mod tests {
             .status(NodegroupStatus::Active)
             .instance_types("m6i.large")
             .instance_types("m6i.xlarge")
-            .scaling_config(NodegroupScalingConfig::builder().min_size(1).desired_size(2).max_size(5).build())
+            .scaling_config(
+                NodegroupScalingConfig::builder()
+                    .min_size(1)
+                    .desired_size(2)
+                    .max_size(5)
+                    .build(),
+            )
             .build();
         let r = nodegroup(&ng, "ap-northeast-2");
         assert_eq!(r.values["instanceTypes"], "m6i.large, m6i.xlarge");
         assert_eq!(r.values["size"], "1/2/5");
-        assert!(r.console_url.unwrap().contains("/clusters/prod/nodegroups/default"));
+        assert!(r
+            .console_url
+            .unwrap()
+            .contains("/clusters/prod/nodegroups/default"));
     }
 }
