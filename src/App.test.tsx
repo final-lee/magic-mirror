@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import App from "./App";
 import { api } from "./api/client";
 import { makeResource, renderWithClient, sampleServices } from "./test/utils";
@@ -14,6 +14,18 @@ vi.mock("./api/client", () => ({
     getSettings: vi.fn(),
     saveSettings: vi.fn(),
   },
+}));
+vi.mock("./explorer/api", () => ({
+  explorerApi: {
+    localHome: vi.fn(async () => "/home/me"),
+    localList: vi.fn(async () => []),
+    diffFiles: vi.fn(),
+    startTransfers: vi.fn(),
+  },
+  onTransferProgress: vi.fn(async () => () => {}),
+}));
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({ onDragDropEvent: vi.fn(async () => () => {}) }),
 }));
 vi.mock("./api/desktop", () => ({ desktop: { copy: vi.fn(), openUrl: vi.fn() } }));
 
@@ -96,4 +108,24 @@ test("startup load failure shows error with retry", async () => {
   m.listServices.mockResolvedValue(sampleServices);
   fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
   expect(await screen.findByText("EC2")).toBeInTheDocument();
+});
+
+test("tab bar switches to the S3 explorer and keeps the resource tab mounted", async () => {
+  renderWithClient(<App />);
+  fireEvent.click(await screen.findByText("EC2"));
+  fireEvent.click(screen.getByText("Instances"));
+  await screen.findByText("web-1");
+  fireEvent.click(screen.getByRole("tab", { name: "S3 탐색기" }));
+  expect(await screen.findByTestId("pane-local")).toBeVisible();
+  expect(screen.getAllByText("web-1")[0]).not.toBeVisible();
+  fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+  expect(screen.getAllByText("web-1")[0]).toBeVisible();
+});
+
+test("local path change is persisted to settings", async () => {
+  renderWithClient(<App />);
+  fireEvent.click(await screen.findByRole("tab", { name: "S3 탐색기" }));
+  const local = await screen.findByTestId("pane-local");
+  fireEvent.click(await within(local).findByRole("button", { name: "상위 폴더" }));
+  await waitFor(() => expect(m.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ explorerLocalPath: "/home" })));
 });

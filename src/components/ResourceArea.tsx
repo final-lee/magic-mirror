@@ -20,15 +20,16 @@ interface Props {
   filter: string;
   onOpenBucket: (loc: S3Location) => void;
   onRefresh: () => void;
+  active: boolean;
 }
 
-export function ResourceArea({ service, type, profile, region, account, filter, onOpenBucket, onRefresh }: Props) {
+export function ResourceArea({ service, type, profile, region, account, filter, onOpenBucket, onRefresh, active }: Props) {
   const q = useResources(profile, region, service, type.id);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
   const items = q.data?.items ?? [];
   const selected = items.find((r) => r.id === selectedId) ?? null;
-  useCopyShortcut(selected?.id ?? null);
+  useCopyShortcut(active ? (selected?.id ?? null) : null);
 
   const open = (id: string) => {
     if (service.id !== "s3" || type.id !== "buckets") return;

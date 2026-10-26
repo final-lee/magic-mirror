@@ -15,6 +15,7 @@ const props = {
   filter: "",
   onOpenBucket: vi.fn(),
   onRefresh: vi.fn(),
+  active: true,
 };
 
 test("lists resources and shows detail on selection", async () => {

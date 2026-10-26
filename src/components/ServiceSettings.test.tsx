@@ -20,3 +20,40 @@ test("done button and backdrop close the sheet", () => {
   fireEvent.click(screen.getByTestId("modal-backdrop"));
   expect(onClose).toHaveBeenCalledTimes(2);
 });
+
+test("diff tool section reports tool and custom command", () => {
+  const onDiffToolChange = vi.fn();
+  render(
+    <ServiceSettings
+      services={sampleServices}
+      enabled={[]}
+      onChange={() => {}}
+      onClose={() => {}}
+      diffTool="filemerge"
+      diffToolCommand={null}
+      onDiffToolChange={onDiffToolChange}
+    />,
+  );
+  expect(screen.getByLabelText("FileMerge")).toBeChecked();
+  fireEvent.click(screen.getByLabelText("VS Code"));
+  expect(onDiffToolChange).toHaveBeenLastCalledWith("vscode", null);
+  fireEvent.click(screen.getByLabelText("직접 입력"));
+  expect(onDiffToolChange).toHaveBeenLastCalledWith("custom", null);
+});
+
+test("custom command input appears for custom tool", () => {
+  const onDiffToolChange = vi.fn();
+  render(
+    <ServiceSettings
+      services={sampleServices}
+      enabled={[]}
+      onChange={() => {}}
+      onClose={() => {}}
+      diffTool="custom"
+      diffToolCommand=""
+      onDiffToolChange={onDiffToolChange}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText("비교 명령"), { target: { value: "ksdiff {left} {right}" } });
+  expect(onDiffToolChange).toHaveBeenLastCalledWith("custom", "ksdiff {left} {right}");
+});

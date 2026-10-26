@@ -20,14 +20,15 @@ interface Props {
   onNavigate: (prefix: string) => void;
   onBack: () => void;
   onRefresh: () => void;
+  active: boolean;
 }
 
-export function S3Area({ profile, account, location, filter, onNavigate, onBack, onRefresh }: Props) {
+export function S3Area({ profile, account, location, filter, onNavigate, onBack, onRefresh, active }: Props) {
   const q = useS3Objects(profile, location.region, location.bucket, location.prefix);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const entries = q.data?.pages.flatMap((p) => p.entries) ?? [];
   const selected = entries.find((e) => e.key === selectedKey) ?? null;
-  useCopyShortcut(selected ? `s3://${location.bucket}/${selected.key}` : null);
+  useCopyShortcut(active && selected ? `s3://${location.bucket}/${selected.key}` : null);
 
   const segments: Segment[] = [
     { label: "Buckets", onClick: onBack },
