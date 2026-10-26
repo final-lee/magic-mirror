@@ -38,6 +38,8 @@ aws-sdk-dynamodb = "1"
 aws-sdk-cloudwatchlogs = "1"
 aws-sdk-sqs = "1"
 aws-sdk-sns = "1"
+aws-sdk-ecr = "1"
+aws-sdk-secretsmanager = "1"
 
 [dev-dependencies]
 tempfile = "3"

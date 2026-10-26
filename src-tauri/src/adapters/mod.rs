@@ -1,14 +1,16 @@
 pub mod cloudfront;
 pub mod dynamodb;
-pub mod logs;
 pub mod ec2;
+pub mod ecr;
 pub mod ecs;
 pub mod eks;
 pub mod iam;
 pub mod lambda;
+pub mod logs;
 pub mod rds;
 pub mod route53;
 pub mod s3;
+pub mod secretsmanager;
 pub mod sns;
 pub mod sqs;
 pub mod util;
@@ -39,7 +41,24 @@ pub type AdapterRef = Arc<dyn ResourceAdapter>;
 
 /// 서비스 표시 순서대로 모든 어댑터를 돌려준다.
 pub fn registry() -> Vec<AdapterRef> {
-    vec![Arc::new(ec2::Ec2), Arc::new(s3::S3), Arc::new(lambda::Lambda), Arc::new(rds::Rds), Arc::new(ecs::Ecs), Arc::new(eks::Eks), Arc::new(vpc::Vpc), Arc::new(iam::Iam), Arc::new(cloudfront::CloudFront), Arc::new(route53::Route53), Arc::new(dynamodb::DynamoDb), Arc::new(logs::Logs), Arc::new(sqs::Sqs), Arc::new(sns::Sns)]
+    vec![
+        Arc::new(ec2::Ec2),
+        Arc::new(s3::S3),
+        Arc::new(lambda::Lambda),
+        Arc::new(rds::Rds),
+        Arc::new(ecs::Ecs),
+        Arc::new(eks::Eks),
+        Arc::new(vpc::Vpc),
+        Arc::new(iam::Iam),
+        Arc::new(dynamodb::DynamoDb),
+        Arc::new(logs::Logs),
+        Arc::new(cloudfront::CloudFront),
+        Arc::new(sqs::Sqs),
+        Arc::new(sns::Sns),
+        Arc::new(ecr::Ecr),
+        Arc::new(route53::Route53),
+        Arc::new(secretsmanager::SecretsManager),
+    ]
 }
 
 pub fn service_info(a: &dyn ResourceAdapter) -> ServiceInfo {
@@ -109,5 +128,33 @@ mod tests {
         dedup.sort();
         dedup.dedup();
         assert_eq!(ids.len(), dedup.len());
+    }
+
+    #[test]
+    fn registry_has_all_services_in_display_order() {
+        let ids: Vec<_> = registry().iter().map(|a| a.service_id()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "ec2", "s3", "lambda", "rds", "ecs", "eks", "vpc", "iam", "dynamodb", "logs", "cloudfront", "sqs",
+                "sns", "ecr", "route53", "secretsmanager"
+            ]
+        );
+    }
+
+    #[test]
+    fn every_service_has_types_with_name_or_id_column() {
+        for a in registry() {
+            let types = a.resource_types();
+            assert!(!types.is_empty(), "{} has no types", a.service_id());
+            for t in types {
+                assert!(
+                    t.columns.first().is_some_and(|c| c.key == "name" || c.key == "id"),
+                    "{}/{} first column must be name or id",
+                    a.service_id(),
+                    t.id
+                );
+            }
+        }
     }
 }
