@@ -46,6 +46,8 @@ export function loginPlan(profiles: ProfileInfo[] | undefined, profile: string) 
 export function useSsoLogin(profiles: ProfileInfo[] | undefined, currentProfile: string | null) {
   const qc = useQueryClient();
   const [entries, setEntries] = useState<Record<string, SsoEntry>>({});
+  // 세션마다 마지막으로 로그인에 성공한 시각. 화면(ErrorState)이 이 값이 바뀌는 것을 보고 다시 불러온다.
+  const [successes, setSuccesses] = useState<Record<string, number>>({});
   // 알림 처리(동기)에서 최신 값을 보려고 ref에도 둔다
   const entriesRef = useRef(entries);
   const profilesRef = useRef(profiles);
@@ -94,7 +96,9 @@ export function useSsoLogin(profiles: ProfileInfo[] | undefined, currentProfile:
         .ssoLogin(plan.target)
         .then(
           async () => {
-            lastSuccess.current.set(plan.key, Date.now());
+            const at = Date.now();
+            lastSuccess.current.set(plan.key, at);
+            setSuccesses((prev) => ({ ...prev, [plan.key]: at }));
             write(({ [plan.key]: _done, ...rest }) => rest);
             const affected = new Set(
               (profilesRef.current ?? []).filter((p) => loginPlan(profilesRef.current, p.name).key === plan.key).map((p) => p.name),
@@ -160,12 +164,14 @@ export function useSsoLogin(profiles: ProfileInfo[] | undefined, currentProfile:
     () => ({
       entries: Object.values(entries),
       statusFor: (profile: string): SsoStatus | null => entries[loginPlan(profiles, profile).key]?.status ?? null,
+      /** 이 프로필의 세션이 마지막으로 로그인에 성공한 시각(ms). 아직 없으면 null */
+      lastSuccessAt: (profile: string): number | null => successes[loginPlan(profiles, profile).key] ?? null,
       start,
       cancel,
       dismiss,
       rearm,
     }),
-    [entries, profiles, start, cancel, dismiss, rearm],
+    [entries, successes, profiles, start, cancel, dismiss, rearm],
   );
 }
 

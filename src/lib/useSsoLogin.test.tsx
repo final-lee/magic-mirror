@@ -104,6 +104,10 @@ test("success clears the entry and reloads the profile-scoped queries of every p
   await waitFor(() => expect(hook.result.current.entries).toEqual([]));
   expect(reloaded.map((k) => [k.join("/"), qc.getQueryState(k)?.isInvalidated])).toEqual(reloaded.map((k) => [k.join("/"), true]));
   expect(untouched.map((k) => [k.join("/"), qc.getQueryState(k)?.isInvalidated])).toEqual(untouched.map((k) => [k.join("/"), false]));
+  // 같은 세션의 프로필은 성공 시각을 함께 본다(화면이 이 값을 보고 다시 불러온다)
+  expect(hook.result.current.lastSuccessAt("admin")).toEqual(expect.any(Number));
+  expect(hook.result.current.lastSuccessAt("base")).toBe(hook.result.current.lastSuccessAt("admin"));
+  expect(hook.result.current.lastSuccessAt("keys")).toBeNull();
 });
 
 test("a failure is not retried automatically, but re-selecting the profile or a manual start retries", async () => {
