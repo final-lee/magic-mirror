@@ -21,6 +21,8 @@ type Outcome = Option<Result<(), AppError>>;
 
 struct Flight {
     id: u64,
+    /// `aws sso login --profile`에 넘긴 프로필. 취소는 이것으로 진행 중인 로그인을 찾는다(키는 config를 고치면 달라질 수 있다)
+    target: String,
     done: watch::Receiver<Outcome>,
     cancel: Arc<Notify>,
 }
@@ -32,11 +34,12 @@ pub struct SsoLogins {
 }
 
 impl SsoLogins {
-    /// `key`의 로그인이 진행 중이면 그 결과를 기다리고, 아니면 `run`으로 새로 시작한다. `run`은 취소 신호를 받는다.
+    /// `key`의 로그인이 진행 중이면 그 결과를 기다리고, 아니면 `run`으로 새로 시작한다. `run`은 `target`(`aws sso login`에 넘길 프로필)과 취소 신호를 받는다.
+    /// 진행 중인 로그인은 `target`을 기억해서 `cancel_target`이 그것으로 찾는다. 이미 도는 로그인에 합류하는 호출의 `target`은 쓰지 않는다.
     /// 실행은 따로 띄운 작업에서 돌아서, 기다리던 호출이 사라져도 끝까지 간다.
-    pub async fn login<F, Fut>(&self, key: &str, run: F) -> Result<(), AppError>
+    pub async fn login<F, Fut>(&self, key: &str, target: &str, run: F) -> Result<(), AppError>
     where
-        F: FnOnce(Arc<Notify>) -> Fut,
+        F: FnOnce(String, Arc<Notify>) -> Fut,
         Fut: Future<Output = Result<(), AppError>> + Send + 'static,
     {
         let mut done = {
@@ -48,8 +51,8 @@ impl SsoLogins {
                 let (tx, rx) = watch::channel(None);
                 let cancel = Arc::new(Notify::new());
                 // 등록하기 전에 만든다: `run`이 바로 패닉해도 목록에 죽은 항목이 남지 않는다
-                let fut = run(cancel.clone());
-                flights.insert(key.to_string(), Flight { id, done: rx.clone(), cancel });
+                let fut = run(target.to_string(), cancel.clone());
+                flights.insert(key.to_string(), Flight { id, target: target.to_string(), done: rx.clone(), cancel });
                 let all = self.flights.clone();
                 let key = key.to_string();
                 tokio::spawn(async move {
@@ -78,15 +81,17 @@ impl SsoLogins {
         }
     }
 
-    /// 진행 중인 `key`의 로그인을 취소한다. 진행 중이 아니면 아무것도 하지 않는다.
-    pub async fn cancel(&self, key: &str) {
-        if let Some(flight) = self.flights.lock().await.get(key) {
+    /// `target`(`aws sso login`에 넘긴 프로필)으로 진행 중인 로그인을 모두 취소한다. 진행 중이 아니면 아무것도 하지 않는다.
+    /// 키가 아니라 대상으로 찾는다. 로그인이 도는 동안 config를 고쳐서 지금 계산한 키가 달라져도 빗나가지 않는다.
+    pub async fn cancel_target(&self, target: &str) {
+        for flight in self.flights.lock().await.values().filter(|f| f.target == target) {
             flight.cancel.notify_one();
         }
     }
 
+    /// 다른 모듈의 테스트도 로그인이 시작됐는지 기다릴 수 있게 한다.
     #[cfg(test)]
-    async fn is_running(&self, key: &str) -> bool {
+    pub(crate) async fn is_running(&self, key: &str) -> bool {
         self.flights.lock().await.contains_key(key)
     }
 }
@@ -153,7 +158,7 @@ mod tests {
             let (logins, runs, gate) = (logins.clone(), runs.clone(), gate.clone());
             tokio::spawn(async move {
                 logins
-                    .login("session:a", move |_| async move {
+                    .login("session:a", "a", move |_, _| async move {
                         runs.fetch_add(1, Ordering::SeqCst);
                         gate.notified().await;
                         Ok(())
@@ -166,7 +171,7 @@ mod tests {
             let (logins, runs) = (logins.clone(), runs.clone());
             tokio::spawn(async move {
                 logins
-                    .login("session:a", move |_| async move {
+                    .login("session:a", "a", move |_, _| async move {
                         runs.fetch_add(1, Ordering::SeqCst);
                         Ok(())
                     })
@@ -188,7 +193,7 @@ mod tests {
             let (logins, gate) = (logins.clone(), gate.clone());
             tokio::spawn(async move {
                 logins
-                    .login("k", move |_| async move {
+                    .login("k", "t", move |_, _| async move {
                         gate.notified().await;
                         Err(AppError::other("boom"))
                     })
@@ -198,7 +203,7 @@ mod tests {
         wait_running(&logins, "k").await;
         let second = {
             let logins = logins.clone();
-            tokio::spawn(async move { logins.login("k", |_| async { Ok(()) }).await })
+            tokio::spawn(async move { logins.login("k", "t", |_, _| async { Ok(()) }).await })
         };
         tokio::time::sleep(Duration::from_millis(20)).await;
         gate.notify_one();
@@ -212,7 +217,7 @@ mod tests {
         let runs = Arc::new(AtomicUsize::new(0));
         for key in ["a", "b", "a"] {
             let runs = runs.clone();
-            within(logins.login(key, move |_| async move {
+            within(logins.login(key, key, move |_, _| async move {
                 runs.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             }))
@@ -223,30 +228,85 @@ mod tests {
         assert!(!logins.is_running("a").await);
     }
 
+    /// 취소 신호가 오면 `CANCELLED`로 끝나는 가짜 실행을 `key`/`target`으로 띄운다. 실행이 받은 대상은 `seen`에 남는다.
+    fn spawn_until_cancelled(
+        logins: &Arc<SsoLogins>,
+        key: &'static str,
+        target: &'static str,
+        seen: &Arc<std::sync::Mutex<Vec<String>>>,
+    ) -> tokio::task::JoinHandle<Result<(), AppError>> {
+        let (logins, seen) = (logins.clone(), seen.clone());
+        tokio::spawn(async move {
+            logins
+                .login(key, target, move |target, cancel| async move {
+                    seen.lock().unwrap().push(target);
+                    cancel.notified().await;
+                    Err(AppError::other(CANCELLED))
+                })
+                .await
+        })
+    }
+
     #[tokio::test]
-    async fn cancel_ends_the_running_login() {
+    async fn cancel_target_ends_the_login_running_for_that_target() {
         let logins = Arc::new(SsoLogins::default());
-        let task = {
-            let logins = logins.clone();
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        // 키(세션)와 대상(`aws sso login`에 넘길 프로필)은 이름이 다르다
+        let task = spawn_until_cancelled(&logins, "session:corp", "base", &seen);
+        wait_running(&logins, "session:corp").await;
+        logins.cancel_target("base").await;
+        assert_eq!(within(task).await.unwrap(), Err(AppError::other(CANCELLED)));
+        // 실행은 기억해 둔 대상을 그대로 받는다
+        assert_eq!(*seen.lock().unwrap(), vec!["base".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn cancel_target_leaves_the_logins_of_other_targets_running() {
+        let logins = Arc::new(SsoLogins::default());
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let gate = Arc::new(Notify::new());
+        let corp = spawn_until_cancelled(&logins, "session:corp", "base", &seen);
+        let other = {
+            let (logins, gate) = (logins.clone(), gate.clone());
             tokio::spawn(async move {
                 logins
-                    .login("k", |cancel| async move {
-                        cancel.notified().await;
-                        Err(AppError::other(CANCELLED))
+                    .login("session:other", "other", move |_, cancel| async move {
+                        tokio::select! {
+                            _ = cancel.notified() => Err(AppError::other(CANCELLED)),
+                            _ = gate.notified() => Ok(()),
+                        }
                     })
                     .await
             })
         };
-        wait_running(&logins, "k").await;
-        logins.cancel("k").await;
-        assert_eq!(within(task).await.unwrap(), Err(AppError::other(CANCELLED)));
+        wait_running(&logins, "session:corp").await;
+        wait_running(&logins, "session:other").await;
+        logins.cancel_target("base").await;
+        assert_eq!(within(corp).await.unwrap(), Err(AppError::other(CANCELLED)));
+        // 다른 대상의 로그인은 건드리지 않았으니 문이 열려야 끝난다
+        gate.notify_one();
+        assert_eq!(within(other).await.unwrap(), Ok(()));
+    }
+
+    #[tokio::test]
+    async fn cancel_target_ends_every_login_running_for_the_target() {
+        // config를 고쳐서 같은 프로필이 새 키로 다시 로그인을 시작한 경우: 같은 프로필의 로그인이 둘 돈다
+        let logins = Arc::new(SsoLogins::default());
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let old = spawn_until_cancelled(&logins, "session:old", "base", &seen);
+        let renamed = spawn_until_cancelled(&logins, "session:renamed", "base", &seen);
+        wait_running(&logins, "session:old").await;
+        wait_running(&logins, "session:renamed").await;
+        logins.cancel_target("base").await;
+        assert_eq!(within(old).await.unwrap(), Err(AppError::other(CANCELLED)));
+        assert_eq!(within(renamed).await.unwrap(), Err(AppError::other(CANCELLED)));
     }
 
     #[tokio::test]
     async fn cancel_without_a_running_login_does_not_affect_the_next_one() {
         let logins = SsoLogins::default();
-        logins.cancel("k").await;
-        let result = within(logins.login("k", |cancel| async move {
+        logins.cancel_target("t").await;
+        let result = within(logins.login("k", "t", |_, cancel| async move {
             tokio::select! {
                 _ = cancel.notified() => Err(AppError::other(CANCELLED)),
                 _ = tokio::time::sleep(Duration::from_millis(20)) => Ok(()),
@@ -264,7 +324,7 @@ mod tests {
             let (logins, gate) = (logins.clone(), gate.clone());
             tokio::spawn(async move {
                 logins
-                    .login("k", move |_| async move {
+                    .login("k", "t", move |_, _| async move {
                         gate.notified().await;
                         Ok(())
                     })
@@ -284,13 +344,13 @@ mod tests {
     #[tokio::test]
     async fn a_run_that_panics_does_not_block_the_key() {
         let logins = SsoLogins::default();
-        let first = within(logins.login("k", |_| async { panic!("run blew up") })).await;
+        let first = within(logins.login("k", "t", |_, _| async { panic!("run blew up") })).await;
         assert_eq!(first, Err(AppError::other("로그인이 중단됐어요")));
         assert!(!logins.is_running("k").await);
         let runs = Arc::new(AtomicUsize::new(0));
         let second = {
             let runs = runs.clone();
-            within(logins.login("k", move |_| async move {
+            within(logins.login("k", "t", move |_, _| async move {
                 runs.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             }))
@@ -307,13 +367,13 @@ mod tests {
             let logins = logins.clone();
             tokio::spawn(async move {
                 logins
-                    .login("k", |_| -> std::future::Ready<Result<(), AppError>> { panic!("run blew up") })
+                    .login("k", "t", |_, _| -> std::future::Ready<Result<(), AppError>> { panic!("run blew up") })
                     .await
             })
         };
         assert!(within(task).await.unwrap_err().is_panic());
         assert!(!logins.is_running("k").await);
-        assert_eq!(within(logins.login("k", |_| async { Ok(()) })).await, Ok(()));
+        assert_eq!(within(logins.login("k", "t", |_, _| async { Ok(()) })).await, Ok(()));
     }
 
     #[test]
