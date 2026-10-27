@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { errorMessage, isAppError } from "../api/errors";
 import { useSsoLoginContext } from "../lib/useSsoLogin";
@@ -15,14 +15,27 @@ export function ErrorState({ error, profile, onRetry, compact = false }: Props) 
   const [busy, setBusy] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const sso = useSsoLoginContext();
+  const ssoExpired = isAppError(error) && error.kind === "ssoExpired";
+  // 이 화면이 뜬 뒤 그 세션의 로그인이 성공하면(자동 로그인이든 이 버튼이든) 한 번 다시 불러온다.
+  // 무효화는 켜진 쿼리만 다시 부르니, 누를 때만 도는 쿼리(enabled: false)는 이렇게 해야 풀린다.
+  // 화면이 뜨기 전의 성공은 보지 않는다: 로그인한 뒤에도 만료로 실패한 화면을 계속 다시 부르지 않게 한다.
+  const [shownAt] = useState(() => Date.now());
+  const loggedInAt = sso?.lastSuccessAt(profile) ?? null;
+  const retry = useRef(onRetry);
+  retry.current = onRetry;
+  const reloadedFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (!ssoExpired || loggedInAt === null || loggedInAt < shownAt || reloadedFor.current === loggedInAt) return;
+    reloadedFor.current = loggedInAt;
+    retry.current();
+  }, [ssoExpired, loggedInAt, shownAt]);
 
-  if (isAppError(error) && error.kind === "ssoExpired") {
+  if (ssoExpired) {
     const running = sso ? sso.statusFor(profile)?.kind === "running" : busy;
     const login = async () => {
       if (sso) {
-        // 관리자가 성공 때 쿼리를 무효화하지만 켜진 쿼리만 다시 불린다. 누를 때만 도는 쿼리(enabled: false)는 여기서 다시 불러야 화면이 풀린다.
-        // 켜진 쿼리는 한 번 더 불리는 셈인데, 그 비용은 받아들인다.
-        if (await sso.start(profile, { manual: true })) onRetry();
+        // 성공하면 위의 효과가 다시 불러온다
+        await sso.start(profile, { manual: true });
         return;
       }
       setBusy(true);
