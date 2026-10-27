@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invoke";
 import type { ListResult, ProfileInfo, S3Listing, ServiceInfo, Settings } from "./types";
 
 export const api = {
@@ -10,6 +10,7 @@ export const api = {
   listS3Objects: (profile: string, region: string, bucket: string, prefix: string, continuationToken: string | null) =>
     invoke<S3Listing>("list_s3_objects", { profile, region, bucket, prefix, continuationToken }),
   ssoLogin: (profile: string) => invoke<void>("sso_login", { profile }),
+  ssoLoginCancel: (profile: string) => invoke<void>("sso_login_cancel", { profile }),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<void>("save_settings", { settings }),
 };

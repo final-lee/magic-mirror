@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "../api/invoke";
 import type { DiffResult, FileRef, LocalEntry, RenameResult, TransferEvent, TransferRequest } from "./types";
 
 export const explorerApi = {
