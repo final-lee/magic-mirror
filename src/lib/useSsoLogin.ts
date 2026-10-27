@@ -40,13 +40,13 @@ export function loginPlan(profiles: ProfileInfo[] | undefined, profile: string) 
  * - 로그인에 성공한 직후(5분 안)에 시작한 호출이 또 만료로 실패하면 프로필 설정 문제로 보고 실패 줄만 띄운다(afterSuccess).
  *   성공하기 전에 시작한 호출의 늦은 보고는 무시한다.
  * - 성공하면 그 세션 프로필의 쿼리 중 돌고 있던 것은 취소한 뒤 무효화한다. 켜진 쿼리는 로그인 뒤에 새로 시작하고,
- *   누를 때만 도는 쿼리(enabled: false)는 다시 불리지 않으므로 ErrorState가 onRetry로 다시 부른다.
+ *   누를 때만 도는 쿼리(enabled: false)는 다시 불리지 않으므로 그 쿼리의 ErrorState가 onLoggedIn으로 자기 쿼리만 다시 부른다.
  * - 지금 보고 있는 프로필의 세션이 아닌 보고는 자동으로 처리하지 않는다. 직접 누른 시작은 언제나 한다.
  */
 export function useSsoLogin(profiles: ProfileInfo[] | undefined, currentProfile: string | null) {
   const qc = useQueryClient();
   const [entries, setEntries] = useState<Record<string, SsoEntry>>({});
-  // 세션마다 마지막으로 로그인에 성공한 시각. 화면(ErrorState)이 이 값이 바뀌는 것을 보고 다시 불러온다.
+  // 세션마다 마지막으로 로그인에 성공한 시각. 화면(ErrorState)이 이 값이 바뀌는 것을 보고 onLoggedIn을 부른다.
   const [successes, setSuccesses] = useState<Record<string, number>>({});
   // 알림 처리(동기)에서 최신 값을 보려고 ref에도 둔다
   const entriesRef = useRef(entries);

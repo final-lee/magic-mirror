@@ -64,7 +64,8 @@ export function UnusedPermissions({ profile, arn, onOpenPolicy, onOpenGroup, onF
       AWS가 서비스별 마지막 사용 시각을 모으는 중이에요. 최대 30초 걸려요
     </p>
   );
-  const error = q.isError && <ErrorState compact error={q.error} profile={profile} onRetry={load} />;
+  // 누를 때만 도는 쿼리(enabled: false)라서 로그인 관리자의 무효화로는 다시 불리지 않는다. 로그인이 끝나면 상자가 이 쿼리만 다시 부른다
+  const error = q.isError && <ErrorState compact error={q.error} profile={profile} onRetry={load} onLoggedIn={load} />;
 
   if (!data) {
     return (

@@ -136,7 +136,10 @@ function Results({ profile, result, overview, onOpen }: ResultsProps) {
           AWS 정책 시뮬레이터로 확인하는 중이에요…
         </div>
       )}
-      {sim.isError && <ErrorState compact error={sim.error} profile={profile} onRetry={() => void sim.refetch()} />}
+      {/* 누를 때만 도는 쿼리(enabled: false)라서 로그인 관리자의 무효화로는 다시 불리지 않는다. 로그인이 끝나면 상자가 이 쿼리만 다시 부른다 */}
+      {sim.isError && (
+        <ErrorState compact error={sim.error} profile={profile} onRetry={() => void sim.refetch()} onLoggedIn={() => void sim.refetch()} />
+      )}
       {result.notes.map((n) => (
         <div className="iam-hint" key={n}>
           <span aria-hidden="true">ⓘ</span> <span>{n}</span>
