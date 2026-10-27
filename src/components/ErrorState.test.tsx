@@ -1,7 +1,9 @@
+import { useQuery } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ErrorState } from "./ErrorState";
 import { api } from "../api/client";
-import { SsoLoginContext, type SsoLogin } from "../lib/useSsoLogin";
+import { SsoLoginContext, useSsoLogin, type SsoLogin } from "../lib/useSsoLogin";
+import { renderWithClient } from "../test/utils";
 
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 
@@ -42,7 +44,7 @@ test("sso login failure is shown", async () => {
   expect(await screen.findByText("aws CLI를 찾을 수 없어요")).toBeInTheDocument();
 });
 
-test("inside the app the login button goes through the manager, which reloads by itself", async () => {
+test("inside the app the login button goes through the manager, and a successful login reloads the failed query", async () => {
   const sso = manager();
   const onRetry = vi.fn();
   render(
@@ -50,16 +52,16 @@ test("inside the app the login button goes through the manager, which reloads by
       <ErrorState error={{ kind: "ssoExpired" }} profile="prod" onRetry={onRetry} />
     </SsoLoginContext.Provider>,
   );
-  // 클릭 뒤에 이어지는 비동기 작업까지 끝낸 다음에 본다(관리자가 이미 쿼리를 무효화하므로 onRetry를 또 부르면 같은 조회가 두 번 돈다)
+  // 클릭 뒤에 이어지는 비동기 작업까지 끝낸 다음에 본다
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "로그인" }));
   });
   expect(sso.start).toHaveBeenCalledWith("prod", { manual: true });
-  expect(onRetry).not.toHaveBeenCalled();
+  expect(onRetry).toHaveBeenCalledTimes(1);
   expect(api.ssoLogin).not.toHaveBeenCalled();
 });
 
-test("a manual start that does not log in calls nothing else", async () => {
+test("a manual start that does not log in does not reload and calls nothing else", async () => {
   const sso = manager({ start: vi.fn(async () => false) });
   const onRetry = vi.fn();
   render(
@@ -73,6 +75,50 @@ test("a manual start that does not log in calls nothing else", async () => {
   expect(sso.start).toHaveBeenCalledTimes(1);
   expect(onRetry).not.toHaveBeenCalled();
   expect(api.ssoLogin).not.toHaveBeenCalled();
+});
+
+// 무효화는 켜진 쿼리만 다시 부른다. 사용자가 누를 때만 도는 쿼리(enabled: false)는 ErrorState의 onRetry로 다시 불러야 화면이 풀린다.
+describe("with the real manager and a query that only runs on demand", () => {
+  const PROFILES = [{ name: "prod", region: null, ssoLogin: "prod", ssoKey: "session:prod" }];
+
+  function OnDemand({ queryFn }: { queryFn: () => Promise<string> }) {
+    const sso = useSsoLogin(PROFILES, "prod");
+    const q = useQuery({ queryKey: ["iam", "prod", "lastAccessed"], queryFn, enabled: false, retry: false });
+    return (
+      <SsoLoginContext.Provider value={sso}>
+        <button onClick={() => void q.refetch()}>불러오기</button>
+        {q.isError && <ErrorState error={q.error} profile="prod" onRetry={() => void q.refetch()} />}
+        {q.data && <p>{q.data}</p>}
+      </SsoLoginContext.Provider>
+    );
+  }
+
+  test("a manual login that succeeds loads the data and clears the error box", async () => {
+    vi.mocked(api.ssoLogin).mockResolvedValue(undefined);
+    const queryFn = vi.fn<() => Promise<string>>().mockRejectedValueOnce({ kind: "ssoExpired" }).mockResolvedValue("마지막 사용 시각");
+    renderWithClient(<OnDemand queryFn={queryFn} />);
+    fireEvent.click(screen.getByRole("button", { name: "불러오기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "로그인" }));
+    expect(await screen.findByText("마지막 사용 시각")).toBeInTheDocument();
+    expect(screen.queryByText(/SSO 세션이 만료됐어요/)).not.toBeInTheDocument();
+    expect(api.ssoLogin).toHaveBeenCalledTimes(1);
+    expect(queryFn).toHaveBeenCalledTimes(2);
+  });
+
+  test("a login that fails leaves the error box and does not load again", async () => {
+    vi.mocked(api.ssoLogin).mockRejectedValue({ kind: "other", message: "로그인을 취소했어요" });
+    const queryFn = vi.fn<() => Promise<string>>().mockRejectedValue({ kind: "ssoExpired" });
+    renderWithClient(<OnDemand queryFn={queryFn} />);
+    fireEvent.click(screen.getByRole("button", { name: "불러오기" }));
+    const login = await screen.findByRole("button", { name: "로그인" });
+    // 클릭 뒤에 이어지는 비동기 작업(로그인 실패 처리)까지 끝낸 다음에 본다
+    await act(async () => {
+      fireEvent.click(login);
+    });
+    expect(api.ssoLogin).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/SSO 세션이 만료됐어요/)).toBeInTheDocument();
+    expect(queryFn).toHaveBeenCalledTimes(1);
+  });
 });
 
 test("a running login shows the busy button", () => {

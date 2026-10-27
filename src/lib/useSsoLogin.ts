@@ -5,8 +5,11 @@ import { errorMessage } from "../api/errors";
 import { onSsoExpired } from "../api/invoke";
 import type { ProfileInfo } from "../api/types";
 
-/** 로그인 하나의 상태. 성공하면 목록에서 빠진다(= 대기). */
-export type SsoStatus = { kind: "running" } | { kind: "failed"; message: string } | { kind: "cancelled" };
+/**
+ * 로그인 하나의 상태. 성공하면 목록에서 빠진다(= 대기).
+ * afterSuccess는 로그인에 성공한 직후 또 만료를 알려서 생긴 실패에만 붙는다. 로그인 자체가 실패한 것이 아니라 프로필 설정 문제라서 배너가 다른 문구를 쓴다.
+ */
+export type SsoStatus = { kind: "running" } | { kind: "failed"; message: string; afterSuccess?: true } | { kind: "cancelled" };
 
 export interface SsoEntry {
   key: string;
@@ -34,8 +37,10 @@ export function loginPlan(profiles: ProfileInfo[] | undefined, profile: string) 
 /**
  * SSO 로그인 관리자. 명령이 SSO 만료로 실패하면 지금 보고 있는 프로필의 세션에 로그인을 한 번 연다.
  * - 실패하거나 취소한 세션은 사용자가 그 프로필을 다시 고르거나 직접 누를 때까지 자동으로 다시 열지 않는다.
- * - 로그인에 성공한 직후(5분 안)에 시작한 호출이 또 만료로 실패하면 프로필 설정 문제로 보고 실패 줄만 띄운다.
+ * - 로그인에 성공한 직후(5분 안)에 시작한 호출이 또 만료로 실패하면 프로필 설정 문제로 보고 실패 줄만 띄운다(afterSuccess).
  *   성공하기 전에 시작한 호출의 늦은 보고는 무시한다.
+ * - 성공하면 그 세션 프로필의 쿼리 중 돌고 있던 것은 취소한 뒤 무효화한다. 켜진 쿼리는 로그인 뒤에 새로 시작하고,
+ *   누를 때만 도는 쿼리(enabled: false)는 다시 불리지 않으므로 ErrorState가 onRetry로 다시 부른다.
  * - 지금 보고 있는 프로필의 세션이 아닌 보고는 자동으로 처리하지 않는다. 직접 누른 시작은 언제나 한다.
  */
 export function useSsoLogin(profiles: ProfileInfo[] | undefined, currentProfile: string | null) {
@@ -78,7 +83,7 @@ export function useSsoLogin(profiles: ProfileInfo[] | undefined, currentProfile:
           if ((opts.startedAt ?? Date.now()) < lastOk) return Promise.resolve(false);
           // 로그인한 직후 시작한 호출이 또 만료로 실패하면 브라우저를 또 띄워도 소용없다
           if (Date.now() - lastOk < RELOGIN_COOLDOWN_MS) {
-            write((prev) => ({ ...prev, [plan.key]: entry({ kind: "failed", message: STILL_NO_CREDENTIALS }) }));
+            write((prev) => ({ ...prev, [plan.key]: entry({ kind: "failed", message: STILL_NO_CREDENTIALS, afterSuccess: true }) }));
             return Promise.resolve(false);
           }
         }
@@ -88,16 +93,24 @@ export function useSsoLogin(profiles: ProfileInfo[] | undefined, currentProfile:
       const flight = api
         .ssoLogin(plan.target)
         .then(
-          () => {
+          async () => {
             lastSuccess.current.set(plan.key, Date.now());
             write(({ [plan.key]: _done, ...rest }) => rest);
             const affected = new Set(
               (profilesRef.current ?? []).filter((p) => loginPlan(profilesRef.current, p.name).key === plan.key).map((p) => p.name),
             );
             affected.add(profile);
-            void qc.invalidateQueries({
-              predicate: (q) => PROFILE_SCOPED_ROOTS.has(String(q.queryKey[0])) && typeof q.queryKey[1] === "string" && affected.has(q.queryKey[1]),
-            });
+            const filters = {
+              predicate: (q: { queryKey: readonly unknown[] }) =>
+                PROFILE_SCOPED_ROOTS.has(String(q.queryKey[0])) && typeof q.queryKey[1] === "string" && affected.has(q.queryKey[1]),
+            };
+            // 데이터가 아직 없는 쿼리의 첫 조회가 이 순간에도 돌고 있으면, 무효화는 새로 부르지 않고 그 조회를 그대로 이어 간다.
+            // 그 조회는 만료된 세션으로 시작했으니 곧 만료 오류로 끝나 화면에 남는다. 먼저 취소해서 로그인 뒤에 새로 시작하게 한다.
+            // 취소된 조회의 늦은 결과는 TanStack이 버리고, 그 만료 보고는 낡은 것이라 위에서 무시한다.
+            // 무효화가 다시 시작하는 것은 켜진(active) 쿼리뿐이라 취소도 그 쿼리만 한다. 누를 때만 도는 쿼리(enabled: false)의
+            // 조회를 취소하면 아무도 다시 시작하지 않아, 10~30초 걸리던 조회가 사라지고 버튼만 남는다.
+            await qc.cancelQueries({ ...filters, type: "active" });
+            void qc.invalidateQueries(filters);
             return true;
           },
           (e: unknown) => {

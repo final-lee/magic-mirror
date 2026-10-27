@@ -18,8 +18,9 @@ export function reportSsoExpired(profile: string, startedAt = Date.now()) {
   for (const listener of [...listeners]) {
     try {
       listener(profile, startedAt);
-    } catch {
-      // 구독자의 오류가 호출한 쪽의 원래 오류를 바꾸거나 다른 구독자를 막으면 안 된다
+    } catch (e) {
+      // 구독자의 오류가 호출한 쪽의 원래 오류를 바꾸거나 다른 구독자를 막으면 안 된다. 다만 원인은 남겨서 로그인 관리자의 버그가 조용히 묻히지 않게 한다.
+      console.error("SSO 만료 알림을 처리하다 오류가 났어요", e);
     }
   }
 }
