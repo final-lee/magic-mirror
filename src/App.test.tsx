@@ -1,6 +1,7 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import App from "./App";
 import { api } from "./api/client";
+import { reportSsoExpired } from "./api/invoke";
 import { iamApi } from "./iam/api";
 import { ACCOUNT, alice, aliceView, bob, sampleFindings, sampleOverview } from "./iam/fixtures";
 import { vpcApi } from "./vpcmap/api";
@@ -15,6 +16,7 @@ vi.mock("./api/client", () => ({
     listResources: vi.fn(),
     listS3Objects: vi.fn(),
     ssoLogin: vi.fn(),
+    ssoLoginCancel: vi.fn(),
     getSettings: vi.fn(),
     saveSettings: vi.fn(),
   },
@@ -108,6 +110,19 @@ test("no profiles shows setup guide", async () => {
   m.listProfiles.mockResolvedValue([]);
   renderWithClient(<App />);
   expect(await screen.findByText(/aws configure sso/)).toBeInTheDocument();
+});
+
+test("an expired SSO session logs in automatically and shows the banner", async () => {
+  m.listProfiles.mockResolvedValue([
+    { name: "dev", region: "us-east-1", ssoLogin: "dev", ssoKey: "session:corp" },
+    { name: "prod", region: "ap-northeast-2", ssoLogin: "dev", ssoKey: "session:corp" },
+  ]);
+  m.ssoLogin.mockReturnValue(new Promise(() => {}));
+  renderWithClient(<App />);
+  await screen.findByRole("combobox", { name: "프로필" });
+  act(() => reportSsoExpired("prod"));
+  expect(m.ssoLogin).toHaveBeenCalledWith("dev");
+  expect(await screen.findByText("prod: SSO 로그인 중이에요. 브라우저에서 승인해 주세요")).toBeInTheDocument();
 });
 
 test("startup load failure shows error with retry", async () => {

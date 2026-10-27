@@ -21,6 +21,8 @@ import { getVersion } from "@tauri-apps/api/app";
 import { VpcMapTab } from "./vpcmap/VpcMapTab";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { useUpdater } from "./lib/useUpdater";
+import { SsoBanner } from "./components/SsoBanner";
+import { SsoLoginContext, useSsoLogin } from "./lib/useSsoLogin";
 
 const sameFav = (a: Favorite, b: Favorite) => a.service === b.service && a.type === b.type;
 
@@ -53,6 +55,7 @@ export default function App() {
   );
   const transfers = useTransfers(profile, onTransferSettled);
   const updater = useUpdater();
+  const sso = useSsoLogin(profiles.data);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   useEffect(() => {
     getVersion().then(setAppVersion, () => {});
@@ -165,6 +168,8 @@ export default function App() {
   const changeProfile = (name: string) => {
     const info = profiles.data?.find((p) => p.name === name);
     const nextRegion = info?.region ?? region;
+    // 사용자가 직접 고른 프로필이므로 그 SSO 세션의 실패·취소 기록을 지워 자동 로그인을 다시 켠다
+    sso.rearm(name);
     setProfile(name);
     setRegion(nextRegion);
     // 버킷과 IAM은 계정에 속하므로 버킷 탭, 비교 탭, IAM 탭을 모두 닫는다.
@@ -194,99 +199,102 @@ export default function App() {
   const mainKey = [profile, region, selection?.service, selection?.type].join("|");
 
   return (
-    <div className="app">
-      <Toolbar
-        profiles={profiles.data}
-        profile={profile}
-        onProfile={changeProfile}
-        region={region}
-        onRegion={changeRegion}
-        filter={filter}
-        onFilter={setFilter}
-        filterRef={filterRef}
-        onRefresh={refresh}
-        onOpenSettings={() => setShowSettings(true)}
-      />
-      <UpdateBanner updater={updater} transfersActive={transfersActive} />
-      <TabBar tabs={tabs} active={activeTab} onActivate={activate} onClose={closeTab} />
-      <div className="tabpane main" hidden={activeTab !== "resources"}>
-        <Sidebar
-          services={enabled}
+    <SsoLoginContext.Provider value={sso}>
+      <div className="app">
+        <Toolbar
+          profiles={profiles.data}
           profile={profile}
+          onProfile={changeProfile}
           region={region}
-          selection={selection}
-          favorites={settings.favorites}
-          onSelect={select}
-          onToggleFavorite={toggleFavorite}
-          onOpenIam={() => openIam()}
-        />
-        <MainArea
-          key={mainKey}
-          services={enabled}
-          selection={selection}
-          profile={profile}
-          region={region}
-          account={account.data}
+          onRegion={changeRegion}
           filter={filter}
-          onOpenBucket={openExplorer}
-          onOpenVpc={openVpc}
-          onOpenIam={openIam}
+          onFilter={setFilter}
+          filterRef={filterRef}
           onRefresh={refresh}
-          active={activeTab === "resources"}
+          onOpenSettings={() => setShowSettings(true)}
         />
-      </div>
-      {profile && iamTab && (
-        <div className="tabpane" hidden={activeTab !== "iam"}>
-          <IamTab profile={profile} active={activeTab === "iam"} filter={activeTab === "iam" ? filter : ""} focus={iamTab.focus} nonce={iamTab.nonce} />
-        </div>
-      )}
-      {explorerTabs.map((t) => (
-        <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
-          <ExplorerTab
+        <UpdateBanner updater={updater} transfersActive={transfersActive} />
+        <SsoBanner entries={sso.entries} onCancel={sso.cancel} onRetry={(p) => void sso.start(p, { manual: true })} onDismiss={sso.dismiss} />
+        <TabBar tabs={tabs} active={activeTab} onActivate={activate} onClose={closeTab} />
+        <div className="tabpane main" hidden={activeTab !== "resources"}>
+          <Sidebar
+            services={enabled}
             profile={profile}
             region={region}
-            s3Service={s3Service}
-            initialLocation={t.location}
-            filter={activeTab === t.id ? filter : ""}
-            active={activeTab === t.id}
-            initialLocalPath={settings.explorerLocalPath ?? null}
-            onLocalPathChange={(path) => update({ explorerLocalPath: path })}
-            transfers={transfers}
-            onOpenDiff={openDiff}
+            selection={selection}
+            favorites={settings.favorites}
+            onSelect={select}
+            onToggleFavorite={toggleFavorite}
+            onOpenIam={() => openIam()}
+          />
+          <MainArea
+            key={mainKey}
+            services={enabled}
+            selection={selection}
+            profile={profile}
+            region={region}
+            account={account.data}
+            filter={filter}
+            onOpenBucket={openExplorer}
+            onOpenVpc={openVpc}
+            onOpenIam={openIam}
             onRefresh={refresh}
+            active={activeTab === "resources"}
           />
         </div>
-      ))}
-      {profile &&
-        vpcTabs.map((t) => (
+        {profile && iamTab && (
+          <div className="tabpane" hidden={activeTab !== "iam"}>
+            <IamTab profile={profile} active={activeTab === "iam"} filter={activeTab === "iam" ? filter : ""} focus={iamTab.focus} nonce={iamTab.nonce} />
+          </div>
+        )}
+        {explorerTabs.map((t) => (
           <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
-            <VpcMapTab profile={profile} region={t.region} vpcId={t.vpcId} name={t.name} active={activeTab === t.id} />
+            <ExplorerTab
+              profile={profile}
+              region={region}
+              s3Service={s3Service}
+              initialLocation={t.location}
+              filter={activeTab === t.id ? filter : ""}
+              active={activeTab === t.id}
+              initialLocalPath={settings.explorerLocalPath ?? null}
+              onLocalPathChange={(path) => update({ explorerLocalPath: path })}
+              transfers={transfers}
+              onOpenDiff={openDiff}
+              onRefresh={refresh}
+            />
           </div>
         ))}
-      {diffTabs.map((t) => (
-        <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
-          <DiffTab
-            profile={profile}
-            left={t.left}
-            right={t.right}
-            active={activeTab === t.id}
-            transfers={transfers}
+        {profile &&
+          vpcTabs.map((t) => (
+            <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
+              <VpcMapTab profile={profile} region={t.region} vpcId={t.vpcId} name={t.name} active={activeTab === t.id} />
+            </div>
+          ))}
+        {diffTabs.map((t) => (
+          <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
+            <DiffTab
+              profile={profile}
+              left={t.left}
+              right={t.right}
+              active={activeTab === t.id}
+              transfers={transfers}
+            />
+          </div>
+        ))}
+        {showSettings && (
+          <ServiceSettings
+            services={services.data}
+            enabled={settings.enabledServices}
+            onChange={(ids) => update({ enabledServices: ids })}
+            onClose={() => setShowSettings(false)}
+            diffTool={diffTool}
+            diffToolCommand={settings.diffToolCommand ?? null}
+            onDiffToolChange={(tool, command) => update({ diffTool: tool, diffToolCommand: command })}
+            updater={updater}
+            appVersion={appVersion}
           />
-        </div>
-      ))}
-      {showSettings && (
-        <ServiceSettings
-          services={services.data}
-          enabled={settings.enabledServices}
-          onChange={(ids) => update({ enabledServices: ids })}
-          onClose={() => setShowSettings(false)}
-          diffTool={diffTool}
-          diffToolCommand={settings.diffToolCommand ?? null}
-          onDiffToolChange={(tool, command) => update({ diffTool: tool, diffToolCommand: command })}
-          updater={updater}
-          appVersion={appVersion}
-        />
-      )}
-    </div>
+        )}
+      </div>
+    </SsoLoginContext.Provider>
   );
 }

@@ -43,6 +43,10 @@ export interface ListResult {
 export interface ProfileInfo {
   name: string;
   region: string | null;
+  /** aws sso login에 넘길 프로필(자기 자신 또는 source_profile 체인의 SSO 프로필). SSO가 아니면 null */
+  ssoLogin?: string | null;
+  /** 같은 SSO 세션을 쓰는 프로필끼리 같은 값. SSO가 아니면 null */
+  ssoKey?: string | null;
 }
 
 /** 즐겨찾기이자 사이드바 선택 상태 */
