@@ -8,7 +8,7 @@ use aws_smithy_types::error::display::DisplayErrorContext;
 use serde::Serialize;
 use tokio::sync::Mutex;
 
-use crate::error::{from_sdk, AppError};
+use crate::error::{credential_denial, from_sdk, AppError};
 
 pub const GLOBAL_REGION: &str = "us-east-1";
 
@@ -119,6 +119,9 @@ pub fn list_profiles() -> Vec<ProfileInfo> {
 
 pub fn credentials_error(chain: &str) -> AppError {
     let lower = chain.to_lowercase();
+    if let Some(denied) = credential_denial(&lower) {
+        return denied;
+    }
     if lower.contains("sso") || lower.contains("token") {
         AppError::SsoExpired
     } else {
@@ -339,5 +342,13 @@ region = eu-west-3
     fn credential_errors_mentioning_sso_are_expired() {
         assert_eq!(credentials_error("the SSO session has expired or is invalid"), AppError::SsoExpired);
         assert_eq!(credentials_error("no providers in chain"), AppError::other("no providers in chain"));
+    }
+
+    #[test]
+    fn a_denied_role_behind_an_sso_profile_is_not_expired() {
+        // 역할 ARN에 AWSReservedSSO_가 들어 있어도 만료가 아니다: 다시 로그인해도 풀리지 않으니 자동 로그인을 열면 안 된다
+        let chain = "failed to load credentials: AccessDenied: User: arn:aws:sts::111111111111:assumed-role/AWSReservedSSO_Admin_0123abcd/jane \
+            is not authorized to perform: sts:AssumeRole on resource: arn:aws:iam::222222222222:role/Deploy";
+        assert_eq!(credentials_error(chain), AppError::AccessDenied { action: "sts:AssumeRole".into() });
     }
 }
