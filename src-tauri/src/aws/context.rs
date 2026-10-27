@@ -122,6 +122,13 @@ pub fn credentials_error(chain: &str) -> AppError {
     if let Some(denied) = credential_denial(&lower) {
         return denied;
     }
+    // 자격 증명을 만들 수 없는 프로필은 만료가 아니다. 다시 로그인해도 풀리지 않는데, 만료로 보면 자동 로그인이 브라우저를 연다.
+    // SDK는 공급자를 모두 시도하고도 못 찾으면 "no credentials found in chain"(토큰 전용 `sso_session` 프로필, 자격 증명이 없는 프로필)을,
+    // 프로필 설정이 잘못됐으면 "not properly configured"를 낸다. 두 chain 모두 "sso"나 "token"이 들어 있어서(공급자 목록의 WebIdentityToken,
+    // `sso_account_id`) 아래 검사에 걸리므로 먼저 거른다. 진짜 만료 chain에는 이 문구가 없다.
+    if lower.contains("no credentials found in chain") || lower.contains("not properly configured") {
+        return AppError::other(chain);
+    }
     if lower.contains("sso") || lower.contains("token") {
         AppError::SsoExpired
     } else {
@@ -338,10 +345,112 @@ region = eu-west-3
         assert!(parse_profiles("").is_empty());
     }
 
+    // 아래 chain들은 실제 aws-config 1.13이 `provide_credentials()`에서 낸 문자열이다(Debug 꼬리는 줄였고 홈 폴더는 /Users/jane로 바꿨다).
+    // 손으로 꾸민 문자열은 실제 문구와 달라서 이 분류를 지키지 못했다. 임시 설정 파일과 임시 HOME에서 SDK를 실제로 돌려 얻었다.
+
+    /// 진짜 만료: 토큰 캐시 파일이 없다(`sso_session` 프로필. 그 위의 `source_profile` 역할 프로필도 같은 문구다)
+    const TOKEN_FILE_MISSING_SESSION: &str = "an error occurred while loading credentials: an error occurred while loading credentials: \
+        an error occurred while loading an access token: failed to load the cached SSO token (ProviderError(ProviderError { source: \
+        ProviderError(ProviderError { source: ProviderError(ProviderError { source: FailedToLoadToken { source: IoError { what: \"read\", \
+        path: \"/Users/jane/.aws/sso/cache/ee0bfd2552fbd840c02cc48b6e823320543c450f.json\", source: Os { code: 2, kind: NotFound, \
+        message: \"No such file or directory\" } } } }) }) }))";
+    /// 진짜 만료: 토큰 파일은 있지만 만료됐고 갱신할 수 없다(`sso_session` 프로필)
+    const TOKEN_EXPIRED_SESSION: &str = "an error occurred while loading credentials: an error occurred while loading credentials: \
+        an error occurred while loading an access token: the SSO token has expired and cannot be refreshed (ProviderError(ProviderError { \
+        source: ProviderError(ProviderError { source: ProviderError(ProviderError { source: ExpiredToken }) }) }))";
+    /// 진짜 만료: 토큰 캐시 파일이 없다(레거시 `sso_start_url` 프로필)
+    const TOKEN_FILE_MISSING_LEGACY: &str = "an error occurred while loading credentials: an error occurred while loading credentials: \
+        failed to read `/Users/jane/.aws/sso/cache/79e435d7a515078e81c9dffc35f38d5687ebd3a7.json`: No such file or directory (os error 2) \
+        (ProviderError(ProviderError { source: ProviderError(ProviderError { source: IoError { what: \"read\", \
+        path: \"/Users/jane/.aws/sso/cache/79e435d7a515078e81c9dffc35f38d5687ebd3a7.json\", source: Os { code: 2, kind: NotFound, \
+        message: \"No such file or directory\" } } }) }))";
+    /// 진짜 만료: 레거시 프로필의 토큰을 포털이 거절한다(이 chain의 "sso"는 `server` 헤더에만 있다)
+    const PORTAL_REJECTS_TOKEN: &str = "an error occurred while loading credentials: an error occurred while loading credentials: service error: \
+        UnauthorizedException: Session token not found or invalid: UnauthorizedException: Session token not found or invalid \
+        (ProviderError(ProviderError { source: ProviderError(ProviderError { source: ServiceError(ServiceError { source: \
+        UnauthorizedException(UnauthorizedException { message: Some(\"Session token not found or invalid\"), meta: ErrorMetadata { \
+        code: Some(\"UnauthorizedException\"), message: Some(\"Session token not found or invalid\"), extras: Some({\"aws_request_id\": \"x\"}) } }), \
+        raw: Response { status: StatusCode(401), headers: {\"server\": \"AWS SSO\"} } }) }) }))";
+
+    /// 자격 증명을 만들 수 없는 프로필: 토큰 전용 `sso_session` 프로필(`sso_account_id`와 `sso_role_name`이 없다. CodeCatalyst 설정이 이렇다).
+    /// 공급자를 모두 시도하고도 못 찾으면 목록에 늘 `WebIdentityToken`이 들어서 "token"이 보인다
+    const NO_CREDENTIALS_TOKEN_ONLY: &str = concat!(
+        "the credential provider was not enabled: no credentials found in chain. Attempted:",
+        "\n  Environment: the credential provider was not enabled: environment variable not set",
+        "\n  Profile: the credential provider was not enabled: selected profile will resolve an access token instead of credentials since it \
+         doesn't have `sso_account_id` and `sso_role_name` set. Specify both `sso_account_id` and `sso_role_name` to let this profile resolve credentials.",
+        "\n  WebIdentityToken: the credential provider was not enabled: $AWS_WEB_IDENTITY_TOKEN_FILE was not set",
+        "\n  EcsContainer: the credential provider was not enabled: ECS provider not configured",
+        "\n  Ec2InstanceMetadata: the credential provider was not enabled: could not communicate with IMDS: dispatch failure: io error: \
+         client error (Connect): tcp connect error: No route to host (os error 65)",
+        " (CredentialsNotLoaded(CredentialsNotLoaded { source: Some(ProviderChainError { attempts: [ProviderAttempt { name: \"Environment\", \
+         error: CredentialsNotLoaded(CredentialsNotLoaded { source: Some(\"environment variable not set\") }) }] }) }))",
+    );
+    /// 자격 증명이 아예 없는 비SSO 프로필(`[profile empty]`에 리전만 있다)
+    const NO_CREDENTIALS_AT_ALL: &str = concat!(
+        "the credential provider was not enabled: no credentials found in chain. Attempted:",
+        "\n  Environment: the credential provider was not enabled: environment variable not set",
+        "\n  Profile: the credential provider was not enabled",
+        "\n  WebIdentityToken: the credential provider was not enabled: $AWS_WEB_IDENTITY_TOKEN_FILE was not set",
+        "\n  EcsContainer: the credential provider was not enabled: ECS provider not configured",
+        "\n  Ec2InstanceMetadata: the credential provider was not enabled: could not communicate with IMDS: dispatch failure: io error: \
+         client error (Connect): tcp connect error: No route to host (os error 65)",
+        " (CredentialsNotLoaded(CredentialsNotLoaded { source: Some(ProviderChainError { attempts: [ProviderAttempt { name: \"Environment\", \
+         error: CredentialsNotLoaded(CredentialsNotLoaded { source: Some(\"environment variable not set\") }) }] }) }))",
+    );
+    /// 설정이 잘못된 프로필: `sso_account_id`만 있고 `sso_role_name`이 없다
+    const NOT_CONFIGURED_HALF_SSO: &str = "the credentials provider was not properly configured: ProfileFile provider could not be built: \
+        profile `half` has invalid SSO config: if `sso_account_id` is set, then `sso_role_name` must also be set (InvalidConfiguration(\
+        InvalidConfiguration { source: \"ProfileFile provider could not be built: profile `half` has invalid SSO config: if `sso_account_id` is set, \
+        then `sso_role_name` must also be set\" }))";
+    /// 설정이 잘못된 프로필: 없는 `[sso-session]`을 가리킨다(`aws sso login`도 실패한다)
+    const NOT_CONFIGURED_SESSION_MISSING: &str = "the credentials provider was not properly configured: ProfileFile provider could not be built: \
+        sso-session named `nope` (referenced by profile `dangling`) was not found (InvalidConfiguration(InvalidConfiguration { source: \
+        \"ProfileFile provider could not be built: sso-session named `nope` (referenced by profile `dangling`) was not found\" }))";
+    /// SSO도 토큰도 아닌 실제 실패: `credential_process`가 0이 아닌 코드로 끝났다
+    const CREDENTIAL_PROCESS_FAILED: &str = "an error occurred while loading credentials: an error occurred while loading credentials: \
+        Error retrieving credentials: external process exited with code exit status: 1. Stderr:  (ProviderError(ProviderError { source: \
+        ProviderError(ProviderError { source: \"Error retrieving credentials: external process exited with code exit status: 1. Stderr: \" }) }))";
+
     #[test]
     fn credential_errors_mentioning_sso_are_expired() {
         assert_eq!(credentials_error("the SSO session has expired or is invalid"), AppError::SsoExpired);
-        assert_eq!(credentials_error("no providers in chain"), AppError::other("no providers in chain"));
+    }
+
+    #[test]
+    fn a_credential_error_that_is_neither_sso_nor_a_token_keeps_its_message() {
+        assert_eq!(credentials_error(CREDENTIAL_PROCESS_FAILED), AppError::other(CREDENTIAL_PROCESS_FAILED));
+    }
+
+    #[test]
+    fn a_real_expired_session_is_still_expired() {
+        for (case, chain) in [
+            ("sso_session, 토큰 파일 없음", TOKEN_FILE_MISSING_SESSION),
+            ("sso_session, 토큰 만료", TOKEN_EXPIRED_SESSION),
+            ("레거시, 토큰 파일 없음", TOKEN_FILE_MISSING_LEGACY),
+            ("레거시, 포털이 토큰을 거절", PORTAL_REJECTS_TOKEN),
+        ] {
+            assert_eq!(credentials_error(chain), AppError::SsoExpired, "{case}");
+        }
+    }
+
+    #[test]
+    fn a_token_only_sso_profile_is_not_an_expired_session() {
+        // 다시 로그인해도 풀리지 않는다: 이 프로필은 액세스 토큰만 받고 자격 증명을 만들지 않는다
+        assert_eq!(credentials_error(NO_CREDENTIALS_TOKEN_ONLY), AppError::other(NO_CREDENTIALS_TOKEN_ONLY));
+    }
+
+    #[test]
+    fn a_misconfigured_profile_is_not_an_expired_session() {
+        for (case, chain) in [("sso_role_name 없음", NOT_CONFIGURED_HALF_SSO), ("없는 sso-session", NOT_CONFIGURED_SESSION_MISSING)] {
+            assert_eq!(credentials_error(chain), AppError::other(chain), "{case}");
+        }
+    }
+
+    #[test]
+    fn a_profile_without_any_credentials_is_not_an_expired_session_either() {
+        // SSO가 아닌 프로필에도 "SSO 세션이 만료됐어요"가 뜨던 오분류
+        assert_eq!(credentials_error(NO_CREDENTIALS_AT_ALL), AppError::other(NO_CREDENTIALS_AT_ALL));
     }
 
     #[test]
