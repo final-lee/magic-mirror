@@ -30,6 +30,7 @@ pub fn run() {
                 ctx: aws::context::AwsContext::default(),
                 adapters: adapters::registry(),
                 settings_path: dir.join("settings.json"),
+                sso: Default::default(),
             });
             app.manage(explorer_commands::ExplorerState::default());
             app.manage(iam_commands::IamState::new(dir.join("iam-changes.jsonl")));
@@ -43,6 +44,7 @@ pub fn run() {
             commands::list_services,
             commands::list_resources,
             commands::sso_login,
+            commands::sso_login_cancel,
             commands::get_settings,
             commands::save_settings,
             commands::list_s3_objects,
