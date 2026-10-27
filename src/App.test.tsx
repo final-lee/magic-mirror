@@ -57,7 +57,9 @@ beforeEach(() => {
 
 test("restores last profile, uses its region, shows only enabled services", async () => {
   renderWithClient(<App />);
-  expect(await screen.findByRole("combobox", { name: "프로필" })).toHaveValue("prod");
+  const profile = await screen.findByRole("combobox", { name: "프로필" });
+  // 첫 렌더에는 아직 마지막 프로필이 복원되기 전이라 첫 옵션이 보인다. 복원 이펙트의 재렌더를 기다린다.
+  await waitFor(() => expect(profile).toHaveValue("prod"));
   expect(screen.getByRole("combobox", { name: "리전" })).toHaveValue("ap-northeast-2");
   expect(screen.getByText("EC2")).toBeInTheDocument();
   expect(screen.getByText("IAM")).toBeInTheDocument();
@@ -117,12 +119,54 @@ test("an expired SSO session logs in automatically and shows the banner", async 
     { name: "dev", region: "us-east-1", ssoLogin: "dev", ssoKey: "session:corp" },
     { name: "prod", region: "ap-northeast-2", ssoLogin: "dev", ssoKey: "session:corp" },
   ]);
-  m.ssoLogin.mockReturnValue(new Promise(() => {}));
+  // Once: 끝나지 않는 구현이 파일 끝까지 남아 뒤의 테스트가 이어받지 않게 한다
+  m.ssoLogin.mockReturnValueOnce(new Promise(() => {}));
   renderWithClient(<App />);
   await screen.findByRole("combobox", { name: "프로필" });
   act(() => reportSsoExpired("prod"));
   expect(m.ssoLogin).toHaveBeenCalledWith("dev");
   expect(await screen.findByText("prod: SSO 로그인 중이에요. 브라우저에서 승인해 주세요")).toBeInTheDocument();
+});
+
+describe("SSO auto-login across profile switches", () => {
+  // 프로필마다 다른 SSO 세션
+  beforeEach(() => {
+    m.listProfiles.mockResolvedValue([
+      { name: "dev", region: "us-east-1", ssoLogin: "dev", ssoKey: "session:dev" },
+      { name: "prod", region: "ap-northeast-2", ssoLogin: "prod", ssoKey: "session:prod" },
+    ]);
+  });
+  const openProd = async () => {
+    renderWithClient(<App />);
+    const profile = await screen.findByRole("combobox", { name: "프로필" });
+    await waitFor(() => expect(profile).toHaveValue("prod"));
+    return profile;
+  };
+
+  test("choosing a profile again re-arms automatic login after a failure", async () => {
+    m.ssoLogin.mockRejectedValueOnce({ kind: "other", message: "aws CLI를 찾을 수 없어요" });
+    const profile = await openProd();
+    await act(async () => reportSsoExpired("prod"));
+    expect(await screen.findByText("prod: SSO 로그인에 실패했어요: aws CLI를 찾을 수 없어요")).toBeInTheDocument();
+    act(() => reportSsoExpired("prod"));
+    expect(m.ssoLogin).toHaveBeenCalledTimes(1); // 실패한 세션은 자동으로 다시 열지 않는다
+
+    fireEvent.change(profile, { target: { value: "dev" } });
+    fireEvent.change(profile, { target: { value: "prod" } });
+    expect(screen.queryByText(/SSO 로그인에 실패했어요/)).not.toBeInTheDocument();
+    m.ssoLogin.mockReturnValueOnce(new Promise(() => {}));
+    act(() => reportSsoExpired("prod"));
+    expect(m.ssoLogin).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText("prod: SSO 로그인 중이에요. 브라우저에서 승인해 주세요")).toBeInTheDocument();
+  });
+
+  test("a late expiry report from the profile we just left does not open a login", async () => {
+    const profile = await openProd();
+    fireEvent.change(profile, { target: { value: "dev" } });
+    act(() => reportSsoExpired("prod")); // 바꾸기 전에 부른 prod 호출이 뒤늦게 실패했다
+    expect(m.ssoLogin).not.toHaveBeenCalled();
+    expect(screen.queryByText(/SSO 로그인/)).not.toBeInTheDocument();
+  });
 });
 
 test("startup load failure shows error with retry", async () => {

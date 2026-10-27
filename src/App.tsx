@@ -55,7 +55,7 @@ export default function App() {
   );
   const transfers = useTransfers(profile, onTransferSettled);
   const updater = useUpdater();
-  const sso = useSsoLogin(profiles.data);
+  const sso = useSsoLogin(profiles.data, profile);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   useEffect(() => {
     getVersion().then(setAppVersion, () => {});
