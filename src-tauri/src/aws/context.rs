@@ -34,13 +34,24 @@ struct Section {
     source_profile: Option<String>,
 }
 
+/// 섹션 헤더 줄 뒤의 주석(`[profile b] # note`)을 뗀다. 헤더가 아닌 줄은 그대로 둔다: 값 안의 `#`은 주석이 아니다.
+fn strip_header_comment(line: &str) -> &str {
+    if !line.starts_with('[') {
+        return line;
+    }
+    match line.find(']') {
+        Some(close) if line[close + 1..].trim_start().starts_with(['#', ';']) => &line[..=close],
+        _ => line,
+    }
+}
+
 /// `~/.aws/config` 형식에서 `[default]`, `[profile X]` 섹션만 프로필로 읽는다.
 pub fn parse_profiles(text: &str) -> Vec<ProfileInfo> {
     let mut order: Vec<String> = Vec::new();
     let mut sections: HashMap<String, Section> = HashMap::new();
     let mut current: Option<String> = None;
     for line in text.lines() {
-        let line = line.trim();
+        let line = strip_header_comment(line.trim());
         if line.starts_with('[') && line.ends_with(']') {
             let header = line[1..line.len() - 1].trim();
             let name = if header == "default" { Some("default") } else { header.strip_prefix("profile ").map(str::trim) };
@@ -159,6 +170,23 @@ impl AwsContext {
     }
 }
 
+/// 다른 모듈의 테스트가 캐시를 심고 들여다보는 길(진짜 자격 증명 없이).
+#[cfg(test)]
+impl AwsContext {
+    /// 이 프로필의 캐시 항목을 하나 심는다.
+    pub(crate) async fn cache_profile_for_test(&self, profile: &str) {
+        self.cache.lock().await.insert((profile.to_string(), GLOBAL_REGION.to_string()), SdkConfig::builder().build());
+    }
+
+    /// 캐시에 남은 프로필 이름(정렬, 중복 없음).
+    pub(crate) async fn cached_profiles_for_test(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.cache.lock().await.keys().map(|(p, _)| p.clone()).collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,6 +277,37 @@ aws_access_key_id = AKIAIOSFODNN7EXAMPLE
         let parsed = parse_profiles(&text);
         assert_eq!(parsed[5].sso_key.as_deref(), Some("session:corp")); // p5 → p0: 5 steps
         assert_eq!(parsed[6].sso_key, None); // p6 → p0: 6 steps
+    }
+
+    #[test]
+    fn comments_after_a_section_header_do_not_hide_the_section() {
+        let text = "\
+[profile a]
+sso_session = s1
+[profile b] # second org
+sso_session = s2
+[profile c]; note
+region = eu-west-1
+[default]
+region = us-east-2
+[sso-session s1] # shared
+region = eu-west-3
+";
+        assert_eq!(
+            parse_profiles(text),
+            vec![
+                info("a", None, Some(("a", "session:s1"))),
+                info("b", None, Some(("b", "session:s2"))),
+                info("c", Some("eu-west-1"), None),
+                info("default", Some("us-east-2"), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_hash_inside_a_value_is_kept() {
+        let text = "[profile old]\nsso_start_url = https://corp.awsapps.com/start/#/\n";
+        assert_eq!(parse_profiles(text), vec![info("old", None, Some(("old", "url:https://corp.awsapps.com/start/#/")))]);
     }
 
     #[test]

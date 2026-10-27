@@ -1,6 +1,9 @@
+use std::future::Future;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use tauri::State;
+use tokio::sync::Notify;
 
 use crate::adapters::{effective_region, find_adapter, service_info, AdapterRef};
 use crate::adapters::s3::{self, S3Listing};
@@ -68,13 +71,23 @@ fn profiles_sharing(profiles: &[ProfileInfo], profile: &str, key: &str) -> Vec<S
     names
 }
 
+/// 로그인하고, 성공하면 같은 SSO 세션을 쓰는 프로필 전부의 SdkConfig 캐시를 비운다(실패하면 비우지 않는다).
+/// `run`은 `aws sso login`에 넘길 프로필과 취소 신호를 받는다.
+async fn login_and_forget<F, Fut>(sso: &SsoLogins, ctx: &AwsContext, profiles: &[ProfileInfo], profile: &str, run: F) -> Result<(), AppError>
+where
+    F: FnOnce(String, Arc<Notify>) -> Fut,
+    Fut: Future<Output = Result<(), AppError>> + Send + 'static,
+{
+    let (key, target) = login_plan(profiles, profile);
+    sso.login(&key, move |cancel| run(target, cancel)).await?;
+    ctx.forget_profiles(&profiles_sharing(profiles, profile, &key)).await;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn sso_login(state: State<'_, AppState>, profile: String) -> Result<(), AppError> {
     let profiles = context::list_profiles();
-    let (key, target) = login_plan(&profiles, &profile);
-    state.sso.login(&key, move |cancel| sso::run_aws_sso_login(target, cancel)).await?;
-    state.ctx.forget_profiles(&profiles_sharing(&profiles, &profile, &key)).await;
-    Ok(())
+    login_and_forget(&state.sso, &state.ctx, &profiles, &profile, sso::run_aws_sso_login).await
 }
 
 #[tauri::command]
@@ -111,6 +124,7 @@ pub async fn list_s3_objects(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     fn p(name: &str, sso: Option<(&str, &str)>) -> ProfileInfo {
         ProfileInfo { name: name.into(), region: None, sso_login: sso.map(|s| s.0.into()), sso_key: sso.map(|s| s.1.into()) }
@@ -129,5 +143,50 @@ mod tests {
         let profiles = vec![p("base", Some(("base", "session:corp"))), p("admin", Some(("base", "session:corp"))), p("other", Some(("other", "session:x")))];
         assert_eq!(profiles_sharing(&profiles, "admin", "session:corp"), vec!["base".to_string(), "admin".to_string()]);
         assert_eq!(profiles_sharing(&profiles, "keys", "profile:keys"), vec!["keys".to_string()]);
+    }
+
+    /// `base`와 `admin`은 같은 SSO 세션(`session:corp`)을 쓰고, `other`는 다른 세션, `keys`는 SSO가 아니다. 넷 다 캐시에 있다.
+    async fn corp_fixture() -> (Vec<ProfileInfo>, AwsContext) {
+        let profiles = vec![
+            p("base", Some(("base", "session:corp"))),
+            p("admin", Some(("base", "session:corp"))),
+            p("other", Some(("other", "session:x"))),
+            p("keys", None),
+        ];
+        let ctx = AwsContext::default();
+        for name in ["base", "admin", "other", "keys"] {
+            ctx.cache_profile_for_test(name).await;
+        }
+        (profiles, ctx)
+    }
+
+    #[tokio::test]
+    async fn a_successful_login_forgets_every_profile_of_the_session_and_only_those() {
+        let (profiles, ctx) = corp_fixture().await;
+        let logged_in_as = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let run = {
+            let logged_in_as = logged_in_as.clone();
+            move |target: String, _cancel: Arc<Notify>| async move {
+                logged_in_as.lock().unwrap().push(target);
+                Ok(())
+            }
+        };
+        let result = tokio::time::timeout(Duration::from_secs(5), login_and_forget(&SsoLogins::default(), &ctx, &profiles, "admin", run)).await;
+        assert_eq!(result.expect("did not finish within 5s"), Ok(()));
+        // admin을 눌러도 `aws sso login`은 SSO 프로필(base)로 돈다
+        assert_eq!(*logged_in_as.lock().unwrap(), vec!["base".to_string()]);
+        assert_eq!(ctx.cached_profiles_for_test().await, vec!["keys".to_string(), "other".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_failed_login_forgets_nothing() {
+        let (profiles, ctx) = corp_fixture().await;
+        let run = |_target: String, _cancel: Arc<Notify>| async { Err(AppError::other("boom")) };
+        let result = tokio::time::timeout(Duration::from_secs(5), login_and_forget(&SsoLogins::default(), &ctx, &profiles, "admin", run)).await;
+        assert_eq!(result.expect("did not finish within 5s"), Err(AppError::other("boom")));
+        assert_eq!(
+            ctx.cached_profiles_for_test().await,
+            vec!["admin".to_string(), "base".to_string(), "keys".to_string(), "other".to_string()]
+        );
     }
 }
