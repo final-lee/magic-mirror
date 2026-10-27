@@ -1,6 +1,8 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { api } from "../api/client";
+import { SsoLoginContext, useSsoLogin } from "../lib/useSsoLogin";
 import { renderWithClient } from "../test/utils";
 import { iamApi } from "./api";
 import { alice, appRole, bob, catalogActions, ciBot, deployPolicy, devTeam, sampleOverview, simulateResults, whoCanResult } from "./fixtures";
@@ -327,5 +329,30 @@ describe("view state", () => {
     expect(screen.getByRole("columnheader", { name: "AWS 확인" })).toBeInTheDocument();
     expect(m.whoCan).toHaveBeenCalledTimes(1);
     expect(m.simulate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("when the session has expired", () => {
+  // AWS 정책 시뮬레이터는 누를 때만 도는 쿼리(enabled: false)라서 로그인 관리자의 무효화로는 다시 불리지 않는다.
+  // 오류 상자가 로그인이 끝나면 그 쿼리의 refetch를 불러야 확인이 이어진다.
+  function WithManager() {
+    const sso = useSsoLogin([{ name: "prod", region: null, ssoLogin: "prod", ssoKey: "session:prod" }], "prod");
+    return (
+      <SsoLoginContext.Provider value={sso}>
+        <WhoCan profile="prod" overview={sampleOverview()} onOpen={vi.fn()} />
+      </SsoLoginContext.Provider>
+    );
+  }
+
+  test("a login that succeeds runs the AWS check again, once", async () => {
+    vi.mocked(api.ssoLogin).mockResolvedValue(undefined);
+    m.simulate.mockRejectedValueOnce({ kind: "ssoExpired" });
+    renderWithClient(<WithManager />);
+    await searchFor();
+    fireEvent.click(screen.getByRole("button", { name: "AWS로 확인" }));
+    fireEvent.click(await screen.findByRole("button", { name: "로그인" }));
+    expect(await screen.findByRole("columnheader", { name: "AWS 확인" })).toBeInTheDocument();
+    expect(api.ssoLogin).toHaveBeenCalledTimes(1);
+    expect(m.simulate).toHaveBeenCalledTimes(2);
   });
 });

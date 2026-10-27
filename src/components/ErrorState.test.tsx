@@ -37,14 +37,27 @@ test("network error offers retry", () => {
   expect(onRetry).toHaveBeenCalled();
 });
 
-test("sso expired logs in then retries", async () => {
+test("sso expired logs in, then calls onLoggedIn and nothing else", async () => {
+  vi.mocked(api.ssoLogin).mockResolvedValue(undefined);
+  const onRetry = vi.fn();
+  const onLoggedIn = vi.fn();
+  render(<ErrorState error={{ kind: "ssoExpired" }} profile="prod" onRetry={onRetry} onLoggedIn={onLoggedIn} />);
+  expect(screen.getByText(/SSO 세션이 만료됐어요/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+  await waitFor(() => expect(onLoggedIn).toHaveBeenCalledTimes(1));
+  expect(api.ssoLogin).toHaveBeenCalledWith("prod");
+  expect(onRetry).not.toHaveBeenCalled();
+});
+
+test("a box without onLoggedIn does nothing extra after its login", async () => {
   vi.mocked(api.ssoLogin).mockResolvedValue(undefined);
   const onRetry = vi.fn();
   render(<ErrorState error={{ kind: "ssoExpired" }} profile="prod" onRetry={onRetry} />);
-  expect(screen.getByText(/SSO 세션이 만료됐어요/)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "로그인" }));
-  await waitFor(() => expect(onRetry).toHaveBeenCalled());
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+  });
   expect(api.ssoLogin).toHaveBeenCalledWith("prod");
+  expect(onRetry).not.toHaveBeenCalled();
 });
 
 test("sso login failure is shown", async () => {
@@ -54,74 +67,77 @@ test("sso login failure is shown", async () => {
   expect(await screen.findByText("aws CLI를 찾을 수 없어요")).toBeInTheDocument();
 });
 
-test("inside the app the login button goes through the manager, and a later success reloads once", async () => {
+/** 관리자를 거치는 상자. 관리자 객체를 바꿔 다시 그리면 로그인 성공 시각이 바뀐 것처럼 보인다. */
+function boxIn(sso: SsoLogin, props: { onRetry?: () => void; onLoggedIn?: () => void; error?: unknown } = {}) {
+  const { onRetry = () => {}, onLoggedIn, error = { kind: "ssoExpired" } } = props;
+  return (
+    <SsoLoginContext.Provider value={sso}>
+      <ErrorState error={error} profile="prod" onRetry={onRetry} onLoggedIn={onLoggedIn} />
+    </SsoLoginContext.Provider>
+  );
+}
+
+test("inside the app the login button goes through the manager, and a later success calls onLoggedIn once", async () => {
   const sso = manager();
   const onRetry = vi.fn();
-  const view = render(
-    <SsoLoginContext.Provider value={sso}>
-      <ErrorState error={{ kind: "ssoExpired" }} profile="prod" onRetry={onRetry} />
-    </SsoLoginContext.Provider>,
-  );
+  const onLoggedIn = vi.fn();
+  const view = render(boxIn(sso, { onRetry, onLoggedIn }));
   // 클릭 뒤에 이어지는 비동기 작업까지 끝낸 다음에 본다
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "로그인" }));
   });
   expect(sso.start).toHaveBeenCalledWith("prod", { manual: true });
   expect(api.ssoLogin).not.toHaveBeenCalled();
-  expect(onRetry).not.toHaveBeenCalled();
-  // 관리자가 성공을 알리면(성공 시각이 바뀌면) 한 번만 다시 불러온다
+  expect(onLoggedIn).not.toHaveBeenCalled();
+  // 관리자가 성공을 알리면(성공 시각이 바뀌면) 한 번만 부른다
   const later = Date.now() + 1000;
   const succeeded = { ...sso, lastSuccessAt: () => later };
-  view.rerender(
-    <SsoLoginContext.Provider value={succeeded}>
-      <ErrorState error={{ kind: "ssoExpired" }} profile="prod" onRetry={onRetry} />
-    </SsoLoginContext.Provider>,
-  );
-  view.rerender(
-    <SsoLoginContext.Provider value={{ ...succeeded }}>
-      <ErrorState error={{ kind: "ssoExpired" }} profile="prod" onRetry={onRetry} />
-    </SsoLoginContext.Provider>,
-  );
-  expect(onRetry).toHaveBeenCalledTimes(1);
-});
-
-test("a success from before the box appeared does not reload it", () => {
-  const onRetry = vi.fn();
-  render(
-    <SsoLoginContext.Provider value={manager({ lastSuccessAt: () => Date.now() - 60_000 })}>
-      <ErrorState error={{ kind: "ssoExpired" }} profile="prod" onRetry={onRetry} />
-    </SsoLoginContext.Provider>,
-  );
+  view.rerender(boxIn(succeeded, { onRetry, onLoggedIn }));
+  view.rerender(boxIn({ ...succeeded }, { onRetry, onLoggedIn }));
+  expect(onLoggedIn).toHaveBeenCalledTimes(1);
+  // 다시 불러오기는 onLoggedIn의 몫이다. 켜진 쿼리의 상자는 onRetry로 앱 전체를 새로 고치지 않는다
   expect(onRetry).not.toHaveBeenCalled();
 });
 
-test("a manual start that does not log in does not reload and calls nothing else", async () => {
+test("a box without onLoggedIn does nothing when its session logs in", () => {
+  const onRetry = vi.fn();
+  const sso = manager();
+  const view = render(boxIn(sso, { onRetry }));
+  view.rerender(boxIn({ ...sso, lastSuccessAt: () => Date.now() + 1000 }, { onRetry }));
+  expect(onRetry).not.toHaveBeenCalled();
+});
+
+test("a success from before the box appeared does not call onLoggedIn", () => {
+  const onLoggedIn = vi.fn();
+  render(boxIn(manager({ lastSuccessAt: () => Date.now() - 60_000 }), { onLoggedIn }));
+  expect(onLoggedIn).not.toHaveBeenCalled();
+});
+
+test("a manual start that does not log in calls neither onLoggedIn nor onRetry", async () => {
   const sso = manager({ start: vi.fn(async () => false) });
   const onRetry = vi.fn();
-  render(
-    <SsoLoginContext.Provider value={sso}>
-      <ErrorState error={{ kind: "ssoExpired" }} profile="prod" onRetry={onRetry} />
-    </SsoLoginContext.Provider>,
-  );
+  const onLoggedIn = vi.fn();
+  render(boxIn(sso, { onRetry, onLoggedIn }));
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "로그인" }));
   });
   expect(sso.start).toHaveBeenCalledTimes(1);
+  expect(onLoggedIn).not.toHaveBeenCalled();
   expect(onRetry).not.toHaveBeenCalled();
   expect(api.ssoLogin).not.toHaveBeenCalled();
 });
 
-// 무효화는 켜진 쿼리만 다시 부른다. 사용자가 누를 때만 도는 쿼리(enabled: false)는 ErrorState의 onRetry로 다시 불러야 화면이 풀린다.
-describe("with the real manager and a query that only runs on demand", () => {
-  const PROFILES = [{ name: "prod", region: null, ssoLogin: "prod", ssoKey: "session:prod" }];
+const PROFILES = [{ name: "prod", region: null, ssoLogin: "prod", ssoKey: "session:prod" }];
 
-  function OnDemand({ queryFn }: { queryFn: () => Promise<string> }) {
+// 무효화는 켜진 쿼리만 다시 부른다. 사용자가 누를 때만 도는 쿼리(enabled: false)는 그 상자가 onLoggedIn으로 자기 쿼리만 다시 불러야 화면이 풀린다.
+describe("with the real manager and a query that only runs on demand", () => {
+  function OnDemand({ queryFn, onRetry = () => {} }: { queryFn: () => Promise<string>; onRetry?: () => void }) {
     const sso = useSsoLogin(PROFILES, "prod");
     const q = useQuery({ queryKey: ["iam", "prod", "lastAccessed"], queryFn, enabled: false, retry: false });
     return (
       <SsoLoginContext.Provider value={sso}>
         <button onClick={() => void q.refetch()}>불러오기</button>
-        {q.isError && <ErrorState error={q.error} profile="prod" onRetry={() => void q.refetch()} />}
+        {q.isError && <ErrorState error={q.error} profile="prod" onRetry={onRetry} onLoggedIn={() => void q.refetch()} />}
         {q.data && <p>{q.data}</p>}
       </SsoLoginContext.Provider>
     );
@@ -130,13 +146,15 @@ describe("with the real manager and a query that only runs on demand", () => {
   test("a manual login that succeeds loads the data and clears the error box", async () => {
     vi.mocked(api.ssoLogin).mockResolvedValue(undefined);
     const queryFn = vi.fn<() => Promise<string>>().mockRejectedValueOnce({ kind: "ssoExpired" }).mockResolvedValue("마지막 사용 시각");
-    renderWithClient(<OnDemand queryFn={queryFn} />);
+    const onRetry = vi.fn();
+    renderWithClient(<OnDemand queryFn={queryFn} onRetry={onRetry} />);
     fireEvent.click(screen.getByRole("button", { name: "불러오기" }));
     fireEvent.click(await screen.findByRole("button", { name: "로그인" }));
     expect(await screen.findByText("마지막 사용 시각")).toBeInTheDocument();
     expect(screen.queryByText(/SSO 세션이 만료됐어요/)).not.toBeInTheDocument();
     expect(api.ssoLogin).toHaveBeenCalledTimes(1);
     expect(queryFn).toHaveBeenCalledTimes(2);
+    expect(onRetry).not.toHaveBeenCalled();
   });
 
   test("an automatic login started elsewhere also reloads the on-demand query", async () => {
@@ -165,6 +183,32 @@ describe("with the real manager and a query that only runs on demand", () => {
     expect(api.ssoLogin).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/SSO 세션이 만료됐어요/)).toBeInTheDocument();
     expect(queryFn).toHaveBeenCalledTimes(1);
+  });
+});
+
+// 켜진 쿼리는 관리자가 무효화해서 다시 부른다. 그 상자는 따로 다시 부르지 않는다: 상자마다 onRetry(앱 전체 새로 고침)를 부르면
+// 같은 로그인 하나에 같은 일이 상자 수만큼 겹친다.
+describe("with the real manager and a query that is enabled", () => {
+  function Enabled({ queryFn, onRetry }: { queryFn: () => Promise<string>; onRetry: () => void }) {
+    const sso = useSsoLogin(PROFILES, "prod");
+    const q = useQuery({ queryKey: ["resources", "prod", "ec2", "instances"], queryFn, retry: false });
+    return (
+      <SsoLoginContext.Provider value={sso}>
+        {q.isError && <ErrorState error={q.error} profile="prod" onRetry={onRetry} />}
+        {q.data && <p>{q.data}</p>}
+      </SsoLoginContext.Provider>
+    );
+  }
+
+  test("a login reloads it through the manager's invalidation, and the box never calls onRetry", async () => {
+    vi.mocked(api.ssoLogin).mockResolvedValue(undefined);
+    const queryFn = vi.fn<() => Promise<string>>().mockRejectedValueOnce({ kind: "ssoExpired" }).mockResolvedValue("인스턴스 목록");
+    const onRetry = vi.fn();
+    renderWithClient(<Enabled queryFn={queryFn} onRetry={onRetry} />);
+    fireEvent.click(await screen.findByRole("button", { name: "로그인" }));
+    expect(await screen.findByText("인스턴스 목록")).toBeInTheDocument();
+    expect(queryFn).toHaveBeenCalledTimes(2);
+    expect(onRetry).not.toHaveBeenCalled();
   });
 });
 

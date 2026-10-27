@@ -1,7 +1,9 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { api } from "../api/client";
 import { desktop } from "../api/desktop";
+import { SsoLoginContext, useSsoLogin } from "../lib/useSsoLogin";
 import { renderWithClient } from "../test/utils";
 import { iamApi } from "./api";
 import { alice, deployPolicy, readOnlyPolicy, sampleLastAccessed, scratchInline } from "./fixtures";
@@ -368,5 +370,25 @@ describe("principals that cannot be changed", () => {
     await load();
     expect(screen.queryByText(reason)).not.toBeInTheDocument();
     expect(within(policyRow("ReadOnlyAccess")).getByRole("button", { name: "떼기" })).toBeEnabled();
+  });
+});
+
+describe("when the session has expired", () => {
+  // 마지막 사용 시각은 누를 때만 도는 쿼리(enabled: false)라서 로그인 관리자의 무효화로는 다시 불리지 않는다.
+  // 오류 상자가 로그인이 끝나면 이 쿼리의 refetch를 불러야 화면이 풀린다.
+  function WithManager() {
+    const sso = useSsoLogin([{ name: "prod", region: null, ssoLogin: "prod", ssoKey: "session:prod" }], "prod");
+    return <SsoLoginContext.Provider value={sso}>{element({})}</SsoLoginContext.Provider>;
+  }
+
+  test("a login that succeeds loads the data again, once", async () => {
+    vi.mocked(api.ssoLogin).mockResolvedValue(undefined);
+    m.lastAccessed.mockRejectedValueOnce({ kind: "ssoExpired" });
+    renderWithClient(<WithManager />);
+    fireEvent.click(loadButton());
+    fireEvent.click(await screen.findByRole("button", { name: "로그인" }));
+    expect(await servicesTable()).toBeInTheDocument();
+    expect(api.ssoLogin).toHaveBeenCalledTimes(1);
+    expect(m.lastAccessed).toHaveBeenCalledTimes(2);
   });
 });
