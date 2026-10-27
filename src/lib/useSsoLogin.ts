@@ -17,6 +17,13 @@ export interface SsoEntry {
   status: SsoStatus;
 }
 
+/** 로그인에 성공한 뒤 이 시간 안에 같은 세션이 또 만료를 알리면 프로필 설정 문제로 보고 자동으로 다시 열지 않는다. */
+const RELOGIN_COOLDOWN_MS = 5 * 60_000;
+const STILL_NO_CREDENTIALS = "로그인했는데도 자격 증명을 받지 못했어요. 프로필 설정을 확인해 주세요";
+
+/** 프로필별 데이터를 담은 쿼리 키의 첫 요소. 이 키들은 두 번째 요소가 프로필 이름이다. */
+const PROFILE_SCOPED_ROOTS = new Set(["account", "resources", "s3", "diff", "vpc-topology", "iam"]);
+
 /** 프로필의 로그인 키와 대상. SSO 설정이 없으면 그 프로필 자신이고 자동 로그인은 하지 않는다(백엔드와 같은 규칙). */
 export function loginPlan(profiles: ProfileInfo[] | undefined, profile: string) {
   const info = profiles?.find((p) => p.name === profile);
@@ -25,43 +32,72 @@ export function loginPlan(profiles: ProfileInfo[] | undefined, profile: string) 
 }
 
 /**
- * SSO 로그인 관리자. 명령이 SSO 만료로 실패하면 그 프로필의 세션에 로그인을 한 번 연다.
- * 실패하거나 취소한 세션은 사용자가 그 프로필을 다시 고르거나 직접 누를 때까지 자동으로 다시 열지 않는다.
+ * SSO 로그인 관리자. 명령이 SSO 만료로 실패하면 지금 보고 있는 프로필의 세션에 로그인을 한 번 연다.
+ * - 실패하거나 취소한 세션은 사용자가 그 프로필을 다시 고르거나 직접 누를 때까지 자동으로 다시 열지 않는다.
+ * - 로그인에 성공한 직후(5분 안)에 시작한 호출이 또 만료로 실패하면 프로필 설정 문제로 보고 실패 줄만 띄운다.
+ *   성공하기 전에 시작한 호출의 늦은 보고는 무시한다.
+ * - 지금 보고 있는 프로필의 세션이 아닌 보고는 자동으로 처리하지 않는다. 직접 누른 시작은 언제나 한다.
  */
-export function useSsoLogin(profiles: ProfileInfo[] | undefined) {
+export function useSsoLogin(profiles: ProfileInfo[] | undefined, currentProfile: string | null) {
   const qc = useQueryClient();
   const [entries, setEntries] = useState<Record<string, SsoEntry>>({});
   // 알림 처리(동기)에서 최신 값을 보려고 ref에도 둔다
   const entriesRef = useRef(entries);
   const profilesRef = useRef(profiles);
   profilesRef.current = profiles;
+  const currentRef = useRef(currentProfile);
+  currentRef.current = currentProfile;
   const flights = useRef(new Map<string, Promise<boolean>>());
   const cancelled = useRef(new Set<string>());
+  /** 키마다 마지막으로 로그인에 성공한 시각. 다시 고르기로 지우지 않는다. */
+  const lastSuccess = useRef(new Map<string, number>());
 
   const write = useCallback((next: (prev: Record<string, SsoEntry>) => Record<string, SsoEntry>) => {
     entriesRef.current = next(entriesRef.current);
     setEntries(entriesRef.current);
   }, []);
 
+  /**
+   * 자동 시작(manual: false)은 알린 명령이 시작된 시각 startedAt(모르면 지금)을 함께 받는다.
+   * 직접 누른 시작(manual: true)은 어떤 프로필이든, 성공 직후든 언제나 로그인한다.
+   */
   const start = useCallback(
-    (profile: string, opts: { manual: boolean }): Promise<boolean> => {
+    (profile: string, opts: { manual: boolean; startedAt?: number }): Promise<boolean> => {
       const plan = loginPlan(profilesRef.current, profile);
       const running = flights.current.get(plan.key);
       if (running) return running;
-      if (!opts.manual && (!plan.auto || entriesRef.current[plan.key])) return Promise.resolve(false);
-      cancelled.current.delete(plan.key);
       const entry = (status: SsoStatus): SsoEntry => ({ key: plan.key, profile, target: plan.target, status });
+      if (!opts.manual) {
+        if (!plan.auto || entriesRef.current[plan.key]) return Promise.resolve(false);
+        // 지금 보고 있는 프로필의 세션만 자동으로 연다(방금 떠난 프로필의 늦은 보고는 무시)
+        const current = currentRef.current;
+        if (current === null || loginPlan(profilesRef.current, current).key !== plan.key) return Promise.resolve(false);
+        const lastOk = lastSuccess.current.get(plan.key);
+        if (lastOk !== undefined) {
+          // 로그인이 끝나기 전에 시작한 호출의 늦은 보고: 새 로그인으로 이미 해결됐을 수 있다
+          if ((opts.startedAt ?? Date.now()) < lastOk) return Promise.resolve(false);
+          // 로그인한 직후 시작한 호출이 또 만료로 실패하면 브라우저를 또 띄워도 소용없다
+          if (Date.now() - lastOk < RELOGIN_COOLDOWN_MS) {
+            write((prev) => ({ ...prev, [plan.key]: entry({ kind: "failed", message: STILL_NO_CREDENTIALS }) }));
+            return Promise.resolve(false);
+          }
+        }
+      }
+      cancelled.current.delete(plan.key);
       write((prev) => ({ ...prev, [plan.key]: entry({ kind: "running" }) }));
       const flight = api
         .ssoLogin(plan.target)
         .then(
           () => {
+            lastSuccess.current.set(plan.key, Date.now());
             write(({ [plan.key]: _done, ...rest }) => rest);
             const affected = new Set(
               (profilesRef.current ?? []).filter((p) => loginPlan(profilesRef.current, p.name).key === plan.key).map((p) => p.name),
             );
             affected.add(profile);
-            void qc.invalidateQueries({ predicate: (q) => typeof q.queryKey[1] === "string" && affected.has(q.queryKey[1]) });
+            void qc.invalidateQueries({
+              predicate: (q) => PROFILE_SCOPED_ROOTS.has(String(q.queryKey[0])) && typeof q.queryKey[1] === "string" && affected.has(q.queryKey[1]),
+            });
             return true;
           },
           (e: unknown) => {
@@ -92,7 +128,7 @@ export function useSsoLogin(profiles: ProfileInfo[] | undefined) {
     [write],
   );
 
-  /** 사용자가 프로필을 직접 고르면 그 세션의 실패·취소 기록을 지워 자동 로그인을 다시 켠다. */
+  /** 사용자가 프로필을 직접 고르면 그 세션의 실패·취소 기록을 지워 자동 로그인을 다시 켠다. 마지막 로그인 시각(5분 창)은 그대로 둔다. */
   const rearm = useCallback(
     (profile: string) => {
       const { key } = loginPlan(profilesRef.current, profile);
@@ -105,7 +141,7 @@ export function useSsoLogin(profiles: ProfileInfo[] | undefined) {
     [write],
   );
 
-  useEffect(() => onSsoExpired((profile) => void start(profile, { manual: false })), [start]);
+  useEffect(() => onSsoExpired((profile, startedAt) => void start(profile, { manual: false, startedAt })), [start]);
 
   return useMemo(
     () => ({

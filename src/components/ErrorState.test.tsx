@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ErrorState } from "./ErrorState";
 import { api } from "../api/client";
 import { SsoLoginContext, type SsoLogin } from "../lib/useSsoLogin";
@@ -42,7 +42,7 @@ test("sso login failure is shown", async () => {
   expect(await screen.findByText("aws CLI를 찾을 수 없어요")).toBeInTheDocument();
 });
 
-test("inside the app the login button goes through the manager", async () => {
+test("inside the app the login button goes through the manager, which reloads by itself", async () => {
   const sso = manager();
   const onRetry = vi.fn();
   render(
@@ -50,9 +50,28 @@ test("inside the app the login button goes through the manager", async () => {
       <ErrorState error={{ kind: "ssoExpired" }} profile="prod" onRetry={onRetry} />
     </SsoLoginContext.Provider>,
   );
-  fireEvent.click(screen.getByRole("button", { name: "로그인" }));
-  await waitFor(() => expect(onRetry).toHaveBeenCalled());
+  // 클릭 뒤에 이어지는 비동기 작업까지 끝낸 다음에 본다(관리자가 이미 쿼리를 무효화하므로 onRetry를 또 부르면 같은 조회가 두 번 돈다)
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+  });
   expect(sso.start).toHaveBeenCalledWith("prod", { manual: true });
+  expect(onRetry).not.toHaveBeenCalled();
+  expect(api.ssoLogin).not.toHaveBeenCalled();
+});
+
+test("a manual start that does not log in calls nothing else", async () => {
+  const sso = manager({ start: vi.fn(async () => false) });
+  const onRetry = vi.fn();
+  render(
+    <SsoLoginContext.Provider value={sso}>
+      <ErrorState error={{ kind: "ssoExpired" }} profile="prod" onRetry={onRetry} />
+    </SsoLoginContext.Provider>,
+  );
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+  });
+  expect(sso.start).toHaveBeenCalledTimes(1);
+  expect(onRetry).not.toHaveBeenCalled();
   expect(api.ssoLogin).not.toHaveBeenCalled();
 });
 

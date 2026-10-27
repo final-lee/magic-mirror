@@ -20,7 +20,8 @@ export function ErrorState({ error, profile, onRetry, compact = false }: Props) 
     const running = sso ? sso.statusFor(profile)?.kind === "running" : busy;
     const login = async () => {
       if (sso) {
-        if (await sso.start(profile, { manual: true })) onRetry();
+        // 로그인에 성공하면 관리자가 이 프로필의 쿼리를 이미 무효화하므로 onRetry로 한 번 더 불러오지 않는다
+        void sso.start(profile, { manual: true });
         return;
       }
       setBusy(true);
