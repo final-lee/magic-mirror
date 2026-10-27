@@ -1,0 +1,78 @@
+# SSO 자동 로그인 — 설계
+
+## 목표
+SSO 프로필의 세션이 만료돼 명령이 실패하면, 사용자가 [로그인]을 누르지 않아도 앱이 `aws sso login`을 시작한다. 로그인이 끝나면 화면을 다시 불러온다. 프로필을 고를 때, 앱을 시작해 마지막 프로필을 복원할 때, 쓰는 도중 만료될 때 모두 같다. 브라우저 승인은 사용자가 한다(AWS가 요구한다).
+
+## 범위 밖
+- 만료 전에 미리 로그인하기(토큰 캐시 파일을 직접 읽어야 해서 뺀다).
+- S3 전송 이벤트의 오류 문자열에서 만료를 감지하기. 다음 목록 호출에서 감지된다.
+
+## SSO 프로필 판별 (`~/.aws/config`)
+- `ProfileInfo`에 `ssoLogin: string | null`과 `ssoKey: string | null`을 더한다.
+- 프로필 섹션(`[default]`, `[profile X]`)에 `sso_session`이나 `sso_start_url`이 있으면 SSO 프로필이다.
+  - `ssoLogin`은 자기 이름이다.
+  - `ssoKey`는 `session:<sso_session>`이고, `sso_session`이 없으면 `url:<sso_start_url>`이다.
+- 둘 다 없고 `source_profile`이 있으면 체인을 따라가 처음 나오는 SSO 프로필을 쓴다. `ssoLogin`은 그 프로필 이름이고 `ssoKey`는 그 프로필의 키다. 최대 5단계까지 따라가고, 순환이면 멈춘다.
+- 그 밖의 프로필은 둘 다 null이다. 이런 프로필은 자동 로그인하지 않고, 지금처럼 오류만 보여준다.
+- `[sso-session X]` 섹션은 프로필이 아니다.
+
+## 감지
+- 프론트엔드의 모든 Tauri 명령 호출은 `src/api/invoke.ts`의 래퍼를 지난다. 이 래퍼를 `api/client.ts`, `explorer/api.ts`, `iam/api.ts`, `vpcmap/api.ts`가 쓴다.
+- 래퍼는 실패가 `{kind:"ssoExpired"}`이고 인자에 `profile`이 있을 때 로그인 관리자에게 그 프로필을 알린다.
+- 원래 오류는 그대로 다시 던진다. 호출한 쪽의 동작은 바뀌지 않는다.
+
+## 로그인 관리자 (`useSsoLogin`, App에 하나)
+상태는 `ssoKey`마다 `idle | running | failed(이유) | cancelled` 중 하나다.
+- `idle`에서 만료를 알리면 `running`이 되고 `sso_login(ssoLogin)`을 부른다. 같은 키가 이미 `running`이면 무시한다. 로그인은 하나만 돈다.
+- 성공하면 `idle`로 돌아간다. 같은 `ssoKey`를 쓰는 모든 프로필의 쿼리를 무효화해 다시 불러온다.
+- 실패하면 `failed(이유)`가 되고, 사용자가 [취소]를 누르면 `cancelled`가 된다. 이 두 상태에서는 만료를 알려도 자동으로 다시 시작하지 않는다. 브라우저가 반복해서 뜨지 않게 하려는 것이다.
+- 다음 경우에는 그 키가 다시 시작한다.
+  - 사용자가 그 프로필을 다시 고른다. 명시적인 요청으로 본다.
+  - 사용자가 [다시 로그인]이나 오류 화면의 [로그인]을 누른다.
+- 서로 다른 SSO 세션은 동시에 로그인할 수 있다.
+
+## 화면
+- 업데이트 배너 아래에 `SsoBanner`를 둔다. `running`이나 `failed`인 키마다 한 줄이다.
+  - running: "<프로필>: SSO 로그인 중이에요. 브라우저에서 승인해 주세요" [취소]
+  - failed: "<프로필>: SSO 로그인에 실패했어요: <이유>" [다시 로그인] [닫기]. [닫기]를 누르면 상태가 `cancelled`가 된다.
+  - cancelled: 배너가 없다.
+- 기존 `ErrorState`(ssoExpired)의 [로그인] 버튼은 관리자를 거쳐 시작하거나 진행 중인 로그인에 합류한다. `running`이면 "브라우저에서 로그인을 완료하세요…"로 꺼진다.
+- 성공하면 쿼리 무효화로 오류 화면이 사라진다.
+
+## 백엔드
+- `sso_login(profile)`:
+  - 로그인 대상의 키는 그 프로필의 `ssoKey`이고, 없으면 `profile:<이름>`이다.
+  - 같은 키로 이미 진행 중이면 새로 띄우지 않고 그 결과를 함께 기다린다.
+  - 성공하면 같은 `ssoKey`를 쓰는 모든 프로필의 `SdkConfig` 캐시를 비운다.
+  - aws CLI 후보 경로와 "aws CLI를 찾을 수 없어요" 오류는 지금 그대로다.
+- `sso_login_cancel(profile)`(새 명령):
+  - 그 키의 로그인 프로세스를 끝낸다. 진행 중이 아니면 아무것도 하지 않는다.
+  - 기다리던 `sso_login`은 `other("로그인을 취소했어요")`로 끝난다.
+
+## 계약 (추가만)
+- `ProfileInfo { name, region, ssoLogin: string | null, ssoKey: string | null }`
+- `sso_login(profile) -> ()`: 이미 있는 명령이다. 이름과 인자는 그대로이고, 위 동작을 더한다.
+- `sso_login_cancel(profile) -> ()`: 새 명령.
+
+## 테스트
+- Rust:
+  - 설정 파싱: `sso_session`, `sso_start_url`, `source_profile` 2단계, 순환, SSO가 아닌 프로필, `[sso-session]` 섹션.
+  - 단일 실행: 가짜 실행기로 같은 키를 두 번 부르면 실행은 한 번이고 결과는 같다.
+  - 취소: 대기 중에 취소하면 "로그인을 취소했어요"가 나온다.
+  - 성공하면 같은 키를 쓰는 프로필의 캐시를 비운다.
+- 프론트엔드:
+  - 래퍼는 `ssoExpired`에 `profile`이 있을 때만 알린다.
+  - 관리자:
+    - 첫 알림에 시작한다.
+    - 동시에 여러 번 알려도 한 번만 시작한다.
+    - 실패한 뒤에는 자동으로 다시 시작하지 않는다.
+    - 프로필을 다시 고르면 다시 시작한다.
+    - 성공하면 쿼리를 무효화한다.
+    - 취소할 수 있다.
+  - 배너가 상태에 맞게 표시된다.
+  - `ErrorState` 버튼이 관리자를 거친다.
+- 수동(`docs/manual-test-checklist.md`):
+  - `aws sso logout` 뒤 앱을 시작하면 브라우저가 자동으로 열리고, 승인하면 목록이 저절로 불러와진다.
+  - 프로필을 바꿔도 같다.
+  - [취소]를 누르면 다시 열리지 않는다.
+  - 같은 SSO 세션을 쓰는 두 프로필에서 로그인은 한 번이다.
