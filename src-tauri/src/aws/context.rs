@@ -351,4 +351,10 @@ region = eu-west-3
             is not authorized to perform: sts:AssumeRole on resource: arn:aws:iam::222222222222:role/Deploy";
         assert_eq!(credentials_error(chain), AppError::AccessDenied { action: "sts:AssumeRole".into() });
     }
+
+    #[test]
+    fn a_forbidden_sso_role_assignment_is_not_expired_either() {
+        // 실제 포털 응답에는 "server": "AWS SSO" 헤더가 있어서, 거부를 먼저 보지 않으면 만료로 읽힌다
+        assert_eq!(credentials_error(crate::error::tests::PORTAL_FORBIDDEN), AppError::AccessDenied { action: "sso:GetRoleCredentials".into() });
+    }
 }

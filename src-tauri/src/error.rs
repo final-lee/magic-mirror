@@ -58,7 +58,11 @@ pub fn classify(code: Option<&str>, chain: &str, action: &str) -> AppError {
     if let Some(denied) = credential_denial(&lower) {
         return denied;
     }
-    if lower.contains("sso") && (lower.contains("token") || lower.contains("expired") || lower.contains("unauthorized")) {
+    // 포털의 401 문구와 지워진 토큰 캐시 파일은 "sso"가 헤더나 경로에만 있어도 알아본다
+    if lower.contains("session token not found or invalid")
+        || lower.contains("/.aws/sso/cache/")
+        || (lower.contains("sso") && (lower.contains("token") || lower.contains("expired") || lower.contains("unauthorized")))
+    {
         return AppError::SsoExpired;
     }
     if lower.contains("dispatch failure") || lower.contains("timeout") || lower.contains("timed out") || lower.contains("connection") || lower.contains("dns") {
@@ -78,12 +82,22 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    const SSO_ROLE_DENIED: &str = "dispatch failure: other: failed to load credentials: an error occurred while loading credentials: \
-        AccessDenied: User: arn:aws:sts::111111111111:assumed-role/AWSReservedSSO_Admin_0123abcd/jane is not authorized to perform: \
-        sts:AssumeRole on resource: arn:aws:iam::222222222222:role/Deploy (session token present)";
+    // 실제 aws-config 오류 체인의 모양(Debug 꼬리는 줄였다). 손으로 꾸민 문자열에 기대지 않으려고 실제와 같은 문구를 쓴다.
+    const SSO_ROLE_DENIED: &str = "dispatch failure: other: an error occurred while loading credentials: an error occurred while loading credentials: \
+        service error: unhandled error (AccessDenied): Error { code: \"AccessDenied\", message: \"User: arn:aws:sts::111111111111:assumed-role/\
+        AWSReservedSSO_Admin_0123abcd/jane is not authorized to perform: sts:AssumeRole on resource: arn:aws:iam::222222222222:role/Deploy\", \
+        aws_request_id: \"x\" }";
+    pub(crate) const PORTAL_FORBIDDEN: &str = "an error occurred while loading credentials: an error occurred while loading credentials: service error: \
+        unhandled error (ForbiddenException): Error { code: \"ForbiddenException\", message: \"No access\", aws_request_id: \"x\" } \
+        (raw: Response { status: StatusCode(403), headers: {\"content-type\": \"application/json\", \"server\": \"AWS SSO\"} })";
+    const PORTAL_UNAUTHORIZED: &str = "dispatch failure: other: an error occurred while loading credentials: an error occurred while loading credentials: \
+        service error: unhandled error (UnauthorizedException): Error { code: \"UnauthorizedException\", message: \"Session token not found or invalid\", \
+        aws_request_id: \"x\" }";
+    const TOKEN_FILE_MISSING: &str = "dispatch failure: other: an error occurred while loading credentials: failed to read \
+        `/Users/jane/.aws/sso/cache/0123456789abcdef0123456789abcdef01234567.json`: No such file or directory (os error 2)";
 
     #[test]
     fn a_denied_assume_role_through_an_sso_role_is_not_an_expired_session() {
@@ -93,14 +107,17 @@ mod tests {
 
     #[test]
     fn a_forbidden_sso_role_assignment_is_access_denied() {
-        let chain = "failed to load credentials: ForbiddenException: No access (operation: GetRoleCredentials)";
-        assert_eq!(credential_denial(&chain.to_lowercase()), Some(AppError::AccessDenied { action: "sso:GetRoleCredentials".into() }));
+        // 실제 체인에는 작업 이름이 없고 "server": "AWS SSO" 헤더만 있다
+        assert_eq!(classify(None, PORTAL_FORBIDDEN, "x"), AppError::AccessDenied { action: "sso:GetRoleCredentials".into() });
     }
 
     #[test]
-    fn expired_sso_tokens_are_still_expired() {
+    fn expired_or_missing_sso_tokens_are_still_expired() {
         assert_eq!(credential_denial("the sso session token has expired"), None);
-        assert_eq!(classify(None, "UnauthorizedException: Session token not found or invalid (sso)", "x"), AppError::SsoExpired);
+        // 포털의 401에는 "sso"가 헤더에만 있을 수 있다: 문구로 직접 알아본다
+        assert_eq!(classify(None, PORTAL_UNAUTHORIZED, "x"), AppError::SsoExpired);
+        // aws sso logout이 토큰 캐시 파일을 지운 경우
+        assert_eq!(classify(None, TOKEN_FILE_MISSING, "x"), AppError::SsoExpired);
     }
 
     #[test]
