@@ -49,7 +49,8 @@ export function ErrorState({ error, profile, onRetry, onLoggedIn, compact = fals
       setLoginError(null);
       try {
         await api.ssoLogin(profile);
-        onLoggedIn?.();
+        // 관리자가 없으면 무효화해 줄 쪽도 없으니, 누를 때만 도는 쿼리가 아니어도 이 상자가 다시 불러온다
+        (onLoggedIn ?? onRetry)();
       } catch (e) {
         setLoginError(errorMessage(e));
       } finally {
