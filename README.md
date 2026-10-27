@@ -10,7 +10,8 @@ A macOS desktop app for browsing AWS resources by service, without clicking thro
 
 ### Resource browser (read-only)
 - **16 services**: EC2, S3, Lambda, RDS, ECS, EKS, VPC, IAM, DynamoDB, CloudWatch Logs, CloudFront, SQS, SNS, ECR, Route 53, Secrets Manager
-- Uses the profiles in `~/.aws/config`, including SSO. Pick a profile and region and the list loads. When an SSO session expires, you can sign in again from the app.
+- Uses the profiles in `~/.aws/config`, including SSO. Pick a profile and region and the list loads.
+- When an SSO session has expired — when you pick the profile, when the app starts, or while you work — the app runs `aws sso login` for you. Approve it in the browser that opens and the lists reload. A banner shows the progress and lets you cancel. Profiles that share an SSO session sign in once, and role profiles sign in through their `source_profile`.
 - Turn on only the services you use, and pin resource types as favorites.
 - Detail panel with key fields, tags, raw JSON, a link to the AWS console, and ID copy (⌘C)
 - Filter by name or ID (⌘F), refresh (⌘R)
@@ -74,7 +75,7 @@ The app checks for a new version at launch and every 6 hours, and shows an **Upd
      ```
 
 ### Requirements
-- A profile in `~/.aws/config`. For SSO profiles, sign in with `aws sso login --profile <name>` or with the app's sign-in button.
+- A profile in `~/.aws/config`. SSO profiles need the AWS CLI v2 (`aws`), which the app uses to sign in.
 - Read permissions for the services you want to browse. The VPC diagram uses EC2 `Describe*` calls plus `rds:DescribeDBInstances`, `elasticloadbalancing:DescribeLoadBalancers`, and `lambda:ListFunctions`; anything it can't read is skipped with a warning. Writing from the S3 explorer needs `s3:PutObject` and `s3:DeleteObject`.
 - The IAM workspace reads with:
   - `iam:GetAccountAuthorizationDetails`, `iam:ListPolicies`, `iam:GetPolicy`, `iam:GetPolicyVersion`
