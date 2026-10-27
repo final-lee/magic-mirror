@@ -1,13 +1,17 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import type { ReactNode } from "react";
 import { api } from "../api/client";
-import { reportSsoExpired } from "../api/invoke";
+import { invoke, reportSsoExpired } from "../api/invoke";
 import type { ProfileInfo } from "../api/types";
 import { useSsoLogin } from "./useSsoLogin";
 
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn(), ssoLoginCancel: vi.fn() } }));
+// 쿼리 안에서는 실제 invoke 래퍼를 쓰고, 그 아래의 Tauri 호출만 가짜로 둔다
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 const m = vi.mocked(api);
+const raw = vi.mocked(tauriInvoke);
 
 const PROFILES: ProfileInfo[] = [
   { name: "base", region: null, ssoLogin: "base", ssoKey: "session:corp" },
@@ -19,11 +23,13 @@ const PROFILES: ProfileInfo[] = [
 const MINUTE = 60_000;
 const T0 = Date.parse("2026-10-27T09:00:00Z");
 const NO_CREDENTIALS = "로그인했는데도 자격 증명을 받지 못했어요. 프로필 설정을 확인해 주세요";
+/** 로그인에 성공한 지 5분 안에 또 만료를 알렸을 때 생기는 실패. 배너가 일반 실패와 다른 문구로 보여 주도록 afterSuccess가 붙는다. */
+const FAILED_AFTER_LOGIN = { kind: "failed", message: NO_CREDENTIALS, afterSuccess: true };
 
-function deferred() {
-  let resolve!: () => void;
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
   let reject!: (e: unknown) => void;
-  const promise = new Promise<void>((res, rej) => {
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
     reject = rej;
   });
@@ -142,15 +148,23 @@ test("cancel stops the login and keeps it from reopening", async () => {
   expect(m.ssoLogin).toHaveBeenCalledTimes(1);
 });
 
-test("dismissing a failure keeps it closed; non-SSO profiles never log in automatically", async () => {
+test("dismissing a failure keeps it closed", async () => {
   m.ssoLogin.mockRejectedValueOnce({ kind: "other", message: "x" });
   const { hook } = setup();
-  act(() => reportSsoExpired("keys"));
-  expect(m.ssoLogin).not.toHaveBeenCalled();
   act(() => reportSsoExpired("base"));
   await waitFor(() => expect(hook.result.current.statusFor("base")?.kind).toBe("failed"));
   act(() => hook.result.current.dismiss("session:corp"));
   expect(hook.result.current.statusFor("base")).toEqual({ kind: "cancelled" });
+  act(() => reportSsoExpired("base"));
+  expect(m.ssoLogin).toHaveBeenCalledTimes(1);
+});
+
+// 현재 프로필이 "keys"여야 현재 세션 검사(키 비교)를 통과한다. 다른 프로필이 현재면 그 검사가 먼저 막아서 이 규칙은 시험되지 않는다.
+test("a non-SSO profile never logs in automatically, even when it is the current profile", () => {
+  const { hook } = setup("keys");
+  act(() => reportSsoExpired("keys"));
+  expect(m.ssoLogin).not.toHaveBeenCalled();
+  expect(hook.result.current.entries).toEqual([]);
 });
 
 test("a manual start joins the running login", async () => {
@@ -187,7 +201,7 @@ describe("right after a successful login", () => {
     const { hook } = await loggedInAtT0();
     act(() => reportSsoExpired("admin", T0)); // 성공을 알린 직후 무효화로 다시 부른 조회가 같은 ms에 시작할 수 있다
     expect(m.ssoLogin).toHaveBeenCalledTimes(1);
-    expect(hook.result.current.statusFor("admin")).toEqual({ kind: "failed", message: NO_CREDENTIALS });
+    expect(hook.result.current.statusFor("admin")).toEqual(FAILED_AFTER_LOGIN);
   });
 
   test("a fresh report within 5 minutes becomes a failure and does not open another login", async () => {
@@ -196,7 +210,7 @@ describe("right after a successful login", () => {
     act(() => reportSsoExpired("admin")); // 로그인이 끝난 뒤에 시작한 호출이 또 만료로 실패했다
     expect(m.ssoLogin).toHaveBeenCalledTimes(1);
     expect(hook.result.current.entries).toEqual([
-      { key: "session:corp", profile: "admin", target: "base", status: { kind: "failed", message: NO_CREDENTIALS } },
+      { key: "session:corp", profile: "admin", target: "base", status: FAILED_AFTER_LOGIN },
     ]);
     // 실패 줄이 있는 동안에는 더 알려도 그대로다
     act(() => reportSsoExpired("base"));
@@ -226,6 +240,20 @@ describe("right after a successful login", () => {
     expect(hook.result.current.entries).toEqual([]);
   });
 
+  test("a manual retry that fails afterwards shows the ordinary failure, not the credentials hint", async () => {
+    const { hook } = await loggedInAtT0();
+    vi.setSystemTime(T0 + MINUTE);
+    act(() => reportSsoExpired("admin"));
+    expect(hook.result.current.statusFor("admin")).toEqual(FAILED_AFTER_LOGIN);
+    m.ssoLogin.mockRejectedValueOnce({ kind: "other", message: "aws CLI를 찾을 수 없어요" });
+    await act(async () => {
+      await hook.result.current.start("admin", { manual: true });
+    });
+    const status = hook.result.current.statusFor("admin");
+    expect(status).toEqual({ kind: "failed", message: "aws CLI를 찾을 수 없어요" });
+    expect(status).not.toHaveProperty("afterSuccess");
+  });
+
   test("re-selecting the profile clears the failure line but not the window", async () => {
     const { hook } = await loggedInAtT0();
     vi.setSystemTime(T0 + MINUTE);
@@ -235,7 +263,7 @@ describe("right after a successful login", () => {
     expect(hook.result.current.statusFor("admin")).toBeNull();
     act(() => reportSsoExpired("admin"));
     expect(m.ssoLogin).toHaveBeenCalledTimes(1);
-    expect(hook.result.current.statusFor("admin")).toEqual({ kind: "failed", message: NO_CREDENTIALS });
+    expect(hook.result.current.statusFor("admin")).toEqual(FAILED_AFTER_LOGIN);
   });
 });
 
@@ -316,4 +344,98 @@ test("different SSO sessions log in at the same time and finish independently", 
   await act(async () => corp.reject({ kind: "other", message: "로그인을 취소했어요" }));
   expect(hook.result.current.statusFor("admin")).toEqual({ kind: "cancelled" });
   expect(hook.result.current.statusFor("other")).toBeNull();
+});
+
+describe("a fetch that is still running when the login succeeds", () => {
+  const key = ["resources", "base", "ec2", "instances"];
+  const watch = (qc: QueryClient, enabled = true) =>
+    new QueryObserver(qc, { queryKey: key, queryFn: () => invoke<string>("list_resources", { profile: "base" }), retry: false, enabled });
+
+  test("starts over after the login instead of ending in the expired-session error", async () => {
+    const login = deferred();
+    m.ssoLogin.mockReturnValue(login.promise);
+    const first = deferred<string>();
+    raw.mockReturnValueOnce(first.promise); // 로그인 전에 시작한 첫 조회. 아직 돌고 있다
+    raw.mockResolvedValue("fresh");
+    const { hook, qc } = setup();
+    const observer = watch(qc);
+    const stop = observer.subscribe(() => {});
+    expect(raw).toHaveBeenCalledTimes(1);
+
+    act(() => reportSsoExpired("admin")); // 다른 호출의 만료 보고로 로그인이 열린다
+    vi.setSystemTime(T0 + 10_000);
+    await act(async () => login.resolve()); // 로그인 성공. 첫 조회는 이 순간에도 돌고 있다
+
+    // 무효화만으로는 돌던 첫 조회가 그대로 이어진다. 취소해야 로그인 뒤에 새로 시작한다
+    await waitFor(() => expect(raw).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(observer.getCurrentResult().data).toBe("fresh"));
+
+    // 취소된 첫 조회는 옛 세션으로 뒤늦게 실패한다
+    await act(async () => first.reject({ kind: "ssoExpired" }));
+    expect(observer.getCurrentResult()).toMatchObject({ status: "success", data: "fresh", isError: false });
+    expect(m.ssoLogin).toHaveBeenCalledTimes(1); // 그 보고는 낡은 것이라 로그인을 또 열지 않고
+    expect(hook.result.current.entries).toEqual([]); // 실패 줄도 만들지 않는다
+    stop();
+  });
+
+  test("a fetch of another SSO session keeps running", async () => {
+    const login = deferred();
+    m.ssoLogin.mockReturnValue(login.promise);
+    const otherFetch = deferred<string>();
+    raw.mockReturnValueOnce(otherFetch.promise);
+    const { hook, qc } = setup();
+    const observer = new QueryObserver(qc, {
+      queryKey: ["resources", "other", "ec2", "instances"], // corp 세션이 아니라 other 세션의 프로필
+      queryFn: () => invoke<string>("list_resources", { profile: "other" }),
+      retry: false,
+    });
+    const stop = observer.subscribe(() => {});
+    act(() => reportSsoExpired("admin"));
+    await act(async () => login.resolve());
+    await waitFor(() => expect(hook.result.current.entries).toEqual([]));
+
+    // 무효화하지 않는 쿼리를 취소하면 아무도 다시 시작하지 않아, 그 화면은 멈춘 채로 남는다
+    expect(observer.getCurrentResult().fetchStatus).toBe("fetching");
+    expect(raw).toHaveBeenCalledTimes(1);
+    await act(async () => otherFetch.resolve("other-data"));
+    expect(observer.getCurrentResult().data).toBe("other-data");
+    expect(raw).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  test("an on-demand fetch (enabled: false) keeps running, since nothing would start it again", async () => {
+    const login = deferred();
+    m.ssoLogin.mockReturnValue(login.promise);
+    const running = deferred<string>();
+    raw.mockReturnValueOnce(running.promise);
+    const { hook, qc } = setup();
+    const observer = watch(qc, false); // 마지막 사용 시각처럼 사용자가 누를 때만 도는 쿼리
+    const stop = observer.subscribe(() => {});
+    void observer.refetch();
+    expect(raw).toHaveBeenCalledTimes(1);
+    act(() => reportSsoExpired("admin"));
+    await act(async () => login.resolve());
+    await waitFor(() => expect(hook.result.current.entries).toEqual([]));
+
+    // 무효화는 꺼진 쿼리를 다시 부르지 않는다. 취소하면 화면은 버튼만 남고, 10~30초 걸리던 조회는 사라진다
+    expect(observer.getCurrentResult().fetchStatus).toBe("fetching");
+    await act(async () => running.resolve("loaded"));
+    expect(observer.getCurrentResult().data).toBe("loaded");
+    expect(raw).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  test("a fetch that finished before the login is left alone", async () => {
+    m.ssoLogin.mockResolvedValue(undefined);
+    raw.mockResolvedValue("cached");
+    const { hook, qc } = setup();
+    const stop = watch(qc).subscribe(() => {});
+    await waitFor(() => expect(qc.getQueryData(key)).toBe("cached"));
+    act(() => reportSsoExpired("admin"));
+    await waitFor(() => expect(hook.result.current.entries).toEqual([]));
+    // 끝난 조회는 취소할 것이 없다. 무효화로 한 번 다시 부를 뿐이다
+    await waitFor(() => expect(raw).toHaveBeenCalledTimes(2));
+    expect(qc.getQueryData(key)).toBe("cached");
+    stop();
+  });
 });

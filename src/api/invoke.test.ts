@@ -66,6 +66,7 @@ test("a report made without a start time is stamped with now", () => {
 });
 
 test("a throwing listener neither changes the caller's error nor starves the other listeners", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
   const seen: string[] = [];
   const offBad = onSsoExpired(() => {
     throw new Error("listener bug");
@@ -76,9 +77,91 @@ test("a throwing listener neither changes the caller's error nor starves the oth
   expect(seen).toEqual(["prod"]);
   offBad();
   offGood();
+  log.mockRestore();
 });
 
-test("only the wrapper imports invoke from @tauri-apps/api/core", () => {
+test("a throwing listener is logged, so a bug in the login manager does not vanish silently", () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  const bug = new Error("listener bug");
+  const off = onSsoExpired(() => {
+    throw bug;
+  });
+  reportSsoExpired("prod");
+  off();
+  expect(log).toHaveBeenCalledTimes(1);
+  expect(log).toHaveBeenCalledWith(expect.any(String), bug);
+  log.mockRestore();
+});
+
+test("listeners that do not throw log nothing", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  const off = onSsoExpired(() => {});
+  raw.mockRejectedValueOnce({ kind: "ssoExpired" });
+  await expect(invoke("get_account", { profile: "prod" })).rejects.toBeTruthy();
+  off();
+  expect(log).not.toHaveBeenCalled();
+  log.mockRestore();
+});
+
+// 래퍼(src/api/invoke.ts)를 우회해 Tauri의 invoke에 닿는 길을 소스 글자로 찾는다. `@tauri-apps/api`의 첫 화면도 core를 내보낸다(core.invoke).
+const CORE = String.raw`["']@tauri-apps/api/core["']`;
+const ROOT = String.raw`["']@tauri-apps/api["']`;
+const named = (name: string, from: string) => String.raw`\b(?:import|export)\s+(?:type\s+)?\{[^}]*\b${name}\b[^}]*\}\s*from\s*${from}`; // import { x } / export { x } from
+const star = (from: string) => String.raw`\b(?:import|export)\s*\*(?:\s*as\s+\w+)?\s*from\s*${from}`; // import * as x / export * (as x) from
+const dynamic = (from: string) => String.raw`\b(?:import|require)\s*\(\s*${from}\s*\)`; // import("...") / require("...")
+const WAYS_TO_REACH_INVOKE = [
+  named("invoke", CORE),
+  star(CORE),
+  dynamic(CORE),
+  named("core", ROOT),
+  star(ROOT),
+  dynamic(ROOT),
+].map((source) => new RegExp(source));
+const reachesInvoke = (text: string) => WAYS_TO_REACH_INVOKE.some((way) => way.test(text));
+
+test("the boundary check recognizes every way to reach Tauri's invoke", () => {
+  const bypasses = [
+    `import { invoke } from "@tauri-apps/api/core";`,
+    `import { invoke as call } from '@tauri-apps/api/core'`,
+    `import { convertFileSrc, invoke } from "@tauri-apps/api/core"`,
+    `import {\n  invoke,\n} from "@tauri-apps/api/core"`,
+    `import * as core from "@tauri-apps/api/core"`,
+    `const { invoke } = await import("@tauri-apps/api/core")`,
+    `const core = require('@tauri-apps/api/core')`,
+    // 다시 내보내면 다른 파일이 래퍼 없이 가져다 쓴다
+    `export { invoke } from "@tauri-apps/api/core"`,
+    `export { invoke as rawInvoke } from "@tauri-apps/api/core";`,
+    `export * from "@tauri-apps/api/core"`,
+    `export * as core from "@tauri-apps/api/core"`,
+    // 첫 화면의 core로도 core.invoke에 닿는다
+    `import { core } from "@tauri-apps/api"`,
+    `import { event, core as tauriCore } from '@tauri-apps/api'`,
+    `import {\n  event,\n  core,\n} from "@tauri-apps/api"`,
+    `import * as tauri from "@tauri-apps/api"`,
+    `export { core } from "@tauri-apps/api"`,
+    `export * from "@tauri-apps/api"`,
+    `const { core } = await import("@tauri-apps/api")`,
+    `const tauri = require("@tauri-apps/api")`,
+  ];
+  for (const source of bypasses) expect(reachesInvoke(source), source).toBe(true);
+});
+
+test("the boundary check lets the other Tauri imports through", () => {
+  const allowed = [
+    `import { listen } from "@tauri-apps/api/event"`,
+    `import { getCurrentWebview } from "@tauri-apps/api/webview"`,
+    `import { getVersion } from "@tauri-apps/api/app"`,
+    `import type { InvokeArgs } from "@tauri-apps/api/core"`,
+    `import { event } from "@tauri-apps/api"`,
+    `import { check } from "@tauri-apps/plugin-updater"`,
+    `import { invoke } from "./invoke"`,
+    `import { invoke } from "../api/invoke"`,
+    `export { invoke } from "./invoke"`,
+  ];
+  for (const source of allowed) expect(reachesInvoke(source), source).toBe(false);
+});
+
+test("only the wrapper reaches Tauri's invoke", () => {
   const sources = import.meta.glob<string>(["/src/**/*.{ts,tsx}", "!/src/**/*.test.*", "!/src/api/invoke.ts"], {
     query: "?raw",
     import: "default",
@@ -86,15 +169,8 @@ test("only the wrapper imports invoke from @tauri-apps/api/core", () => {
   });
   // 패턴이 빗나가 아무 파일도 못 읽으면 검사가 헛돌기 때문에, 래퍼를 쓰는 파일이 잡혔는지 먼저 본다
   expect(Object.keys(sources)).toContain("/src/api/client.ts");
-  const core = String.raw`["']@tauri-apps/api/core["']`;
-  const direct = [
-    new RegExp(String.raw`import\s+(?:type\s+)?\{[^}]*\binvoke\b[^}]*\}\s*from\s*${core}`), // import { invoke } / { invoke as x }
-    new RegExp(String.raw`import\s*\*\s*as\s+\w+\s+from\s*${core}`), // import * as core (core.invoke)
-    new RegExp(String.raw`import\s*\(\s*${core}\s*\)`), // await import(...)
-    new RegExp(String.raw`require\(\s*${core}\s*\)`),
-  ];
   const offenders = Object.entries(sources)
-    .filter(([, text]) => direct.some((re) => re.test(text)))
+    .filter(([, text]) => reachesInvoke(text))
     .map(([path]) => path);
   expect(offenders).toEqual([]);
 });

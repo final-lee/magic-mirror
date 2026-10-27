@@ -160,6 +160,19 @@ describe("SSO auto-login across profile switches", () => {
     expect(await screen.findByText("prod: SSO 로그인 중이에요. 브라우저에서 승인해 주세요")).toBeInTheDocument();
   });
 
+  test("an expiry right after a successful login says to check the profile settings and opens no second login", async () => {
+    m.ssoLogin.mockResolvedValueOnce(undefined);
+    await openProd();
+    await act(async () => reportSsoExpired("prod")); // 첫 만료: 로그인하고 성공한다
+    await waitFor(() => expect(screen.queryByText(/SSO 로그인 중이에요/)).not.toBeInTheDocument());
+    expect(m.ssoLogin).toHaveBeenCalledTimes(1);
+
+    act(() => reportSsoExpired("prod")); // 로그인이 끝난 뒤에 시작한 호출이 또 만료로 실패했다
+    expect(await screen.findByText("prod: 로그인했는데도 자격 증명을 받지 못했어요. 프로필 설정을 확인해 주세요")).toBeInTheDocument();
+    expect(screen.queryByText(/SSO 로그인에 실패했어요/)).not.toBeInTheDocument(); // 로그인이 실패한 것이 아니다
+    expect(m.ssoLogin).toHaveBeenCalledTimes(1);
+  });
+
   test("a late expiry report from the profile we just left does not open a login", async () => {
     const profile = await openProd();
     fireEvent.change(profile, { target: { value: "dev" } });

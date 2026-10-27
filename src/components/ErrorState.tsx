@@ -20,8 +20,9 @@ export function ErrorState({ error, profile, onRetry, compact = false }: Props) 
     const running = sso ? sso.statusFor(profile)?.kind === "running" : busy;
     const login = async () => {
       if (sso) {
-        // 로그인에 성공하면 관리자가 이 프로필의 쿼리를 이미 무효화하므로 onRetry로 한 번 더 불러오지 않는다
-        void sso.start(profile, { manual: true });
+        // 관리자가 성공 때 쿼리를 무효화하지만 켜진 쿼리만 다시 불린다. 누를 때만 도는 쿼리(enabled: false)는 여기서 다시 불러야 화면이 풀린다.
+        // 켜진 쿼리는 한 번 더 불리는 셈인데, 그 비용은 받아들인다.
+        if (await sso.start(profile, { manual: true })) onRetry();
         return;
       }
       setBusy(true);
