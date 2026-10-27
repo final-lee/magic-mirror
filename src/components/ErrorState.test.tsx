@@ -107,6 +107,30 @@ test("a box without onLoggedIn does nothing when its session logs in", () => {
   expect(onRetry).not.toHaveBeenCalled();
 });
 
+test("one success calls onLoggedIn once, even when the error goes ssoExpired, network, ssoExpired", () => {
+  const onLoggedIn = vi.fn();
+  const sso = manager();
+  const view = render(boxIn(sso, { onLoggedIn }));
+  const later = Date.now() + 1000;
+  const succeeded = { ...sso, lastSuccessAt: () => later };
+  view.rerender(boxIn(succeeded, { onLoggedIn }));
+  expect(onLoggedIn).toHaveBeenCalledTimes(1);
+  // 다시 불러온 조회가 네트워크 오류로 끝났다가, 사용자가 [다시 시도]를 눌러 이번에는 다시 만료로 실패했다. 같은 성공으로 또 부르지 않는다
+  view.rerender(boxIn(succeeded, { onLoggedIn, error: { kind: "network", message: "timeout" } }));
+  view.rerender(boxIn(succeeded, { onLoggedIn }));
+  expect(onLoggedIn).toHaveBeenCalledTimes(1);
+});
+
+test("a newer success calls onLoggedIn again", () => {
+  const onLoggedIn = vi.fn();
+  const sso = manager();
+  const view = render(boxIn(sso, { onLoggedIn }));
+  const first = Date.now() + 1000;
+  view.rerender(boxIn({ ...sso, lastSuccessAt: () => first }, { onLoggedIn }));
+  view.rerender(boxIn({ ...sso, lastSuccessAt: () => first + 5000 }, { onLoggedIn }));
+  expect(onLoggedIn).toHaveBeenCalledTimes(2);
+});
+
 test("a success from before the box appeared does not call onLoggedIn", () => {
   const onLoggedIn = vi.fn();
   render(boxIn(manager({ lastSuccessAt: () => Date.now() - 60_000 }), { onLoggedIn }));
