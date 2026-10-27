@@ -49,7 +49,7 @@ test("sso expired logs in, then calls onLoggedIn and nothing else", async () => 
   expect(onRetry).not.toHaveBeenCalled();
 });
 
-test("a box without onLoggedIn does nothing extra after its login", async () => {
+test("without a login manager, a box without onLoggedIn reloads with onRetry after its login", async () => {
   vi.mocked(api.ssoLogin).mockResolvedValue(undefined);
   const onRetry = vi.fn();
   render(<ErrorState error={{ kind: "ssoExpired" }} profile="prod" onRetry={onRetry} />);
@@ -57,7 +57,7 @@ test("a box without onLoggedIn does nothing extra after its login", async () => 
     fireEvent.click(screen.getByRole("button", { name: "로그인" }));
   });
   expect(api.ssoLogin).toHaveBeenCalledWith("prod");
-  expect(onRetry).not.toHaveBeenCalled();
+  expect(onRetry).toHaveBeenCalledTimes(1);
 });
 
 test("sso login failure is shown", async () => {
