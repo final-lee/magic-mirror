@@ -244,6 +244,35 @@ async fn close_target_drops_every_entry_of_that_target_and_only_that_target() {
 }
 
 #[tokio::test]
+async fn close_user_drops_only_that_users_entries_of_that_target_and_leaves_the_epoch_alone() {
+    let server = FakeServer::start(Script::Ready).await;
+    let pool = Pool::default();
+    let as_reader = |id: &str, database: &str| ConnKey { user: "reader".into(), ..key(id, database) };
+    let one = get(&pool, &server, key("a", "one"), 1).await;
+    get(&pool, &server, key("a", "two"), 2).await;
+    get(&pool, &server, as_reader("a", "one"), 3).await;
+    // 같은 사용자라도 다른 대상의 연결은 그대로다
+    get(&pool, &server, key("b", "one"), 4).await;
+    let epoch = pool.epoch(&target("a"));
+    let one_weak = Arc::downgrade(&one);
+    drop(one);
+
+    pool.close_user(&target("a"), "iam_admin");
+    assert_eq!(pool.backend_pids(&target("a")), vec![3]);
+    assert_eq!(pool.backend_pids(&target("b")), vec![4]);
+    // 풀이 쥐고 있던 참조가 없어져야 연결이 닫힌다
+    assert!(one_weak.upgrade().is_none());
+    // epoch는 그대로다: 대상을 닫은 것이 아니라서, 도는 명령이 쥔 epoch로 계속 연결할 수 있다
+    assert_eq!(pool.epoch(&target("a")), epoch);
+    get_at_epoch(&pool, &server, key("a", "one"), epoch, 5).await.unwrap();
+    assert_eq!(pool.backend_pids(&target("a")), vec![3, 5]);
+    // 없는 사용자와 연결이 없는 대상은 아무 일도 아니다
+    pool.close_user(&target("a"), "nobody");
+    pool.close_user(&target("c"), "iam_admin");
+    assert_eq!(pool.backend_pids(&target("a")), vec![3, 5]);
+}
+
+#[tokio::test]
 async fn backend_pids_lists_the_pids_of_that_target() {
     let server = FakeServer::start(Script::Ready).await;
     let pool = Pool::default();

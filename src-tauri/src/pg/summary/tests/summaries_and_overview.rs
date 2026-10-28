@@ -1,6 +1,7 @@
 use super::*;
 
 const MANAGE_REASON: &str = "이 사용자는 rds_superuser 멤버가 아니고 CREATEROLE도 없어서 바꿀 수 없어요";
+const SET_ROLE_REASON: &str = "이 사용자는 SET ROLE로만 rds_superuser 권한을 쓸 수 있어서 바꿀 수 없어요";
 
 // ───────────────────────── 역할 요약 ─────────────────────────
 
@@ -375,20 +376,55 @@ fn the_login_user_can_manage_with_createrole_or_as_a_superuser() {
 fn the_login_user_cannot_manage_otherwise_and_the_reason_is_the_exact_text() {
     // 아무것도 없다
     assert_eq!(manage(&scene_with_login(login("iam_admin"))), (false, Some(MANAGE_REASON.to_string())));
-    // rds_superuser 멤버여도 상속하지 않으면(NOINHERIT) 그 권한을 쓰지 못한다
-    let mut scene = scene_with_login(RoleRec { inherit: false, ..login("iam_admin") });
-    scene.cluster.members.push(member("iam_admin", "rds_superuser"));
-    assert_eq!(manage(&scene), (false, Some(MANAGE_REASON.to_string())));
-    // PG16에서 관계의 INHERIT 옵션을 끈 구성원도 마찬가지다
-    let mut scene = scene_with_login(login("iam_admin"));
-    scene.cluster.members.push(member_with("iam_admin", "rds_superuser", false, true));
-    assert_eq!(manage(&scene), (false, Some(MANAGE_REASON.to_string())));
     // 상속하는 그룹이 rds_superuser가 아니다
     let mut scene = scene_with_login(login("iam_admin"));
     scene.cluster.members.push(member("iam_admin", "app_read"));
     assert_eq!(manage(&scene), (false, Some(MANAGE_REASON.to_string())));
     // 로그인 사용자가 역할 목록에 없다
     assert_eq!(manage(&rds_scene(PG16)), (false, Some(MANAGE_REASON.to_string())));
+    // SET ROLE로도 rds_superuser에 닿지 못하는 사슬은 멤버가 아닌 것과 같다: 첫 관계에 SET 옵션이 없다
+    let mut scene = scene_with_login(RoleRec { inherit: false, ..login("iam_admin") });
+    scene.cluster.roles.push(role("admins"));
+    scene.cluster.members.extend([member_with("iam_admin", "admins", false, false), member_with("admins", "rds_superuser", true, true)]);
+    assert_eq!(manage(&scene), (false, Some(MANAGE_REASON.to_string())));
+}
+
+#[test]
+fn a_login_user_that_reaches_rds_superuser_only_directly_or_through_set_role_gets_its_own_reason() {
+    // 직접 구성원이지만 상속하지 않는다(NOINHERIT): 문장은 SET ROLE 없이 돌아서 바꿀 수 없다. "멤버가 아니다"는 틀린 말이다
+    let mut scene = scene_with_login(RoleRec { inherit: false, ..login("iam_admin") });
+    scene.cluster.members.push(member("iam_admin", "rds_superuser"));
+    assert_eq!(manage(&scene), (false, Some(SET_ROLE_REASON.to_string())));
+    // PG16에서 관계의 INHERIT 옵션을 끈 구성원도 마찬가지다
+    let mut scene = scene_with_login(login("iam_admin"));
+    scene.cluster.members.push(member_with("iam_admin", "rds_superuser", false, true));
+    assert_eq!(manage(&scene), (false, Some(SET_ROLE_REASON.to_string())));
+    // INHERIT도 SET도 끈 직접 구성원도 역할 목록에서 관리자급이다: 같은 이유를 보인다
+    let mut scene = scene_with_login(login("iam_admin"));
+    scene.cluster.members.push(member_with("iam_admin", "rds_superuser", false, false));
+    assert_eq!(manage(&scene), (false, Some(SET_ROLE_REASON.to_string())));
+    // 직접 구성원이 아니어도, 되어 볼 수 있는 그룹이 rds_superuser를 상속하면 SET ROLE을 한 뒤에 그 권한을 쓴다
+    let mut scene = scene_with_login(RoleRec { inherit: false, ..login("iam_admin") });
+    scene.cluster.roles.push(role("admins"));
+    scene.cluster.members.extend([member("iam_admin", "admins"), member("admins", "rds_superuser")]);
+    assert_eq!(manage(&scene), (false, Some(SET_ROLE_REASON.to_string())));
+    // PG16: admins로 SET ROLE을 할 수 있고(SET 켬) admins가 rds_superuser를 상속하면(INHERIT 켬, SET은 꺼도 된다) 마찬가지다
+    let mut scene = scene_with_login(login("iam_admin"));
+    scene.cluster.roles.push(role("admins"));
+    scene.cluster.members.extend([member_with("iam_admin", "admins", false, true), member_with("admins", "rds_superuser", true, false)]);
+    assert_eq!(manage(&scene), (false, Some(SET_ROLE_REASON.to_string())));
+}
+
+#[test]
+fn the_set_role_reason_only_appears_when_the_login_user_cannot_manage() {
+    // 상속하지 않는 직접 구성원이어도 CREATEROLE이 있으면 관리할 수 있다: 이유가 없다
+    let mut scene = scene_with_login(RoleRec { inherit: false, create_role: true, ..login("iam_admin") });
+    scene.cluster.members.push(member("iam_admin", "rds_superuser"));
+    assert_eq!(manage(&scene), (true, None));
+    // 상속하는 구성원도 그렇다
+    let mut scene = scene_with_login(login("iam_admin"));
+    scene.cluster.members.push(member("iam_admin", "rds_superuser"));
+    assert_eq!(manage(&scene), (true, None));
 }
 
 #[test]

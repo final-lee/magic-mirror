@@ -69,7 +69,7 @@ fn the_members_of_a_group_say_whether_each_membership_allows_set_role() {
 #[test]
 fn an_unknown_role_has_no_view() {
     let scene = app_scene(PG16);
-    assert_eq!(role_view(&scene.cluster, &[], "nobody", now(), &[]), Err(AppError::other("알 수 없는 역할이에요: nobody")));
+    assert_eq!(role_view(&scene.cluster, &[], "nobody", now(), &[]), Err(AppError::other("역할을 찾을 수 없어요: nobody")));
 }
 
 #[test]
@@ -259,7 +259,7 @@ fn who_can_resolves_every_kind_of_object_from_the_reference() {
 fn who_can_refuses_an_object_the_snapshot_does_not_have() {
     let scene = app_scene(PG16);
     let ask = |object: PgObjectRef| who_can_view(&scene.cluster, &scene.db, &object, Select);
-    let missing = |text: &str| Err(AppError::other(format!("객체를 찾지 못했어요: {text}")));
+    let missing = |text: &str| Err(AppError::other(format!("객체를 찾을 수 없어요: {text}")));
     assert_eq!(ask(PgObjectRef::database("nope")), missing("nope"));
     assert_eq!(ask(PgObjectRef::schema("nope")), missing("nope"));
     assert_eq!(ask(PgObjectRef { kind: PgObjectKind::Table, schema: Some("app".into()), name: "nope".into(), signature: None }), missing("app.nope"));

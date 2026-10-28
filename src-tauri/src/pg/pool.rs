@@ -175,6 +175,12 @@ impl Pool {
         state.entries.retain(|key, _| key.target != *target);
     }
 
+    /// 이 대상에서 `user`로 연 연결을 모두 보관함에서 뺀다(로그인 사용자를 바꿨을 때 이전 사용자의 연결). `close_target`과 달리 epoch는 그대로다:
+    /// 대상을 닫은 것이 아니라서, 도는 명령도 새 사용자의 연결도 영향이 없다. 쓰는 중인 호출이 있으면 그 호출이 끝나는 대로 연결이 닫힌다.
+    pub fn close_user(&self, target: &PgTarget, user: &str) {
+        lock(&self.state).entries.retain(|key, _| !(key.target == *target && key.user == user));
+    }
+
     /// `now` 기준으로 `IDLE`을 넘겨 안 쓴 연결을 보관함에서 뺀다. 벽시계로 재는 쉰 시간은 지금 시각을 쓴다
     pub fn sweep(&self, now: Instant) {
         self.sweep_at(now, SystemTime::now());

@@ -277,8 +277,8 @@ fn a_cell_detail_of_a_cut_snapshot_says_it_is_partial() {
 #[test]
 fn a_cell_detail_asks_for_a_known_role_and_schema() {
     let scene = app_scene(PG16);
-    assert_eq!(cell_detail(&scene.cluster, &scene.db, "nobody", "app"), Err(AppError::other("알 수 없는 역할이에요: nobody")));
-    assert_eq!(cell_detail(&scene.cluster, &scene.db, "alice", "nope"), Err(AppError::other("스키마를 찾지 못했어요: nope")));
+    assert_eq!(cell_detail(&scene.cluster, &scene.db, "nobody", "app"), Err(AppError::other("역할을 찾을 수 없어요: nobody")));
+    assert_eq!(cell_detail(&scene.cluster, &scene.db, "alice", "nope"), Err(AppError::other("스키마를 찾을 수 없어요: nope")));
 }
 
 #[test]

@@ -74,16 +74,22 @@ impl PgState {
     }
 
     /// 열기가 끝났다: 로그인, 접속 정보, 클러스터 스냅숏을 담고 이 대상의 데이터베이스 스냅숏을 버린다.
-    /// 열기를 시작한 뒤(`epoch`를 읽은 뒤) 탭이 닫혔으면 아무것도 담지 않고 "먼저 연결해 주세요"다.
+    /// 기억하던 로그인과 다른 사용자로 열었으면 이전 사용자의 연결을 연결 보관함에서 뺀다(`close_user`): 남겨 두면 10분 동안 서버 연결을 쥐고,
+    /// 세션 목록에 이전 사용자의 이름으로 "이 앱"의 연결이 보이고, 더 높은 권한의 연결이 낮은 권한으로 바꾼 뒤에도 붙어 있다.
+    /// 새 사용자의 연결은 열기가 먼저 열어 두었으니 영향이 없다. 같은 사용자로 다시 열면(다시 읽기) 닫을 것이 없다.
+    /// 열기를 시작한 뒤(`epoch`를 읽은 뒤) 탭이 닫혔으면 아무것도 담지 않고, 아무것도 닫지 않고 "먼저 연결해 주세요"다.
     fn finish_open(&self, target: &PgTarget, epoch: u64, login: String, info: PgTargetInfo, cluster: Arc<ClusterSnapshot>) -> Result<(), AppError> {
         let mut clusters = locked(&self.clusters);
         if self.pool.epoch(target) != epoch {
             return Err(not_opened());
         }
-        locked(&self.logins).insert(target.clone(), login);
+        let previous = locked(&self.logins).insert(target.clone(), login.clone());
         locked(&self.infos).insert(target.clone(), info);
         locked(&self.dbs).retain(|(owner, _), _| owner != target);
         clusters.insert(target.clone(), cluster);
+        if let Some(previous) = previous.filter(|previous| *previous != login) {
+            self.pool.close_user(target, &previous);
+        }
         Ok(())
     }
 
@@ -140,6 +146,9 @@ type Collected = (Vec<Arc<DbSnapshot>>, Vec<PgSkippedDatabase>);
 
 /// 연결할 수 있는 데이터베이스들을 차례로 읽는다(읽어 둔 것은 `force`가 아니면 그대로 쓴다).
 /// - 데이터베이스 하나를 연결하지 못하거나 읽지 못하면 그 이름과 이유를 `skipped`에 담고 다음으로 간다.
+/// - 네트워크 오류(끝점에 닿지 못했거나 연결이 끊겼다)는 한 대상의 데이터베이스가 끝점 하나를 같이 쓰니 데이터베이스 하나의 문제가 아니다. 처음 만나면
+///   더는 연결하지 않는다: 나머지는 같은 이유로 `skipped`에 담고(VPN이 꺼졌을 때 데이터베이스마다 연결 제한 시간을 기다리지 않는다),
+///   읽어 둔 것은 그대로 쓴다. `force`면 읽어 둔 것을 다시 읽을 수 없으니 읽기가 실패한 것과 같게 건너뛴다.
 /// - 자격 증명 문제(SSO 만료, 권한 거부)는 데이터베이스 하나의 문제가 아니니 호출을 실패시킨다. 앱의 자동 로그인이 이어받는다.
 /// - 탭이 닫히면(`epoch`가 달라지면) 더 읽지 않고 "먼저 연결해 주세요"로 끝낸다. 닫혀서 생긴 실패는 건너뛴 데이터베이스로 적지 않는다.
 ///   데이터베이스 사이에서 닫혔으면 다음 데이터베이스에 연결을 시도하지도 않고, 연결하는 중에 닫혔으면 그 연결은 보관함이 버린다.
@@ -151,14 +160,25 @@ where
     let closed = || pg.pool.epoch(target) != epoch;
     let mut snapshots = Vec::new();
     let mut skipped = Vec::new();
+    // 처음 만난 네트워크 오류. 있으면 나머지 데이터베이스는 읽으러 가지 않고(`read`를 부르지 않고) 이 오류로 읽지 못한 것처럼 다룬다
+    let mut unreachable: Option<AppError> = None;
     for database in databases {
         if closed() {
             return Err(not_opened());
         }
-        match snapshot_of(pg, target, epoch, database, force, &mut read).await {
+        let outcome = match &unreachable {
+            None => snapshot_of(pg, target, epoch, database, force, &mut read).await,
+            Some(network_error) => snapshot_of(pg, target, epoch, database, force, |_| std::future::ready(Err(network_error.clone()))).await,
+        };
+        match outcome {
             Ok(snapshot) => snapshots.push(snapshot),
             Err(_) if closed() => return Err(not_opened()),
-            Err(error @ (AppError::Other { .. } | AppError::Network { .. })) => skipped.push(PgSkippedDatabase { database: database.clone(), reason: error_text(&error) }),
+            Err(error @ (AppError::Other { .. } | AppError::Network { .. })) => {
+                skipped.push(PgSkippedDatabase { database: database.clone(), reason: error_text(&error) });
+                if matches!(error, AppError::Network { .. }) {
+                    unreachable.get_or_insert(error);
+                }
+            }
             Err(error) => return Err(error),
         }
     }
