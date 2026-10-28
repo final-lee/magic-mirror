@@ -1,5 +1,6 @@
 //! 묶음 미리보기: 할당 표에서 모은 붙이기·떼기·넣기·빼기를 적용 순서로 늘어놓고, 가상 스냅숏에 하나씩 반영하며 변경마다
-//! 요약·호출·경고를 그 시점 상태로 계산한 뒤, 처음과 끝 상태를 한 번 비교해 권한 증감과 묶음 경고를 낸다. 순수 함수다.
+//! 요약·호출·경고를 그 시점 상태로 계산한 뒤, 처음과 끝 상태를 한 번 비교해 권한 증감과 묶음 경고를 낸다.
+//! 붙이기·넣기와 떼기·빼기가 함께 있으면 붙이기·넣기만 반영한 상태도 처음과 비교해, 떼기·빼기가 실패해 거기서 멈출 때 새로 얻는 위험한 권한은 따로 확인받는다. 순수 함수다.
 
 use std::collections::BTreeSet;
 
@@ -112,6 +113,22 @@ fn batch_confirm_text(s: &Snapshot, changes: &[IamChange]) -> String {
     }
 }
 
+/// 붙이기·넣기를 모두 반영하고 떼기·빼기는 하나도 반영하지 않은 상태, 그리고 그때까지 모은 바꾸는 주체(`touched`)와 닿은 주체(`reached`).
+/// 떼기·빼기가 실패하면 묶음은 이 상태로 멈춘다. 허용만 더하는 정책에서는 묶음이 지나는 가장 허용적인 상태다.
+struct AfterGrants {
+    state: Snapshot,
+    touched: Ordered,
+    reached: Ordered,
+}
+
+/// `analyze`에 넘길 주체: 직접 바꾸는 주체를 모두 앞에, 그 뒤에 `affected`가 더 돌려준 주체.
+fn in_reach_order(mut touched: Ordered, reached: Ordered) -> Vec<String> {
+    for arn in reached.into_list() {
+        touched.push(&arn);
+    }
+    touched.into_list()
+}
+
 /// 묶음 미리보기. `facts`는 `changes`와 같은 순서(받은 순서)로 변경마다 하나다.
 pub fn preview_batch(s: &Snapshot, changes: &[IamChange], facts: &[Facts]) -> BatchPreview {
     let mut batch_warnings = batch_blocks(changes);
@@ -124,8 +141,14 @@ pub fn preview_batch(s: &Snapshot, changes: &[IamChange], facts: &[Facts]) -> Ba
     // 영향을 계산할 주체. `analyze`는 앞에서부터 `MAX_AFFECTED`명만 계산하니, 변경마다 직접 바꾸는 주체(그룹은 그 자신)를 모두 먼저 넣고
     // 그룹 구성원처럼 `affected`가 더 돌려준 주체는 그 뒤에 넣는다: 큰 그룹을 바꾸는 변경이 뒤의 변경의 대상을 한도 밖으로 밀어내지 못한다.
     let (mut touched, mut reached) = (Ordered::default(), Ordered::default());
+    // 붙이기·넣기가 끝나고 첫 떼기·빼기가 시작되는 자리의 상태. 붙이기·넣기와 떼기·빼기가 함께 있을 때만 생긴다
+    let has_grants = changes.iter().any(is_grant);
+    let mut after_grants: Option<AfterGrants> = None;
     for i in application_order(changes) {
         let (c, f) = (&changes[i], facts.get(i).cloned().unwrap_or_default());
+        if has_grants && after_grants.is_none() && !is_grant(c) {
+            after_grants = Some(AfterGrants { state: state.clone(), touched: touched.clone(), reached: reached.clone() });
+        }
         let badges = warnings::target_badges(&state, c);
         let mut found = warnings::blocks(&state, c, &f, &badges);
         found.extend(warnings::notices(&state, c, &f, &badges));
@@ -159,14 +182,16 @@ pub fn preview_batch(s: &Snapshot, changes: &[IamChange], facts: &[Facts]) -> Ba
             item.warnings.retain(|w| w.level != WarnLevel::Confirm);
         }
     } else {
-        for arn in reached.into_list() {
-            touched.push(&arn);
-        }
-        let analysis = analyze(s, &state, touched.into_list(), caller);
+        let analysis = analyze(s, &state, in_reach_order(touched, reached), caller);
         // 되돌리기는 적용의 반대 순서로 한다
         let inverses: Vec<IamChange> = items.iter().rev().filter_map(|i| i.inverse.clone()).collect();
         let (found, lost) = warnings::analysis_warnings(s, &state, &analysis, &inverses, false);
         batch_warnings.extend(found);
+        // 영향은 처음과 끝만 비교한다. 하지만 떼기·빼기가 실패하면 붙이기·넣기만 반영된 채 멈추니, 그 상태에서 새로 위험해지는 주체도 확인받는다
+        if let Some(AfterGrants { state: stopped_at, touched, reached }) = after_grants {
+            let stopped = analyze(s, &stopped_at, in_reach_order(touched, reached), caller);
+            batch_warnings.extend(warnings::mid_stop(s, &stopped, &analysis));
+        }
         undo_lost = lost;
         impacts = analysis.impacts;
     }

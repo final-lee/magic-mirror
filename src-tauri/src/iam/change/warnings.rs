@@ -324,3 +324,19 @@ pub(super) fn analysis_warnings(before: &Snapshot, after: &Snapshot, a: &Analysi
     }
     (out, undo_lost)
 }
+
+/// 묶음이 붙이기·넣기만 반영한 상태에서 멈추면(떼기·빼기가 실패하면 자동 되돌리기 없이 거기서 멈춘다) 새로 관리자급이 되거나 권한 상승에 쓸 수 있는
+/// 권한을 얻는 주체의 확인. `stopped`는 그 상태와 처음 상태를, `end`는 묶음을 다 적용한 상태와 처음 상태를 비교한 결과다.
+/// 끝 상태의 확인(`analysis_warnings`)이 이미 말하는 주체는 뺀다: 관리자급이 되는 주체는 권한 상승을 따로 말하지 않으니 그것도 말한 것으로 센다.
+pub(super) fn mid_stop(before: &Snapshot, stopped: &Analysis, end: &Analysis) -> Vec<Warning> {
+    let admin: Vec<String> = stopped.newly_admin.iter().filter(|arn| !end.newly_admin.contains(arn)).cloned().collect();
+    let privesc: Vec<String> = stopped.newly_privesc.iter().filter(|arn| !end.newly_privesc.contains(arn) && !end.newly_admin.contains(arn)).cloned().collect();
+    let mut out = Vec::new();
+    if !admin.is_empty() {
+        out.push(confirm(format!("중간에 멈추면 관리자급 권한을 새로 얻는 주체: {}", names(before, &admin))));
+    }
+    if !privesc.is_empty() {
+        out.push(confirm(format!("중간에 멈추면 권한 상승에 쓸 수 있는 권한을 새로 얻는 주체: {}", names(before, &privesc))));
+    }
+    out
+}

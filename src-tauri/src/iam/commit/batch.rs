@@ -1,6 +1,6 @@
 //! 묶음 적용: 다시 계산한 묶음 미리보기를 사용자가 본 계획과 견주고 관문을 지난 뒤, 적용 순서대로 변경마다 쓰고 기록한다.
 //! 실패하면 거기서 멈춘다: 이미 적용된 변경은 그대로 두고(자동 되돌리기 없음) 결과에 실패한 위치를 알린다.
-//! 변경 기록을 저장하지 못할 때도 멈춘다: 기록할 수 없는 쓰기는 더 하지 않는다(그 변경은 이미 적용됐으니 알림으로만 알리고, 다음 변경을 멈춘 곳으로 알린다).
+//! 변경 기록을 저장하지 못할 때도 멈춘다: 기록할 수 없는 쓰기는 더 하지 않는다(그 변경은 이미 적용됐으니 알림에 그 요약을 적어 알리고, 다음 변경을 멈춘 곳으로 알린다).
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -18,6 +18,8 @@ use crate::iam::write::Applied;
 
 /// 변경 기록을 저장하지 못해서 다음 변경을 적용하지 않고 멈출 때 그 변경의 실패 이유
 pub const LOG_NOT_SAVED: &str = "변경 기록을 저장하지 못해서 멈췄어요";
+/// 변경 기록을 저장하지 못했는데 그 변경은 이미 적용됐을 때 알림에서 그 변경의 요약 뒤에 오는 말(`<요약>: <이 문구>`)
+pub const APPLIED_NOT_LOGGED: &str = "적용했지만 변경 기록에 남기지 못했어요";
 
 pub struct BatchRequest {
     pub profile: String,
@@ -147,8 +149,9 @@ where
         match result {
             Ok(()) if recorded.appended => log_ids.push(id),
             Ok(()) => {
-                // IAM은 바꿨는데 기록이 파일에 없다(그 id는 알리지 않는다). 기록할 수 없는 쓰기는 더 하지 않는다:
+                // IAM은 바꿨는데 기록이 파일에 없다(그 id는 알리지 않는다). 어느 변경인지는 알림에 남긴다. 기록할 수 없는 쓰기는 더 하지 않는다:
                 // 적용하지 않은 다음 변경을 멈춘 곳으로 알리고, 마지막 변경이었으면 알림(notes)만 남는다
+                notes.push(format!("{}: {APPLIED_NOT_LOGGED}", item.summary));
                 failed = checked.changes.get(index + 1).map(|next| BatchFailure { index: index + 1, summary: next.summary.clone(), message: LOG_NOT_SAVED.to_string() });
                 break;
             }

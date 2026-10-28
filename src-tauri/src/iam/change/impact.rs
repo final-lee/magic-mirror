@@ -94,7 +94,7 @@ pub(super) struct Analysis {
 }
 
 /// 순서를 지키면서 중복 없이 ARN을 모은다.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Ordered {
     list: Vec<String>,
     seen: HashSet<String>,

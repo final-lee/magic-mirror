@@ -14,6 +14,7 @@ use crate::iam::clock::iso;
 use crate::iam::commit::plan::DRIFTED;
 use crate::iam::fixtures::*;
 use crate::iam::log::{append, read_all};
+use crate::iam::model::GroupRec;
 
 const NOW: i64 = 1_792_000_000;
 
@@ -29,6 +30,21 @@ fn detach(target: &str, policy: &str) -> IamChange {
 fn bob_has_unused() -> Snapshot {
     let mut s = snapshot();
     s.users.iter_mut().find(|u| u.name == "bob").expect("bob").attached.push(UNUSED_POLICY.into());
+    s
+}
+
+fn add_to_group(user: &str, group: &str) -> IamChange {
+    IamChange::AddToGroup { user_name: user.into(), group_name: group.into() }
+}
+
+const OPS: &str = "arn:aws:iam::111111111111:group/ops";
+const MID_STOP_ADMIN_BOB: &str = "중간에 멈추면 관리자급 권한을 새로 얻는 주체: bob";
+
+/// 구성원이 없는 그룹 ops에 관리자 정책이 붙어 있는 스냅숏. [bob을 ops에 넣기, ops에서 관리자 정책 떼기]는 끝 상태에서 bob에게 달라지는 게 없지만,
+/// 떼기가 실패해 멈추면 bob은 관리자급이 된 채로 남는다.
+fn ops_is_admin() -> Snapshot {
+    let mut s = snapshot();
+    s.groups.push(GroupRec { arn: OPS.into(), name: "ops".into(), path: "/".into(), attached: vec![ADMIN_POLICY.into()], ..Default::default() });
     s
 }
 
@@ -89,6 +105,11 @@ fn writer_breaking_the_log(written: &Written, log: &Path, break_on: usize) -> im
 
 fn saved_log(log: &Path) -> std::path::PathBuf {
     log.with_extension("jsonl.bak")
+}
+
+/// 적용했지만 변경 기록에 남기지 못한 변경을 알리는 알림.
+fn unlogged(summary: &str) -> String {
+    format!("{summary}: 적용했지만 변경 기록에 남기지 못했어요")
 }
 
 fn refusal(committed: &BatchCommitted) -> String {
@@ -200,8 +221,10 @@ async fn stops_before_the_next_change_when_the_log_stops_saving() {
     // 멈춘 곳은 적용하지 않은 다음 변경이다
     let stopped = BatchFailure { index: 1, summary: planned.items[1].0.clone(), message: "변경 기록을 저장하지 못해서 멈췄어요".into() };
     assert_eq!(result.failed, Some(stopped));
-    assert_eq!(result.notes.len(), 1, "{:?}", result.notes);
+    // 기록하지 못한 이유 다음에, 기록에 남지 않은 변경(첫 변경)의 요약을 적은 알림이 온다
+    assert_eq!(result.notes.len(), 2, "{:?}", result.notes);
     assert!(result.notes[0].starts_with("변경 기록을 저장하지 못했어요"), "{:?}", result.notes);
+    assert_eq!(result.notes[1], unlogged(&planned.items[0].0));
     assert!(!saved_log(&log).exists(), "저장된 기록은 없어요");
 }
 
@@ -221,7 +244,10 @@ async fn a_log_that_stops_saving_midway_keeps_the_ids_saved_before_it() {
     assert_eq!(result.log_ids, vec!["b1-1".to_string()], "둘째 변경의 기록 id는 파일에 없어요");
     let stopped = BatchFailure { index: 2, summary: planned.items[2].0.clone(), message: "변경 기록을 저장하지 못해서 멈췄어요".into() };
     assert_eq!(result.failed, Some(stopped));
-    assert_eq!(result.notes.len(), 1, "{:?}", result.notes);
+    // 기록에 남지 않은 변경은 둘째 변경이다. 앞 변경(b1-1)은 기록에 남았으니 알리지 않는다
+    assert_eq!(result.notes.len(), 2, "{:?}", result.notes);
+    assert!(result.notes[0].starts_with("변경 기록을 저장하지 못했어요"), "{:?}", result.notes);
+    assert_eq!(result.notes[1], unlogged(&planned.items[1].0));
     let saved: Vec<String> = read_all(&saved_log(&log)).into_iter().map(|e| e.id).collect();
     assert_eq!(saved, vec!["b1-1"], "앞 변경의 기록은 파일에 남아요");
 }
@@ -231,7 +257,7 @@ async fn a_log_that_stops_saving_at_the_last_change_is_only_a_note() {
     let dir = tempfile::tempdir().unwrap();
     let written = Written::default();
     let req = request(dir.path(), snapshot(), vec![attach(BOB, S3_FULL), attach(CAROL, UNUSED_POLICY)]);
-    let log = req.log_path.clone();
+    let (log, planned) = (req.log_path.clone(), req.seen.clone().unwrap());
 
     // 마지막 변경을 적용한 직후부터 기록을 저장하지 못한다: 멈출 다음 변경이 없다
     let committed = commit_batch(req, writer_breaking_the_log(&written, &log, 2)).await;
@@ -241,13 +267,64 @@ async fn a_log_that_stops_saving_at_the_last_change_is_only_a_note() {
     assert_eq!(written.lock().unwrap().len(), 2, "두 변경 모두 적용됐어요");
     assert_eq!(result.log_ids, vec!["b1-1".to_string()], "마지막 변경의 기록 id는 파일에 없어요");
     assert_eq!(result.failed, None);
-    assert_eq!(result.notes.len(), 1, "{:?}", result.notes);
+    // 멈출 변경이 없어도 마지막 변경이 기록에 남지 않았다는 것은 알림으로 남는다
+    assert_eq!(result.notes.len(), 2, "{:?}", result.notes);
     assert!(result.notes[0].starts_with("변경 기록을 저장하지 못했어요"), "{:?}", result.notes);
+    assert_eq!(result.notes[1], unlogged(&planned.items[1].0));
     let saved: Vec<String> = read_all(&saved_log(&log)).into_iter().map(|e| e.id).collect();
     assert_eq!(saved, vec!["b1-1"]);
 }
 
 // ── 거부 ────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn a_risky_mid_stop_state_needs_its_confirm_text_to_apply() {
+    let dir = tempfile::tempdir().unwrap();
+    let written = Written::default();
+    let changes = vec![add_to_group("bob", "ops"), detach(OPS, ADMIN_POLICY)];
+    let req = request(dir.path(), ops_is_admin(), changes.clone());
+    // 사용자가 본 계획에 멈출 때의 확인과 확인 문구가 들어 있다
+    let planned = req.seen.clone().unwrap();
+    assert_eq!(planned.checks.iter().map(|w| w.message.as_str()).collect::<Vec<_>>(), vec![MID_STOP_ADMIN_BOB]);
+    assert_eq!(planned.confirm_text.as_deref(), Some("변경 2개 적용"));
+    let log = req.log_path.clone();
+
+    // 적용할 때 다시 계산해도 같은 확인이 나오니, 문구가 없거나 다르면 거부한다
+    for typed in [None, Some("bob"), Some("ops")] {
+        let wrong = BatchRequest { confirm_text: typed.map(str::to_string), ..request(dir.path(), ops_is_admin(), changes.clone()) };
+        let committed = commit_batch(wrong, writer(&written, None)).await;
+        assert_eq!(refusal(&committed), "확인 문구가 달라요. 입력해야 할 이름: 변경 2개 적용", "{typed:?}");
+        assert!(!committed.wrote);
+    }
+    assert!(written.lock().unwrap().is_empty());
+    assert!(!log.exists());
+
+    // 대조: 맞는 문구를 넣으면 붙이기·넣기가 먼저, 떼기·빼기가 나중에 적용된다
+    let right = BatchRequest { confirm_text: Some("변경 2개 적용".into()), ..req };
+    let committed = commit_batch(right, writer(&written, None)).await;
+    assert_eq!(committed.result, Ok(BatchResult { batch_id: "b1".into(), log_ids: vec!["b1-1".into(), "b1-2".into()], failed: None, notes: vec![] }));
+    assert_eq!(written_apis(&written), vec![vec!["iam:AddUserToGroup"], vec!["iam:DetachGroupPolicy"]]);
+}
+
+#[tokio::test]
+async fn refuses_a_plan_seen_without_the_mid_stop_confirm() {
+    let dir = tempfile::tempdir().unwrap();
+    let written = Written::default();
+    // 사용자가 본 계획에는 멈출 때의 확인이 없었다(예전 미리보기): 적용 때 다시 계산하면 확인이 생기니 달라진 계획이다
+    let mut req = request(dir.path(), ops_is_admin(), vec![add_to_group("bob", "ops"), detach(OPS, ADMIN_POLICY)]);
+    let seen = req.seen.as_mut().unwrap();
+    seen.checks.retain(|w| w.message != MID_STOP_ADMIN_BOB);
+    seen.confirm_text = None;
+    req.confirm_text = Some("변경 2개 적용".into());
+    let log = req.log_path.clone();
+
+    let committed = commit_batch(req, writer(&written, None)).await;
+
+    assert_eq!(refusal(&committed), DRIFTED);
+    assert!(!committed.wrote);
+    assert!(written.lock().unwrap().is_empty());
+    assert!(!log.exists());
+}
 
 #[tokio::test]
 async fn refuses_when_the_plan_changed() {
