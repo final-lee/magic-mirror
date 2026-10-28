@@ -1,5 +1,5 @@
 // 할당 표의 장바구니: 칸을 눌러 담은 변경을 들고 있다가, 개요를 다시 불러오면 이미 끝난 변경을 빼고 알린다.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   MAX_DRAFT,
   matchChanges,
@@ -14,33 +14,48 @@ import type { IamChange, IamOverview, PrincipalSummary } from "./types";
 
 const FULL_NOTICE = `한 번에 ${MAX_DRAFT}개까지 담을 수 있어요`;
 
-/** 장바구니 한 벌. 프로필 하나의 것이라서 어느 프로필인지 함께 들고 있다 */
+/** 장바구니 한 벌. 프로필 하나의 것이라서 어느 프로필인지 함께 들고, 마지막으로 정리한 개요도 같이 둔다 */
 interface Tray {
   profile: string;
+  /** 이 장바구니를 마지막으로 정리한 개요. 다른 개요가 오면 다시 정리한다 */
+  ov: IamOverview | undefined;
   items: DraftItem[];
   notices: string[];
 }
 
-const emptyTray = (profile: string): Tray => ({ profile, items: [], notices: [] });
+const emptyTray = (profile: string, ov: IamOverview | undefined): Tray => ({ profile, ov, items: [], notices: [] });
+
+/**
+ * 지금의 프로필과 개요에 맞춘 장바구니. 렌더마다 부르고, 바뀐 것이 없으면 받은 것을 그대로 돌려준다.
+ * - 다른 프로필의 것이면 비운다.
+ * - 새 개요가 왔으면 이미 끝난 변경과 대상이 없어진 변경을 빼고 알린다. 개요가 아직 없으면(불러오는 중) 건드리지 않는다.
+ */
+function settle(tray: Tray, profile: string, ov: IamOverview | undefined): Tray {
+  if (tray.profile !== profile) return emptyTray(profile, ov);
+  if (!ov || ov === tray.ov) return tray;
+  const { draft, notices } = normalizeDraft(ov, tray.items);
+  return { ...tray, ov, items: draft, notices: notices.length > 0 ? [...tray.notices, ...notices] : tray.notices };
+}
 
 type Step = (ov: IamOverview, items: DraftItem[]) => { draft: DraftItem[]; full: boolean };
 
 /**
  * 장바구니 상태. IAM 탭이 들고 있어서 IAM 안의 다른 화면을 보고 돌아와도 남는다.
  * ov는 불러오는 중에는 undefined일 수 있고, 그동안은 담지도 정리하지도 않는다.
+ * 같은 개요는 같은 객체여야 한다(react-query의 data처럼). 렌더마다 새 객체를 주면 렌더가 끝나지 않는다.
  */
 export function useAssignmentDraft(profile: string, ov: IamOverview | undefined) {
-  const [stored, setStored] = useState<Tray>(() => emptyTray(profile));
+  const [stored, setStored] = useState<Tray>(() => emptyTray(profile, ov));
   // 한 이벤트에서 여러 번 불러도 앞 호출의 결과 위에 쌓이도록, 상태와 같은 값을 ref에도 바로 반영한다.
   const trayRef = useRef(stored);
   const ovRef = useRef(ov);
   ovRef.current = ov;
 
-  // IamTab은 프로필이 바뀌어도 다시 만들어지지 않는다. 다른 프로필의 항목은 effect가 아니라 렌더 중에 버린다.
-  // effect에서 버리면 새 프로필의 개요로 옛 항목을 먼저 정리하며 "찾을 수 없어서 뺐어요"가 뜨기 때문이다.
-  let tray = stored;
-  if (stored.profile !== profile) {
-    tray = emptyTray(profile);
+  // 프로필과 개요에 맞추는 일은 effect가 아니라 렌더 중에 한다. effect로 하면 자식이 한 번은 낡은 장바구니를 그린다.
+  // 특히 IamTab은 프로필이 바뀌어도 다시 만들어지지 않으므로, effect에서는 옛 프로필의 항목이
+  // 새 프로필의 개요로 정리되며 "찾을 수 없어서 뺐어요"가 뜬다.
+  const tray = settle(stored, profile, ov);
+  if (tray !== stored) {
     trayRef.current = tray;
     setStored(tray);
   }
@@ -108,14 +123,6 @@ export function useAssignmentDraft(profile: string, ov: IamOverview | undefined)
     },
     [commit],
   );
-
-  // 개요를 새로 받으면 이미 끝난 변경과 대상이 없어진 변경을 뺀다. 바뀐 것이 없으면 아무것도 하지 않는다.
-  useEffect(() => {
-    if (!ov) return;
-    const cur = trayRef.current;
-    const { draft, notices } = normalizeDraft(ov, cur.items);
-    if (draft !== cur.items) commit({ ...cur, items: draft, notices: [...cur.notices, ...notices] });
-  }, [ov, commit]);
 
   return { items: tray.items, notices: tray.notices, toggle, paint, match, remove, clear, removeApplied, dismissNotice };
 }

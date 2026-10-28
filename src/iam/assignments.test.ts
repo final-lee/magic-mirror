@@ -402,25 +402,44 @@ describe("paintCells", () => {
 
 describe("matchPrincipal", () => {
   test("lists what only the source has to add and what only the target has as extra", () => {
-    expect(matchPrincipal("policies", ciBot, bob)).toEqual({ add: [ADMIN], extra: [] });
-    expect(matchPrincipal("policies", bob, alice)).toEqual({ add: [], extra: [READ] });
+    expect(matchPrincipal(ov, "policies", ciBot, bob)).toEqual({ add: [ADMIN], extra: [] });
+    expect(matchPrincipal(ov, "policies", bob, alice)).toEqual({ add: [], extra: [READ] });
   });
 
   test("does not look at policies that come from groups", () => {
     // alice also gets app-deploy through dev-team, but it is not hers to copy
-    expect(matchPrincipal("policies", alice, ciBot)).toEqual({ add: [READ], extra: [ADMIN] });
+    expect(matchPrincipal(ov, "policies", alice, ciBot)).toEqual({ add: [READ], extra: [ADMIN] });
     // bob gets app-deploy through dev-team, but it is not a direct policy to take off
-    expect(matchPrincipal("policies", ciBot, bob)).toEqual({ add: [ADMIN], extra: [] });
+    expect(matchPrincipal(ov, "policies", ciBot, bob)).toEqual({ add: [ADMIN], extra: [] });
   });
 
   test("two principals with the same policies match already", () => {
-    expect(matchPrincipal("policies", alice, appRole)).toEqual({ add: [], extra: [] });
+    expect(matchPrincipal(ov, "policies", alice, appRole)).toEqual({ add: [], extra: [] });
   });
 
   test("on the members tab it compares group membership", () => {
-    expect(matchPrincipal("members", alice, ciBot)).toEqual({ add: ["dev-team"], extra: [] });
-    expect(matchPrincipal("members", ciBot, alice)).toEqual({ add: [], extra: ["dev-team"] });
-    expect(matchPrincipal("members", alice, bob)).toEqual({ add: [], extra: [] });
+    expect(matchPrincipal(ov, "members", alice, ciBot)).toEqual({ add: ["dev-team"], extra: [] });
+    expect(matchPrincipal(ov, "members", ciBot, alice)).toEqual({ add: [], extra: ["dev-team"] });
+    expect(matchPrincipal(ov, "members", alice, bob)).toEqual({ add: [], extra: [] });
+  });
+
+  test("leaves out a policy the target already gets through a group, since that cell cannot be changed", () => {
+    const source = { ...ciBot, attached: [ADMIN, DEPLOY] }; // has app-deploy directly
+    // bob gets app-deploy through dev-team, so only AdministratorAccess is on offer
+    expect(matchPrincipal(ov, "policies", source, bob)).toEqual({ add: [ADMIN], extra: [] });
+    // a target outside that group is offered it as usual
+    expect(matchPrincipal(ov, "policies", source, ciBot)).toEqual({ add: [DEPLOY], extra: [] });
+  });
+
+  test("keeps a policy the target has directly and also through a group among the extras", () => {
+    const both = { ...bob, attached: [READ, DEPLOY] }; // app-deploy directly and through dev-team: still editable
+    expect(matchPrincipal(ov, "policies", ciBot, both)).toEqual({ add: [ADMIN], extra: [READ, DEPLOY] });
+  });
+
+  test("offers nothing for a locked target, neither to add nor to take off", () => {
+    const locked = { ...supportRole, attached: [READ] };
+    expect(matchPrincipal(ov, "policies", ciBot, locked)).toEqual({ add: [], extra: [] });
+    expect(matchPrincipal(ov, "policies", locked, ciBot)).toEqual({ add: [READ], extra: [ADMIN] }); // a locked source is fine to copy from
   });
 });
 
@@ -499,6 +518,47 @@ describe("normalizeDraft", () => {
     const draft = pressed(ov, "members", [bob, "admins"]);
     expect(normalizeDraft(without(ov, bob), draft).notices).toEqual(["찾을 수 없어서 뺐어요: admins에 넣기 · bob"]);
     expect(normalizeDraft(without(ov, admins), draft).notices).toEqual(["찾을 수 없어서 뺐어요: admins에 넣기 · bob"]);
+  });
+
+  describe("a policy that is no longer there", () => {
+    // app-deploy was deleted: it is gone from the policy list and from everything it was attached to
+    const deleted = sampleOverview({ policies: ov.policies.filter((p) => p.arn !== DEPLOY), groups: [{ ...devTeam, attached: [] }, admins] });
+
+    test("drops an attach of a customer-managed policy the overview no longer lists, as not found", () => {
+      const draft = pressed(ov, "policies", [ciBot, DEPLOY]);
+      expect(labels(draft)).toEqual(["app-deploy 붙이기 · ci-bot"]);
+      expect(normalizeDraft(deleted, draft)).toEqual({ draft: [], notices: ["찾을 수 없어서 뺐어요: app-deploy 붙이기 · ci-bot"] });
+    });
+
+    test("keeps an attach of a customer-managed policy the overview still lists", () => {
+      const draft = pressed(ov, "policies", [ciBot, DEPLOY]);
+      const result = normalizeDraft(sampleOverview(), draft);
+      expect(result.draft).toBe(draft);
+      expect(result.notices).toEqual([]);
+    });
+
+    test("keeps an attach of an AWS-managed policy the overview does not list: it may be an unused one added as a column", () => {
+      const unlisted = policyArn("AmazonS3ReadOnlyAccess", true);
+      const draft = pressed(ov, "policies", [bob, unlisted]);
+      expect(labels(draft)).toEqual(["AmazonS3ReadOnlyAccess 붙이기 · bob"]);
+      const result = normalizeDraft(ov, draft);
+      expect(result.draft).toBe(draft);
+      expect(result.notices).toEqual([]);
+    });
+
+    test("tells an attach of a deleted policy from the others in the same draft", () => {
+      const unlisted = policyArn("AmazonS3ReadOnlyAccess", true);
+      const draft = pressed(ov, "policies", [bob, unlisted], [ciBot, DEPLOY], [bob, READ]);
+      const result = normalizeDraft(deleted, draft);
+      expect(labels(result.draft)).toEqual(["AmazonS3ReadOnlyAccess 붙이기 · bob", "ReadOnlyAccess 붙이기 · bob"]);
+      expect(result.notices).toEqual(["찾을 수 없어서 뺐어요: app-deploy 붙이기 · ci-bot"]);
+    });
+
+    test("a detach of it is still reported as already detached, not as not found", () => {
+      const draft = pressed(ov, "policies", [devTeam, DEPLOY]);
+      expect(labels(draft)).toEqual(["app-deploy 떼기 · dev-team"]);
+      expect(normalizeDraft(deleted, draft)).toEqual({ draft: [], notices: ["이미 떨어져 있어서 뺐어요: app-deploy 떼기 · dev-team"] });
+    });
   });
 
   test("keeps what is still to be done, in order, and reports only what it dropped", () => {

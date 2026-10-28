@@ -285,12 +285,15 @@ export interface BatchPreview {
 }
 export interface BatchResult {
   batchId: string;
+  /** 적용한 변경의 기록 id. 적용 순서 */
   logIds: string[];
+  /** 멈춘 변경. null이면 끝까지 적용했다. index는 0부터, 적용 순서 기준이다("k+1번째"는 index+1) */
   failed: { index: number; summary: string; message: string } | null;
   notes?: string[];
 }
 export interface UndoBatch {
   changes: IamChange[];
+  /** undoOf[i]는 changes[i]가 되돌리는 기록 id */
   undoOf: string[];
 }
 export interface ChangeLogEntry {
