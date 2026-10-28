@@ -107,7 +107,7 @@ export interface PgSchemaCell {
   role: string; schema: string;
   usage: boolean; create: boolean; read: PgCoverage; write: PgCoverage;
   inheritedOnly: boolean;          // 보이는 권한의 출처가 group/public/predefined뿐
-  unusable: string | null;         // "CONNECT 없음" | "USAGE 없음" | null. 이 칸에 잃을 것(usage·create·read·write 가운데 하나)이 있을 때만 채운다
+  unusable: string | null;         // "CONNECT 없음" | "USAGE 없음" | null. 이 칸에 잃을 것(usage·create·read·write 가운데 하나)이 있을 때만 채운다. 만들기(create)만 보이는 칸에는 "USAGE 없음"을 쓰지 않는다(CREATE는 USAGE 없이도 된다)
 }
 export interface PgDbPrivilegeRow { role: string; connect: boolean; create: boolean; temp: boolean }
 export interface PgSchemaInfo { name: string; owner: string; tableCount: number }
