@@ -89,11 +89,24 @@ pub struct RoleRec {
     /// `1970-01-01T00:00:00Z`로 읽는다
     pub valid_until: Option<String>,
     pub comment: Option<String>,
+    /// 역할의 OID(`pg_roles.oid`). 서버는 상속으로 닿는 역할을 너비 우선으로 훑을 때 같은 깊이의 역할을 OID 순으로 본다.
+    /// 권한이나 ADMIN을 준 쪽을 고를 때 그 순서가 결과를 정한다
+    pub oid: u32,
 }
 
 /// 구성원 관계마다 INHERIT·SET 옵션이 있는 첫 서버 버전(`server_version_num`). 카탈로그는 이 버전부터 두 옵션을 함께 읽는 질의를 고르고,
 /// `eval`은 이 버전부터 구성원 역할의 `rolinherit` 대신 관계의 INHERIT 옵션으로 상속을 가른다.
 pub const MEMBERSHIP_OPTIONS_SINCE: i32 = 160_000;
+
+/// 구성원 관계의 부여 하나(`pg_auth_members`의 줄 하나): `grantor`가 이 구성원에게 그룹을 줬다.
+/// 옵션의 뜻은 `MemberRec`의 같은 이름 칸과 같다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemberGrant {
+    pub grantor: String,
+    pub admin: bool,
+    pub inherit: Option<bool>,
+    pub set: Option<bool>,
+}
 
 /// 역할 구성원 관계 하나: `member`가 `group`의 구성원이다. 쌍마다 하나다(PG16에서 부여자가 여럿이어도 하나로 합친다).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,6 +119,9 @@ pub struct MemberRec {
     /// PG16부터 부여마다 있는 SET 옵션(`SET ROLE`을 허용하는지). 그 전 버전에는 없어서 None이다(그때는 구성원이면 언제나 `SET ROLE`을 할 수 있다).
     /// PG16에서 CREATEROLE 사용자가 만든 역할은 그 사용자에게 `admin: true, inherit: Some(false), set: Some(false)`로 부여된다.
     pub set: Option<bool>,
+    /// 이 쌍의 부여들, 부여자 이름순. PG16부터는 부여자마다 한 줄이라 하나보다 많을 수 있다. 그 전 버전에는 쌍마다 하나다(`inherit`·`set`은 None).
+    /// 위의 `admin`·`inherit`·`set`은 이 부여들을 합친 값이다: 하나라도 허용하면 허용이다.
+    pub grants: Vec<MemberGrant>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,6 +175,13 @@ pub struct ClusterSnapshot {
     pub sessions: Vec<SessionRec>,
     /// ISO 8601 UTC
     pub fetched_at: String,
+    /// OID가 10인 역할(부트스트랩 superuser). RDS에서는 `rdsadmin`이다. PG16부터 superuser가 한 구성원 부여는 이 역할이 준 것으로 남는다
+    pub bootstrap_superuser: String,
+    /// `createrole_self_grant` 설정(PG16부터). CREATEROLE 사용자가 역할을 만들면 자신에게 이 옵션(`inherit`, `set`)으로 구성원 부여를 하나 더 한다.
+    /// 설정이 없는 서버(PG15 이하)와 설정하지 않은 서버는 빈 문자열이다
+    pub createrole_self_grant: String,
+    /// RDS의 `rds.restrict_password_commands`가 켜져 있다. 켜져 있으면 비밀번호와 만료일을 바꾸려면 `rds_password` 구성원이어야 한다. 설정이 없는 서버는 false
+    pub restrict_password_commands: bool,
 }
 
 /// 관계(`pg_class`)의 종류. 괄호는 `relkind` 코드.

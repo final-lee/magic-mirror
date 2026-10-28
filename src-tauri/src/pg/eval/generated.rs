@@ -65,7 +65,7 @@ fn random_member(rng: &mut Rng, version: i32, who: &str, group: &str) -> MemberR
     }
     let inherit = if rng.chance(90) { Some(rng.chance(60)) } else { None };
     let set = if rng.chance(90) { Some(rng.chance(70)) } else { None };
-    MemberRec { inherit, set, ..member(who, group) }
+    member_options(who, group, inherit, set)
 }
 
 fn random_scene(seed: u64) -> Scene {

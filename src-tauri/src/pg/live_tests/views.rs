@@ -224,8 +224,7 @@ pub(super) async fn the_sessions_command_marks_the_connection_the_app_holds(serv
         read_replica: false,
     };
     let state = PgState::default();
-    let epoch = state.pool.epoch(&target);
-    state.finish_open_for_tests(&target, epoch, "iam_admin".into(), info, Arc::new(cluster)).expect("열기");
+    let epoch = state.open_for_tests(&target, "iam_admin".into(), info, Arc::new(cluster)).expect("열기");
     let key = ConnKey { target: target.clone(), user: "iam_admin".into(), database: scene.database.clone() };
     state.pool.get_or_connect_at_epoch(key, epoch, || async { Ok(held) }).await.expect("보관함에 넣지 못했어요");
 

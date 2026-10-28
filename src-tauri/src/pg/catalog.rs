@@ -15,8 +15,8 @@ use tokio_postgres::{Client, Error, IsolationLevel, Row, Transaction};
 
 use super::connect::Connected;
 use super::model::{
-    AclEntry, ClusterSnapshot, DatabaseRec, DbSnapshot, DefaultAclRec, DefaultObjType, FunctionRec, MemberRec, Privilege, RelKind, RelationRec,
-    RoleRec, RoleSettingRec, SchemaRec, SessionRec, MEMBERSHIP_OPTIONS_SINCE,
+    AclEntry, ClusterSnapshot, DatabaseRec, DbSnapshot, DefaultAclRec, DefaultObjType, FunctionRec, MemberGrant, MemberRec, Privilege, RelKind,
+    RelationRec, RoleRec, RoleSettingRec, SchemaRec, SessionRec, MEMBERSHIP_OPTIONS_SINCE,
 };
 use crate::error::AppError;
 use crate::iam::clock;
@@ -54,22 +54,27 @@ macro_rules! user_schemas {
 /// 로그인 직후 이 연결의 서버 쪽 프로세스 번호
 const BACKEND_PID_SQL: &str = "SELECT pg_backend_pid()";
 
-const SERVER_SQL: &str =
-    "SELECT current_setting('server_version_num')::int, current_setting('server_version'), current_setting('password_encryption')";
+/// 서버 버전과 설정. 부트스트랩 superuser는 OID가 10인 역할이다(RDS에서는 `rdsadmin`).
+/// `createrole_self_grant`(PG16부터)와 `rds.restrict_password_commands`(RDS만)는 없는 서버도 있다: `missing_ok`로 읽어서 없으면 NULL이고, 그때 값은 빈 문자열과 false다
+const SERVER_SQL: &str = r#"SELECT current_setting('server_version_num')::int, current_setting('server_version'), current_setting('password_encryption'),
+       (SELECT rolname FROM pg_roles WHERE oid = 10),
+       coalesce(current_setting('createrole_self_grant', true), ''),
+       coalesce(current_setting('rds.restrict_password_commands', true) = 'on', false)"#;
 
 const ROLES_SQL: &str = r#"SELECT r.rolname, r.rolcanlogin, r.rolinherit, r.rolcreaterole, r.rolcreatedb, r.rolreplication, r.rolbypassrls, r.rolsuper, r.rolconnlimit,
        CASE WHEN r.rolvaliduntil IS NULL OR r.rolvaliduntil = 'infinity' THEN NULL
             WHEN r.rolvaliduntil = '-infinity' THEN '1970-01-01T00:00:00Z'
             ELSE to_char(r.rolvaliduntil AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END,
-       shobj_description(r.oid, 'pg_authid')
+       shobj_description(r.oid, 'pg_authid'), r.oid
 FROM pg_roles r ORDER BY r.rolname"#;
 
-/// 구성원 관계, PG16 이상(`server_version_num >= 160000`): 부여마다 INHERIT·SET 옵션이 있다
-const MEMBERS_SQL_16: &str = r#"SELECT m.rolname, g.rolname, am.admin_option, am.inherit_option, am.set_option
+/// 구성원 관계, PG16 이상(`server_version_num >= 160000`): 부여마다 INHERIT·SET 옵션이 있다. 마지막 칸은 그 부여를 준 역할이다
+const MEMBERS_SQL_16: &str = r#"SELECT m.rolname, g.rolname, am.admin_option, am.inherit_option, am.set_option, pg_get_userbyid(am.grantor)
 FROM pg_auth_members am JOIN pg_roles m ON m.oid = am.member JOIN pg_roles g ON g.oid = am.roleid ORDER BY 1, 2"#;
 
-/// 구성원 관계, PG16 미만: INHERIT·SET 옵션이 없다(INHERIT은 구성원 역할의 속성이 정하고, 구성원이면 언제나 `SET ROLE`을 할 수 있다)
-const MEMBERS_SQL_OLD: &str = r#"SELECT m.rolname, g.rolname, am.admin_option, NULL::bool, NULL::bool
+/// 구성원 관계, PG16 미만: INHERIT·SET 옵션이 없다(INHERIT은 구성원 역할의 속성이 정하고, 구성원이면 언제나 `SET ROLE`을 할 수 있다).
+/// 부여자는 이 버전에도 있다
+const MEMBERS_SQL_OLD: &str = r#"SELECT m.rolname, g.rolname, am.admin_option, NULL::bool, NULL::bool, pg_get_userbyid(am.grantor)
 FROM pg_auth_members am JOIN pg_roles m ON m.oid = am.member JOIN pg_roles g ON g.oid = am.roleid ORDER BY 1, 2"#;
 
 const DATABASES_SQL: &str = r#"SELECT d.datname, pg_get_userbyid(d.datdba), d.datallowconn,
@@ -267,8 +272,9 @@ fn acl_row<K>(row: &Row, key: K, first: usize) -> Result<AclRow<K>, Error> {
     })
 }
 
-/// PG16부터 `pg_auth_members`는 부여자마다 한 줄이라 같은 (구성원, 그룹) 쌍이 여러 줄일 수 있다.
+/// PG16부터 `pg_auth_members`는 부여자마다 한 줄이라 같은 (구성원, 그룹) 쌍이 여러 줄일 수 있다. 질의가 주는 줄은 부여 하나씩을 가진다.
 /// 질의가 쌍 순서로 정렬해 주므로 이웃한 줄을 합친다. 서버는 부여 가운데 하나라도 허용하면 허용으로 본다(ADMIN도 INHERIT도 SET도).
+/// 합친 쌍은 부여들을 부여자 이름순으로 모두 들고 있다: 줄이 오는 순서에 기대지 않는다
 fn merge_members(rows: Vec<MemberRec>) -> Vec<MemberRec> {
     let mut merged: Vec<MemberRec> = Vec::new();
     for row in rows {
@@ -277,9 +283,13 @@ fn merge_members(rows: Vec<MemberRec>) -> Vec<MemberRec> {
                 last.admin |= row.admin;
                 last.inherit = any_grant_allows(last.inherit, row.inherit);
                 last.set = any_grant_allows(last.set, row.set);
+                last.grants.extend(row.grants);
             }
             _ => merged.push(row),
         }
+    }
+    for pair in &mut merged {
+        pair.grants.sort_by(|a, b| a.grantor.cmp(&b.grantor));
     }
     merged
 }
@@ -330,16 +340,16 @@ fn now_iso() -> String {
 /// `login_user`는 이 연결로 로그인한 DB 사용자로, 스냅숏에 그대로 담는다.
 pub async fn cluster_snapshot(conn: &mut Connected, login_user: &str) -> Result<ClusterSnapshot, AppError> {
     read(conn, async |tx| {
-        let (version_num, version, password_encryption) = read_server(tx).await?;
+        let server = read_server(tx).await?;
         let roles = read_roles(tx).await?;
-        let members = read_members(tx, version_num).await?;
+        let members = read_members(tx, server.version_num).await?;
         let databases = read_databases(tx).await?;
         let settings = read_settings(tx).await?;
         let sessions = read_sessions(tx).await?;
         Ok(ClusterSnapshot {
-            version_num,
-            version,
-            password_encryption,
+            version_num: server.version_num,
+            version: server.version,
+            password_encryption: server.password_encryption,
             login_user: login_user.to_string(),
             roles,
             members,
@@ -347,6 +357,9 @@ pub async fn cluster_snapshot(conn: &mut Connected, login_user: &str) -> Result<
             settings,
             sessions,
             fetched_at: now_iso(),
+            bootstrap_superuser: server.bootstrap_superuser,
+            createrole_self_grant: server.createrole_self_grant,
+            restrict_password_commands: server.restrict_password_commands,
         })
     })
     .await
@@ -390,9 +403,26 @@ pub async fn sessions(conn: &mut Connected) -> Result<Vec<SessionRec>, AppError>
     read(conn, read_sessions).await
 }
 
-async fn read_server(tx: &Transaction<'_>) -> Result<(i32, String, String), Error> {
+/// `SERVER_SQL`이 주는 것: 클러스터 스냅숏의 서버 쪽 칸들
+struct ServerInfo {
+    version_num: i32,
+    version: String,
+    password_encryption: String,
+    bootstrap_superuser: String,
+    createrole_self_grant: String,
+    restrict_password_commands: bool,
+}
+
+async fn read_server(tx: &Transaction<'_>) -> Result<ServerInfo, Error> {
     let row = tx.query_one(SERVER_SQL, &[]).await?;
-    Ok((row.try_get(0)?, row.try_get(1)?, row.try_get(2)?))
+    Ok(ServerInfo {
+        version_num: row.try_get(0)?,
+        version: row.try_get(1)?,
+        password_encryption: row.try_get(2)?,
+        bootstrap_superuser: row.try_get(3)?,
+        createrole_self_grant: row.try_get(4)?,
+        restrict_password_commands: row.try_get(5)?,
+    })
 }
 
 async fn read_roles(tx: &Transaction<'_>) -> Result<Vec<RoleRec>, Error> {
@@ -411,6 +441,7 @@ async fn read_roles(tx: &Transaction<'_>) -> Result<Vec<RoleRec>, Error> {
                 conn_limit: row.try_get(8)?,
                 valid_until: row.try_get(9)?,
                 comment: row.try_get(10)?,
+                oid: row.try_get(11)?,
             })
         })
         .collect()
@@ -422,7 +453,10 @@ async fn read_members(tx: &Transaction<'_>, version_num: i32) -> Result<Vec<Memb
     let members = rows
         .iter()
         .map(|row| -> Result<MemberRec, Error> {
-            Ok(MemberRec { member: row.try_get(0)?, group: row.try_get(1)?, admin: row.try_get(2)?, inherit: row.try_get(3)?, set: row.try_get(4)? })
+            let (admin, inherit, set) = (row.try_get(2)?, row.try_get(3)?, row.try_get(4)?);
+            // 줄 하나는 부여 하나다. 같은 쌍의 줄들은 `merge_members`가 합친다
+            let grants = vec![MemberGrant { grantor: row.try_get(5)?, admin, inherit, set }];
+            Ok(MemberRec { member: row.try_get(0)?, group: row.try_get(1)?, admin, inherit, set, grants })
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(merge_members(members))

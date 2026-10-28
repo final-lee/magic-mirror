@@ -4,6 +4,7 @@
 //!
 //! 연결은 `pg::pool`이 (대상, DB 사용자, 데이터베이스)마다 하나씩 보관한다. 명령은 시작할 때 대상의 닫힌 횟수(`epoch`)를 읽어 두고
 //! 연결을 열 때마다 넘긴다: 명령이 도는 중에 탭이 닫히면 새 연결을 열지도 보관하지도 않는다.
+//! 열기(`pg_open`)는 거기에 그 대상의 열기 번호도 받는다: 로그인 사용자가 다른 두 열기가 겹쳐 돌 때, 먼저 시작한 쪽이 나중에 끝나도 남는 것은 나중에 시작한 쪽의 로그인이다.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -50,6 +51,24 @@ pub struct PgState {
     clusters: Mutex<HashMap<PgTarget, Arc<ClusterSnapshot>>>,
     /// (대상, 데이터베이스) → 데이터베이스 스냅숏
     dbs: Mutex<HashMap<(PgTarget, String), Arc<DbSnapshot>>>,
+    /// 대상 → 열기 번호. 대상을 닫아도 지우지 않는다: 번호는 계속 커져야 한다(닫기 전에 시작한 열기는 `epoch`가 거른다)
+    opens: Mutex<HashMap<PgTarget, OpenNumbers>>,
+}
+
+/// 한 대상의 열기 번호. 열기는 시작할 때 다음 번호를 받고(`begin_open`), 끝날 때 더 늦게 시작한 열기가 이미 받아들여졌는지 본다(`finish_open`)
+#[derive(Default)]
+struct OpenNumbers {
+    /// 지금까지 나눠 준 마지막 번호
+    given: u64,
+    /// 받아들인 열기 가운데 가장 큰 번호. 아직 받아들인 열기가 없으면 0이다(번호는 1부터다)
+    accepted: u64,
+}
+
+/// 열기가 시작한 때 받는 표: 대상이 닫힌 횟수(`epoch`)와 그 대상의 열기 번호. 열기가 끝날 때 `finish_open`에 되돌린다
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OpenStart {
+    epoch: u64,
+    number: u64,
 }
 
 /// 열린 대상에 대해 명령이 시작할 때 한 번 읽어 가는 것
@@ -73,14 +92,44 @@ impl PgState {
         Ok(Opened { login, info, cluster, epoch })
     }
 
+    /// 열기를 시작한다: 대상이 닫힌 횟수를 읽고 이 대상의 다음 열기 번호를 받는다. 닫힌 횟수를 먼저 읽는다(`opened`와 같은 까닭이다).
+    fn begin_open(&self, target: &PgTarget) -> OpenStart {
+        let epoch = self.pool.epoch(target);
+        let mut opens = locked(&self.opens);
+        let numbers = opens.entry(target.clone()).or_default();
+        numbers.given += 1;
+        OpenStart { epoch, number: numbers.given }
+    }
+
+    /// 이 열기를 받아들이는가: 더 늦게 시작한 열기가 이미 받아들여졌으면 아니다. 받아들이면 그 번호를 기억한다.
+    /// `finish_open`이 `clusters`의 자물쇠를 쥔 채 부른다(`opens`는 그다음 칸이다).
+    fn accept_open(&self, target: &PgTarget, number: u64) -> bool {
+        let mut opens = locked(&self.opens);
+        let numbers = opens.entry(target.clone()).or_default();
+        if number < numbers.accepted {
+            return false;
+        }
+        numbers.accepted = number;
+        true
+    }
+
     /// 열기가 끝났다: 로그인, 접속 정보, 클러스터 스냅숏을 담고 이 대상의 데이터베이스 스냅숏을 버린다.
     /// 기억하던 로그인과 다른 사용자로 열었으면 이전 사용자의 연결을 연결 보관함에서 뺀다(`close_user`): 남겨 두면 10분 동안 서버 연결을 쥐고,
     /// 세션 목록에 이전 사용자의 이름으로 "이 앱"의 연결이 보이고, 더 높은 권한의 연결이 낮은 권한으로 바꾼 뒤에도 붙어 있다.
     /// 새 사용자의 연결은 열기가 먼저 열어 두었으니 영향이 없다. 같은 사용자로 다시 열면(다시 읽기) 닫을 것이 없다.
     /// 열기를 시작한 뒤(`epoch`를 읽은 뒤) 탭이 닫혔으면 아무것도 담지 않고, 아무것도 닫지 않고 "먼저 연결해 주세요"다.
-    fn finish_open(&self, target: &PgTarget, epoch: u64, login: String, info: PgTargetInfo, cluster: Arc<ClusterSnapshot>) -> Result<(), AppError> {
+    /// 더 늦게 시작한 열기가 이미 받아들여졌으면(두 열기가 겹쳐 돌았고 나중에 시작한 쪽이 먼저 끝났다) 이 열기도 같은 말로 물러난다:
+    /// 아무것도 담지 않는다(읽은 스냅숏은 버려진다). 이 열기가 연 연결은 그 사용자가 기억하는 로그인이 아니면 닫는다
+    /// (같은 사용자면 나중 열기가 쓰는 연결과 같은 것이라 둔다). 사용자를 바꾼 마지막 선택이 남는다.
+    fn finish_open(&self, target: &PgTarget, start: OpenStart, login: String, info: PgTargetInfo, cluster: Arc<ClusterSnapshot>) -> Result<(), AppError> {
         let mut clusters = locked(&self.clusters);
-        if self.pool.epoch(target) != epoch {
+        if self.pool.epoch(target) != start.epoch {
+            return Err(not_opened());
+        }
+        if !self.accept_open(target, start.number) {
+            if locked(&self.logins).get(target) != Some(&login) {
+                self.pool.close_user(target, &login);
+            }
             return Err(not_opened());
         }
         let previous = locked(&self.logins).insert(target.clone(), login.clone());
@@ -235,17 +284,18 @@ impl PgState {
     /// 대상을 연다: 대상을 확인하고, 기본 데이터베이스에 `login_user`로 연결해 클러스터 스냅숏을 새로 읽는다.
     /// 성공하면 로그인 사용자를 이 대상에 기억하고, 읽어 둔 데이터베이스 스냅숏을 버린다. 실패하면 이전 상태를 그대로 둔다.
     /// 로그인 이름은 가장 먼저 본다: 토큰을 서명하거나 AWS에 묻기 전에, 상태에 담기 전에 걸러야 한다.
+    /// 열기는 로그인 이름을 본 뒤 시작할 때 번호를 받는다(`begin_open`): 두 열기가 겹쳐 돌 때 나중에 시작한 쪽이 이긴다.
     async fn open(&self, app: &AppState, target: PgTarget, login_user: String) -> Result<PgOverview, AppError> {
         connect::check_login_name(&login_user)?;
-        let epoch = self.pool.epoch(&target);
+        let start = self.begin_open(&target);
         let cfg = app.ctx.config(&target.profile, &target.region).await?;
         let info = resolve_target(&cfg, &target).await?;
         connect::connect_check(&info)?;
 
         let key = ConnKey { target: target.clone(), user: login_user.clone(), database: info.default_database.clone() };
-        let conn = self.pool.get_or_connect_at_epoch(key, epoch, || connect::connect(&cfg, &info, &login_user, &info.default_database)).await?;
+        let conn = self.pool.get_or_connect_at_epoch(key, start.epoch, || connect::connect(&cfg, &info, &login_user, &info.default_database)).await?;
         let cluster = Arc::new(catalog::cluster_snapshot(&mut *conn.lock().await, &login_user).await?);
-        self.finish_open(&target, epoch, login_user, info.clone(), cluster.clone())?;
+        self.finish_open(&target, start, login_user, info.clone(), cluster.clone())?;
         blocking(move || summary::overview(&info, &cluster, now_secs())).await
     }
 
@@ -313,11 +363,14 @@ impl PgState {
 }
 
 /// live 시험(`pg::live_tests`)이 AWS 없이 열린 상태를 만들고 명령의 몸통을 부르는 길. 제품 빌드에는 없다:
-/// `finish_open`은 `open`이 로그인 이름과 대상을 확인한 뒤에만 부르는 것이라 크레이트 안의 다른 코드에 열어 두지 않는다.
+/// `begin_open`과 `finish_open`은 `open`이 로그인 이름과 대상을 확인한 뒤에만 부르는 것이라 크레이트 안의 다른 코드에 열어 두지 않는다.
 #[cfg(test)]
 impl PgState {
-    pub(crate) fn finish_open_for_tests(&self, target: &PgTarget, epoch: u64, login: String, info: PgTargetInfo, cluster: Arc<ClusterSnapshot>) -> Result<(), AppError> {
-        self.finish_open(target, epoch, login, info, cluster)
+    /// 열기를 시작하고 바로 끝낸다. 열기를 시작한 때의 epoch를 돌려준다(보관함에 연결을 넣을 때 쓴다)
+    pub(crate) fn open_for_tests(&self, target: &PgTarget, login: String, info: PgTargetInfo, cluster: Arc<ClusterSnapshot>) -> Result<u64, AppError> {
+        let start = self.begin_open(target);
+        self.finish_open(target, start, login, info, cluster)?;
+        Ok(start.epoch)
     }
 
     pub(crate) async fn sessions_for_tests(&self, app: &AppState, target: &PgTarget) -> Result<Vec<PgSession>, AppError> {

@@ -15,6 +15,7 @@
 //! 실효 권한 비교 시험(`effective_privileges_match_postgres`, `a_noinherit_database_owner_matches_postgres`)은 이 장면에 서버 규칙의
 //! 모서리를 건드리는 역할(`mm_cmp_*`)과 객체(`app.cmp_*` 등)를 더한다. 다른 시험이 기대하는 장면은 그대로 둔다.
 
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -23,7 +24,7 @@ use tokio_postgres::{Client, Config, NoTls};
 
 use super::catalog::{self, cluster_snapshot, db_snapshot, db_snapshot_capped, read, sessions};
 use super::connect::Connected;
-use super::model::{AclEntry, DbSnapshot, DefaultAclRec, DefaultObjType, FunctionRec, MemberRec, Privilege, RelKind, RelationRec, SchemaRec};
+use super::model::{AclEntry, ClusterSnapshot, DbSnapshot, DefaultAclRec, DefaultObjType, FunctionRec, MemberGrant, MemberRec, Privilege, RelKind, RelationRec, SchemaRec};
 use crate::error::AppError;
 use crate::iam::clock;
 
@@ -33,6 +34,11 @@ use comparison::{a_noinherit_database_owner_matches_postgres, effective_privileg
 #[cfg(test)]
 mod views;
 use views::{a_statement_timeout_reads_as_the_read_timeout_text, the_builders_read_the_seeded_database, the_sessions_command_marks_the_connection_the_app_holds};
+#[cfg(test)]
+mod statements;
+use statements::{
+    membership_statements_grant_and_revoke, ownership_and_session_statements, privilege_statements_change_the_acls, role_statements_create_alter_and_reset_roles,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Server {
@@ -266,6 +272,8 @@ on_both_servers!(
     cluster_snapshot_reads_the_seeded_roles_and_memberships,
     one_membership_granted_by_several_roles_is_one_pair,
     the_set_option_of_a_membership_is_read,
+    a_membership_keeps_one_grant_per_grantor,
+    the_oids_the_bootstrap_superuser_and_the_server_settings_are_read,
     valid_until_is_read_as_utc_and_minus_infinity_as_expired,
     db_snapshot_reads_schemas_relations_functions_and_default_acls,
     the_object_cap_cuts_the_snapshot,
@@ -282,6 +290,10 @@ on_both_servers!(
     the_builders_read_the_seeded_database,
     a_statement_timeout_reads_as_the_read_timeout_text,
     the_sessions_command_marks_the_connection_the_app_holds,
+    role_statements_create_alter_and_reset_roles,
+    membership_statements_grant_and_revoke,
+    privilege_statements_change_the_acls,
+    ownership_and_session_statements,
 );
 
 async fn cluster_snapshot_reads_the_seeded_roles_and_memberships(server: Server) {
@@ -454,6 +466,108 @@ async fn the_set_option_of_a_membership_is_read(server: Server) {
     }
 
     conn.client.batch_execute(drop_roles).await.expect("시험 역할을 지우지 못했어요");
+}
+
+/// 구성원 관계는 부여자마다 부여를 하나씩 들고 있다. 심어 둔 `alice → app_write`는 `postgres`가 준 부여 하나다(PG15 이하에도 부여자는 있다).
+/// PG16에서는 다른 역할이 같은 쌍에 부여를 더하면 그 부여가 따로 늘어선다: 부여자 이름순이고 각자의 옵션을 그대로 가진다.
+/// 합친 값(`admin`·`inherit`·`set`)은 부여가 하나일 때와 같이 하나라도 허용하면 허용이다
+async fn a_membership_keeps_one_grant_per_grantor(server: Server) {
+    let scene = seed(server).await;
+    let mut conn = scene.connect().await;
+    let pair = |snap: &ClusterSnapshot, member: &str, group: &str| -> MemberRec {
+        let found: Vec<&MemberRec> = snap.members.iter().filter(|m| m.member == member && m.group == group).collect();
+        assert_eq!(found.len(), 1, "{member} → {group}는 쌍마다 하나여야 해요: {found:?}");
+        found[0].clone()
+    };
+    let grant = |grantor: &str, admin: bool, inherit: Option<bool>, set: Option<bool>| MemberGrant { grantor: grantor.into(), admin, inherit, set };
+    let option = |value: bool| server.has_membership_options().then_some(value);
+
+    // 심어 둔 구성원 관계는 모두 `postgres`가 준 부여 하나다. bob의 INHERIT은 부여할 때 구성원의 속성을 따라 false다
+    let snap = cluster_snapshot(&mut conn, "iam_admin").await.expect("클러스터 스냅숏을 읽지 못했어요");
+    assert_eq!(pair(&snap, "alice", "app_write").grants, vec![grant("postgres", false, option(true), option(true))]);
+    assert_eq!(pair(&snap, "app_write", "app_read").grants, vec![grant("postgres", false, option(true), option(true))]);
+    assert_eq!(pair(&snap, "bob", "app_read").grants, vec![grant("postgres", false, option(false), option(true))]);
+    assert_eq!(pair(&snap, "carol", "pg_read_all_data").grants, vec![grant("postgres", false, option(true), option(true))]);
+
+    // 다른 부여자의 부여를 더하는 것은 PG16부터 된다(그 전에는 쌍마다 부여가 하나뿐이다)
+    if !server.has_membership_options() {
+        return;
+    }
+    let cleanup = "DO $cleanup$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mm_admin') THEN
+            REVOKE app_write FROM alice GRANTED BY mm_admin;
+            DROP ROLE mm_admin;
+          END IF;
+        END
+        $cleanup$";
+    conn.client.batch_execute(cleanup).await.expect("지난 시험의 역할을 지우지 못했어요");
+    conn.client
+        .batch_execute(
+            "CREATE ROLE mm_admin NOLOGIN;
+             GRANT app_write TO mm_admin WITH ADMIN OPTION;
+             GRANT app_write TO alice WITH INHERIT FALSE, SET FALSE GRANTED BY mm_admin;",
+        )
+        .await
+        .expect("부여하지 못했어요");
+
+    let snap = cluster_snapshot(&mut conn, "iam_admin").await.expect("클러스터 스냅숏을 읽지 못했어요");
+    let alice = pair(&snap, "alice", "app_write");
+    // 쌍은 하나이고, 부여는 둘이 부여자 이름순으로 늘어서며 각자의 옵션을 그대로 가진다
+    assert_eq!(alice.grants, vec![grant("mm_admin", false, Some(false), Some(false)), grant("postgres", false, Some(true), Some(true))]);
+    // 합친 값은 부여가 하나일 때와 같다: 하나라도 허용하면 허용
+    assert_eq!((alice.admin, alice.inherit, alice.set), (false, Some(true), Some(true)));
+    // mm_admin 자신의 구성원 관계는 ADMIN OPTION이 있는 부여 하나다(superuser가 한 부여는 부트스트랩 superuser인 postgres가 준 것으로 남는다)
+    assert_eq!(pair(&snap, "mm_admin", "app_write").grants, vec![grant("postgres", true, Some(true), Some(true))]);
+
+    conn.client.batch_execute(cleanup).await.expect("시험 역할을 지우지 못했어요");
+    let snap = cluster_snapshot(&mut conn, "iam_admin").await.expect("클러스터 스냅숏을 읽지 못했어요");
+    assert_eq!(pair(&snap, "alice", "app_write").grants, vec![grant("postgres", false, Some(true), Some(true))], "시험이 더한 부여를 거뒀어야 해요");
+    assert!(snap.roles.iter().all(|r| r.name != "mm_admin"));
+}
+
+/// 역할의 OID, 부트스트랩 superuser(OID가 10인 역할), 서버에 없을 수 있는 설정 둘(`createrole_self_grant`는 PG16부터,
+/// `rds.restrict_password_commands`는 RDS에만 있다)
+async fn the_oids_the_bootstrap_superuser_and_the_server_settings_are_read(server: Server) {
+    let scene = seed(server).await;
+    let mut conn = scene.connect().await;
+    conn.client.batch_execute("DROP ROLE IF EXISTS mm_settings").await.expect("지난 시험의 역할을 지우지 못했어요");
+
+    let snap = cluster_snapshot(&mut conn, "iam_admin").await.expect("클러스터 스냅숏을 읽지 못했어요");
+    // 도커 서버의 부트스트랩 superuser는 postgres다(RDS에서는 rdsadmin이다)
+    assert_eq!(snap.bootstrap_superuser, "postgres");
+    let oid = |name: &str| snap.roles.iter().find(|r| r.name == name).unwrap_or_else(|| panic!("역할 {name}가 없어요")).oid;
+    assert_eq!(oid(&snap.bootstrap_superuser), 10, "부트스트랩 superuser의 OID는 10이에요");
+    // 역할마다 OID가 다르다. 사용자가 만든 역할은 16384부터고, 서버가 직접 만든 미리 정의된 역할은 그보다 작다
+    let all: HashSet<u32> = snap.roles.iter().map(|r| r.oid).collect();
+    assert_eq!(all.len(), snap.roles.len(), "OID가 겹치는 역할이 있어요");
+    for name in ["app_owner", "app_read", "app_write", "alice", "bob", "carol"] {
+        assert!(oid(name) >= 16_384, "{name}: {}", oid(name));
+    }
+    assert!(oid("pg_read_all_data") < 16_384);
+    // 설정을 하지 않았으니 PG16은 빈 문자열이고, PG14는 설정 자체가 없어 빈 문자열이다. RDS 설정이 없는 서버는 꺼진 것으로 읽는다
+    assert_eq!(snap.createrole_self_grant, "");
+    assert!(!snap.restrict_password_commands);
+
+    // 설정은 읽는 연결의 것이다. 로그인할 때 설정이 켜지는 역할로 읽으면 값이 보인다
+    conn.client
+        .batch_execute("CREATE ROLE mm_settings LOGIN PASSWORD 'settings'; ALTER ROLE mm_settings SET rds.restrict_password_commands = 'on';")
+        .await
+        .expect("역할을 만들지 못했어요");
+    if server.has_membership_options() {
+        conn.client.batch_execute("ALTER ROLE mm_settings SET createrole_self_grant = 'inherit, set'").await.expect("설정하지 못했어요");
+    }
+    // 시험 데이터베이스는 PUBLIC의 CONNECT를 거뒀으니 `postgres`에 붙는다
+    let mut config = scene.config_as("mm_settings", "settings", "mm-live-settings");
+    config.dbname("postgres");
+    let mut as_role = connected(&config).await;
+    let snap = cluster_snapshot(&mut as_role, "mm_settings").await.expect("mm_settings의 클러스터 스냅숏");
+    assert!(snap.restrict_password_commands, "켜 둔 설정을 읽어야 해요");
+    assert_eq!(snap.createrole_self_grant, if server.has_membership_options() { "inherit, set" } else { "" });
+    assert_eq!(snap.bootstrap_superuser, "postgres", "부트스트랩 superuser는 읽는 쪽과 상관없어요");
+
+    drop(as_role);
+    conn.client.batch_execute("DROP ROLE mm_settings").await.expect("시험 역할을 지우지 못했어요");
 }
 
 /// `VALID UNTIL`은 UTC ISO 8601로 읽는다. `infinity`와 설정 없음은 None이고, `-infinity`(비밀번호로는 로그인할 수 없다)는 만료로 보이는 가장 오래된 시각이다

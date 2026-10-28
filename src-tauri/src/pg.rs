@@ -12,6 +12,11 @@
 //! - `summary`: 스냅숏과 `eval`로 계약의 값을 만든다(순수 함수). 역할 요약·개요, 권한 표, 칸 상세, 객체 검색, 역할 상세, 누가 할 수 있나, 세션.
 //! - `checks`: 스냅숏을 보고 보안 점검 열 가지를 찾는다(순수 함수).
 //!
+//! 2단계(변경)의 순수한 부품들:
+//! - `sql`: 문장에 이름과 값을 넣는 유일한 길(`ident`, `literal`, `grantee`)
+//! - `password`: 새 비밀번호를 만들고 SCRAM-SHA-256 검증값으로 바꾼다. 평문도 검증값도 `Debug`에 찍히지 않는다.
+//! - `change`: 변경의 모양(`model`), 문장 만들기(`sql_text`), 화면 문구(`text`)
+//!
 //! 명령(Tauri)과 읽어 둔 값의 보관은 `pg_commands`에 있다. 질의를 보내거나 트랜잭션을 여는 곳이 `catalog` 하나뿐이라는 약속은 시험 `hygiene`이 지킨다.
 
 pub mod catalog;
@@ -23,6 +28,15 @@ pub mod pool;
 pub mod summary;
 pub mod target;
 pub mod view;
+
+// 2단계의 부품들은 아직 제품 코드가 부르지 않는다(변경 명령과 `exec`는 QB4가 잇는다). 쓰이지 않는 코드로 경고가 나지 않게(`allow`를 쓰지 않고)
+// 그때까지는 시험 빌드에서만 컴파일한다. QB4가 명령을 잇는 대로 이 세 `#[cfg(test)]`를 뗀다.
+#[cfg(test)]
+pub mod change;
+#[cfg(test)]
+pub mod password;
+#[cfg(test)]
+pub mod sql;
 
 #[cfg(test)]
 pub(crate) mod fake_server;
