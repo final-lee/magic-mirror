@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status (2026-10-28):** executed. The code blocks below are the starting drafts; the reviewed code in the repo supersedes them (for example `matchPrincipal(ov, tab, source, target)`, `AssignmentsScreen.tsx`, the batch log-stop rule and the mid-stop confirm). Don't copy code from this plan.
+
 **Goal:** A "🧩 할당" IAM view with two tables: principals × managed policies, and users × groups. Clicking or dragging over cells collects attach/detach/add/remove changes in a tray, and the tray is previewed, applied, logged and undone as one batch.
 
 **Architecture:**
