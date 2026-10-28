@@ -6,6 +6,7 @@
 //! - `app_scene`: 여러 시험이 함께 쓰는 장면. `live_tests`가 Docker에 심는 장면과 같은 모양이다.
 
 use super::eval::Ctx;
+use super::summary::is_system_role;
 use super::model::Privilege::{Connect, Create, Delete, Execute, Insert, References, Select, Temporary, Trigger, Truncate, Update, Usage};
 use super::model::{
     AclEntry, ClusterSnapshot, DatabaseRec, DbSnapshot, FunctionRec, MemberGrant, MemberRec, Privilege, RelKind, RelationRec, RoleRec, SchemaRec,
@@ -22,10 +23,14 @@ pub const PG17: i32 = 170_000;
 /// 시험 장면의 부트스트랩 superuser(RDS의 `rdsadmin`): 클러스터의 `bootstrap_superuser`고, 시험의 구성원 관계는 이 역할이 맺어 준 것이다
 pub const BOOTSTRAP: &str = "rdsadmin";
 
-/// 서버가 사용자 역할에 처음 매기는 OID. 그 아래는 서버가 직접 만든 역할(미리 정의된 역할 등)의 것이다
+/// 서버가 사용자 역할에 처음 매기는 OID. 그 아래는 서버가 직접 만든 역할(미리 정의된 `pg_` 역할 등)의 것이다
 const FIRST_ROLE_OID: u32 = 16_384;
 
-/// 속성이 서버 기본값인 NOLOGIN 역할(INHERIT만 켜져 있다). OID는 0이다: `cluster`가 역할들에 이름순으로 서로 다른 OID를 매긴다
+/// 시험 장면의 시스템 역할(`is_system_role`)에 처음 매기는 OID. 서버에서는 시스템 역할이 사용자 역할보다 먼저 만들어져 OID가 작다(`pg_` 역할은 16384 아래다).
+/// 시험 장면도 그 순서를 따라, 시스템 역할이 상속 탐색에서 같은 깊이의 사용자 역할보다 먼저 온다
+const FIRST_SYSTEM_OID: u32 = 10_000;
+
+/// 속성이 서버 기본값인 NOLOGIN 역할(INHERIT만 켜져 있다). OID는 0이다: `cluster`가 역할들에 서로 다른 OID를 매긴다
 pub fn role(name: &str) -> RoleRec {
     RoleRec {
         name: name.into(),
@@ -159,17 +164,21 @@ pub fn database(name: &str, owner: &str) -> DatabaseRec {
     DatabaseRec { name: name.into(), owner: owner.into(), allow_conn: true, acl }
 }
 
-/// 역할마다 서로 다른 OID를 이름순으로 매긴다(`FIRST_ROLE_OID`부터). 이미 있던 OID는 덮어쓴다: 특정 OID가 필요한 시험은 장면을 만든 뒤 `role_mut`로 고친다
+/// 역할마다 서로 다른 OID를 매긴다. 서버처럼 시스템 역할(`is_system_role`)이 먼저다: 시스템 역할은 `FIRST_SYSTEM_OID`부터, 나머지는 `FIRST_ROLE_OID`부터
+/// 각각 이름순이다. 이미 있던 OID는 덮어쓴다: 특정 OID가 필요한 시험은 장면을 만든 뒤 `role_mut`로 고친다
 fn numbered(mut roles: Vec<RoleRec>) -> Vec<RoleRec> {
     let mut by_name: Vec<usize> = (0..roles.len()).collect();
     by_name.sort_by(|&a, &b| roles[a].name.cmp(&roles[b].name));
-    for (rank, index) in by_name.into_iter().enumerate() {
-        roles[index].oid = FIRST_ROLE_OID + u32::try_from(rank).expect("역할이 너무 많아요");
+    let (mut next_system, mut next_other) = (FIRST_SYSTEM_OID, FIRST_ROLE_OID);
+    for index in by_name {
+        let next = if is_system_role(&roles[index].name) { &mut next_system } else { &mut next_other };
+        roles[index].oid = *next;
+        *next += 1;
     }
     roles
 }
 
-/// 클러스터 스냅숏. 역할의 OID는 이름순으로 매기고(`numbered`), 부트스트랩 superuser는 `BOOTSTRAP`이며,
+/// 클러스터 스냅숏. 역할의 OID는 시스템 역할이 먼저, 각 무리 안에서는 이름순으로 매기고(`numbered`), 부트스트랩 superuser는 `BOOTSTRAP`이며,
 /// `createrole_self_grant`는 비어 있고 `restrict_password_commands`는 꺼져 있다
 pub fn cluster(version_num: i32, roles: Vec<RoleRec>, members: Vec<MemberRec>, databases: Vec<DatabaseRec>) -> ClusterSnapshot {
     ClusterSnapshot {

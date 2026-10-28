@@ -17,7 +17,11 @@ pub fn literal(value: &str) -> String {
 }
 
 /// 권한을 받는 쪽. 글자 그대로 `PUBLIC`이면 모든 역할을 뜻하는 키워드고, 그 밖의 이름은 식별자다.
-/// 이름이 `PUBLIC`인 역할은 만들 수 없다(서버가 예약해 둔 이름이다).
+/// 서버의 규칙은 이렇다(PG14·PG16에서 확인했다. `live_tests`의 `privilege_statements_change_the_acls`가 붙들어 둔다):
+/// - 이름이 `PUBLIC`인 역할도 만들 수 있다(`CREATE ROLE "PUBLIC"`). 역할 이름으로 예약된 것은 소문자 `public`이다(`PUBLIC`, `Public`은 아니다).
+///   그런 역할은 이 함수로 가리킬 수 없다: `PUBLIC`은 언제나 키워드다.
+/// - 서버는 따옴표를 친 `"public"`도 PUBLIC(모든 역할)으로 읽는다. `public`을 넘기면 식별자로 감싸도 모든 역할에게 주고받는 문장이 된다.
+///   그래서 받는 쪽은 스냅숏에 있는 역할의 이름이나 글자 그대로의 `PUBLIC`만 넘긴다. 이 함수는 확인하지 않는다: 확인은 부르는 쪽(`resolve`)의 몫이다.
 pub fn grantee(name: &str) -> String {
     if name == "PUBLIC" {
         "PUBLIC".to_string()
