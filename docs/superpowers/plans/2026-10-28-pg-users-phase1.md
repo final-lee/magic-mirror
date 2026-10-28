@@ -103,7 +103,7 @@ export interface PgSchemaCell {
   role: string; schema: string;
   usage: boolean; create: boolean; read: PgCoverage; write: PgCoverage;
   inheritedOnly: boolean;          // 보이는 권한의 출처가 group/public/predefined뿐
-  unusable: string | null;         // "CONNECT 없음" | "USAGE 없음" | null
+  unusable: string | null;         // "CONNECT 없음" | "USAGE 없음" | null. 이 칸에 잃을 것(usage·create·read·write 가운데 하나)이 있을 때만 채운다
 }
 export interface PgDbPrivilegeRow { role: string; connect: boolean; create: boolean; temp: boolean }
 export interface PgSchemaInfo { name: string; owner: string; tableCount: number }
@@ -425,6 +425,7 @@ pub fn who_can(ctx: &Ctx, obj: Obj, p: Privilege) -> Vec<WhoCanRow>; // roles wi
      - `write` uses INSERT, UPDATE or DELETE on table, partitioned or foreign relations.
      - `usage` and `create` come from the schema ACL.
      - `inherited_only` is true when every source behind the shown `true` or `All`/`Some` values is Group, Public or Predefined.
+     - `unusable` holds `ctx.unusable(role, schema)` only when the cell has something to lose: `usage || create || read != None || write != None`. Otherwise it is `None`. Test both sides: a cell with privileges but no CONNECT, and an empty cell without CONNECT.
   10. **Who-can:** for `app.orders` SELECT, the rows are app_owner (Owner), app_read (Direct), app_write (Group via app_read), alice (Group via app_write → app_read) and carol (Predefined). Bob is absent because of NOINHERIT. Rows are in name order, and `unusable` is filled for roles that lack CONNECT.
 - [ ] **Step 2: Implement.**
   - Precompute each role's inherited set once (BFS over `members`, with the PG16 rule when `version_num >= 160000` and the `rolinherit` rule before).
