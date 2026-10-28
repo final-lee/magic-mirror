@@ -643,6 +643,9 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .pg-grid .pg-dbcell:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .pg-warn-mark { position: absolute; right: 5px; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--yellow); }
 .pg-grid .pg-table .pg-row .pg-picked { background: #0a84ff22; box-shadow: inset 0 0 0 1px var(--accent); }
+/* 점검 항목이 가리킨 스키마의 열 머리 */
+.pg-table thead th[aria-selected="true"] { box-shadow: inset 0 -2px 0 var(--accent); }
+.pg-table thead th[aria-selected="true"] .pg-colname { color: var(--accent); }
 
 /* 칸 상세 (오른쪽 패널) */
 .pg-panel { width: 340px; flex: none; min-height: 0; display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line); outline: none; user-select: text; }
@@ -665,7 +668,7 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 
 /* 기본 권한 */
 .pg-builtin { margin: 0; }
-.pg-def-scroll { flex: 1; min-height: 0; overflow: auto; user-select: text; }
+.pg-def-scroll, .pg-pane { flex: 1; min-height: 0; overflow: auto; user-select: text; }
 .pg-defaults th.nosort { cursor: default; }
 .pg-defaults tbody th, .pg-defaults tbody td { white-space: normal; max-width: none; vertical-align: top; }
 .pg-defaults tbody th { position: static; background: none; border-bottom: 0; padding: 8px 14px; color: var(--text); font-size: 13px; font-weight: 400; cursor: default; }
@@ -679,3 +682,23 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .pg-grants li { display: flex; flex-wrap: wrap; gap: 0 8px; }
 .pg-grantee { font-weight: 500; }
 .pg-sentences ul { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; }
+
+/* 누가 할 수 있나, 세션, 점검. 검색 줄(.wc-form)과 점검 목록(.fx-items)은 IAM의 규칙을 그대로 쓴다. */
+.pg-bar-end { margin-left: auto; }
+.wc-form .pg-chips { flex-wrap: wrap; }
+.pg-pick { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.pg-who { margin-bottom: 4px; }
+.pg-who th.nosort, .pg-pane th.nosort { cursor: default; }
+.pg-who thead th:first-child { padding-left: 16px; }
+.pg-who tbody th, .pg-who tbody td { white-space: normal; max-width: none; vertical-align: top; padding: 7px 16px; border-bottom: 1px solid var(--line); }
+.pg-who tbody tr:nth-child(even) td { background: none; }
+.pg-who tbody th { position: static; width: 260px; background: none; color: var(--text); font-size: 13px; font-weight: 500; cursor: default; word-break: break-all; }
+.pg-who .pg-who-kind th { width: auto; padding: 5px 16px; background: #262629; border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 600; }
+.pg-who-why { margin-left: 8px; font-weight: 400; }
+.pg-reasons { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.pg-who-apart { margin: 18px 16px 6px; font-size: 13px; font-weight: 600; color: var(--yellow); }
+.pg-footnote { margin: 0; padding: 10px 16px 14px; color: var(--dim); font-size: 11px; }
+/* 점검 목록의 대상 칸은 IAM의 것(220px)보다 넓게: 함수는 인자까지 이름이 길다 */
+.fx-items.pg-fx td:first-child { width: 320px; }
+.pg-fx .link { text-align: left; }
+.pg-fx-obj { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; }

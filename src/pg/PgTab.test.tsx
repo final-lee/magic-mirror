@@ -6,7 +6,20 @@ import type { Settings } from "../api/types";
 import type { SsoLogin } from "../lib/useSsoLogin";
 import { newQueryClient, renderWithClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { pgApi } from "./api";
-import { LOGIN_USER, pgTarget, sampleCellDetail, sampleDatabaseView, sampleFindings, sampleOverview, sampleRoleView, sampleSessions, sampleTargetInfo } from "./fixtures";
+import {
+  LOGIN_USER,
+  object,
+  ordersTable,
+  pgTarget,
+  sampleCellDetail,
+  sampleDatabaseView,
+  sampleFindings,
+  sampleOverview,
+  sampleRoleView,
+  sampleSessions,
+  sampleTargetInfo,
+  sampleWhoCan,
+} from "./fixtures";
 import { LOGIN_NAME_INVALID } from "./loginName";
 import { PgTab } from "./PgTab";
 import type { PgTarget } from "./types";
@@ -98,6 +111,8 @@ beforeEach(() => {
   m.findings.mockResolvedValue(sampleFindings());
   m.role.mockImplementation(async (_t, role) => sampleRoleView(role));
   m.sessions.mockResolvedValue(sampleSessions());
+  m.objects.mockResolvedValue([ordersTable]);
+  m.whoCan.mockResolvedValue(sampleWhoCan());
   m.close.mockResolvedValue(null);
 });
 
@@ -780,16 +795,22 @@ describe("menu", () => {
     expect(m.target).toHaveBeenCalledTimes(1);
   });
 
-  test("the screens still to come are not built yet and say so, each under its own name", async () => {
+  test("each item opens its own screen, named in the menu and above", async () => {
     setup();
     await connected();
-    for (const label of ["점검", "누가 할 수 있나", "세션"]) {
-      fireEvent.click(menu().getByText(label).closest("button")!);
+    const screens: [string, () => Promise<unknown>][] = [
+      ["점검", () => screen.findByRole("heading", { name: /rds_superuser 멤버/ })],
+      ["누가 할 수 있나", async () => screen.getByRole("search", { name: "누가 할 수 있나 검색" })],
+      ["세션", () => screen.findByRole("table", { name: "세션 목록" })],
+    ];
+    for (const [label, shown] of screens) {
+      openMenu(label);
       expect(menu().getByText(label).closest("button")).toHaveAttribute("aria-current", "page");
       expect(crumb().getByText(label)).toBeInTheDocument();
-      expect(screen.getByText(`${label} 화면은 아직 준비 중이에요`)).toBeInTheDocument();
+      expect(await shown()).toBeInTheDocument();
     }
-    fireEvent.click(menu().getByText("역할").closest("button")!);
+    expect(screen.queryByText(/화면은 아직 준비 중이에요/)).not.toBeInTheDocument();
+    openMenu("역할");
     expect(await screen.findByRole("table", { name: "역할 목록" })).toBeInTheDocument();
   });
 });
@@ -1028,7 +1049,7 @@ describe("privileges", () => {
     await loadedGrid();
     expect(picker()).toHaveValue("analytics");
     fireEvent.click(screen.getByRole("button", { name: "앞으로" }));
-    expect(screen.getByText("세션 화면은 아직 준비 중이에요")).toBeInTheDocument();
+    expect(await screen.findByRole("table", { name: "세션 목록" })).toBeInTheDocument();
   });
 
   test("choosing a database does not add an entry to the history", async () => {
@@ -1127,6 +1148,264 @@ describe("default privileges", () => {
     fireEvent.click(topBar().getByRole("button", { name: "다시 읽기" }));
     await waitFor(() => expect(m.database).toHaveBeenCalledWith(pgTarget, "orders", true));
     expect(await loadedTable()).toBeInTheDocument();
+  });
+});
+
+describe("findings", () => {
+  const grid = () => screen.getByRole("grid", { name: "권한 표" });
+  const picker = () => screen.getByRole("combobox", { name: "데이터베이스" });
+  const itemRow = (text: string | RegExp) => screen.getByText(text).closest("tr") as HTMLElement;
+  const openFindings = async () => {
+    await connected();
+    openMenu("점검");
+    await screen.findByRole("heading", { name: /rds_superuser 멤버/ });
+  };
+  const markedColumns = () => within(grid()).getAllByRole("columnheader").filter((h) => h.getAttribute("aria-selected") === "true").map((h) => h.textContent?.replace(/(사용|만들기|읽기|쓰기)+$/, ""));
+  const finding = (extra: Partial<ReturnType<typeof sampleFindings>["groups"][number]["items"][number]> & { detail: string }) => ({ database: null, role: null, object: null, ...extra });
+  const withItems = (...items: ReturnType<typeof finding>[]) =>
+    sampleFindings({ groups: [{ kind: "publicObjectGrant", level: "medium", title: "PUBLIC에 테이블·시퀀스 권한이 있어요", items }], skipped: [] });
+
+  test("shows the groups, and the number in the menu is how many items there are in all", async () => {
+    setup();
+    await openFindings();
+    expect(screen.getAllByRole("heading").map((h) => h.firstChild?.textContent?.trim())).toEqual([
+      "rds_superuser 멤버",
+      "search_path를 고정하지 않은 SECURITY DEFINER 함수",
+      "CREATEROLE을 가진 역할",
+      "만료됐거나 곧 만료되는 사용자",
+      "점검하지 못한 데이터베이스",
+    ]);
+    expect(within(menu().getByRole("button", { name: /점검/ })).getByTestId("nav-count")).toHaveTextContent("5");
+    expect(screen.getByText("역할별 비밀번호 해시 방식과 마지막 로그인은 RDS에서 볼 수 없어 점검하지 않아요")).toBeInTheDocument();
+  });
+
+  test("a role of an item opens its detail, and back brings the findings again without reading them again", async () => {
+    setup();
+    await openFindings();
+    fireEvent.click(within(itemRow("bob은 2026-11-05에 만료돼요")).getByRole("button", { name: "bob" }));
+    expect(await screen.findByRole("heading", { name: "bob" })).toBeInTheDocument();
+    expect(m.role).toHaveBeenCalledWith(pgTarget, "bob");
+    expect(crumb().getByText("역할")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
+    expect(await screen.findByRole("heading", { name: /rds_superuser 멤버/ })).toBeInTheDocument();
+    expect(m.findings).toHaveBeenCalledTimes(1);
+  });
+
+  test("an object of an item opens the privileges of its database with its schema marked and the focus in its column", async () => {
+    setup();
+    await openFindings();
+    fireEvent.click(within(itemRow(/^app.touch_order는 SECURITY DEFINER/)).getByRole("button", { name: "app.touch_order(order_id integer)" }));
+    await screen.findByRole("grid", { name: "권한 표" });
+    expect(crumb().getByText("권한")).toBeInTheDocument();
+    expect(menu().getByText("권한").closest("button")).toHaveAttribute("aria-current", "page");
+    expect(picker()).toHaveValue("orders");
+    expect(m.database).toHaveBeenCalledWith(pgTarget, "orders", false);
+    expect(markedColumns()).toEqual(["app"]);
+    expect(within(grid()).getByRole("button", { name: (n) => n.startsWith("alice · app: ") })).toHaveFocus();
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  });
+
+  test("an object in another database makes that database the choice of the tab, for every screen that has one", async () => {
+    m.findings.mockResolvedValue(withItems(finding({ database: "analytics", object: ordersTable, detail: "analytics의 app.orders" })));
+    setup();
+    await connected();
+    openMenu("점검");
+    fireEvent.click(await screen.findByRole("button", { name: "app.orders" }));
+    await screen.findByRole("grid", { name: "권한 표" });
+    expect(picker()).toHaveValue("analytics");
+    expect(m.database).toHaveBeenCalledWith(pgTarget, "analytics", false);
+    expect(m.database).not.toHaveBeenCalledWith(pgTarget, "orders", expect.anything());
+    openMenu("기본 권한");
+    await screen.findByRole("table", { name: "기본 권한" });
+    expect(picker()).toHaveValue("analytics");
+    openMenu("누가 할 수 있나");
+    expect(picker()).toHaveValue("analytics");
+  });
+
+  test("an item that names a role and a schema opens that role's cell, with the detail in focus", async () => {
+    m.findings.mockResolvedValue(withItems(finding({ database: "orders", role: "bob", object: object("schema", null, "app"), detail: "bob은 app의 새 테이블을 읽지 못해요" })));
+    setup();
+    await connected();
+    openMenu("점검");
+    fireEvent.click(within(await screen.findByText("bob은 app의 새 테이블을 읽지 못해요").then((el) => el.closest("tr") as HTMLElement)).getByRole("button", { name: "app" }));
+    expect(await screen.findByRole("complementary", { name: "bob · app" })).toBeInTheDocument();
+    expect(m.cell).toHaveBeenCalledWith(pgTarget, "orders", "bob", "app");
+    expect(screen.getByRole("complementary", { name: "bob · app" })).toHaveFocus();
+  });
+
+  test("the privileges opened from the menu afterwards come as usual, and so does the next one opened from a finding", async () => {
+    setup();
+    await openFindings();
+    fireEvent.click(within(itemRow(/^app.touch_order는 SECURITY DEFINER/)).getByRole("button", { name: "app.touch_order(order_id integer)" }));
+    await screen.findByRole("grid", { name: "권한 표" });
+    expect(markedColumns()).toEqual(["app"]);
+    openMenu("역할");
+    openMenu("권한");
+    await screen.findByRole("grid", { name: "권한 표" });
+    expect(markedColumns()).toEqual([]);
+    // 뒤로 가기로 돌아와도 한 번 쓴 부탁은 다시 쓰지 않는다
+    openMenu("점검");
+    fireEvent.click(within(itemRow(/^app.touch_order는 SECURITY DEFINER/)).getByRole("button", { name: "app.touch_order(order_id integer)" }));
+    await screen.findByRole("grid", { name: "권한 표" });
+    expect(markedColumns()).toEqual(["app"]);
+  });
+
+  test("back from the privileges it opened is the findings, forward is the privileges again as they were left", async () => {
+    setup();
+    await openFindings();
+    fireEvent.click(within(itemRow(/^app.touch_order는 SECURITY DEFINER/)).getByRole("button", { name: "app.touch_order(order_id integer)" }));
+    await screen.findByRole("grid", { name: "권한 표" });
+    fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
+    expect(await screen.findByRole("heading", { name: /rds_superuser 멤버/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "앞으로" }));
+    await screen.findByRole("grid", { name: "권한 표" });
+    expect(picker()).toHaveValue("orders");
+    expect(markedColumns()).toEqual([]);
+  });
+
+  test("the databases it could not read are told with their reasons", async () => {
+    setup();
+    await openFindings();
+    const row = screen.getByRole("table", { name: "점검하지 못한 데이터베이스" });
+    expect(within(row).getByText('analytics에 연결하지 못했어요: permission denied for database "analytics"')).toBeInTheDocument();
+  });
+});
+
+describe("who can", () => {
+  const picker = () => screen.getByRole("combobox", { name: "데이터베이스" });
+  const openWhoCan = async () => {
+    await connected();
+    openMenu("누가 할 수 있나");
+    return screen.getByRole("search", { name: "누가 할 수 있나 검색" });
+  };
+  const chooseObject = async (name = "app.orders") => {
+    fireEvent.click(within(screen.getByRole("search", { name: "누가 할 수 있나 검색" })).getByRole("button"));
+    fireEvent.click(await within(screen.getByRole("dialog", { name: "객체 고르기" })).findByText(name, { selector: ".pk-name" }));
+  };
+
+  test("opens on the default database of the target and reads nothing until an object is chosen", async () => {
+    setup();
+    await openWhoCan();
+    expect(picker()).toHaveValue("orders");
+    expect(crumb().getByText("누가 할 수 있나")).toBeInTheDocument();
+    expect(m.objects).not.toHaveBeenCalled();
+    expect(m.whoCan).not.toHaveBeenCalled();
+  });
+
+  test("searches the objects of the database that is showing and tells who can, with the way to the privilege", async () => {
+    setup();
+    await openWhoCan();
+    await chooseObject();
+    expect(m.objects).toHaveBeenCalledWith(pgTarget, "orders", "");
+    await waitFor(() => expect(m.whoCan).toHaveBeenCalledWith(pgTarget, "orders", ordersTable, "SELECT"));
+    const table = await screen.findByRole("table", { name: "할 수 있는 역할" });
+    expect(within(table).getByText("alice ← app_write ← app_read ← 직접 받음")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "권한은 있지만 실제로는 못 써요" })).toBeInTheDocument();
+  });
+
+  test("the database that was chosen is the choice of the tab, in both directions", async () => {
+    setup();
+    await openWhoCan();
+    fireEvent.change(picker(), { target: { value: "analytics" } });
+    openMenu("권한");
+    await screen.findByRole("grid", { name: "권한 표" });
+    expect(picker()).toHaveValue("analytics");
+    fireEvent.change(picker(), { target: { value: "postgres" } });
+    openMenu("누가 할 수 있나");
+    expect(picker()).toHaveValue("postgres");
+    expect(m.database.mock.calls.filter((call) => call[1] === "analytics")).toEqual([[pgTarget, "analytics", false]]);
+  });
+
+  test("the chips and the system roles toggle are those of the role list, in both directions", async () => {
+    setup();
+    await connected();
+    await screen.findByText("alice");
+    fireEvent.click(screen.getByRole("checkbox", { name: "시스템 역할 보기" }));
+    openMenu("누가 할 수 있나");
+    expect(screen.getByRole("checkbox", { name: "시스템 역할 보기" })).toBeChecked();
+    fireEvent.click(screen.getByRole("checkbox", { name: "그룹" }));
+    openMenu("역할");
+    expect(screen.getByRole("checkbox", { name: "그룹" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "시스템 역할 보기" })).toBeChecked();
+  });
+
+  test("shows the system roles of the answer once the toggle is on", async () => {
+    setup();
+    await openWhoCan();
+    await chooseObject();
+    const table = await screen.findByRole("table", { name: "할 수 있는 역할" });
+    expect(within(table).queryByText("pg_read_all_data", { selector: "th" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "시스템 역할 보기" }));
+    expect(within(table).getByText("pg_read_all_data", { selector: "th" })).toBeInTheDocument();
+  });
+
+  test("다시 읽기 reads the answer again", async () => {
+    setup();
+    await openWhoCan();
+    await chooseObject();
+    await screen.findByRole("table", { name: "할 수 있는 역할" });
+    m.whoCan.mockClear();
+    fireEvent.click(topBar().getByRole("button", { name: "다시 읽기" }));
+    await waitFor(() => expect(m.whoCan).toHaveBeenCalledTimes(1));
+    expect(m.whoCan).toHaveBeenCalledWith(pgTarget, "orders", ordersTable, "SELECT");
+  });
+});
+
+describe("sessions", () => {
+  const sessionTable = () => screen.findByRole("table", { name: "세션 목록" });
+
+  test("lists the sessions of the cluster, and this app's own are marked", async () => {
+    setup();
+    await connected();
+    openMenu("세션");
+    const table = await sessionTable();
+    expect(crumb().getByText("세션")).toBeInTheDocument();
+    expect(m.sessions).toHaveBeenCalledWith(pgTarget);
+    expect(within(table).getAllByRole("row")).toHaveLength(6);
+    expect(within(table).getAllByText("이 앱")).toHaveLength(2);
+  });
+
+  test("is read each time the screen is opened", async () => {
+    setup();
+    await connected();
+    openMenu("세션");
+    await sessionTable();
+    openMenu("역할");
+    openMenu("세션");
+    await waitFor(() => expect(m.sessions).toHaveBeenCalledTimes(2));
+  });
+
+  test("the 다시 읽기 of the screen reads only the sessions", async () => {
+    setup();
+    await connected();
+    openMenu("세션");
+    await sessionTable();
+    m.sessions.mockClear();
+    m.open.mockClear();
+    fireEvent.click(within(document.querySelector(".pg-screen") as HTMLElement).getByRole("button", { name: "다시 읽기" }));
+    await waitFor(() => expect(m.sessions).toHaveBeenCalledTimes(1));
+    expect(m.open).not.toHaveBeenCalled();
+  });
+
+  test("the 다시 읽기 of the top bar reads them too", async () => {
+    setup();
+    await connected();
+    openMenu("세션");
+    await sessionTable();
+    m.sessions.mockClear();
+    fireEvent.click(topBar().getByRole("button", { name: "다시 읽기" }));
+    await waitFor(() => expect(m.sessions).toHaveBeenCalledTimes(1));
+    expect(m.open).toHaveBeenCalledTimes(2);
+  });
+
+  test("a failure shows through the error box and does not get in the way of the other screens", async () => {
+    m.sessions.mockRejectedValue({ kind: "other", message: "세션을 읽지 못했어요" });
+    setup();
+    await connected();
+    openMenu("세션");
+    expect(await screen.findByText("세션을 읽지 못했어요")).toBeInTheDocument();
+    openMenu("역할");
+    expect(await screen.findByRole("table", { name: "역할 목록" })).toBeInTheDocument();
   });
 });
 

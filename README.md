@@ -44,6 +44,17 @@ Open **IAM → 🔐 IAM 관리** in the sidebar, or double-click a user, role, o
 - **Change log**: every applied change is recorded locally, and most can be undone. An undo goes through the same preview. Changes AWS can't reverse, such as deleting an access key, are marked as such. A batch from the assignment matrix shows as one group and can be undone as a whole.
 - **What it doesn't evaluate**: only identity-based policies and permissions boundaries. Organization SCPs and resource-based policies (such as bucket policies) aren't included, and the app says so on screen.
 
+### PostgreSQL users (RDS)
+
+Double-click an Aurora PostgreSQL or RDS for PostgreSQL row in **RDS → DB Clusters** or **DB Instances** to open a `🐘` tab (an Aurora instance opens its cluster). The app connects straight to the database over TLS and signs in with an IAM authentication token. **This first version only reads**: every query runs in a read-only transaction, and nothing in the database is changed. Closing the tab closes its connections.
+
+- **Roles**: users and groups, with system roles hidden until you ask. Badges mark admin-level roles (`rds_superuser` members), IAM sign-in, CREATEROLE, CREATEDB, BYPASSRLS, REPLICATION, and logins that are expired or about to expire. A role's detail shows its attributes, per-role settings, memberships (including ones that don't inherit), privileges and owned objects per database, and its sessions.
+- **Privileges**: a roles × schemas table for one database, with USAGE, CREATE, and table read/write coverage per cell, plus CONNECT, CREATE, and TEMP on the database itself. It counts what a role gets from ownership, direct grants, groups, PUBLIC, and predefined roles such as `pg_read_all_data`, and flags privileges a role can't actually use because it lacks CONNECT or USAGE. Click a cell to see each object's privileges and where each one comes from.
+- **Default privileges**: what new objects will get (`ALTER DEFAULT PRIVILEGES`), written out as sentences.
+- **Who can do this?**: pick an object and a privilege to list the users and groups that have it, with the path that gives it to them (for example `alice ← app_write ← app_read ← direct grant`).
+- **Sessions**: current connections with role, database, client, application, state, start time, and wait event. The app's own connections are marked. Details of other users' sessions need `pg_read_all_stats`, and the app says so when they are hidden.
+- **Security checks**: PUBLIC with CREATE on a schema or privileges on tables, `rds_superuser` members, CREATEROLE, BYPASSRLS, expiring logins, login roles with no group and no privileges, gaps in default privileges, SECURITY DEFINER functions without a fixed `search_path`, and `md5` password encryption. Each finding links to the role or to the privileges table. Password hash types and last logins aren't visible on RDS, so they aren't checked, and the app says so.
+
 ### S3 explorer
 ![S3 explorer](docs/screenshots/explorer.png)
 
@@ -88,6 +99,11 @@ The app checks for a new version at launch and every 6 hours, and shows an **Upd
   - `iam:AddUserToGroup`, `iam:RemoveUserFromGroup`
   - `iam:CreatePolicyVersion`, `iam:DeletePolicyVersion`
   - `iam:UpdateAccessKey`, `iam:DeleteAccessKey`
+- The PostgreSQL tab needs:
+  - `rds:DescribeDBClusters`, `rds:DescribeDBInstances`, and `rds-db:connect` for the DB user you sign in as
+  - A network path to the database endpoint, such as a VPN. The app connects directly and checks the server certificate against the bundled RDS CA.
+  - IAM database authentication turned on for the cluster or instance
+  - A DB user that is a member of `rds_iam`. Reading works with any such user, though other users' session details also need `pg_read_all_stats`. Changing roles and privileges (a later version) will need `rds_superuser` or CREATEROLE too, and the app already says when the user you signed in as has neither.
 
 ## Development
 
@@ -114,12 +130,14 @@ src/                     React frontend
   explorer/              S3 explorer, transfer queue, diff tab
   vpcmap/                VPC network diagram
   iam/                   IAM workspace
+  pg/                    PostgreSQL users tab
 src-tauri/src/
   adapters/              per-service read-only adapters
   explorer/              local files, S3 writes and transfers, diff engine
   topology/              VPC topology queries (read-only)
   iam/                   IAM snapshot, permission evaluation, checks, change previews
   iam/write.rs           the only place that calls IAM write APIs
+  pg/                    PostgreSQL connection, read-only catalog snapshot, privilege evaluation, security checks
   mouse_nav.rs           macOS mouse back/forward buttons
 scripts/release.sh       universal build and GitHub release
 ```

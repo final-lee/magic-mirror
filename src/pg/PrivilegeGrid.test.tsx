@@ -5,9 +5,10 @@ import { StrictMode, useState } from "react";
 import { renderWithClient } from "../test/utils";
 import { pgApi } from "./api";
 import { ROLES, attributes, pgTarget, role, sampleCellDetail, sampleDatabaseView, sampleOverview } from "./fixtures";
-import { PrivilegeGrid, ROW_H } from "./PrivilegeGrid";
+import { HEAD_H, PrivilegeGrid, ROW_H } from "./PrivilegeGrid";
 import { pgKeys } from "./queries";
 import { DEFAULT_KINDS, type RoleKindsValue } from "./RoleKinds";
+import type { SchemaFocus } from "./route";
 import type { PgDatabaseView, PgDbPrivilegeRow, PgRoleSummary, PgSchemaCell } from "./types";
 
 vi.mock("./api", () => ({ pgApi: { database: vi.fn(), cell: vi.fn() } }));
@@ -65,6 +66,11 @@ const picker = () => screen.getByRole("combobox", { name: "데이터베이스" }
 const panel = () => screen.getByRole("complementary");
 /** 데이터가 와서 표가 그려질 때까지 기다린다 */
 const loaded = () => screen.findByRole("grid", { name: "권한 표" });
+/** jsdom은 크기를 재지 못한다. 표가 머리 행 아래로 보여 주는 줄 수를 정해 준다(종류 머리도 한 줄이다). 되돌리는 일은 부르는 쪽이 한다. */
+const showLines = (count: number) =>
+  vi.spyOn(Element.prototype, "clientHeight", "get").mockImplementation(function (this: Element) {
+    return this.classList.contains("pg-scroll") ? HEAD_H + count * ROW_H : 0;
+  });
 
 const emptyCell = (roleName: string, schema: string): PgSchemaCell => ({
   role: roleName,
@@ -859,6 +865,206 @@ describe("the keyboard", () => {
     expect(cellOf("alice", "app")).toHaveFocus();
   });
 
+  describe("keys that would scroll the grid in a browser", () => {
+    const focusCell = (el: HTMLElement) => act(() => el.focus());
+    /** fireEvent는 기본 동작이 막히지 않았을 때만 true를 돌려준다 */
+    const notPrevented = (el: HTMLElement, init: KeyboardEventInit) => fireEvent.keyDown(el, init);
+
+    test("Space on a database cell is kept from scrolling the grid, with Shift too, and opens nothing", async () => {
+      setup();
+      await loaded();
+      focusCell(dbCell("alice"));
+      expect(notPrevented(dbCell("alice"), { key: " " })).toBe(false);
+      expect(notPrevented(dbCell("alice"), { key: " ", shiftKey: true })).toBe(false);
+      expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+      expect(dbCell("alice")).toHaveFocus();
+    });
+
+    test("Space on a schema cell is left to the button, which opens the detail", async () => {
+      const user = userEvent.setup();
+      setup();
+      await loaded();
+      focusCell(cellOf("alice", "app"));
+      expect(notPrevented(cellOf("alice", "app"), { key: " " })).toBe(true);
+      await user.keyboard(" ");
+      expect(m.cell).toHaveBeenCalledWith(pgTarget, "orders", "alice", "app");
+      expect(await screen.findByRole("complementary", { name: "alice · app" })).toBeInTheDocument();
+    });
+
+    test("End goes to the last column of the row and Home to the first one, the database column", async () => {
+      const user = userEvent.setup();
+      setup();
+      await loaded();
+      focusCell(cellOf("bob", "app"));
+      await user.keyboard("{End}");
+      expect(cellOf("bob", "audit")).toHaveFocus();
+      await user.keyboard("{Home}");
+      expect(dbCell("bob")).toHaveFocus();
+      await user.keyboard("{End}");
+      expect(cellOf("bob", "audit")).toHaveFocus();
+      expect(cellOf("bob", "audit")).toHaveAttribute("tabindex", "0"); // 탭이 닿는 칸도 따라온다
+    });
+
+    test("Home and End stay in the row, and do nothing at the ends of it", async () => {
+      const user = userEvent.setup();
+      setup();
+      await loaded();
+      focusCell(dbCell("app_owner"));
+      await user.keyboard("{Home}");
+      expect(dbCell("app_owner")).toHaveFocus();
+      focusCell(cellOf("app_owner", "audit"));
+      await user.keyboard("{End}");
+      expect(cellOf("app_owner", "audit")).toHaveFocus();
+    });
+
+    test("Home and End are kept from scrolling the grid, at the ends of the row as well", async () => {
+      setup();
+      await loaded();
+      focusCell(cellOf("bob", "app"));
+      expect(notPrevented(cellOf("bob", "app"), { key: "End" })).toBe(false);
+      expect(notPrevented(cellOf("bob", "audit"), { key: "End" })).toBe(false);
+      expect(notPrevented(cellOf("bob", "audit"), { key: "Home" })).toBe(false);
+      expect(notPrevented(dbCell("bob"), { key: "Home" })).toBe(false);
+    });
+
+    test("a grid without schemas has its database column for both Home and End", async () => {
+      const user = userEvent.setup();
+      m.database.mockResolvedValue(viewOf(ROLES, []));
+      setup();
+      await loaded();
+      focusCell(dbCell("alice"));
+      await user.keyboard("{End}");
+      expect(dbCell("alice")).toHaveFocus();
+      await user.keyboard("{Home}");
+      expect(dbCell("alice")).toHaveFocus();
+    });
+
+    test.each([
+      ["Ctrl", "{Control>}", "{/Control}"],
+      ["⌘", "{Meta>}", "{/Meta}"],
+    ])("%s with Home goes to the first cell of the first row, and with End to the last cell of the last row", async (_name, down, up) => {
+      const user = userEvent.setup();
+      setup();
+      await loaded();
+      focusCell(cellOf("bob", "app"));
+      await user.keyboard(`${down}{End}${up}`);
+      expect(cellOf("app_write", "audit")).toHaveFocus(); // 그룹의 마지막 행, 마지막 스키마
+      await user.keyboard(`${down}{Home}${up}`);
+      expect(dbCell("alice")).toHaveFocus(); // 사용자의 첫 행, 데이터베이스 열
+    });
+
+    test.each([
+      ["Ctrl", { ctrlKey: true }],
+      ["⌘", { metaKey: true }],
+    ])("%s with Home or End is kept from scrolling the grid, in the corners as well", async (_name, modifier) => {
+      setup();
+      await loaded();
+      focusCell(dbCell("alice"));
+      expect(notPrevented(dbCell("alice"), { key: "Home", ...modifier })).toBe(false);
+      expect(notPrevented(dbCell("alice"), { key: "End", ...modifier })).toBe(false);
+      focusCell(cellOf("app_write", "audit"));
+      expect(notPrevented(cellOf("app_write", "audit"), { key: "End", ...modifier })).toBe(false);
+    });
+
+    test("other keys with ⌘, Ctrl or Alt stay with the app, Home and End with Alt too", async () => {
+      setup();
+      await loaded();
+      focusCell(cellOf("bob", "app"));
+      for (const init of [
+        { key: "PageDown", ctrlKey: true },
+        { key: "PageUp", metaKey: true },
+        { key: "ArrowDown", metaKey: true },
+        { key: "ArrowRight", ctrlKey: true },
+        { key: " ", ctrlKey: true },
+        { key: "Home", altKey: true },
+        { key: "End", altKey: true },
+        { key: "PageDown", altKey: true },
+      ]) {
+        expect(notPrevented(cellOf("bob", "app"), init)).toBe(true);
+      }
+      expect(cellOf("bob", "app")).toHaveFocus();
+    });
+
+    describe("PageDown and PageUp", () => {
+      let viewport: ReturnType<typeof showLines> | null = null;
+      afterEach(() => viewport?.mockRestore());
+
+      test("move down and up by the rows that are in view, in the same column", async () => {
+        const user = userEvent.setup();
+        viewport = showLines(6); // 사용자 머리, alice, app_owner, bob, iam_admin, postgres
+        setup();
+        await loaded();
+        focusCell(cellOf("alice", "audit")); // 줄 1
+        await user.keyboard("{PageDown}");
+        expect(cellOf("app_read", "audit")).toHaveFocus(); // 줄 7. 줄 1 + 6
+        await user.keyboard("{PageUp}");
+        expect(cellOf("alice", "audit")).toHaveFocus();
+      });
+
+      test("end on the last row and the first row when less than a page is left, and stay there", async () => {
+        const user = userEvent.setup();
+        viewport = showLines(6);
+        setup();
+        await loaded();
+        focusCell(dbCell("bob")); // 줄 3
+        await user.keyboard("{PageDown}"); // 줄 9는 없다: 마지막 줄(8)의 행
+        expect(dbCell("app_write")).toHaveFocus();
+        await user.keyboard("{PageDown}");
+        expect(dbCell("app_write")).toHaveFocus();
+        await user.keyboard("{PageUp}"); // 줄 8 - 6 = 줄 2
+        expect(dbCell("app_owner")).toHaveFocus();
+        await user.keyboard("{PageUp}"); // 줄 2 - 6 < 0: 맨 위의 행
+        expect(dbCell("alice")).toHaveFocus();
+        await user.keyboard("{PageUp}");
+        expect(dbCell("alice")).toHaveFocus();
+      });
+
+      test("go over the heading of a kind when the page ends on it", async () => {
+        const user = userEvent.setup();
+        viewport = showLines(5);
+        setup();
+        await loaded();
+        focusCell(cellOf("alice", "app")); // 줄 1
+        await user.keyboard("{PageDown}"); // 줄 6은 그룹 머리라서 그 아래 행으로
+        expect(cellOf("app_read", "app")).toHaveFocus();
+        focusCell(cellOf("app_write", "app")); // 줄 8
+        await user.keyboard("{PageUp}"); // 줄 3
+        expect(cellOf("bob", "app")).toHaveFocus();
+      });
+
+      test("going up, a page that ends on the heading of a kind goes to the row above it", async () => {
+        const user = userEvent.setup();
+        viewport = showLines(2);
+        setup();
+        await loaded();
+        focusCell(cellOf("app_write", "audit")); // 줄 8, 둘 위는 줄 6(그룹 머리)
+        await user.keyboard("{PageUp}");
+        expect(cellOf("postgres", "audit")).toHaveFocus();
+      });
+
+      test("move by one row at least, however little is in view", async () => {
+        const user = userEvent.setup();
+        viewport = showLines(0);
+        setup();
+        await loaded();
+        focusCell(cellOf("alice", "app"));
+        await user.keyboard("{PageDown}");
+        expect(cellOf("app_owner", "app")).toHaveFocus();
+      });
+
+      test("are kept from scrolling the grid, at the ends as well, on database cells and schema cells alike", async () => {
+        viewport = showLines(6);
+        setup();
+        await loaded();
+        focusCell(cellOf("alice", "app"));
+        expect(notPrevented(cellOf("alice", "app"), { key: "PageUp" })).toBe(false); // 맨 위에서도
+        expect(notPrevented(dbCell("alice"), { key: "PageDown" })).toBe(false);
+        await userEvent.setup().keyboard("{PageDown}{PageDown}");
+        expect(notPrevented(cellOf("app_write", "app"), { key: "PageDown" })).toBe(false); // 맨 아래에서도
+      });
+    });
+  });
+
   test("a click is where the stop is, also when the browser does not focus the button", async () => {
     setup();
     await loaded();
@@ -975,6 +1181,61 @@ describe("tall grids", () => {
     }
   });
 
+  describe("paging and the corners", () => {
+    let viewport: ReturnType<typeof showLines> | null = null;
+    afterEach(() => viewport?.mockRestore());
+
+    test("PageDown and PageUp go by the page that is in view, past the rows that are drawn", async () => {
+      const user = userEvent.setup();
+      viewport = showLines(10);
+      setup({ overview: bigOverview() });
+      await loaded();
+      act(() => cellOf("user-000", "app").focus()); // 줄 1
+      await user.keyboard("{PageDown}");
+      expect(cellOf("user-010", "app")).toHaveFocus(); // 줄 11
+      for (let i = 0; i < 8; i++) await user.keyboard("{PageDown}");
+      expect(cellOf("user-090", "app")).toHaveFocus();
+      expect(within(grid()).getAllByRole("row").length).toBeLessThan(60);
+      await user.keyboard("{PageUp}{PageUp}");
+      expect(cellOf("user-070", "app")).toHaveFocus();
+    });
+
+    test("PageDown scrolls the page so that the cell it lands on is in view", async () => {
+      const user = userEvent.setup();
+      viewport = showLines(10);
+      setup({ overview: bigOverview() });
+      await loaded();
+      act(() => dbCell("user-000").focus());
+      for (let i = 0; i < 5; i++) await user.keyboard("{PageDown}");
+      expect(dbCell("user-050")).toHaveFocus();
+      expect(scroller().scrollTop).toBeGreaterThan(0);
+    });
+
+    test("Ctrl+End goes to the last row, which is not drawn, and Ctrl+Home back to the first", async () => {
+      const user = userEvent.setup();
+      setup({ overview: bigOverview() });
+      await loaded();
+      act(() => cellOf("user-000", "app").focus());
+      await user.keyboard("{Control>}{End}{/Control}");
+      expect(cellOf("user-299", "audit")).toHaveFocus();
+      expect(within(grid()).getAllByRole("row").length).toBeLessThan(60);
+      await user.keyboard("{Control>}{Home}{/Control}");
+      expect(dbCell("user-000")).toHaveFocus();
+    });
+
+    test("End and Home keep the row, also a row far down", async () => {
+      const user = userEvent.setup();
+      setup({ overview: bigOverview() });
+      await loaded();
+      act(() => cellOf("user-000", "app").focus());
+      for (let i = 0; i < 70; i++) await user.keyboard("{ArrowDown}");
+      await user.keyboard("{End}");
+      expect(cellOf("user-070", "audit")).toHaveFocus();
+      await user.keyboard("{Home}");
+      expect(dbCell("user-070")).toHaveFocus();
+    });
+  });
+
   test("the kind headings are in the count of rows too: users and then groups", async () => {
     const roles = [...manyUsers(120), role("grp-a"), role("grp-b")];
     m.database.mockResolvedValue(viewOf(roles, ["app"]));
@@ -984,5 +1245,136 @@ describe("tall grids", () => {
     scroller().scrollTop = 200 * ROW_H;
     fireEvent.scroll(scroller());
     expect(rowHeads().slice(-4)).toEqual(["user-119", "그룹 2", "grp-a", "grp-b"]);
+  });
+});
+
+describe("opened from a finding", () => {
+  /** PgTab이 하는 일을 하는 작은 부모: 점검이 부탁한 것을 들고 있다가, 표가 쓰고 알리면 비운다 */
+  function Opened({ initialPick, onUsed, ...rest }: Props & { initialPick: SchemaFocus | null; onUsed?: () => void }) {
+    const [pick, setPick] = useState(initialPick);
+    return (
+      <Harness
+        {...rest}
+        pick={pick}
+        onPickUsed={() => {
+          onUsed?.();
+          setPick(null);
+        }}
+      />
+    );
+  }
+  const open = (pick: SchemaFocus | null, extra: Props & { onUsed?: () => void } = {}) => renderWithClient(<Opened initialPick={pick} {...extra} />);
+  const headOf = (schema: string) => columnHeads().find((h) => h.textContent?.startsWith(schema))!;
+
+  test("marks the column of the schema, puts the focus on its first cell, and opens nothing when no role is named", async () => {
+    open({ database: "orders", schema: "audit", role: null });
+    await loaded();
+    expect(headOf("audit")).toHaveAttribute("aria-selected", "true");
+    expect(headOf("app")).not.toHaveAttribute("aria-selected");
+    expect(cellOf("alice", "audit")).toHaveFocus();
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(m.cell).not.toHaveBeenCalled();
+  });
+
+  test("opens the cell of the role it names, with the focus in the detail, and the focus goes back to the cell on Esc", async () => {
+    open({ database: "orders", schema: "app", role: "bob" });
+    await loaded();
+    expect(await screen.findByRole("complementary", { name: "bob · app" })).toBeInTheDocument();
+    expect(m.cell).toHaveBeenCalledWith(pgTarget, "orders", "bob", "app");
+    expect(m.cell).toHaveBeenCalledTimes(1);
+    expect(cellOf("bob", "app").closest("td")).toHaveAttribute("aria-selected", "true");
+    expect(panel()).toHaveFocus();
+    fireEvent.keyDown(panel(), { key: "Escape" });
+    expect(cellOf("bob", "app")).toHaveFocus();
+  });
+
+  test("a role the rows do not show is not opened; the column is marked and the focus goes to its first cell", async () => {
+    open({ database: "orders", schema: "app", role: "rds_superuser" }); // 시스템 역할은 토글을 켜야 보인다
+    await loaded();
+    expect(headOf("app")).toHaveAttribute("aria-selected", "true");
+    expect(cellOf("alice", "app")).toHaveFocus();
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(m.cell).not.toHaveBeenCalled();
+  });
+
+  test("a schema the database does not have marks nothing, opens nothing and takes no focus", async () => {
+    open({ database: "orders", schema: "dropped", role: "bob" });
+    await loaded();
+    expect(columnHeads().filter((h) => h.getAttribute("aria-selected") === "true")).toHaveLength(0);
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(m.cell).not.toHaveBeenCalled();
+    expect(document.body).toHaveFocus();
+  });
+
+  test("is for the database it names: the grid of another database leaves it alone and does not say it was used", async () => {
+    const onUsed = vi.fn();
+    open({ database: "analytics", schema: "app", role: "bob" }, { onUsed });
+    await loaded();
+    expect(columnHeads().filter((h) => h.getAttribute("aria-selected") === "true")).toHaveLength(0);
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(onUsed).not.toHaveBeenCalled();
+  });
+
+  test("a database without a schema opens the grid as it is, and is used", async () => {
+    const onUsed = vi.fn();
+    open({ database: "orders", schema: null, role: null }, { onUsed });
+    await loaded();
+    expect(columnHeads().filter((h) => h.getAttribute("aria-selected") === "true")).toHaveLength(0);
+    expect(document.body).toHaveFocus();
+    expect(onUsed).toHaveBeenCalledTimes(1);
+  });
+
+  test("says once that it was used, and nothing when nothing was asked", async () => {
+    const onUsed = vi.fn();
+    open({ database: "orders", schema: "audit", role: null }, { onUsed });
+    await loaded();
+    await act(async () => {});
+    expect(onUsed).toHaveBeenCalledTimes(1);
+    const none = vi.fn();
+    open(null, { onUsed: none });
+    await waitFor(() => expect(screen.getAllByRole("grid", { name: "권한 표" })).toHaveLength(2));
+    expect(none).not.toHaveBeenCalled();
+  });
+
+  test("is used only on the first time: another database and then this one again start from scratch", async () => {
+    open({ database: "orders", schema: "audit", role: null });
+    await loaded();
+    expect(headOf("audit")).toHaveAttribute("aria-selected", "true");
+    fireEvent.change(picker(), { target: { value: "analytics" } });
+    await loaded();
+    fireEvent.change(picker(), { target: { value: "orders" } });
+    await loaded();
+    expect(columnHeads().filter((h) => h.getAttribute("aria-selected") === "true")).toHaveLength(0);
+  });
+
+  test("the mark goes away when a cell is pressed", async () => {
+    open({ database: "orders", schema: "audit", role: null });
+    await loaded();
+    fireEvent.click(cellOf("alice", "app"));
+    expect(columnHeads().filter((h) => h.getAttribute("aria-selected") === "true")).toHaveLength(0);
+    expect(await screen.findByRole("complementary", { name: "alice · app" })).toBeInTheDocument();
+  });
+
+  test("under StrictMode it is used once and the detail still takes the focus", async () => {
+    const onUsed = vi.fn();
+    renderWithClient(
+      <StrictMode>
+        <Opened initialPick={{ database: "orders", schema: "app", role: "bob" }} onUsed={onUsed} />
+      </StrictMode>,
+    );
+    await loaded();
+    expect(await screen.findByRole("complementary", { name: "bob · app" })).toBeInTheDocument();
+    expect(onUsed).toHaveBeenCalledTimes(1);
+    expect(m.cell).toHaveBeenCalledTimes(1);
+    expect(panel()).toHaveFocus();
+  });
+
+  test("a cell far down is brought into view: the grid scrolls to the role it names", async () => {
+    m.database.mockResolvedValue(viewOf(manyUsers(), ["app", "audit"]));
+    open({ database: "orders", schema: "audit", role: "user-250" }, { overview: sampleOverview({ roles: manyUsers() }) });
+    await loaded();
+    expect(await screen.findByRole("complementary", { name: "user-250 · audit" })).toBeInTheDocument();
+    expect(within(grid()).getByRole("rowheader", { name: "user-250" })).toBeInTheDocument();
+    expect(within(grid()).getAllByRole("row").length).toBeLessThan(60);
   });
 });

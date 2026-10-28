@@ -3,16 +3,17 @@ import { visibleRange } from "../iam/AssignmentGrid";
 import { parsePos, posKey, type Pos } from "../iam/gridPos";
 import { CellPanel } from "./CellPanel";
 import { DatabaseScreen } from "./DatabaseScreen";
-import { COVERAGE_LABEL, INHERITED_ONLY_TEXT, ROLE_KIND_LABEL, unusableText } from "./labels";
+import { COVERAGE_LABEL, INHERITED_ONLY_TEXT, ROLE_KIND_LABEL, collate, unusableText } from "./labels";
 import { PgError } from "./PgError";
 import { usePgDatabase } from "./queries";
 import { RoleKinds, filterRoles, type RoleKindsValue } from "./RoleKinds";
+import type { SchemaFocus } from "./route";
 import type { PgCoverage, PgDatabaseView, PgDbPrivilegeRow, PgOverview, PgRoleKind, PgRoleSummary, PgSchemaCell, PgTarget } from "./types";
 
 /** 데이터 행의 높이. 고정이라서 보이는 행만 그릴 수 있다 */
 export const ROW_H = 28;
 /** 열 머리 행의 높이: 스키마 이름과 그 아래 표시 안내 */
-const HEAD_H = 46;
+export const HEAD_H = 46;
 /** 보이는 구간 위아래로 더 그리는 행 수 */
 const OVERSCAN = 10;
 /** 아직 크기를 못 쟀을 때(첫 그림, 레이아웃이 없는 환경) 쓰는 표 높이 */
@@ -22,9 +23,6 @@ const DB_W = 176;
 const CELL_W = 188;
 /** 머리 행과 머리 열이 가리는 만큼을 CSS(scroll-padding)도 알아야 해서 같은 값을 변수로 넘긴다 */
 const SIZES = { "--pg-head": `${HEAD_H}px`, "--pg-name": `${NAME_W}px` } as CSSProperties;
-
-/** 이름순. 역할 목록의 정렬과 같은 비교다. */
-const collate = (a: string, b: string) => a.localeCompare(b, "ko", { sensitivity: "base" });
 
 /** 상세를 여는 칸: 역할과 스키마의 이름으로 가리킨다(번호가 아니라서 역할을 거르거나 다시 읽어도 같은 칸이다) */
 interface CellKey {
@@ -38,13 +36,33 @@ interface GridKey {
 }
 /** 데이터베이스 열의 열 번호. 스키마 열은 0부터 센다 */
 const DB_COL = -1;
-/** 표에게 이 칸으로 초점을 돌려 달라는 부탁. n이 올라야 같은 칸을 또 부탁할 수 있다. */
-type FocusReq = CellKey & { n: number };
+/**
+ * 표에게 이 칸으로 초점을 돌려 달라는 부탁. n이 올라야 같은 칸을 또 부탁할 수 있다.
+ * open이면 초점을 준 뒤 그 칸의 상세도 연다(상세가 마지막에 초점을 가져가서, 칸을 눌렀을 때와 같다).
+ */
+type FocusReq = CellKey & { n: number; open?: boolean };
 
 /** 그려지는 줄: 종류 머리이거나 데이터 행(r은 rows의 번호) */
 type Line = { type: "head"; kind: PgRoleKind; count: number } | { type: "row"; r: number };
 
 const emptyCell = (role: string, schema: string): PgSchemaCell => ({ role, schema, usage: false, create: false, read: "none", write: "none", inheritedOnly: false, unusable: null });
+
+/** 표의 행: 사용자 먼저, 그다음 그룹. 종류 안에서는 이름순. 거르는 규칙은 역할 목록과 같다. */
+function shownRows(roles: PgRoleSummary[], kinds: RoleKindsValue, filter: string): PgRoleSummary[] {
+  const shown = filterRoles(roles, kinds, filter);
+  const ofKind = (kind: PgRoleKind) => shown.filter((r) => r.kind === kind).sort((a, b) => collate(a.name, b.name));
+  return [...ofKind("user"), ...ofKind("group")];
+}
+
+/**
+ * 점검이 부탁한 대로 열 때의 첫 모습. 항목이 역할도 가리키고 그 역할의 행이 있으면 그 칸을 열어 달라고 하고(스키마가 이 데이터베이스에 없으면 표가 알아서 거른다),
+ * 아니면 가리킨 스키마의 열 머리에 표시를 하고 첫 행의 그 열 칸으로 초점을 보내 달라고 한다.
+ */
+function openedFrom(pick: SchemaFocus | null, rows: PgRoleSummary[]): { marked: string | null; focusReq: FocusReq | null } {
+  if (!pick?.schema) return { marked: null, focusReq: null };
+  if (pick.role !== null && rows.some((r) => r.name === pick.role)) return { marked: null, focusReq: { role: pick.role, schema: pick.schema, n: 1, open: true } };
+  return { marked: pick.schema, focusReq: rows.length > 0 ? { role: rows[0].name, schema: pick.schema, n: 1 } : null };
+}
 
 /** 데이터베이스 보기를 칸과 데이터베이스 권한으로 바로 찾을 수 있게 정리한다. 보기에 없는 역할의 칸은 비어 있는 것으로 본다. */
 interface ViewIndex {
@@ -97,6 +115,12 @@ interface Props {
   /** 종류 칩과 시스템 역할 토글의 상태. 역할 목록과 같은 것을 쓴다(탭이 들고 있다) */
   kinds: RoleKindsValue;
   onKinds: (next: RoleKindsValue) => void;
+  /**
+   * 점검 항목이 이 표를 열면서 부탁한 것(스키마를 고르고, 항목이 역할도 가리키면 그 칸을 연다). 고른 데이터베이스가 부탁의 데이터베이스일 때
+   * 표가 처음 그려지면서 한 번 쓰고 onPickUsed로 알린다. 알리면 부른 쪽이 비운다(비우지 않으면 데이터베이스를 바꿨다 돌아올 때 다시 쓴다).
+   */
+  pick?: SchemaFocus | null;
+  onPickUsed?: () => void;
 }
 
 /**
@@ -104,10 +128,20 @@ interface Props {
  * 누르면 오른쪽에 그 칸의 객체별 권한과 출처(CellPanel)가 나온다. 이 단계에서 칸은 읽기만 한다.
  * 데이터베이스 선택은 표 위에 있고, 종류 칩과 필터는 역할 목록과 같다.
  */
-export function PrivilegeGrid({ target, overview, database, onDatabase, filter, kinds, onKinds }: Props) {
+export function PrivilegeGrid({ target, overview, database, onDatabase, filter, kinds, onKinds, pick = null, onPickUsed }: Props) {
   return (
     <DatabaseScreen overview={overview} database={database} onDatabase={onDatabase} bar={<RoleKinds value={kinds} onChange={onKinds} />}>
-      {(db) => <DatabasePrivileges target={target} overview={overview} database={db} filter={filter} kinds={kinds} />}
+      {(db) => (
+        <DatabasePrivileges
+          target={target}
+          overview={overview}
+          database={db}
+          filter={filter}
+          kinds={kinds}
+          pick={pick && pick.database === db ? pick : null}
+          onPickUsed={onPickUsed}
+        />
+      )}
     </DatabaseScreen>
   );
 }
@@ -118,20 +152,28 @@ interface BodyProps {
   database: string;
   filter: string;
   kinds: RoleKindsValue;
+  /** 이 데이터베이스에 대한 점검의 부탁. 없으면 null */
+  pick: SchemaFocus | null;
+  onPickUsed?: () => void;
 }
 
-function DatabasePrivileges({ target, overview, database, filter, kinds }: BodyProps) {
+function DatabasePrivileges({ target, overview, database, filter, kinds, pick, onPickUsed }: BodyProps) {
   const q = usePgDatabase(target, database);
   const view = q.data;
   const [selected, setSelected] = useState<CellKey | null>(null);
-  const [focusReq, setFocusReq] = useState<FocusReq | null>(null);
+  // 점검에서 열렸으면 첫 모습을 부탁에서 정한다(openedFrom). 처음 그려질 때만 정하고, 그 뒤로는 사용자가 정한다.
+  const [start] = useState(() => openedFrom(pick, shownRows(overview.roles, kinds, filter)));
+  const [marked, setMarked] = useState<string | null>(start.marked);
+  const [focusReq, setFocusReq] = useState<FocusReq | null>(start.focusReq);
+  // 부탁은 한 번만 쓰고 알린다(strict mode가 효과를 두 번 돌려도 한 번이다)
+  const told = useRef(false);
+  useEffect(() => {
+    if (!pick || told.current) return;
+    told.current = true;
+    onPickUsed?.();
+  }, [pick, onPickUsed]);
 
-  // 사용자 먼저, 그다음 그룹. 종류 안에서는 이름순. 거르는 규칙은 역할 목록과 같다.
-  const rows = useMemo(() => {
-    const shown = filterRoles(overview.roles, kinds, filter);
-    const ofKind = (kind: PgRoleKind) => shown.filter((r) => r.kind === kind).sort((a, b) => collate(a.name, b.name));
-    return [...ofKind("user"), ...ofKind("group")];
-  }, [overview.roles, kinds, filter]);
+  const rows = useMemo(() => shownRows(overview.roles, kinds, filter), [overview.roles, kinds, filter]);
   const index = useMemo(() => (view ? indexOf(view) : null), [view]);
 
   // 상세는 지금 표에 보이는 칸에게만 둔다: 그 역할의 행(필터, 칩)과 그 스키마의 열(다시 읽기)이 있어야 한다.
@@ -158,7 +200,19 @@ function DatabasePrivileges({ target, overview, database, filter, kinds }: BodyP
       {q.isError && <PgError compact error={q.error} target={target} />}
       {view.truncated && <div className="notice">객체가 많아 일부만 읽었어요</div>}
       <div className="pg-split">
-        <Grid rows={rows} index={index} empty={empty} selected={open} focusReq={focusReq} onOpen={setSelected} onDismiss={dismiss} />
+        <Grid
+          rows={rows}
+          index={index}
+          empty={empty}
+          selected={open}
+          marked={marked}
+          focusReq={focusReq}
+          onOpen={(key) => {
+            setMarked(null);
+            setSelected(key);
+          }}
+          onDismiss={dismiss}
+        />
         {open && summary && (
           <CellPanel
             target={target}
@@ -183,6 +237,8 @@ interface GridProps {
   empty: string | null;
   /** 상세가 열려 있는 칸 */
   selected: CellKey | null;
+  /** 점검이 가리킨 스키마. 그 열의 머리에 표시를 한다 */
+  marked: string | null;
   focusReq: FocusReq | null;
   onOpen: (key: CellKey) => void;
   /** 표에서 누른 Esc가 열린 상세를 닫는다 */
@@ -190,10 +246,11 @@ interface GridProps {
 }
 
 /**
- * 표 자체. 키보드: 화살표로 칸을 옮기고(데이터베이스 열의 칸도 읽기만 하는 칸으로 닿는다), Enter(스키마 칸은 버튼이다)로 상세를 연다.
+ * 표 자체. 키보드(ARIA 격자 패턴): 화살표로 칸을 옮기고(데이터베이스 열의 칸도 읽기만 하는 칸으로 닿는다), Enter(스키마 칸은 버튼이다)로 상세를 연다.
+ * PageUp/PageDown은 보이는 한 쪽만큼, Home/End는 행의 처음과 끝(데이터베이스 열과 마지막 스키마)으로, ⌘·Ctrl+Home/End는 표의 첫 칸과 끝 칸으로 옮긴다.
  * Esc는 열린 상세를 닫는다. 초점은 한 칸만 탭이 닿는다(roving tabindex). 행은 보이는 부분만 그린다(고정 행 높이). 머리 행과 머리 열은 고정한다.
  */
-function Grid({ rows, index, empty, selected, focusReq, onOpen, onDismiss }: GridProps) {
+function Grid({ rows, index, empty, selected, marked, focusReq, onOpen, onDismiss }: GridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const uid = useId();
   const [topRow, setTopRow] = useState(0);
@@ -290,7 +347,9 @@ function Grid({ rows, index, empty, selected, focusReq, onOpen, onDismiss }: Gri
     if (!focusReq || focusReq.n === handled.current) return;
     handled.current = focusReq.n;
     const pos = posOf(focusReq);
-    if (pos) goTo(pos);
+    if (!pos) return;
+    goTo(pos);
+    if (focusReq.open) onOpen({ role: focusReq.role, schema: focusReq.schema });
   });
 
   const press = (key: CellKey) => {
@@ -298,8 +357,24 @@ function Grid({ rows, index, empty, selected, focusReq, onOpen, onDismiss }: Gri
     onOpen(key);
   };
 
+  // 한 쪽 = 머리 행 아래로 지금 보이는 줄 수(종류 머리도 한 줄이다). 아주 작아도 한 줄은 움직인다.
+  const pageLines = Math.max(1, Math.floor((height - HEAD_H) / ROW_H));
+  /** 한 쪽 아래(dir 1)나 위(-1)의 행. 맨 끝을 넘으면 끝 행이고, 도착한 줄이 종류 머리면 가는 방향의 다음 행이다. */
+  const pageRow = (r: number, dir: 1 | -1) => {
+    const line = Math.min(Math.max(at[r] + dir * pageLines, 0), lines.length - 1);
+    if (dir === 1) {
+      for (let i = 0; i < rows.length; i++) if (at[i] >= line) return i;
+      return rows.length - 1;
+    }
+    for (let i = rows.length - 1; i >= 0; i--) if (at[i] <= line) return i;
+    return 0;
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLTableElement>) => {
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.altKey) return;
+    // ⌘나 Ctrl과 함께 누른 키는 앱의 것이다(⌘C, ⌘F, ⌘[ …). 격자의 모서리로 가는 ⌘·Ctrl+Home/End만 받는다.
+    const corner = (e.metaKey || e.ctrlKey) && (e.key === "Home" || e.key === "End");
+    if ((e.metaKey || e.ctrlKey) && !corner) return;
     if (e.key === "Escape") {
       if (selected) {
         e.preventDefault();
@@ -310,11 +385,45 @@ function Grid({ rows, index, empty, selected, focusReq, onOpen, onDismiss }: Gri
     const el = (e.target as HTMLElement).closest<HTMLElement>("[data-pos]");
     if (!el?.dataset.pos) return;
     const from = parsePos(el.dataset.pos);
-    const dr = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
-    const dc = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-    if (dr === 0 && dc === 0) return; // Enter와 Space는 버튼이 눌린 것으로 받는다. 데이터베이스 열의 칸은 버튼이 아니라서 아무 일도 없다
+    if (e.key === " ") {
+      // 데이터베이스 열의 칸은 읽기만 하는 칸이라 Space로 할 일이 없다. 그냥 두면 브라우저가 격자를 한 쪽 스크롤해서 초점이 있는 행이 사라질 수 있다.
+      // 스키마 칸은 버튼이라 Space가 눌림이다. 막지 않는다.
+      if (from.c === DB_COL) e.preventDefault();
+      return;
+    }
+    const lastRow = rows.length - 1;
+    const lastCol = schemas.length - 1; // 스키마가 없으면 데이터베이스 열(DB_COL)
+    let to: Pos;
+    switch (e.key) {
+      case "ArrowDown":
+        to = { r: from.r + 1, c: from.c };
+        break;
+      case "ArrowUp":
+        to = { r: from.r - 1, c: from.c };
+        break;
+      case "ArrowRight":
+        to = { r: from.r, c: from.c + 1 };
+        break;
+      case "ArrowLeft":
+        to = { r: from.r, c: from.c - 1 };
+        break;
+      case "PageDown":
+        to = { r: pageRow(from.r, 1), c: from.c };
+        break;
+      case "PageUp":
+        to = { r: pageRow(from.r, -1), c: from.c };
+        break;
+      case "Home":
+        to = { r: corner ? 0 : from.r, c: DB_COL };
+        break;
+      case "End":
+        to = { r: corner ? lastRow : from.r, c: lastCol };
+        break;
+      default:
+        return; // Enter는 버튼이 눌린 것으로 받는다. 데이터베이스 열의 칸은 버튼이 아니라서 아무 일도 없다
+    }
+    // 브라우저도 이 키들로 스크롤하므로(맨 끝에서도) 막는다
     e.preventDefault();
-    const to = { r: from.r + dr, c: from.c + dc };
     if (focusable(to)) goTo(to);
   };
 
@@ -362,7 +471,7 @@ function Grid({ rows, index, empty, selected, focusReq, onOpen, onDismiss }: Gri
                 </div>
               </th>
               {schemas.map((schema) => (
-                <th key={schema} role="columnheader" scope="col" className="pg-colhead">
+                <th key={schema} role="columnheader" scope="col" className="pg-colhead" aria-selected={marked === schema ? true : undefined}>
                   <div className="pg-colname" title={schema}>
                     {schema}
                   </div>

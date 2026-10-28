@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { formatDateTime, formatDay } from "../iam/format";
+import { formatDay } from "../iam/format";
 import { BadgeList } from "./Badges";
 import { COVERAGE_LABEL, INHERITED_ONLY_TEXT, OBJECT_KIND_LABEL, ROLE_KIND_LABEL, objectName, unusableText } from "./labels";
 import { PgError } from "./PgError";
 import { usePgDatabase, usePgRole } from "./queries";
 import { roleRoute, type PgRoute } from "./route";
+import { SessionTable } from "./Sessions";
 import type { PgObjectKind, PgRoleDatabase, PgRoleView, PgSchemaCell, PgSession, PgTarget } from "./types";
 
 type Tab = "overview" | "members" | "privileges" | "owned" | "sessions";
@@ -17,7 +18,6 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "sessions", label: "세션" },
 ];
 
-const DASH = "—";
 const yesNo = (v: boolean) => (v ? "예" : "아니요");
 
 interface Props {
@@ -343,32 +343,5 @@ function OwnedObjects({ db }: { db: PgRoleDatabase }) {
 
 function Sessions({ sessions }: { sessions: PgSession[] }) {
   if (sessions.length === 0) return <div className="empty small">이 역할의 세션이 없어요</div>;
-  return (
-    <table className="pg-sessions" aria-label="세션 목록">
-      <thead>
-        <tr>
-          {["데이터베이스", "클라이언트", "application_name", "상태", "시작", "대기"].map((label) => (
-            <th key={label} scope="col" className="nosort">
-              {label}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {sessions.map((s) => (
-          <tr key={s.pid}>
-            <td>{s.database ?? DASH}</td>
-            <td className="mono">{s.clientAddr ?? DASH}</td>
-            <td>
-              {s.applicationName || DASH}
-              {s.own && <span className="iam-chip pg-own">이 앱</span>}
-            </td>
-            <td>{s.state ?? DASH}</td>
-            <td>{formatDateTime(s.backendStart) || DASH}</td>
-            <td>{s.waitEvent ?? DASH}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
+  return <SessionTable sessions={sessions} />;
 }

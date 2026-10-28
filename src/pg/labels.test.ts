@@ -1,4 +1,4 @@
-import { COVERAGE_LABEL, INHERITED_ONLY_TEXT, OBJECT_KIND_LABEL, ROLE_KIND_LABEL, objectName, unusableText } from "./labels";
+import { COVERAGE_LABEL, DASH, INHERITED_ONLY_TEXT, OBJECT_KIND_LABEL, ROLE_KIND_LABEL, collate, objectName, unusableText } from "./labels";
 import { customersTable, object, ordersIdSeq, touchOrderFn } from "./fixtures";
 
 test("role kinds read as 사용자 and 그룹", () => {
@@ -51,5 +51,19 @@ describe("objectName", () => {
 
   test("an object without a schema is its name", () => {
     expect(objectName(object("table", null, "orphan"))).toBe("orphan");
+  });
+});
+
+test("a value that is missing is shown as one dash everywhere in the tab", () => {
+  expect(DASH).toBe("—");
+});
+
+describe("collate", () => {
+  test("puts names in the order of the role list: by name, ignoring case", () => {
+    expect(["bob", "Zed", "alice_2", "Alice", "app_owner"].sort(collate)).toEqual(["Alice", "alice_2", "app_owner", "bob", "Zed"]);
+  });
+
+  test("names that differ only in case are the same place in the order", () => {
+    expect(collate("Alice", "alice")).toBe(0);
   });
 });
