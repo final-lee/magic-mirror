@@ -82,7 +82,10 @@ pub fn findings(cluster: &ClusterSnapshot, dbs: &[&DbSnapshot], skipped: Vec<PgS
         .collect();
     // 안정 정렬이라 같은 심각도 안에서는 표의 순서가 남는다
     groups.sort_by_key(|group| group.level);
-    PgFindings { groups, skipped, fetched_at: iso(now) }
+    // 일부만 읽은 데이터베이스는 그 데이터베이스의 항목이 읽은 만큼만 찾은 것이다. 이름의 바이트 순서로 낸다(받은 순서와 서버의 정렬에 기대지 않는다)
+    let mut truncated: Vec<String> = dbs.iter().filter(|db| db.truncated).map(|db| db.database.clone()).collect();
+    truncated.sort_unstable();
+    PgFindings { groups, skipped, truncated, fetched_at: iso(now) }
 }
 
 // ───────────────────────── 클러스터 전체 ─────────────────────────

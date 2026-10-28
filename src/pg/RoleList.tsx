@@ -1,7 +1,6 @@
-import { formatDay } from "../iam/format";
 import { ListTable, type ListColumn } from "../iam/ListTable";
 import { BadgeList } from "./Badges";
-import { ROLE_KIND_LABEL } from "./labels";
+import { ROLE_KIND_LABEL, utcDay } from "./labels";
 import { RoleKinds, filterRoles, type RoleKindsValue } from "./RoleKinds";
 import type { PgRoleSummary } from "./types";
 
@@ -30,7 +29,7 @@ const COLUMNS: ListColumn<PgRoleSummary>[] = [
     key: "expiry",
     label: "만료일",
     sort: expiryOf,
-    render: (r) => (expiryOf(r) === null ? <span className="dim">없음</span> : formatDay(r.attributes.validUntil)),
+    render: (r) => (expiryOf(r) === null ? <span className="dim">없음</span> : utcDay(r.attributes.validUntil!)),
   },
 ];
 

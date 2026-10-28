@@ -191,6 +191,26 @@ describe("where a privilege comes from", () => {
     });
   });
 
+  test("a role that inherits the owner role is told so, with the way to the owner role; the owner itself is just 소유자", async () => {
+    m.cell.mockResolvedValue(
+      detail([
+        entry(ordersTable, [
+          privilege("SELECT", source("owner")),
+          privilege("INSERT", source("owner", ["app_owner"], "app_owner")),
+          privilege("UPDATE", source("owner", ["app_team", "app_owner"], "app_owner")),
+        ]),
+      ]),
+    );
+    setup();
+    await screen.findByText("app.orders");
+    const titles = Object.fromEntries(chips("app.orders").map((c) => [c.textContent, c.getAttribute("title")]));
+    expect(titles).toEqual({
+      SELECT: "소유자",
+      INSERT: "소유자 역할(app_owner)을 물려받음",
+      UPDATE: "소유자 역할(app_team ← app_owner)을 물려받음",
+    });
+  });
+
   test("a privilege that comes from the pg_read_all_data role names it", async () => {
     m.cell.mockResolvedValue(detail([entry(ordersTable, [privilege("SELECT", source("predefined", ["pg_read_all_data"]))])]));
     setup({ role: "iam_admin" });

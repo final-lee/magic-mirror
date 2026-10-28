@@ -4,6 +4,7 @@ import {
   BUILTIN_NOTE,
   DEFAULT_OBJECT_LABEL,
   DEFAULT_OBJECT_ORDER,
+  GRANT_OPTION_NOTE,
   PUBLIC_LABEL,
   defaultPrivilegeSentence,
   granteeLabel,
@@ -92,11 +93,27 @@ describe("defaultPrivilegeSentence", () => {
     expect(defaultPrivilegeSentence(row({ objectType }), grant("app_read", "USAGE"))).toContain(` ${phrase} `);
   });
 
-  test("the grant option is not part of the sentence", () => {
+  test("a grant that can be passed on says so right after its privileges", () => {
     expect(defaultPrivilegeSentence(row(), { grantee: "iam_admin", privileges: ["SELECT"], grantable: true })).toBe(
+      "app_owner 역할이 app에 새 테이블을 만들면 iam_admin 역할이 SELECT (GRANT OPTION 포함) 권한을 받아요",
+    );
+    expect(defaultPrivilegeSentence(row(), { grantee: "app_write", privileges: ["INSERT", "UPDATE"], grantable: true })).toBe(
+      "app_owner 역할이 app에 새 테이블을 만들면 app_write 역할이 INSERT, UPDATE (GRANT OPTION 포함) 권한을 받아요",
+    );
+    expect(defaultPrivilegeSentence(row({ schema: null, objectType: "types" }), { grantee: "PUBLIC", privileges: ["USAGE"], grantable: true })).toBe(
+      "app_owner 역할이 모든 스키마에 새 타입을 만들면 모든 역할(PUBLIC)이 USAGE (GRANT OPTION 포함) 권한을 받아요",
+    );
+  });
+
+  test("a grant that cannot be passed on says nothing about it", () => {
+    expect(defaultPrivilegeSentence(row(), { grantee: "iam_admin", privileges: ["SELECT"], grantable: false })).toBe(
       "app_owner 역할이 app에 새 테이블을 만들면 iam_admin 역할이 SELECT 권한을 받아요",
     );
   });
+});
+
+test("the note for a grant that can be passed on is the exact text, with the space in front", () => {
+  expect(GRANT_OPTION_NOTE).toBe(" (GRANT OPTION 포함)");
 });
 
 test("the note about what PostgreSQL grants by default is the exact text", () => {
@@ -128,6 +145,11 @@ describe("sourceText", () => {
     expect(sourceText(source("direct", [], "app_owner"), "alice")).toBe("직접 받음");
     expect(sourceText(source("owner"), "app_owner")).toBe("소유자");
     expect(sourceText(source("public"), "alice")).toBe("모든 역할(PUBLIC)");
+  });
+
+  test("a role that inherits the owner role is not called the owner: it names the way to the owner role", () => {
+    expect(sourceText(source("owner", ["app_owner"]), "alice")).toBe("소유자 역할(app_owner)을 물려받음");
+    expect(sourceText(source("owner", ["app_team", "app_owner"]), "alice")).toBe("소유자 역할(app_team ← app_owner)을 물려받음");
   });
 
   test("a group names the way to it, from the role to the group that was granted", () => {

@@ -178,7 +178,27 @@ describe("the table", () => {
     for (const empty of [tables, sequences, functions]) expect(within(empty).queryAllByRole("listitem")).toHaveLength(0);
     expect(within(types).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["모든 역할(PUBLIC) USAGE"]);
     expect(within(schemas).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["app_read USAGE"]);
-    expect(within(cellsOf("postgres · 모든 스키마")[0]).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["iam_admin SELECT"]);
+    // postgres의 iam_admin은 위임할 수 있게 받는다(픽스처): 권한 뒤에 그렇다고 적는다
+    expect(within(cellsOf("postgres · 모든 스키마")[0]).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["iam_admin SELECT (GRANT OPTION 포함)"]);
+  });
+
+  test("a grantee who gets the same privileges both ways is listed twice, the grant option only on the line that has it", async () => {
+    m.database.mockResolvedValue(
+      withDefaults([
+        {
+          creator: "etl",
+          schema: "staging",
+          objectType: "tables",
+          grants: [
+            { grantee: "analyst", privileges: ["SELECT"], grantable: false },
+            { grantee: "analyst", privileges: ["SELECT"], grantable: true },
+          ],
+        },
+      ]),
+    );
+    setup();
+    await loaded();
+    expect(within(cellsOf("etl · staging")[0]).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["analyst SELECT", "analyst SELECT (GRANT OPTION 포함)"]);
   });
 
   test("puts the rows of one creator and schema together, even when the backend sends them apart", async () => {
@@ -247,7 +267,8 @@ describe("the sentences", () => {
       "app_owner 역할이 모든 스키마에 새 타입을 만들면 모든 역할(PUBLIC)이 USAGE 권한을 받아요",
       "app_owner 역할이 모든 스키마에 새 스키마를 만들면 app_read 역할이 USAGE 권한을 받아요",
     ]);
-    expect(sentencesOf("postgres · 모든 스키마")).toEqual(["postgres 역할이 모든 스키마에 새 테이블을 만들면 iam_admin 역할이 SELECT 권한을 받아요"]);
+    // 이 줄의 iam_admin은 위임할 수 있게 받는다(픽스처)
+    expect(sentencesOf("postgres · 모든 스키마")).toEqual(["postgres 역할이 모든 스키마에 새 테이블을 만들면 iam_admin 역할이 SELECT (GRANT OPTION 포함) 권한을 받아요"]);
   });
 
   test("follow the columns even when the backend sends the kinds in another order", async () => {
@@ -295,10 +316,12 @@ describe("the sentences", () => {
     expect(sentencesOf("etl · staging").map((s) => /새 (\S+) 만들(?:면|어도)/.exec(s)?.[1])).toEqual(["테이블을", "함수를", "스키마를"]);
   });
 
-  test("are not changed by the grant option, which the sentence does not mention", async () => {
+  test("say after the privileges that a grant can be passed on, and say nothing of it otherwise", async () => {
     setup();
     await loaded();
-    // postgres의 iam_admin은 위임 가능으로 받는다(픽스처)
-    expect(sentencesOf("postgres · 모든 스키마")[0]).not.toMatch(/GRANT|위임/);
+    // postgres의 iam_admin은 위임할 수 있게 받는다(픽스처)
+    expect(sentencesOf("postgres · 모든 스키마")).toEqual(["postgres 역할이 모든 스키마에 새 테이블을 만들면 iam_admin 역할이 SELECT (GRANT OPTION 포함) 권한을 받아요"]);
+    expect(sentencesOf("app_owner · app")[0]).toBe("app_owner 역할이 app에 새 테이블을 만들면 app_read 역할이 SELECT 권한을 받아요");
+    expect(screen.getAllByText(/GRANT OPTION/)).toHaveLength(2);
   });
 });

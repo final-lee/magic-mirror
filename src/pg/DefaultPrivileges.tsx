@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { DatabaseScreen } from "./DatabaseScreen";
 import { PgError } from "./PgError";
 import { usePgDatabase } from "./queries";
-import { ALL_SCHEMAS, BUILTIN_NOTE, DEFAULT_OBJECT_LABEL, DEFAULT_OBJECT_ORDER, defaultPrivilegeSentence, granteeLabel, noGrantSentence } from "./sentences";
+import { ALL_SCHEMAS, BUILTIN_NOTE, DEFAULT_OBJECT_LABEL, DEFAULT_OBJECT_ORDER, GRANT_OPTION_NOTE, defaultPrivilegeSentence, granteeLabel, noGrantSentence } from "./sentences";
 import type { PgDefaultAclRow, PgDefaultObjectType, PgOverview, PgTarget } from "./types";
 
 type Grants = PgDefaultAclRow["grants"];
@@ -112,6 +112,7 @@ function GroupRows({ group }: { group: Group }) {
                   {grants.map((g, i) => (
                     <li key={`${g.grantee}:${i}`}>
                       <span className="pg-grantee">{granteeLabel(g.grantee)}</span> <span className="mono">{g.privileges.join(", ")}</span>
+                      {g.grantable && <span className="dim">{GRANT_OPTION_NOTE}</span>}
                     </li>
                   ))}
                 </ul>

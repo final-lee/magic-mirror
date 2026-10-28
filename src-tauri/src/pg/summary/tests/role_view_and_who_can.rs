@@ -22,10 +22,16 @@ fn the_role_view_has_the_summary_the_settings_the_members_and_the_set_role_only_
     ];
     let alice = view_of(&scene, "alice", &[], &[]);
     assert_eq!(alice.summary, by_name(&summaries(&scene), "alice").clone());
-    // 이 역할의 설정과 모든 역할에 걸린 설정(role이 없다). 다른 역할의 것은 뺀다. 데이터베이스 없는 것이 먼저, 그다음 이름순
+    // 이 역할의 설정과 모든 역할에 걸린 설정(role이 없다). 다른 역할의 것은 뺀다. 데이터베이스 없는 것이 먼저, 그다음 이름순.
+    // 모든 역할에 걸린 설정(`ALTER DATABASE … SET`, `ALTER ROLE ALL SET`)은 `allRoles`로 알아본다
     assert_eq!(
-        alice.settings.iter().map(|s| (s.database.as_deref(), s.setting.as_str())).collect::<Vec<_>>(),
-        [(None, "log_statement=none"), (None, "search_path=app, public"), (Some("appdb"), "statement_timeout=5s"), (Some("appdb"), "work_mem=8MB")]
+        alice.settings.iter().map(|s| (s.database.as_deref(), s.setting.as_str(), s.all_roles)).collect::<Vec<_>>(),
+        [
+            (None, "log_statement=none", true),
+            (None, "search_path=app, public", false),
+            (Some("appdb"), "statement_timeout=5s", false),
+            (Some("appdb"), "work_mem=8MB", true)
+        ]
     );
     assert_eq!(
         view_of(&scene, "bob", &[], &[]).settings.iter().map(|s| s.setting.as_str()).collect::<Vec<_>>(),
@@ -84,6 +90,15 @@ fn the_role_view_lists_every_connectable_database_and_fills_only_the_loaded_ones
     assert_eq!(alice.databases.iter().map(|d| (d.database.as_str(), d.loaded)).collect::<Vec<_>>(), [("appdb", true), ("orders_archive", false)]);
     let archive = &alice.databases[1];
     assert!(archive.cells.is_empty() && archive.owned.is_empty() && archive.owned_omitted == 0);
+
+    // 일부만 읽은 데이터베이스인지는 읽은 데이터베이스에만 있다. 읽지 않은 데이터베이스는 말할 것이 없다
+    assert!(alice.databases.iter().all(|d| !d.truncated));
+    let mut cut = scene.db.clone();
+    cut.truncated = true;
+    let alice_cut = view_of(&scene, "alice", &[&cut], &[]);
+    assert_eq!(alice_cut.databases.iter().map(|d| (d.database.as_str(), d.loaded, d.truncated)).collect::<Vec<_>>(), [("appdb", true, true), ("orders_archive", false, false)]);
+    let owner_cut = view_of(&scene, "app_owner", &[&cut], &[]);
+    assert!(owner_cut.databases[0].truncated && !owner_cut.databases[1].truncated);
 
     // 읽은 데이터베이스는 이 역할에게 보이는 권한이 있는 칸만 담는다: scratch는 아무것도 없어서 빠진다
     let appdb = &alice.databases[0];

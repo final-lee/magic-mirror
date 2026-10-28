@@ -713,6 +713,22 @@ fn several_databases_are_checked_in_the_given_order_and_the_skipped_ones_pass_th
     assert_eq!(found.skipped, skipped);
 }
 
+#[test]
+fn the_databases_that_were_read_only_in_part_are_named_in_byte_order() {
+    let scene = app_scene(PG16);
+    let cut = |name: &str| DbSnapshot { truncated: true, ..db(name, "app_owner", vec![], vec![], vec![]) };
+    let whole = db("orders", "app_owner", vec![], vec![], vec![]);
+    let (reports, analytics) = (cut("reports"), cut("analytics"));
+    // 받은 순서가 아니라 이름순이다. 온전히 읽은 데이터베이스는 들어가지 않는다
+    let found = findings(&scene.cluster, &[&reports, &whole, &analytics], Vec::new(), now());
+    assert_eq!(found.truncated, ["analytics", "reports"]);
+    // 읽지 못한 데이터베이스는 `skipped`가 알린다. 일부만 읽은 데이터베이스가 아니다
+    let skipped = vec![PgSkippedDatabase { database: "legacy".into(), reason: "legacy에 연결하지 못했어요: permission denied".into() }];
+    assert!(findings(&scene.cluster, &[&whole], skipped, now()).truncated.is_empty());
+    // 모두 온전히 읽었으면 비어 있다
+    assert!(run(&scene).truncated.is_empty());
+}
+
 // ───────────────────────── 속도 ─────────────────────────
 
 /// 역할 200 × 관계 2만 개: 스키마 100개에 테이블 200개씩. 위의 역할들이 스키마의 모든 테이블을 읽는다

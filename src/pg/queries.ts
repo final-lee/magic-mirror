@@ -1,4 +1,4 @@
-import { hashKey, partialMatchKey, useQuery, type Query, type QueryClient, type QueryKey } from "@tanstack/react-query";
+import { hashKey, partialMatchKey, queryOptions, useQuery, type Query, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import type { AppError } from "../api/types";
 import { pgApi } from "./api";
 import { targetKey } from "./targets";
@@ -81,15 +81,26 @@ export function usePgOverview(target: PgTarget, loginUser: string | null) {
   });
 }
 
-/** 데이터베이스 하나의 스냅숏. 처음 읽을 때는 백엔드 캐시를 쓰고, 새로 고침 뒤에는 다시 읽는다(force). */
-export function usePgDatabase(target: PgTarget, database: string | null) {
-  return useQuery<PgDatabaseView, AppError>({
+const databaseOptions = (target: PgTarget, database: string | null) =>
+  queryOptions<PgDatabaseView, AppError>({
     queryKey: pgKeys.database(target, database),
     queryFn: ({ client, queryKey }) => pgApi.database(target, database!, takeForce(client, queryKey)),
-    enabled: !!database,
     staleTime: Infinity,
     retry: false,
   });
+
+/** 데이터베이스 하나의 스냅숏. 처음 읽을 때는 백엔드 캐시를 쓰고, 새로 고침 뒤에는 다시 읽는다(force). */
+export function usePgDatabase(target: PgTarget, database: string | null) {
+  return useQuery({ ...databaseOptions(target, database), enabled: !!database });
+}
+
+/**
+ * 같은 쿼리를 읽지 않고 보기만 한다: 다른 화면(권한 표, 기본 권한, 역할 상세)이 읽어 둔 사본이 있으면 data에 있고, 없으면 data가 없다.
+ * 사본이 바뀌면 다시 그려진다. 읽지 않으니 새로 고침이 이 구독 때문에 다시 읽는 일도 없다.
+ * 데이터베이스 스냅숏 전체가 필요 없는 화면(누가 할 수 있나)이 "일부만 읽었어요"를 알리는 데 쓴다. 읽게 하면 객체 검색이 같은 때 읽는 스냅숏을 한 번 더 읽는다.
+ */
+export function usePgDatabaseIfRead(target: PgTarget, database: string | null) {
+  return useQuery({ ...databaseOptions(target, database), enabled: false });
 }
 
 export function usePgCell(target: PgTarget, database: string | null, role: string | null, schema: string | null) {

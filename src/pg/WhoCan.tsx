@@ -2,9 +2,9 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { PickerSheet, type PickerOption } from "../iam/PickerSheet";
 import { useDebounced } from "../lib/useDebounced";
 import { DatabaseScreen } from "./DatabaseScreen";
-import { OBJECT_KIND_LABEL, ROLE_KIND_LABEL, collate, objectName } from "./labels";
+import { OBJECT_KIND_LABEL, ROLE_KIND_LABEL, TRUNCATED_TEXT, collate, objectName } from "./labels";
 import { PgError } from "./PgError";
-import { usePgObjects, usePgWhoCan } from "./queries";
+import { usePgDatabaseIfRead, usePgObjects, usePgWhoCan } from "./queries";
 import { RoleKinds, roleShown, type RoleKindsValue } from "./RoleKinds";
 import { reasonPath } from "./sentences";
 import type { PgObjectKind, PgObjectRef, PgOverview, PgRoleKind, PgTarget, PgWhoCanRow } from "./types";
@@ -44,6 +44,7 @@ interface Props {
  * 누가 할 수 있나(데이터베이스 하나): 객체와 권한을 고르면 그 권한을 가진 역할을 이유 경로와 함께 보인다.
  * 객체는 이름의 일부로 찾아 고르고(PickerSheet), 사용자 먼저, 그다음 그룹이다. 시스템 역할은 [시스템 역할 보기]를 켜야 보인다.
  * 데이터베이스가 바뀌면 고른 객체는 사라진다(객체는 데이터베이스의 것이다).
+ * 그 데이터베이스의 권한 표를 읽어 둔 적이 있고 객체가 많아 일부만 읽은 것이었다면 그렇다고 알린다(읽어 둔 사본만 본다. 이 화면은 권한 표를 읽지 않는다).
  */
 export function WhoCan({ target, overview, database, onDatabase, kinds, onKinds }: Props) {
   return (
@@ -60,6 +61,7 @@ function DatabaseWhoCan({ target, database, kinds }: { target: PgTarget; databas
   const opener = useRef<HTMLButtonElement>(null);
   const groupName = useId();
   const q = usePgWhoCan(target, database, object, privilege);
+  const read = usePgDatabaseIfRead(target, database);
 
   // 검색 창이 닫히면(고르든 취소하든) 초점을 창을 연 버튼으로 돌려 준다
   const wasPicking = useRef(false);
@@ -92,6 +94,11 @@ function DatabaseWhoCan({ target, database, kinds }: { target: PgTarget; databas
 
   return (
     <>
+      {read.data?.truncated && (
+        <div className="notice" role="note">
+          {TRUNCATED_TEXT}
+        </div>
+      )}
       <div className="wc-form" role="search" aria-label="누가 할 수 있나 검색">
         <div className="wc-field">
           <span className="wc-label" aria-hidden="true">

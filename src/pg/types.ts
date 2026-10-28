@@ -68,10 +68,10 @@ export interface PgSession {
   applicationName: string; state: string | null; backendStart: string | null; queryStart: string | null;
   waitEvent: string | null; own: boolean;
 }
-export interface PgRoleDatabase { database: string; loaded: boolean; cells: PgSchemaCell[]; owned: PgObjectRef[]; ownedOmitted: number }
+export interface PgRoleDatabase { database: string; loaded: boolean; truncated: boolean; cells: PgSchemaCell[]; owned: PgObjectRef[]; ownedOmitted: number }  // truncated: 읽은 스냅숏이 객체가 많아 일부만 읽은 것
 export interface PgRoleView {
   summary: PgRoleSummary;
-  settings: { database: string | null; setting: string }[];
+  settings: { database: string | null; setting: string; allRoles: boolean }[];   // allRoles: 이 역할만이 아니라 모든 역할에 걸린 설정
   members: { role: string; inherit: boolean; set: boolean; admin: boolean }[];
   databases: PgRoleDatabase[];     // 모든 연결 가능한 데이터베이스. 아직 안 읽은 곳은 loaded=false, 나머지 비움
   sessions: PgSession[];
@@ -80,4 +80,4 @@ export interface PgRoleView {
 export type PgFindingKind = "publicSchemaCreate" | "publicObjectGrant" | "rdsSuperuser" | "createRole" | "bypassRls" | "expiringLogin" | "emptyLogin" | "defaultPrivilegeGap" | "securityDefinerPath" | "md5Encryption";
 export interface PgFinding { database: string | null; role: string | null; object: PgObjectRef | null; detail: string }
 export interface PgFindingGroup { kind: PgFindingKind; title: string; level: "high" | "medium" | "low"; items: PgFinding[] }
-export interface PgFindings { groups: PgFindingGroup[]; skipped: { database: string; reason: string }[]; fetchedAt: string }
+export interface PgFindings { groups: PgFindingGroup[]; skipped: { database: string; reason: string }[]; truncated: string[]; fetchedAt: string }  // truncated: 객체가 많아 일부만 읽고 점검한 데이터베이스(이름순)
