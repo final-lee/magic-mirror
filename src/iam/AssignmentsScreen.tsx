@@ -52,7 +52,8 @@ const summaryOf = (items: DraftItem[]) => (items.length === 1 ? `변경 1개 · 
 export function Assignments({ profile, overview, draft, extra, onAddColumn, tab, onTab, onOpen, onPreview, filter }: Props) {
   const [kinds, setKinds] = useState<Record<PrincipalKind, boolean>>({ user: true, group: true, role: true });
   const [adding, setAdding] = useState(false);
-  const [matching, setMatching] = useState<PrincipalSummary | null>(null);
+  /** "다른 주체와 같게"로 맞추는 대상의 ARN. 객체가 아니라 ARN으로 들고 지금의 개요에서 찾는다: 시트가 열려 있는 동안 개요를 다시 읽을 수 있다 */
+  const [matching, setMatching] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
   const pool = useMemo(() => principalsOf(overview, tab), [overview, tab]);
@@ -70,6 +71,12 @@ export function Assignments({ profile, overview, draft, extra, onAddColumn, tab,
   useEffect(() => {
     if (draft.items.length === 0) setExpanded(false);
   }, [draft.items.length]);
+
+  // 맞추던 대상이 다시 읽은 개요에서 없어졌으면 시트를 닫는다
+  const target = matching ? pool.find((p) => p.arn === matching) : undefined;
+  useEffect(() => {
+    if (matching && !target) setMatching(null);
+  }, [matching, target]);
 
   return (
     <section className="center iam-asg">
@@ -103,7 +110,7 @@ export function Assignments({ profile, overview, draft, extra, onAddColumn, tab,
           </button>
         </div>
       ))}
-      <AssignmentGrid overview={overview} tab={tab} rows={rows} columns={columns} draft={draft} grouped={tab === "policies"} onOpen={onOpen} onMatch={setMatching} />
+      <AssignmentGrid overview={overview} tab={tab} rows={rows} columns={columns} draft={draft} grouped={tab === "policies"} onOpen={onOpen} onMatch={(row) => setMatching(row.arn)} />
       {draft.items.length > 0 && (
         <div className="asg-tray">
           {expanded && (
@@ -145,15 +152,15 @@ export function Assignments({ profile, overview, draft, extra, onAddColumn, tab,
           }}
         />
       )}
-      {matching && (
+      {target && (
         <MatchSheet
           overview={overview}
           tab={tab}
-          target={matching}
+          target={target}
           candidates={pool}
           onClose={() => setMatching(null)}
           onApply={(add, remove) => {
-            draft.match(tab, matching, add, remove);
+            draft.match(tab, target, add, remove);
             setMatching(null);
           }}
         />

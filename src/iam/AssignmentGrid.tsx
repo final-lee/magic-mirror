@@ -39,7 +39,7 @@ export function visibleRange(scrollTop: number, viewport: number, rowHeight: num
   return { start: Math.max(0, Math.min(count, first - overscan)), end: Math.max(0, Math.min(count, last + overscan)) };
 }
 
-type Draft = Pick<ReturnType<typeof useAssignmentDraft>, "items" | "toggle" | "paint">;
+type Draft = Pick<ReturnType<typeof useAssignmentDraft>, "items" | "toggle" | "paint" | "remove">;
 
 /** 그려지는 줄: 종류 머리이거나 데이터 행(r은 rows의 번호) */
 type Line = { type: "head"; kind: PrincipalKind; count: number } | { type: "row"; r: number };
@@ -217,13 +217,21 @@ export function AssignmentGrid({ overview, tab, rows, columns, draft, grouped, o
     else goTo({ r, c: -1 });
   };
 
-  /** 칸 하나를 누른 것: 바꿀 수 있으면 토글, 그룹으로만 받은 칸이면 어디서 받는지 알려 준다 */
+  /**
+   * 칸 하나를 누른 것: 바꿀 수 있으면 토글, 그룹으로만 받은 칸이면 어디서 받는지 알려 준다.
+   * 그런데 담아 둔 변경이 있는 칸이 개요를 다시 읽은 뒤 그룹으로만 받는 칸이 됐으면(담은 붙이기는 직접 붙은 것이 아니라서 남는다) 안내 대신 그 변경을 뺀다.
+   */
   const press = (r: number, c: number, trigger: HTMLElement) => {
     if (locks[r]) return;
     const row = rows[r];
     const column = columns[c].id;
     if (isEditable(overview, tab, row, column)) {
       draft.toggle(tab, row, column);
+      return;
+    }
+    const key = rowKey(tab, row, column);
+    if (queued.has(key)) {
+      draft.remove(key);
       return;
     }
     const groups = policyCell(overview, row, column).via;

@@ -402,6 +402,62 @@ describe("matching another principal", () => {
     expect(trayItems()).toEqual(["dev-team에 넣기 · ci-bot", "dev-team에서 빼기 · alice"]);
   });
 
+  test("works on the principals as they are now when the overview is read again under the sheet", async () => {
+    const { update } = setup();
+    openMenu("alice");
+    chooseMatch();
+    await pickSource(/ci-bot/);
+    expect(within(within(matchDialog()).getByRole("list", { name: "붙일 것" })).getByText("AdministratorAccess")).toBeInTheDocument();
+
+    // 그 사이 누군가 alice에 AdministratorAccess를 붙였다
+    update(sampleOverview({ users: [{ ...alice, attached: [readOnlyPolicy.arn, adminPolicy.arn] }, bob, ciBot] }));
+
+    const dialog = matchDialog();
+    expect(within(dialog).getByRole("list", { name: "붙일 것" })).toHaveTextContent("없어요");
+    expect(within(dialog).queryByText("AdministratorAccess")).not.toBeInTheDocument();
+    // 남은 것은 뗄 것뿐이라서, 그것을 골라 담아도 이미 끝난 붙이기는 장바구니에 들어가지 않는다
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "ReadOnlyAccess" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "담기" }));
+    expect(tray()).toBe("변경 1개 · ReadOnlyAccess 떼기 · alice");
+  });
+
+  test("closes when the principal it is matching is gone from the overview that was read again", async () => {
+    const { update } = setup();
+    openMenu("alice");
+    chooseMatch();
+    expect(screen.getByRole("dialog", { name: "원본 고르기" })).toBeInTheDocument();
+    update(sampleOverview({ users: [bob, ciBot] }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // 닫은 뒤에 alice가 다시 나타나도 시트는 다시 열리지 않는다
+    update(sampleOverview());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // 원본을 고른 뒤에도 마찬가지다
+    openMenu("alice");
+    chooseMatch();
+    await pickSource(/ci-bot/);
+    update(sampleOverview({ users: [bob, ciBot] }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(tray()).toBeNull();
+  });
+
+  test("closes when the source it picked is gone from the overview that was read again", async () => {
+    const { update } = setup();
+    openMenu("alice");
+    chooseMatch();
+    await pickSource(/ci-bot/);
+    expect(matchDialog()).toBeInTheDocument();
+
+    update(sampleOverview({ users: [alice, bob] }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(tray()).toBeNull();
+
+    // 감춘 것이 아니라 닫은 것이다: ci-bot이 다시 나타나도 시트는 돌아오지 않는다
+    update(sampleOverview());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   test("the row menu is off for a locked row, and closes with Escape", async () => {
     setup();
     openMenu("AWSServiceRoleForSupport");

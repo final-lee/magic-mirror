@@ -1,3 +1,4 @@
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { act, createEvent, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithClient } from "../test/utils";
@@ -15,7 +16,14 @@ const press = (el: HTMLElement, init: PointerEventInit & { button?: number } = {
 function setup(overview: IamOverview = sampleOverview(), extra: Partial<React.ComponentProps<typeof AssignmentsHarness>> = {}) {
   const props = { onOpen: vi.fn(), onPreview: vi.fn() };
   const utils = renderWithClient(<AssignmentsHarness overview={overview} {...props} {...extra} />);
-  return { props, overview, ...utils };
+  /** 개요를 다시 읽은 것처럼 다른 개요로 다시 그린다 */
+  const update = (next: IamOverview) =>
+    utils.rerender(
+      <QueryClientProvider client={utils.qc as QueryClient}>
+        <AssignmentsHarness overview={next} {...props} {...extra} />
+      </QueryClientProvider>,
+    );
+  return { props, overview, update, ...utils };
 }
 
 beforeEach(() => {
@@ -309,6 +317,60 @@ describe("a cell that is only inherited", () => {
   });
 });
 
+describe("a queued change on a cell that has become only inherited", () => {
+  /** bob에 ReadOnlyAccess 붙이기를 담은 뒤 개요를 다시 읽으니, bob이 속한 dev-team에도 그 정책이 붙었다 */
+  const queuedThenInherited = () => {
+    const utils = setup();
+    fireEvent.click(cellOf("bob", "ReadOnlyAccess"));
+    utils.update(sampleOverview({ groups: [{ ...devTeam, attached: [deployPolicy.arn, readOnlyPolicy.arn] }, admins] }));
+    // 직접 붙은 것은 아니라서 담은 변경은 이미 끝난 변경이 아니다. 칸은 ＋로 보이지만 더는 바꿀 수 없다
+    expect(tray()).toBe("변경 1개 · ReadOnlyAccess 붙이기 · bob");
+    expect(cellOf("bob", "ReadOnlyAccess")).toHaveAccessibleName("bob · ReadOnlyAccess: 붙일 예정");
+    return utils;
+  };
+
+  test("pressing it cancels the change and opens no note", () => {
+    queuedThenInherited();
+    fireEvent.click(cellOf("bob", "ReadOnlyAccess"));
+    expect(tray()).toBeNull();
+    expect(screen.queryByText("dev-team 그룹에서 받아요")).not.toBeInTheDocument();
+    expect(cellOf("bob", "ReadOnlyAccess")).toHaveAccessibleName("bob · ReadOnlyAccess: dev-team 그룹에서 받음");
+
+    // 담은 변경이 없으니 다음 누름은 늘 하던 대로 어디서 받는지 알려 준다
+    fireEvent.click(cellOf("bob", "ReadOnlyAccess"));
+    expect(screen.getByText("dev-team 그룹에서 받아요")).toBeInTheDocument();
+    expect(tray()).toBeNull();
+  });
+
+  test("Space cancels it too", async () => {
+    queuedThenInherited();
+    focusCell(cellOf("bob", "ReadOnlyAccess"));
+    await userEvent.keyboard(" ");
+    expect(tray()).toBeNull();
+    expect(screen.queryByText("dev-team 그룹에서 받아요")).not.toBeInTheDocument();
+  });
+
+  test("the other changes stay", () => {
+    const { update } = queuedThenInherited();
+    fireEvent.click(cellOf("ci-bot", "ReadOnlyAccess"));
+    expect(tray()).toBe("변경 2개 · ReadOnlyAccess 붙이기 · bob 외 1개");
+    update(sampleOverview({ groups: [{ ...devTeam, attached: [deployPolicy.arn, readOnlyPolicy.arn] }, admins] }));
+    fireEvent.click(cellOf("bob", "ReadOnlyAccess"));
+    expect(tray()).toBe("변경 1개 · ReadOnlyAccess 붙이기 · ci-bot");
+  });
+
+  test("a paint does not start from it: the cells it is dragged over are left alone and the change stays", () => {
+    queuedThenInherited();
+    press(cellOf("bob", "ReadOnlyAccess"));
+    fireEvent.pointerEnter(cellOf("ci-bot", "ReadOnlyAccess"), { buttons: 1 });
+    fireEvent.pointerEnter(cellOf("admins", "ReadOnlyAccess"), { buttons: 1 });
+    fireEvent.pointerUp(window);
+    expect(cellOf("ci-bot", "ReadOnlyAccess")).toHaveAccessibleName("ci-bot · ReadOnlyAccess: 없음");
+    expect(cellOf("admins", "ReadOnlyAccess")).toHaveAccessibleName("admins · ReadOnlyAccess: 없음");
+    expect(tray()).toBe("변경 1개 · ReadOnlyAccess 붙이기 · bob");
+  });
+});
+
 describe("the ⋯ button of a row", () => {
   test("a second press closes the menu", async () => {
     setup();
@@ -505,6 +567,49 @@ describe("dragging", () => {
     fireEvent.pointerUp(window);
     expect(cellOf("alice", "AdministratorAccess")).toHaveAccessibleName("alice · AdministratorAccess: 붙일 예정");
     expect(tray()).toBe("변경 2개 · ReadOnlyAccess 붙이기 · ci-bot 외 1개");
+  });
+
+  test("rows that move under the drag do not make it paint the rows between the old place and the new one", () => {
+    const { update } = setup();
+    press(cellOf("bob", "AdministratorAccess")); // 둘째 행이다
+    // 개요를 다시 읽으니 alice보다 앞서는 사용자 둘이 늘었다: 같은 bob이 이제 넷째 행이다
+    update(sampleOverview({ users: [principal("user", "aaron"), principal("user", "abe"), alice, bob, ciBot] }));
+    fireEvent.pointerEnter(cellOf("ci-bot", "AdministratorAccess"), { buttons: 1 }); // 옛 번호(둘째 행)에서 이 다섯째 행까지 곧게 이으면 alice의 칸이 지나는 칸이 된다
+    expect(cellOf("abe", "AdministratorAccess")).toHaveAccessibleName("abe · AdministratorAccess: 없음");
+    expect(cellOf("alice", "AdministratorAccess")).toHaveAccessibleName("alice · AdministratorAccess: 없음");
+    expect(tray()).toBe("변경 1개 · AdministratorAccess 붙이기 · bob");
+
+    // 끌기는 거기서 이어진다: ci-bot의 칸에서 dev-team까지는 곧게 이어서 칠한다(admins는 이미 붙어 있다)
+    fireEvent.pointerEnter(cellOf("dev-team", "AdministratorAccess"), { buttons: 1 });
+    fireEvent.pointerUp(window);
+    expect(cellOf("dev-team", "AdministratorAccess")).toHaveAccessibleName("dev-team · AdministratorAccess: 붙일 예정");
+    expect(tray()).toBe("변경 2개 · AdministratorAccess 붙이기 · bob 외 1개");
+  });
+
+  test("columns that move under the drag make it forget where it was too", () => {
+    // 네 정책은 holder에 모두 붙어 있고 열은 붙은 주체가 많은 순이다: P1 P2 P3 P4. 사용자 other는 처음에는 아무것도 없다
+    const holder = principal("user", "holder", { attached: ["P1", "P2", "P3", "P4"].map((name) => policyArn(name, true)) });
+    const [a, b, other] = ["a", "b", "other"].map((name) => principal("user", name));
+    const { update } = setup(sampleOverview({ users: [a, b, holder, other], groups: [], roles: [], policies: [] }));
+    press(cellOf("a", "P1")); // 첫 열이다
+    // 개요를 다시 읽으니 other에게 P4가 붙어 P4가 가장 앞 열이 됐다: P1은 이제 둘째 열이다. 행은 그대로다
+    update(sampleOverview({ users: [a, b, holder, { ...other, attached: [policyArn("P4", true)] }], groups: [], roles: [], policies: [] }));
+    expect(columnHeads().map((h) => within(h).getByRole("button").textContent)).toEqual(["P4", "P1", "P2", "P3"]);
+    fireEvent.pointerEnter(cellOf("a", "P3"), { buttons: 1 }); // 옛 번호(첫 열)에서 이 넷째 열까지 곧게 이으면 P2의 칸이 지나는 칸이 된다
+    fireEvent.pointerUp(window);
+    expect(cellOf("a", "P2")).toHaveAccessibleName("a · P2: 없음");
+    expect(cellOf("a", "P3")).toHaveAccessibleName("a · P3: 붙일 예정");
+    expect(tray()).toBe("변경 2개 · P1 붙이기 · a 외 1개");
+  });
+
+  test("a reload that moves nothing leaves the fast drag as it was", () => {
+    const { update } = setup();
+    press(cellOf("bob", "ReadOnlyAccess"));
+    update(sampleOverview({ users: [alice, { ...bob }, ciBot] })); // 같은 행과 열의 새 객체들
+    fireEvent.pointerEnter(cellOf("dev-team", "ReadOnlyAccess"), { buttons: 1 }); // ci-bot과 admins의 칸에는 들어온 적이 없다
+    fireEvent.pointerUp(window);
+    for (const row of ["bob", "ci-bot", "admins", "dev-team"]) expect(cellOf(row, "ReadOnlyAccess")).toHaveAccessibleName(`${row} · ReadOnlyAccess: 붙일 예정`);
+    expect(tray()).toBe("변경 4개 · ReadOnlyAccess 붙이기 · bob 외 3개");
   });
 
   test("rows that are not drawn are painted too", () => {

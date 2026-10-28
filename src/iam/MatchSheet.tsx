@@ -16,7 +16,7 @@ const SECTION: Record<AssignmentTab, { add: string; remove: string }> = {
 interface Props {
   overview: IamOverview;
   tab: AssignmentTab;
-  /** 맞출 대상 */
+  /** 맞출 대상. 부르는 쪽이 ARN으로 지금의 개요에서 찾아 넘긴다 */
   target: PrincipalSummary;
   /** 원본으로 고를 수 있는 주체들(보여 줄 순서대로). 대상 자신은 빼고 보여 준다 */
   candidates: PrincipalSummary[];
@@ -28,10 +28,18 @@ interface Props {
 /**
  * "다른 주체와 같게": 먼저 원본을 고르고, 원본에만 있는 것(붙일 것)과 대상에만 있는 것(뗄 것)을 보여 준다.
  * 붙일 것은 늘 담기고, 뗄 것은 체크한 것만 담긴다. 처음에는 아무것도 체크하지 않는다.
+ * 원본은 고른 순간의 객체가 아니라 ARN으로 들고, 그릴 때마다 지금의 후보에서 다시 찾는다: 시트가 열려 있는 동안 개요를 다시 읽으면
+ * 주체의 정책과 그룹이 달라져 있을 수 있다. 원본이 개요에서 없어졌으면 시트를 닫는다.
  */
 export function MatchSheet({ overview, tab, target, candidates, onApply, onClose }: Props) {
-  const [source, setSource] = useState<PrincipalSummary | null>(null);
-  if (!source) return <SourcePicker tab={tab} target={target} candidates={candidates} onPick={setSource} onClose={onClose} />;
+  const [sourceArn, setSourceArn] = useState<string | null>(null);
+  const source = sourceArn ? candidates.find((p) => p.arn === sourceArn) : undefined;
+  const gone = sourceArn !== null && !source;
+  useEffect(() => {
+    if (gone) onClose();
+  }, [gone, onClose]);
+  if (sourceArn === null) return <SourcePicker tab={tab} target={target} candidates={candidates} onPick={(picked) => setSourceArn(picked.arn)} onClose={onClose} />;
+  if (!source) return null;
   return <MatchDiff overview={overview} tab={tab} target={target} source={source} onApply={onApply} onClose={onClose} />;
 }
 
