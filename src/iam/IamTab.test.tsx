@@ -9,6 +9,7 @@ import {
   aliceView,
   appRole,
   appRoleView,
+  batchResult,
   bob,
   bobKeys,
   catalogActions,
@@ -19,6 +20,7 @@ import {
   devTeam,
   devTeamView,
   logEntry,
+  previewBatchOf,
   previewOf,
   readOnlyPolicy,
   s3WriteGrants,
@@ -49,6 +51,9 @@ vi.mock("./api", () => ({
     undoChange: vi.fn(),
     listPolicies: vi.fn(),
     validatePolicy: vi.fn(),
+    previewBatch: vi.fn(),
+    applyBatch: vi.fn(),
+    undoBatch: vi.fn(),
   },
 }));
 let mouseNav: ((dir: "back" | "forward") => void) | null = null;
@@ -115,6 +120,8 @@ beforeEach(() => {
   m.preview.mockImplementation(async (_p, change) => previewOf(change));
   m.apply.mockResolvedValue({ logId: "log-9", summary: "변경을 적용했어요" });
   m.changeLog.mockResolvedValue([]);
+  m.previewBatch.mockImplementation(async (_p, changes) => previewBatchOf(changes));
+  m.applyBatch.mockResolvedValue(batchResult());
   m.listPolicies.mockImplementation(async () => [readOnlyPolicy, adminPolicy].map((p) => ({ arn: p.arn, name: p.name, scope: p.scope, description: null, badges: p.badges })));
 });
 
@@ -941,11 +948,179 @@ describe("assignments", () => {
     expect(navCount()).toBeNull();
   });
 
-  test("the preview button hands the queued changes over without applying anything", async () => {
-    await openAssignments();
-    fireEvent.click(cell("bob", "ReadOnlyAccess"));
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
-    expect(m.apply).not.toHaveBeenCalled();
-    expect(m.preview).not.toHaveBeenCalled();
+  describe("the batch preview", () => {
+    const detachAlice: IamChange = { op: "detachPolicy", target: alice.arn, policyArn: readOnlyPolicy.arn };
+    const attachBob: IamChange = { op: "attachPolicy", target: bob.arn, policyArn: readOnlyPolicy.arn };
+    const attachCi: IamChange = { op: "attachPolicy", target: ciBot.arn, policyArn: readOnlyPolicy.arn };
+    const isGrant = (c: IamChange) => c.op === "attachPolicy" || c.op === "addToGroup";
+    const nameOf = (arn: string) => [alice, bob, ciBot].find((p) => p.arn === arn)?.name ?? arn;
+    const summaryOf = (c: IamChange) =>
+      c.op === "attachPolicy" ? `${nameOf(c.target)}에 ReadOnlyAccess를 붙여요` : c.op === "detachPolicy" ? `${nameOf(c.target)}에서 ReadOnlyAccess를 떼요` : c.op;
+    const batchDialog = (n: number) => screen.findByRole("dialog", { name: `변경 ${n}개 미리보기` });
+    const applyBatchButton = () => screen.getByRole("button", { name: /^적용( 중…)?$/ });
+    const trayText = () => screen.queryByText(/^변경 \d+개 · /)?.textContent ?? null;
+
+    beforeEach(() => {
+      // 백엔드처럼 붙이기를 앞에 두고, 항목마다 요약을 단다
+      m.previewBatch.mockImplementation(async (_p, changes) => {
+        const ordered = [...changes.filter(isGrant), ...changes.filter((c) => !isGrant(c))];
+        return previewBatchOf(ordered, { changes: ordered.map((change) => ({ change, summary: summaryOf(change), calls: [], warnings: [] })) });
+      });
+    });
+
+    /** 떼기(alice) 하나와 붙이기(bob, ci-bot) 둘을 이 순서로 담고 [미리보기]를 누른다 */
+    const queueThree = async () => {
+      const utils = await openAssignments();
+      fireEvent.click(cell("alice", "ReadOnlyAccess"));
+      fireEvent.click(cell("bob", "ReadOnlyAccess"));
+      fireEvent.click(cell("ci-bot", "ReadOnlyAccess"));
+      fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+      await batchDialog(3);
+      return utils;
+    };
+
+    test("the preview button opens the preview of the queued changes, handing over the order they were queued in, and applies nothing", async () => {
+      await queueThree();
+      expect(m.previewBatch).toHaveBeenCalledTimes(1);
+      expect(m.previewBatch).toHaveBeenCalledWith("prod", [detachAlice, attachBob, attachCi]);
+      // 화면에는 백엔드가 돌려준 적용 순서(붙이기가 앞)로 나온다
+      const rows = Array.from(screen.getByRole("list", { name: "변경 목록" }).children).map((li) => li.textContent);
+      expect(rows[0]).toContain("bob에 ReadOnlyAccess를 붙여요");
+      expect(rows[1]).toContain("ci-bot에 ReadOnlyAccess를 붙여요");
+      expect(rows[2]).toContain("alice에서 ReadOnlyAccess를 떼요");
+      expect(m.applyBatch).not.toHaveBeenCalled();
+      expect(m.preview).not.toHaveBeenCalled();
+      expect(m.apply).not.toHaveBeenCalled();
+      expect(trayText()).toBe("변경 3개 · ReadOnlyAccess 떼기 · alice 외 2개"); // 미리보기를 열어도 장바구니는 그대로다
+    });
+
+    test("cancelling the preview keeps the tray as it was", async () => {
+      await queueThree();
+      fireEvent.click(screen.getByRole("button", { name: "취소" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(trayText()).toBe("변경 3개 · ReadOnlyAccess 떼기 · alice 외 2개");
+      expect(m.applyBatch).not.toHaveBeenCalled();
+    });
+
+    test("applying sends the changes as queued, empties the tray before the reloaded overview arrives, and tells how many were applied", async () => {
+      await queueThree();
+      await waitFor(() => expect(applyBatchButton()).toBeEnabled());
+      // 다시 읽은 개요는 적용한 결과를 담고 있다. 장바구니가 그때까지 비워져 있지 않으면 "이미 … 뺐어요"가 뜬다
+      m.overview.mockResolvedValue(
+        sampleOverview({ users: [{ ...alice, attached: [] }, { ...bob, attached: [readOnlyPolicy.arn] }, { ...ciBot, attached: [adminPolicy.arn, readOnlyPolicy.arn] }] }),
+      );
+      m.applyBatch.mockResolvedValue(batchResult({ logIds: ["l-1", "l-2", "l-3"] }));
+      fireEvent.click(applyBatchButton());
+      await waitFor(() => expect(m.applyBatch).toHaveBeenCalledWith("prod", [detachAlice, attachBob, attachCi], null, null));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(screen.getByText("변경 3개를 적용했어요")).toBeInTheDocument();
+      expect(trayText()).toBeNull();
+      expect(navCount()).toBeNull();
+      await waitFor(() => expect(cell("bob", "ReadOnlyAccess")).toHaveAccessibleName("bob · ReadOnlyAccess: 직접 붙음"));
+      expect(screen.queryByText(/뺐어요/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "알림 닫기" }));
+      expect(screen.queryByText("변경 3개를 적용했어요")).not.toBeInTheDocument();
+    });
+
+    test("a batch that stops halfway says where, leaves only the changes that did not run in the tray, and its undo leads to a new preview", async () => {
+      await queueThree();
+      await waitFor(() => expect(applyBatchButton()).toBeEnabled());
+      m.applyBatch.mockResolvedValueOnce(
+        batchResult({
+          batchId: "batch-9",
+          logIds: ["l-1"],
+          failed: { index: 1, summary: "ci-bot에 ReadOnlyAccess를 붙여요", message: "권한 없음 (iam:AttachUserPolicy)" },
+        }),
+      );
+      fireEvent.click(applyBatchButton());
+      const stop = await screen.findByText("3개 중 1개를 적용하고 2번째에서 멈췄어요: ci-bot에 ReadOnlyAccess를 붙여요: 권한 없음 (iam:AttachUserPolicy)");
+      expect(stop).toBeInTheDocument();
+      expect(m.applyBatch).toHaveBeenCalledWith("prod", [detachAlice, attachBob, attachCi], null, null);
+      expect(screen.queryByText("변경 3개를 적용했어요")).not.toBeInTheDocument();
+      // 적용된 것은 적용 순서의 앞(bob)이다. 담긴 순서의 앞(alice)이 아니다
+      expect(trayText()).toBe("변경 2개 · ReadOnlyAccess 떼기 · alice 외 1개");
+
+      const inverse: IamChange = { op: "detachPolicy", target: bob.arn, policyArn: readOnlyPolicy.arn };
+      m.undoBatch.mockResolvedValue({ changes: [inverse], undoOf: ["l-1"] });
+      fireEvent.click(screen.getByRole("button", { name: "적용된 1개 되돌리기" }));
+      await batchDialog(1);
+      expect(m.undoBatch).toHaveBeenCalledWith("batch-9");
+      expect(m.previewBatch).toHaveBeenLastCalledWith("prod", [inverse]);
+      await waitFor(() => expect(applyBatchButton()).toBeEnabled());
+      m.applyBatch.mockResolvedValueOnce(batchResult({ logIds: ["l-2"] }));
+      fireEvent.click(applyBatchButton());
+      await waitFor(() => expect(m.applyBatch).toHaveBeenLastCalledWith("prod", [inverse], null, ["l-1"]));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(trayText()).toBe("변경 2개 · ReadOnlyAccess 떼기 · alice 외 1개"); // 되돌리기는 장바구니를 건드리지 않는다
+    });
+
+    test("closing the result keeps the changes that did not run, ready to be previewed again", async () => {
+      await queueThree();
+      await waitFor(() => expect(applyBatchButton()).toBeEnabled());
+      m.applyBatch.mockResolvedValueOnce(
+        batchResult({ logIds: [], failed: { index: 0, summary: "bob에 ReadOnlyAccess를 붙여요", message: "권한 없음 (iam:AttachUserPolicy)" } }),
+      );
+      fireEvent.click(applyBatchButton());
+      await screen.findByText(/^3개 중 0개를 적용하고 1번째에서 멈췄어요/);
+      expect(screen.queryByRole("button", { name: /되돌리기/ })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(trayText()).toBe("변경 3개 · ReadOnlyAccess 떼기 · alice 외 2개");
+      fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+      await batchDialog(3);
+      expect(m.previewBatch).toHaveBeenCalledTimes(2);
+    });
+
+    test("a rejected apply keeps the preview open, and the tray as it was", async () => {
+      await queueThree();
+      await waitFor(() => expect(applyBatchButton()).toBeEnabled());
+      m.applyBatch.mockRejectedValueOnce({ kind: "other", message: "미리보기 뒤에 IAM이 바뀌었어요. 미리보기를 다시 받아 주세요." });
+      fireEvent.click(applyBatchButton());
+      expect(await screen.findByText("미리보기 뒤에 IAM이 바뀌었어요. 미리보기를 다시 받아 주세요.")).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: "변경 3개 미리보기" })).toBeInTheDocument();
+      expect(trayText()).toBe("변경 3개 · ReadOnlyAccess 떼기 · alice 외 2개");
+    });
+
+    test("with the batch preview open, ⌘[ does not navigate; Escape closes it without applying", async () => {
+      await queueThree();
+      metaKey("[");
+      expect(screen.getByRole("dialog", { name: "변경 3개 미리보기" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "정책" })).toBeInTheDocument();
+      fireEvent.keyDown(document, { key: "Escape" });
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(m.applyBatch).not.toHaveBeenCalled();
+      expect(trayText()).toBe("변경 3개 · ReadOnlyAccess 떼기 · alice 외 2개");
+    });
+
+    test("another profile closes the preview, so it is never applied there", async () => {
+      const { update } = await queueThree();
+      update({ profile: "dev" });
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(m.applyBatch).not.toHaveBeenCalled();
+    });
+
+    test("undoing a batch from the change log starts the batch preview with the ids of the records, and the log is read again afterwards", async () => {
+      const inverses: IamChange[] = [
+        { op: "detachPolicy", target: bob.arn, policyArn: readOnlyPolicy.arn },
+        { op: "detachPolicy", target: ciBot.arn, policyArn: readOnlyPolicy.arn },
+      ];
+      const member = (id: string, change: IamChange) => logEntry({ id, batchId: "b-1", change: attachBob, summary: `${id} 붙였어요`, inverse: change });
+      m.changeLog.mockResolvedValue([member("m-2", inverses[1]), member("m-1", inverses[0])]);
+      m.undoBatch.mockResolvedValue({ changes: inverses, undoOf: ["m-2", "m-1"] });
+      setup();
+      fireEvent.click(await nav(/변경 기록/));
+      fireEvent.click(await screen.findByRole("button", { name: "묶음 되돌리기" }));
+      await batchDialog(2);
+      expect(m.undoBatch).toHaveBeenCalledWith("b-1");
+      expect(m.previewBatch).toHaveBeenCalledWith("prod", inverses);
+      await waitFor(() => expect(applyBatchButton()).toBeEnabled());
+
+      m.changeLog.mockResolvedValue([member("m-2", inverses[1]), member("m-1", inverses[0])].map((e) => ({ ...e, undone: true })));
+      fireEvent.click(applyBatchButton());
+      await waitFor(() => expect(m.applyBatch).toHaveBeenCalledWith("prod", inverses, null, ["m-2", "m-1"]));
+      await waitFor(() => expect(m.changeLog).toHaveBeenCalledTimes(2));
+      expect(await screen.findByText("변경 2개를 적용했어요")).toBeInTheDocument();
+      expect(await screen.findAllByText("되돌림")).toHaveLength(2);
+    });
   });
 });

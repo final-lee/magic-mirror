@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { errorMessage } from "../api/errors";
 import { iamApi } from "./api";
 import { iamKeys, refreshIam } from "./queries";
-import type { ChangePreview, IamChange } from "./types";
+import type { ChangePreview, IamChange, PreviewWarning } from "./types";
 
 /** 적용한 뒤 IAM이 반영될 때까지 기다렸다가 한 번 더 읽는 시간 */
 export const REFRESH_DELAY_MS = 3_000;
@@ -51,7 +51,7 @@ export type ApplyGate = { ok: true } | { ok: false; reason: "blocked" | "text" |
  * - 확인 문구가 있으면 한 글자도 다르지 않게(대소문자·공백 포함) 입력해야 한다.
  * - 확인(confirm) 경고가 있는데 입력할 문구를 받지 못했다면 확인할 방법이 없으니 적용하지 않는다.
  */
-export function applyGate(preview: ChangePreview, typed: string): ApplyGate {
+export function applyGate(preview: { warnings: PreviewWarning[]; confirmText: string | null }, typed: string): ApplyGate {
   if (preview.warnings.some((w) => w.level === "block")) return { ok: false, reason: "blocked" };
   if (preview.confirmText) return typed === preview.confirmText ? { ok: true } : { ok: false, reason: "text" };
   if (preview.warnings.some((w) => w.level === "confirm")) return { ok: false, reason: "noText" };
