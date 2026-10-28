@@ -209,13 +209,29 @@ describe("the DB user", () => {
     await waitFor(() => expect(api.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ pgLogins: { [other]: "billing_admin", [ARN]: "iam_admin" } })));
   });
 
-  test("a name with spaces around it is saved and used without them", async () => {
+  test('"  iam_admin  " is saved and used as "iam_admin"', async () => {
     setup();
     await screen.findByRole("heading", { name: "DB 사용자" });
     const user = await type("  iam_admin  ");
     await user.click(screen.getByRole("button", { name: "연결" }));
+    // 설정 파일에 남는 이름도, 서명하고 접속하는 이름도 가장자리 공백이 없다
+    await waitFor(() => expect(api.saveSettings).toHaveBeenCalledTimes(1));
+    expect(api.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ pgLogins: { [ARN]: "iam_admin" } }));
     await connected();
+    expect(m.open).toHaveBeenCalledTimes(1);
     expect(m.open).toHaveBeenCalledWith(pgTarget, "iam_admin");
+  });
+
+  test("[연결] waits while only spaces are typed, and nothing is saved or opened", async () => {
+    setup();
+    await screen.findByRole("heading", { name: "DB 사용자" });
+    const user = await type("   ");
+    expect(screen.getByRole("button", { name: "연결" })).toBeDisabled();
+    await user.type(promptInput(), "{Enter}");
+    await act(async () => {});
+    expect(api.saveSettings).not.toHaveBeenCalled();
+    expect(m.open).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "DB 사용자" })).toBeInTheDocument();
   });
 
   test("a remembered login connects at once, without asking", async () => {
@@ -269,6 +285,21 @@ describe("connecting", () => {
     setup();
     expect(await screen.findByText(text)).toBeInTheDocument();
     expect(topBar().getByRole("button", { name: "바꾸기" })).toBeInTheDocument();
+  });
+
+  test("a remembered name that the backend refuses shows why, and 바꾸기 fixes it: the spaces go and it connects", async () => {
+    const text = `DB 사용자 이름이 올바르지 않아요. 공백이나 " < > # & % + 같은 문자는 쓸 수 없어요`;
+    remembered("iam_admin "); // 설정 파일을 손으로 고쳐 가장자리 공백이 남은 이름
+    m.open.mockImplementation((_t, user) => (user === user.trim() ? Promise.resolve(sampleOverview({ loginUser: user })) : Promise.reject({ kind: "other", message: text })));
+    setup();
+    expect(await screen.findByText(text)).toBeInTheDocument();
+    fireEvent.click(topBar().getByRole("button", { name: "바꾸기" }));
+    expect(promptInput()).toHaveValue("iam_admin ");
+    fireEvent.click(screen.getByRole("button", { name: "연결" }));
+    expect(await connected()).toBeInTheDocument();
+    expect(api.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ pgLogins: { [ARN]: "iam_admin" } }));
+    expect(m.open).toHaveBeenLastCalledWith(pgTarget, "iam_admin");
+    expect(screen.queryByText(text)).not.toBeInTheDocument();
   });
 
   test("an expired SSO session asks for the login of the profile, and a login done by the app's manager connects again", async () => {
