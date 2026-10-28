@@ -44,6 +44,29 @@ fn the_role_view_has_the_summary_the_settings_the_members_and_the_set_role_only_
 }
 
 #[test]
+fn the_members_of_a_group_say_whether_each_membership_allows_set_role() {
+    let members = |scene: &Scene, group: &str| -> Vec<(String, bool, bool)> {
+        view_of(scene, group, &[], &[]).members.iter().map(|m| (m.role.clone(), m.inherit, m.set)).collect()
+    };
+
+    // PG16: bob의 부여는 SET을 껐고, carol의 부여는 상속을 끄고 SET만 켰다
+    let mut scene = app_scene(PG16);
+    scene.member_mut("bob", "app_read").set = Some(false);
+    scene.cluster.members.push(member_with("carol", "app_read", false, true));
+    assert_eq!(
+        members(&scene, "app_read"),
+        [("app_write".to_string(), true, true), ("bob".to_string(), false, false), ("carol".to_string(), false, true)]
+    );
+    // 같은 역할 상세의 `setRoleOnly`도 SET이 없는 관계로는 닿지 못한다고 말한다
+    assert!(view_of(&scene, "bob", &[], &[]).set_role_only.is_empty());
+    assert_eq!(view_of(&scene, "carol", &[], &[]).set_role_only, ["app_read"]);
+
+    // PG15 이하: SET 옵션이 없어서 구성원이면 늘 SET ROLE을 할 수 있다
+    let scene = app_scene(PG15);
+    assert_eq!(members(&scene, "app_read"), [("app_write".to_string(), true, true), ("bob".to_string(), false, true)]);
+}
+
+#[test]
 fn an_unknown_role_has_no_view() {
     let scene = app_scene(PG16);
     assert_eq!(role_view(&scene.cluster, &[], "nobody", now(), &[]), Err(AppError::other("알 수 없는 역할이에요: nobody")));

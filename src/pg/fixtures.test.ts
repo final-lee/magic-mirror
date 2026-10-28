@@ -221,7 +221,7 @@ describe("who-can", () => {
 
   test("bob has the privilege only through his own grant, because his membership in app_read does not inherit", () => {
     const row = whoCan.allowed.find((r) => r.role === "bob")!;
-    expect(roleOf("bob").memberOf).toEqual([{ group: "app_read", inherit: false, admin: false }]);
+    expect(roleOf("bob").memberOf).toEqual([{ group: "app_read", inherit: false, set: true, admin: false }]);
     expect(row.sources.map((s) => s.kind)).toEqual(["direct"]);
     expect(row.sources.some((s) => s.via.includes("app_read"))).toBe(false);
   });
@@ -302,14 +302,14 @@ describe("role view", () => {
       expect(view.members.length, name).toBe(roleOf(name).memberCount);
       for (const m of view.members) {
         const link = roleOf(m.role).memberOf.find((x) => x.group === name)!;
-        expect(m, name).toEqual({ role: m.role, inherit: link.inherit, admin: link.admin });
+        expect(m, name).toEqual({ role: m.role, inherit: link.inherit, set: link.set, admin: link.admin });
       }
     }
     expect(sampleRoleView("rds_superuser").members).toEqual([
-      { role: "iam_admin", inherit: true, admin: false },
-      { role: "postgres", inherit: true, admin: true },
+      { role: "iam_admin", inherit: true, set: true, admin: false },
+      { role: "postgres", inherit: true, set: true, admin: true },
     ]);
-    expect(sampleRoleView("app_read").members.find((m) => m.role === "bob")).toEqual({ role: "bob", inherit: false, admin: false });
+    expect(sampleRoleView("app_read").members.find((m) => m.role === "bob")).toEqual({ role: "bob", inherit: false, set: true, admin: false });
   });
 
   test("setRoleOnly is what a role reaches only through memberships that do not inherit", () => {

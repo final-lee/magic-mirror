@@ -73,6 +73,8 @@ pub struct PgMembership {
     pub group: String,
     /// 이 관계로 그룹의 권한을 쓰는가
     pub inherit: bool,
+    /// 이 관계로 그룹에 `SET ROLE`을 할 수 있는가. PG16부터 관계마다 SET 옵션이 있고, 그 전에는 늘 참이다
+    pub set: bool,
     pub admin: bool,
 }
 
@@ -368,7 +370,10 @@ pub struct PgRoleSetting {
 #[serde(rename_all = "camelCase")]
 pub struct PgRoleMember {
     pub role: String,
+    /// 이 관계로 구성원이 이 그룹의 권한을 쓰는가
     pub inherit: bool,
+    /// 이 관계로 구성원이 이 그룹에 `SET ROLE`을 할 수 있는가. PG16 전에는 늘 참이다
+    pub set: bool,
     pub admin: bool,
 }
 

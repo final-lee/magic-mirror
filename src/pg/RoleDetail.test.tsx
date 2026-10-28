@@ -251,10 +251,52 @@ describe("구성원", () => {
     expect(rowText(groupsList())).toEqual(["app_readSET ROLE로만 쓸 수 있음"]);
   });
 
+  test("a membership with neither INHERIT nor SET says it can be used neither way", async () => {
+    // PG16에서 CREATEROLE 사용자가 만든 역할의 자동 부여: INHERIT도 SET도 없다. "SET ROLE로만 쓸 수 있음"이라고 하면 틀린 말이다
+    const view = sampleRoleView("bob");
+    m.role.mockResolvedValue({ ...view, summary: { ...view.summary, memberOf: [{ group: "app_read", inherit: false, set: false, admin: true }] } });
+    setup("bob");
+    await openTab("구성원");
+    expect(rowText(groupsList())).toEqual(["app_read상속·SET ROLE 없음ADMIN OPTION"]);
+    expect(screen.queryByText("SET ROLE로만 쓸 수 있음")).not.toBeInTheDocument();
+  });
+
+  test("a membership that inherits is 상속 whether or not it allows SET ROLE", async () => {
+    const view = sampleRoleView("alice");
+    m.role.mockResolvedValue({
+      ...view,
+      summary: {
+        ...view.summary,
+        memberOf: [
+          { group: "app_read", inherit: true, set: false, admin: false },
+          { group: "app_write", inherit: true, set: true, admin: false },
+        ],
+      },
+    });
+    setup("alice");
+    await openTab("구성원");
+    expect(rowText(groupsList())).toEqual(["app_read상속", "app_write상속"]);
+  });
+
   test("an ADMIN OPTION is marked", async () => {
     setup("postgres");
     await openTab("구성원");
     expect(rowText(groupsList())).toEqual(["rds_superuser상속ADMIN OPTION"]);
+  });
+
+  test("the members of a group get the same three marks", async () => {
+    const view = sampleRoleView("app_read");
+    m.role.mockResolvedValue({
+      ...view,
+      members: [
+        { role: "app_write", inherit: true, set: true, admin: false },
+        { role: "bob", inherit: false, set: true, admin: false },
+        { role: "creator", inherit: false, set: false, admin: true },
+      ],
+    });
+    setup("app_read");
+    await openTab("구성원");
+    expect(rowText(membersList())).toEqual(["app_write상속", "bobSET ROLE로만 쓸 수 있음", "creator상속·SET ROLE 없음ADMIN OPTION"]);
   });
 
   test("the members of a group are listed with the same marks", async () => {

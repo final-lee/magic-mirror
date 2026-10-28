@@ -100,7 +100,7 @@ fn role_summary() -> PgRoleSummary {
             connection_limit: -1,
             valid_until: Some("2026-11-05T12:00:00Z".into()),
         },
-        member_of: vec![PgMembership { group: "rds_superuser".into(), inherit: true, admin: false }],
+        member_of: vec![PgMembership { group: "rds_superuser".into(), inherit: true, set: false, admin: false }],
         member_count: 0,
         session_count: 2,
         badges: vec![PgBadge { kind: PgBadgeKind::Admin, label: "관리자급".into(), level: PgBadgeLevel::High }],
@@ -117,7 +117,7 @@ fn role_summary_json() -> Value {
             "login": true, "createDb": false, "createRole": true, "inherit": true, "replication": false, "bypassRls": false,
             "connectionLimit": -1, "validUntil": "2026-11-05T12:00:00Z"
         },
-        "memberOf": [{ "group": "rds_superuser", "inherit": true, "admin": false }],
+        "memberOf": [{ "group": "rds_superuser", "inherit": true, "set": false, "admin": false }],
         "memberCount": 0,
         "sessionCount": 2,
         "badges": [{ "kind": "admin", "label": "관리자급", "level": "high" }],
@@ -330,7 +330,7 @@ fn the_role_view_serializes_to_the_contract() {
     let view = PgRoleView {
         summary: role_summary(),
         settings: vec![PgRoleSetting { database: None, setting: "search_path=app, public".into() }],
-        members: vec![PgRoleMember { role: "alice".into(), inherit: false, admin: true }],
+        members: vec![PgRoleMember { role: "alice".into(), inherit: false, set: true, admin: true }],
         databases: vec![
             PgRoleDatabase { database: "orders".into(), loaded: true, cells: vec![], owned: vec![PgObjectRef::schema("app")], owned_omitted: 4 },
             PgRoleDatabase { database: "analytics".into(), loaded: false, cells: vec![], owned: vec![], owned_omitted: 0 },
@@ -343,7 +343,7 @@ fn the_role_view_serializes_to_the_contract() {
         json!({
             "summary": role_summary_json(),
             "settings": [{ "database": null, "setting": "search_path=app, public" }],
-            "members": [{ "role": "alice", "inherit": false, "admin": true }],
+            "members": [{ "role": "alice", "inherit": false, "set": true, "admin": true }],
             "databases": [
                 {
                     "database": "orders", "loaded": true, "cells": [],

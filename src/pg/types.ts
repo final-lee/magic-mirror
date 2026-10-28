@@ -1,5 +1,5 @@
 // RDS PostgreSQL 사용자 관리 계약(docs/superpowers/specs/2026-10-28-rds-postgres-users-design.md "계약")과 1:1로 맞춘 타입.
-// Tauri 명령/JSON 모양은 백엔드와 같이 고정이다. 필드를 바꾸지 말고, 추가는 선택 필드로만 한다.
+// Tauri 명령/JSON 모양은 백엔드(src-tauri/src/pg/view.rs)와 같이 고정이다. 필드를 바꾸지 말고, 더할 때는 백엔드와 같은 변경에서 함께 더한다(view.rs의 시험이 JSON 모양을 지킨다).
 
 export type PgTargetKind = "cluster" | "instance";
 export interface PgTarget { profile: string; region: string; kind: PgTargetKind; id: string }
@@ -20,7 +20,7 @@ export interface PgAttributes {
   connectionLimit: number;       // -1 = 제한 없음
   validUntil: string | null;     // ISO 8601 UTC, null = 없음
 }
-export interface PgMembership { group: string; inherit: boolean; admin: boolean }
+export interface PgMembership { group: string; inherit: boolean; set: boolean; admin: boolean }  // set: 이 관계로 SET ROLE을 할 수 있다(PG16 전에는 늘 true)
 export interface PgRoleSummary {
   name: string; kind: PgRoleKind; system: boolean; attributes: PgAttributes;
   memberOf: PgMembership[]; memberCount: number; sessionCount: number;
@@ -72,7 +72,7 @@ export interface PgRoleDatabase { database: string; loaded: boolean; cells: PgSc
 export interface PgRoleView {
   summary: PgRoleSummary;
   settings: { database: string | null; setting: string }[];
-  members: { role: string; inherit: boolean; admin: boolean }[];
+  members: { role: string; inherit: boolean; set: boolean; admin: boolean }[];
   databases: PgRoleDatabase[];     // 모든 연결 가능한 데이터베이스. 아직 안 읽은 곳은 loaded=false, 나머지 비움
   sessions: PgSession[];
   setRoleOnly: string[];           // 상속하지 않는 구성원 관계로만 닿는 역할
