@@ -3,9 +3,11 @@ import { useEffect, useRef, useState } from "react";
 import { useSettings } from "../api/queries";
 import { useHistoryKeys } from "../lib/useHistoryKeys";
 import { useRouteHistory } from "../lib/useRouteHistory";
+import { DefaultPrivileges } from "./DefaultPrivileges";
 import { LoginPrompt } from "./LoginPrompt";
 import { PgError } from "./PgError";
 import { PgNav } from "./PgNav";
+import { PrivilegeGrid } from "./PrivilegeGrid";
 import { refreshPg, refreshPgData, usePgFindings, usePgOverview, usePgTarget } from "./queries";
 import { DEFAULT_KINDS } from "./RoleKinds";
 import { RoleDetail } from "./RoleDetail";
@@ -105,7 +107,7 @@ export function PgTab({ target, active, filter }: Props) {
   // 점검이 보이지 않는 동안의 새로 고침은, 이미 읽은 점검이면 표시와 무효화만 해 두었다가 다시 열 때 force로 읽는다(refreshPg). 한 번도 열지 않았으면 아무것도 하지 않는다.
   const findings = usePgFindings(target, !!ov && route.view === "findings");
   const [changing, setChanging] = useState(false);
-  // 역할 목록의 칩과 시스템 역할 토글, 고른 행. 상세를 보고 돌아와도 남는다.
+  // 역할 목록과 권한 표가 함께 쓰는 칩과 시스템 역할 토글, 역할 목록에서 고른 행. 상세를 보고 돌아와도 남는다.
   const [kinds, setKinds] = useState(DEFAULT_KINDS);
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
 
@@ -177,8 +179,20 @@ export function PgTab({ target, active, filter }: Props) {
               onSelect={setSelectedRole}
               onOpen={(name) => go(roleRoute(name))}
             />
+          ) : route.view === "privileges" ? (
+            <PrivilegeGrid
+              target={target}
+              overview={o}
+              database={route.database}
+              onDatabase={(database) => remember({ database })}
+              filter={filter}
+              kinds={kinds}
+              onKinds={setKinds}
+            />
+          ) : route.view === "defaults" ? (
+            <DefaultPrivileges target={target} overview={o} database={route.database} onDatabase={(database) => remember({ database })} />
           ) : (
-            // 점검, 권한, 기본 권한, 누가 할 수 있나, 세션은 다음 작업에서 이 자리에 들어온다
+            // 점검, 누가 할 수 있나, 세션은 다음 작업에서 이 자리에 들어온다
             <div className="empty">{PG_VIEW_LABEL[route.view]} 화면은 아직 준비 중이에요</div>
           )}
         </div>
