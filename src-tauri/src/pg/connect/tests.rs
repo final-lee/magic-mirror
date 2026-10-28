@@ -54,27 +54,45 @@ fn failing_config(why: &'static str) -> SdkConfig {
     SdkConfig::builder().region(Region::new("ap-northeast-2")).credentials_provider(SharedCredentialsProvider::new(Failing(why))).build()
 }
 
+const CERTIFICATE_UNVERIFIED: &str = "서버 인증서를 확인하지 못했어요";
+
 #[test]
 fn the_rds_bundle_loads() {
     // 읽지 못한 인증서가 조용히 빠지면 신뢰 저장소가 줄어든다: 번들의 인증서 블록 수와 읽은 수가 같아야 한다
     let blocks = String::from_utf8_lossy(RDS_BUNDLE).matches("-----BEGIN CERTIFICATE-----").count();
     assert!(blocks > 10, "번들에서 인증서 {blocks}개만 찾았어요");
-    let roots = rds_roots();
+    let roots = rds_roots().expect("앱에 넣은 번들은 읽혀야 해요");
     assert_eq!(roots.len(), blocks, "번들의 인증서 {blocks}개 중 {}개만 읽었어요", roots.len());
 }
 
 #[test]
-#[should_panic(expected = "읽을 수 없는 인증서")]
-fn a_bundle_with_an_unparsable_certificate_is_a_programming_error() {
-    // PEM으로는 맞지만 인증서(DER)가 아니다
-    roots_from(b"-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n");
+fn a_bundle_with_an_unparsable_certificate_is_refused() {
+    // PEM으로는 맞지만 인증서(DER)가 아니다. 패닉하지 않고 오류로 돌려준다
+    let roots = roots_from(b"-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n");
+    assert_eq!(roots.err(), Some(AppError::other(CERTIFICATE_UNVERIFIED)));
 }
 
 #[test]
-#[should_panic(expected = "읽을 수 없는 인증서")]
-fn a_bundle_with_broken_pem_is_a_programming_error() {
+fn a_bundle_with_broken_pem_is_refused() {
     // PEM 자체가 깨졌다. `add_parsable_certificates`에는 닿지 못하는 항목이라 따로 센다
-    roots_from(b"-----BEGIN CERTIFICATE-----\n!!!!\n-----END CERTIFICATE-----\n");
+    let roots = roots_from(b"-----BEGIN CERTIFICATE-----\n!!!!\n-----END CERTIFICATE-----\n");
+    assert_eq!(roots.err(), Some(AppError::other(CERTIFICATE_UNVERIFIED)));
+}
+
+#[test]
+fn a_bundle_is_never_used_partially() {
+    // 읽히는 인증서 뒤에 읽히지 않는 것이 하나라도 있으면 일부만 믿는 저장소로 이어 가지 않고 통째로 거절한다
+    let first_end = RDS_BUNDLE.windows(25).position(|w| w == b"-----END CERTIFICATE-----").expect("번들에 인증서가 있어야 해요") + 25;
+    for (case, broken) in [
+        ("DER이 아닌 항목", &b"\n-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"[..]),
+        ("깨진 PEM 항목", &b"\n-----BEGIN CERTIFICATE-----\n!!!!\n-----END CERTIFICATE-----\n"[..]),
+    ] {
+        let mut bundle = RDS_BUNDLE[..first_end].to_vec();
+        bundle.extend_from_slice(broken);
+        assert_eq!(roots_from(&bundle).err(), Some(AppError::other(CERTIFICATE_UNVERIFIED)), "{case}");
+        // 같은 앞부분만이면 읽힌다: 위의 거절은 뒤에 붙인 항목 때문이다
+        assert_eq!(roots_from(&bundle[..first_end]).map(|roots| roots.len()).ok(), Some(1), "{case}");
+    }
 }
 
 #[test]
@@ -156,6 +174,52 @@ fn unsafe_login_names_are_refused() {
     for (case, name) in UNSAFE_LOGINS {
         assert_eq!(check_login_name(name), Err(AppError::other(INVALID_LOGIN)), "{case}: {name:?}");
     }
+}
+
+const TOO_LONG_LOGIN: &str = "DB 사용자 이름은 63바이트까지 쓸 수 있어요";
+
+/// 한글 한 글자는 UTF-8로 3바이트다
+fn hangul(chars: usize) -> String {
+    "가".repeat(chars)
+}
+
+#[test]
+fn a_login_name_of_63_bytes_passes() {
+    // PostgreSQL의 식별자 한도는 글자 수가 아니라 바이트 수다. 63바이트를 이루는 서로 다른 방법들
+    for name in [hangul(21), format!("{}abc", hangul(20)), "a".repeat(63), format!("{}{}", hangul(10), "a".repeat(33))] {
+        assert_eq!(name.len(), 63, "{name}");
+        assert_eq!(check_login_name(&name), Ok(()), "{name}");
+    }
+}
+
+#[test]
+fn a_login_name_over_63_bytes_is_refused() {
+    // 한글 21자 + 영문 1자는 22글자지만 64바이트다. 글자 수로 세면 통과해 버린다
+    for name in [format!("{}a", hangul(21)), "a".repeat(64), hangul(22), format!("{}{}", hangul(10), "a".repeat(34))] {
+        assert!(name.len() >= 64, "{name}");
+        assert_eq!(check_login_name(&name), Err(AppError::other(TOO_LONG_LOGIN)), "{} bytes: {name}", name.len());
+    }
+    assert!(format!("{}a", hangul(21)).chars().count() < 63, "글자 수로는 한도 안인 이름이어야 해요");
+}
+
+#[test]
+fn the_length_is_checked_before_the_characters() {
+    // 길면서 공백도 든 이름은 "너무 길다"가 먼저다
+    let long_with_space = format!("{} {}", "a".repeat(40), "b".repeat(40));
+    assert_eq!(check_login_name(&long_with_space), Err(AppError::other(TOO_LONG_LOGIN)));
+    // 한도 안이면 공백 때문에 거절된다
+    assert_eq!(check_login_name("a b"), Err(AppError::other(INVALID_LOGIN)));
+}
+
+#[tokio::test]
+async fn a_login_name_that_is_too_long_is_refused_before_signing_or_dialing() {
+    let name = format!("{}a", hangul(21));
+    // 자격 증명이 없는 설정이다: 서명까지 갔다면 다른 오류가 났을 것이다
+    let no_credentials = SdkConfig::builder().region(Region::new("ap-northeast-2")).build();
+    assert_eq!(auth_token(&no_credentials, "db.example", 5432, &name).await, Err(AppError::other(TOO_LONG_LOGIN)));
+    // IAM 인증이 꺼진 대상이다: 이름 검사가 맨 앞이 아니면 IAM 문구가 나온다
+    let err = connect(&SdkConfig::builder().build(), &info_at(closed_port(), TargetKind::Cluster, false), &name, "app").await.err().unwrap();
+    assert_eq!(err, AppError::other(TOO_LONG_LOGIN));
 }
 
 #[tokio::test]
@@ -358,6 +422,8 @@ async fn open_connects_spawns_the_connection_and_reads_the_backend_pid() {
     assert_eq!(connected.backend_pid, FAKE_PID);
     assert!(!connected.client.is_closed());
     assert_eq!(server.plaintext_startups(), 1);
+    // 로그인 직후의 질의도 읽기 전용 트랜잭션 안에서 간다
+    assert_eq!(server.simple_queries(), ["START TRANSACTION READ ONLY", "SET LOCAL statement_timeout = '30s'", "COMMIT"]);
 }
 
 #[tokio::test]

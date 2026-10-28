@@ -18,6 +18,7 @@ use tokio_postgres::tls::{MakeTlsConnect, TlsConnect};
 use tokio_postgres::Socket;
 use tokio_postgres_rustls::MakeRustlsConnect;
 
+use super::catalog;
 use super::target::{PgTargetInfo, TargetKind};
 use crate::aws::context::credentials_error;
 use crate::error::AppError;
@@ -36,6 +37,8 @@ const RDS_BUNDLE: &[u8] = include_bytes!("../../certs/rds-global-bundle.pem");
 
 const IAM_OFF_CLUSTER: &str = "이 클러스터는 IAM 데이터베이스 인증이 꺼져 있어요. RDS 콘솔에서 수정해 켠 뒤 다시 열어 주세요";
 const IAM_OFF_INSTANCE: &str = "이 인스턴스는 IAM 데이터베이스 인증이 꺼져 있어요. RDS 콘솔에서 수정해 켠 뒤 다시 열어 주세요";
+/// 서버 인증서를 믿을 수 없을 때의 문구: TLS 검증이 실패했을 때, 그리고 앱에 넣은 CA 번들을 읽지 못했을 때
+const CERTIFICATE_UNVERIFIED: &str = "서버 인증서를 확인하지 못했어요";
 
 /// 연결 하나. 질의는 `&mut Connected`를 받아 읽기 전용 트랜잭션을 연다.
 pub struct Connected {
@@ -68,7 +71,7 @@ pub fn describe_failure(f: &ConnFailure, c: &ConnCtx) -> AppError {
         ConnFailure::Timeout | ConnFailure::Io(_) => AppError::Network {
             message: format!("엔드포인트에 연결하지 못했어요({}:{}). VPN이 켜져 있는지 확인하세요", c.host, c.port),
         },
-        ConnFailure::Tls(_) => AppError::other("서버 인증서를 확인하지 못했어요"),
+        ConnFailure::Tls(_) => AppError::other(CERTIFICATE_UNVERIFIED),
         ConnFailure::Auth => AppError::other(format!(
             "IAM 인증에 실패했어요. 프로필에 rds-db:connect 권한이 있는지, DB 사용자 {}에게 rds_iam이 있는지 확인하세요",
             c.user
@@ -139,29 +142,39 @@ pub fn connect_check(info: &PgTargetInfo) -> Result<(), AppError> {
 }
 
 /// 번들에 든 RDS CA들. 번들은 앱에 들어 있는 고정된 파일이고 모든 인증서가 읽혀야 한다(테스트가 지킨다).
-pub fn rds_roots() -> RootCertStore {
+/// 읽을 수 없는 항목이 있으면 오류다: 일부만 믿는 저장소로 이어 가지 않는다.
+pub fn rds_roots() -> Result<RootCertStore, AppError> {
     roots_from(RDS_BUNDLE)
 }
 
-/// PEM 번들에서 신뢰할 CA를 읽는다. 읽을 수 없는 항목이 하나라도 있으면 번들이 깨진 것이므로 패닉한다(프로그래밍 오류).
+/// PEM 번들에서 신뢰할 CA를 읽는다. 읽을 수 없는 항목이 하나라도 있으면 번들이 깨진 것이므로 오류를 돌려준다(패닉하지 않는다).
 /// 일부만 읽은 신뢰 저장소로 조용히 이어 가지 않으려는 것이다. 앱에 넣은 번들은 정해져 있고 테스트가 읽어 보므로 실행 중에는 일어나지 않는다.
 /// `add_parsable_certificates`는 PEM으로는 맞는데 인증서가 아닌 항목만 세므로, PEM 자체가 깨진 항목은 따로 센다.
-fn roots_from(bundle: &[u8]) -> RootCertStore {
+fn roots_from(bundle: &[u8]) -> Result<RootCertStore, AppError> {
     let entries: Vec<_> = CertificateDer::pem_slice_iter(bundle).collect();
     let broken_pem = entries.iter().filter(|entry| entry.is_err()).count();
     let mut roots = RootCertStore::empty();
     let (_loaded, broken_certificates) = roots.add_parsable_certificates(entries.into_iter().flatten());
-    assert_eq!(broken_pem + broken_certificates, 0, "RDS CA 번들에 읽을 수 없는 인증서가 있어요");
-    roots
+    if broken_pem + broken_certificates > 0 {
+        return Err(AppError::other(CERTIFICATE_UNVERIFIED));
+    }
+    Ok(roots)
 }
 
 const INVALID_LOGIN_NAME: &str = "DB 사용자 이름이 올바르지 않아요. 공백이나 \" < > # & % + 같은 문자는 쓸 수 없어요";
+const LOGIN_NAME_TOO_LONG: &str = "DB 사용자 이름은 63바이트까지 쓸 수 있어요";
+/// PostgreSQL의 식별자 한도(`NAMEDATALEN - 1`). 글자 수가 아니라 바이트 수다
+const MAX_LOGIN_NAME_BYTES: usize = 63;
 
 /// 로그인 이름이 토큰을 서명해도 되는 이름인지 본다. 이름은 입력창의 자유 텍스트다.
+/// 먼저 길이를 본다: 서버는 63바이트를 넘는 이름을 잘라서 읽으므로, 긴 이름으로 서명한 토큰은 잘린 이름과 맞지 않아 로그인이 엉뚱한 이유로 실패한다.
 /// SDK의 토큰 서명기는 이름을 URL 쿼리에 그대로 붙인다. 공백·제어 문자·`"`·`<`·`>`는 URL로 읽히지 않아 서명기가 패닉하고
 /// (명령 작업이 패닉하면 호출이 끝나지 않는다), `#`·`&`·`%`·`+`는 다른 이름으로 서명되어 로그인이 엉뚱한 이유로 실패한다.
 /// 서명이나 접속보다 먼저 불러야 한다.
 pub fn check_login_name(user: &str) -> Result<(), AppError> {
+    if user.len() > MAX_LOGIN_NAME_BYTES {
+        return Err(AppError::other(LOGIN_NAME_TOO_LONG));
+    }
     let unsafe_char = |c: char| c.is_whitespace() || c.is_control() || matches!(c, '"' | '<' | '>' | '#' | '&' | '%' | '+');
     if user.is_empty() || user.chars().any(unsafe_char) {
         return Err(AppError::other(INVALID_LOGIN_NAME));
@@ -171,7 +184,7 @@ pub fn check_login_name(user: &str) -> Result<(), AppError> {
 
 /// 접속에 쓰는 TLS 설정: RDS CA만 믿고, 서버 인증서와 호스트 이름을 검증한다.
 fn tls_config() -> Result<ClientConfig, AppError> {
-    tls_config_with(rds_roots())
+    tls_config_with(rds_roots()?)
 }
 
 /// 믿을 CA를 받는 꼴. 검증은 그대로 켜져 있고, 테스트가 자기 CA로 TLS 연결 전체를 시험하려고 나눴다.
@@ -246,14 +259,13 @@ where
     <T::TlsConnect as TlsConnect<Socket>>::Future: Send,
 {
     let attempt = async {
-        let (client, connection) = config.connect(tls).await.map_err(|e| failure_of(&e))?;
+        let (mut client, connection) = config.connect(tls).await.map_err(|e| failure_of(&e))?;
         tokio::spawn(async move {
             // 클라이언트를 놓거나 서버가 닫으면 끝난다. 끝난 연결은 `client.is_closed()`로 알 수 있고, 오류는 다음 질의가 받는다
             let _ = connection.await;
         });
-        // 임시: PB2에서 `catalog.rs`로 옮긴다. 질의와 트랜잭션은 거기에만 둔다
-        let row = client.query_one("SELECT pg_backend_pid()", &[]).await.map_err(|e| failure_of(&e))?;
-        let backend_pid: i32 = row.try_get(0).map_err(|e| failure_of(&e))?;
+        // 질의와 트랜잭션은 `catalog`에만 둔다. 서버 쪽 pid도 거기서 읽기 전용 트랜잭션으로 읽는다
+        let backend_pid = catalog::backend_pid(&mut client).await.map_err(|e| failure_of(&e))?;
         Ok(Connected { client, backend_pid })
     };
     tokio::time::timeout(limit, attempt).await.unwrap_or(Err(ConnFailure::Timeout))
