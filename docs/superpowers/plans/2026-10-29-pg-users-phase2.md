@@ -109,6 +109,8 @@
     - Reserved name: "이 이름은 PostgreSQL이 예약해 둬서 쓸 수 없어요"
     - Name taken: `이미 있는 역할이에요: ${name}`
     - Unknown role: `역할을 찾을 수 없어요: ${role}`
+    - Empty privilege list: "권한을 하나 이상 골라야 해요"
+    - A grant change with no items: "바꿀 객체가 없어요"
     - A role named PUBLIC: "PUBLIC이라는 이름의 역할은 이 앱에서 바꿀 수 없어요"
     - Password commands restricted: "비밀번호나 만료일을 바꾸려면 로그인한 역할이 rds_password 구성원이어야 해요(rds.restrict_password_commands가 켜져 있어요)"
     - Execution database: `이 데이터베이스에서는 바꿀 수 없어요: ${database}`
