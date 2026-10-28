@@ -21,16 +21,20 @@ function useDebounced<T>(value: T, ms: number): T {
 
 interface Props {
   profile: string;
-  /** 정책을 붙일 사용자·그룹·역할의 이름(안내 문구에 쓴다) */
-  targetName: string;
+  /** 정책을 붙일 사용자·그룹·역할의 이름. 있으면 제목 아래에 대상을 알리는 안내를 보여 준다 */
+  targetName?: string;
+  /** 창 제목. 기본은 "정책 붙이기" */
+  title?: string;
   /** 이미 붙어 있는 정책 ARN. 목록에는 보이지만 고를 수 없다 */
   attachedArns: string[];
+  /** 고를 수 없는 정책 옆에 보이는 이유. 기본은 "이미 붙어 있어요" */
+  disabledReason?: string;
   onPick: (policy: PolicyRef) => void;
   onClose: () => void;
 }
 
 /** 정책 붙이기 선택 창. 이름 일부를 입력하면 고객 관리형·AWS 관리형 정책에서 찾는다. */
-export function PolicyPicker({ profile, targetName, attachedArns, onPick, onClose }: Props) {
+export function PolicyPicker({ profile, targetName, title = "정책 붙이기", attachedArns, disabledReason = "이미 붙어 있어요", onPick, onClose }: Props) {
   const [query, setQuery] = useState("");
   const term = useDebounced(query.trim(), SEARCH_DELAY_MS);
   const q = usePolicyRefs(profile, term);
@@ -49,9 +53,9 @@ export function PolicyPicker({ profile, targetName, attachedArns, onPick, onClos
         </>
       ),
       detail: p.description,
-      disabledReason: attached.has(p.arn) ? "이미 붙어 있어요" : undefined,
+      disabledReason: attached.has(p.arn) ? disabledReason : undefined,
     }));
-  }, [refs, attachedArns]);
+  }, [refs, attachedArns, disabledReason]);
 
   const status = q.isError ? (
     <ErrorState compact error={q.error} profile={profile} onRetry={() => void q.refetch()} />
@@ -61,8 +65,8 @@ export function PolicyPicker({ profile, targetName, attachedArns, onPick, onClos
 
   return (
     <PickerSheet
-      title="정책 붙이기"
-      intro={`붙일 정책을 고르세요 (대상: ${targetName})`}
+      title={title}
+      intro={targetName === undefined ? undefined : `붙일 정책을 고르세요 (대상: ${targetName})`}
       searchLabel="정책 검색"
       placeholder="정책 이름으로 찾기"
       query={query}

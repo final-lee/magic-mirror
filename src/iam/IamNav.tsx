@@ -7,6 +7,7 @@ const ITEMS: { view: IamView; icon: string; label: string; gap?: boolean }[] = [
   { view: "groups", icon: "👥", label: "그룹" },
   { view: "roles", icon: "🎭", label: "역할" },
   { view: "policies", icon: "📜", label: "정책" },
+  { view: "assignments", icon: "🧩", label: "할당" },
   { view: "whoCan", icon: "🔎", label: "누가 할 수 있나", gap: true },
   { view: "log", icon: "🕘", label: "변경 기록" },
 ];

@@ -1,6 +1,6 @@
 import type { AccessLevel, IamOverview, PrincipalKind } from "./types";
 
-export type IamView = "findings" | "users" | "groups" | "roles" | "policies" | "whoCan" | "log";
+export type IamView = "findings" | "users" | "groups" | "roles" | "policies" | "assignments" | "whoCan" | "log";
 
 /** 권한 표에서 고른 칸 */
 export interface MatrixCell {
@@ -37,6 +37,7 @@ export const VIEW_LABEL: Record<IamView, string> = {
   groups: "그룹",
   roles: "역할",
   policies: "정책",
+  assignments: "할당",
   whoCan: "누가 할 수 있나",
   log: "변경 기록",
 };
