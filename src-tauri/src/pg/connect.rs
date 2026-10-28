@@ -46,6 +46,9 @@ const CERTIFICATE_UNVERIFIED: &str = "서버 인증서를 확인하지 못했어
 pub struct Connected {
     pub(in crate::pg) client: tokio_postgres::Client,
     pub backend_pid: i32,
+    /// 읽다가 응답이 끊겨 더 쓰지 않기로 한 연결이다(`catalog::read`가 정한다). 서버가 연결을 닫지 않았으면 `client.is_closed()`는 계속 false라서,
+    /// 연결 보관함은 이 표시로 이 연결을 버리고 다음에 새로 연결한다
+    pub(in crate::pg) broken: bool,
 }
 
 /// 접속이 실패한 이유. 사용자 문구는 `describe_failure`가 정한다.
@@ -268,7 +271,7 @@ where
         });
         // 질의와 트랜잭션은 `catalog`에만 둔다. 서버 쪽 pid도 거기서 읽기 전용 트랜잭션으로 읽는다
         let backend_pid = catalog::backend_pid(&mut client).await.map_err(|e| failure_of(&e))?;
-        Ok(Connected { client, backend_pid })
+        Ok(Connected { client, backend_pid, broken: false })
     };
     tokio::time::timeout(limit, attempt).await.unwrap_or(Err(ConnFailure::Timeout))
 }

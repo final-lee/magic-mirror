@@ -87,7 +87,7 @@ async fn connect_to(config: &Config) -> Client {
 async fn connected(config: &Config) -> Connected {
     let mut client = connect_to(config).await;
     let backend_pid = catalog::backend_pid(&mut client).await.expect("서버 쪽 pid를 읽지 못했어요");
-    Connected { client, backend_pid }
+    Connected { client, backend_pid, broken: false }
 }
 
 /// 한 시험의 장면: 심어 둔 데이터베이스와, superuser로 거기에 붙는 설정

@@ -421,6 +421,7 @@ async fn open_connects_spawns_the_connection_and_reads_the_backend_pid() {
     let connected = open(&plain_config(server.port), NoTls, Duration::from_secs(5)).await.expect("연결해야 해요");
     assert_eq!(connected.backend_pid, FAKE_PID);
     assert!(!connected.client.is_closed());
+    assert!(!connected.broken, "새 연결은 끊긴 것으로 표시되지 않아요");
     assert_eq!(server.plaintext_startups(), 1);
     // 로그인 직후의 질의도 읽기 전용 트랜잭션 안에서 간다
     assert_eq!(
