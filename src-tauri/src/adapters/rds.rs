@@ -89,6 +89,7 @@ fn db_instance(d: &DbInstance, region: &str) -> Resource {
         .value("class", s(d.db_instance_class()))
         .value("status", s(d.db_instance_status()))
         .value("endpoint", s(d.endpoint().and_then(|e| e.address())))
+        .value("cluster", s(d.db_cluster_identifier()))
         .field("Engine version", s(d.engine_version()))
         .field("Multi-AZ", opt(d.multi_az()))
         .field("Storage (GiB)", opt(d.allocated_storage()))
@@ -133,13 +134,22 @@ mod tests {
             .db_instance_status("available")
             .endpoint(Endpoint::builder().address("orders-db.abc.rds.amazonaws.com").build())
             .db_instance_arn("arn:aws:rds:r:1:db:orders-db")
+            .db_cluster_identifier("orders-cluster")
             .tag_list(Tag::builder().key("env").value("prod").build())
             .build();
         let r = db_instance(&d, "ap-northeast-2");
         assert_eq!(r.values["status"], "available");
         assert_eq!(r.values["endpoint"], "orders-db.abc.rds.amazonaws.com");
+        // PostgreSQL 탭이 Aurora 인스턴스를 그 클러스터의 탭으로 열 때 읽는다
+        assert_eq!(r.values["cluster"], "orders-cluster");
         assert_eq!(r.tags["env"], "prod");
         assert!(r.console_url.unwrap().contains("is-cluster=false"));
+    }
+
+    #[test]
+    fn a_standalone_db_instance_has_an_empty_cluster_value() {
+        let d = DbInstance::builder().db_instance_identifier("orders-db").engine("postgres").build();
+        assert_eq!(db_instance(&d, "ap-northeast-2").values["cluster"], "");
     }
 
     #[test]
