@@ -1,4 +1,5 @@
-//! 테스트용 가짜 PostgreSQL 서버. 로컬 주소에만 열고, 시작 메시지와 `SELECT pg_backend_pid()` 하나만 흉내 낸다.
+//! 테스트용 가짜 PostgreSQL 서버. 로컬 주소에만 열고, 시작 메시지와 `SELECT pg_backend_pid()` 하나, 그리고 트랜잭션을 여닫는 단순 질의만 흉내 낸다.
+//! 단순 질의는 아무 문장이나 받아 주고 받은 문장을 적어 둔다(`simple_queries`): 읽기가 어떤 문장을 어떤 순서로 보내는지 본다.
 //! 진짜 `tokio_postgres::Client`와 진짜 접속 오류를 네트워크 없이 얻는 데 쓴다. 이 파일은 질의를 보내지 않고 서버 쪽 바이트만 다룬다.
 //! TLS를 받는 서버도 만들 수 있다: `TestPki`가 그때그때 테스트 CA와 서버 인증서를 만든다(비밀 키를 저장소에 두지 않는다).
 
@@ -28,8 +29,12 @@ const SSL_REQUEST: u32 = 80_877_103;
 /// 클라이언트에게 어떻게 구는지
 #[derive(Clone, Copy)]
 pub enum Script {
-    /// 시작 메시지를 받아들이고 질의(`SELECT pg_backend_pid()`)에 답한다. 연결은 클라이언트가 닫거나 `close_connections`가 불릴 때까지 열려 있다
+    /// 시작 메시지를 받아들이고 질의(`SELECT pg_backend_pid()`)에 답한다. 단순 질의(`START TRANSACTION …`, `SET …`, `COMMIT`)는 아무것이나 받아 준다.
+    /// 연결은 클라이언트가 닫거나 `close_connections`가 불릴 때까지 열려 있다
     Ready,
+    /// `Ready`처럼 굴되, 확장 질의(준비 단계)마다 연결을 끊지 않는 오류(`ERROR`)로 답한다. 단순 질의는 받아 준다.
+    /// 읽기 도중에 서버가 보낸 오류와, 그 뒤에도 연결이 쓸 수 있는지를 본다
+    RejectsQueries { code: &'static str, message: &'static str },
     /// `Ready`처럼 굴되, 먼저 비밀번호(평문)를 요구하고 받은 값을 적어 둔다. IAM 토큰이 비밀번호로 가는지 본다
     AskPassword,
     /// 시작 메시지는 받아들이지만 그 뒤의 질의에는 답하지 않는다
@@ -55,6 +60,8 @@ struct Seen {
     /// 받은 시작 메시지의 매개변수(`user`, `database`, `application_name` …). 평문과 TLS 모두
     startups: Mutex<Vec<HashMap<String, String>>>,
     passwords: Mutex<Vec<String>>,
+    /// 받은 단순 질의(`Query` 메시지)의 문장, 받은 순서대로
+    queries: Mutex<Vec<String>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -158,6 +165,11 @@ impl FakeServer {
         lock(&self.seen.passwords).clone()
     }
 
+    /// 지금까지 받은 단순 질의의 문장들(받은 순서). 트랜잭션을 여닫는 문장이 여기에 보인다
+    pub fn simple_queries(&self) -> Vec<String> {
+        lock(&self.seen.queries).clone()
+    }
+
     /// 지금 열려 있는 연결을 모두 서버 쪽에서 닫는다. 그 뒤에 오는 연결은 영향이 없다
     pub fn close_connections(&self) {
         self.closing.send_modify(|generation| *generation += 1);
@@ -193,7 +205,7 @@ pub fn closed_port() -> u16 {
 
 async fn serve(mut stream: TcpStream, script: Script, tls: Option<TlsAcceptor>, seen: Arc<Seen>, closing: watch::Receiver<u64>) {
     if matches!(script, Script::Silent) {
-        return session(stream, closing, false).await;
+        return session(stream, closing, false, script, &seen).await;
     }
     let Ok((first, mut params)) = read_startup(&mut stream).await else { return };
     if first == SSL_REQUEST {
@@ -202,7 +214,7 @@ async fn serve(mut stream: TcpStream, script: Script, tls: Option<TlsAcceptor>, 
                 if stream.write_all(b"S").await.is_err() || stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await.is_err() {
                     return;
                 }
-                return session(stream, closing, false).await;
+                return session(stream, closing, false, script, &seen).await;
             }
             (Script::TlsThenHangUp, _) => {
                 // 'S'만 보내고 끊는다: 클라이언트가 보낸 ClientHello에 답하지 않고 연결이 닫힌다
@@ -217,7 +229,7 @@ async fn serve(mut stream: TcpStream, script: Script, tls: Option<TlsAcceptor>, 
                 if let Ok(Ok(_)) = tokio::time::timeout(Duration::from_millis(300), read_startup(&mut stream)).await {
                     seen.plaintext_startups.fetch_add(1, Ordering::SeqCst);
                 }
-                return session(stream, closing, false).await;
+                return session(stream, closing, false, script, &seen).await;
             }
             (_, Some(acceptor)) => {
                 if stream.write_all(b"S").await.is_err() {
@@ -250,8 +262,8 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     if let Script::Fatal { code, message } = script {
-        if stream.write_all(&error_response(code, message)).await.is_ok() {
-            session(stream, closing, false).await;
+        if stream.write_all(&error_response("FATAL", code, message)).await.is_ok() {
+            session(stream, closing, false, script, seen).await;
         }
         return;
     }
@@ -268,7 +280,7 @@ where
     hello.extend(message(b'K', &[FAKE_PID.to_be_bytes(), 7i32.to_be_bytes()].concat()));
     hello.extend(message(b'Z', b"I"));
     if stream.write_all(&hello).await.is_ok() {
-        session(stream, closing, !matches!(script, Script::MuteAfterStartup)).await;
+        session(stream, closing, !matches!(script, Script::MuteAfterStartup), script, seen).await;
     }
 }
 
@@ -305,9 +317,9 @@ where
     Ok((tag, body))
 }
 
-/// 연결을 열어 둔다. `answer`면 `SELECT pg_backend_pid()`의 확장 질의 흐름에 답하고, 아니면 들어오는 바이트를 버린다.
+/// 연결을 열어 둔다. `answer`면 `SELECT pg_backend_pid()`의 확장 질의 흐름과 단순 질의에 답하고, 아니면 들어오는 바이트를 버린다.
 /// 클라이언트가 닫거나 `close_connections`가 불리면 끝나고, 그때 연결이 닫힌다
-async fn session<S>(mut stream: S, mut closing: watch::Receiver<u64>, answer: bool)
+async fn session<S>(mut stream: S, mut closing: watch::Receiver<u64>, answer: bool, script: Script, seen: &Seen)
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -322,14 +334,37 @@ where
     }
     // 다음 Sync까지 받은 메시지에 대한 답
     let mut pending: Vec<u8> = Vec::new();
+    // 확장 질의가 오류가 나면 서버는 다음 Sync까지 오는 메시지를 버린다
+    let mut failed = false;
     loop {
         tokio::select! {
             _ = closing.changed() => return,
             received = read_message(&mut stream) => {
                 let Ok((tag, body)) = received else { return };
+                if failed && !matches!(tag, b'S' | b'X') {
+                    continue;
+                }
                 match tag {
                     b'X' => return,
-                    b'P' => pending.extend(message(b'1', &[])),
+                    b'Q' => {
+                        // 단순 질의: 문장을 적어 두고 바로 끝났다고 답한다. 명령 태그는 문장의 첫 낱말이면 된다
+                        let sql = String::from_utf8_lossy(body.strip_suffix(&[0]).unwrap_or(&body)).into_owned();
+                        let command = sql.split_whitespace().next().unwrap_or_default().to_uppercase();
+                        lock(&seen.queries).push(sql);
+                        let mut reply = message(b'C', format!("{command}\0").as_bytes());
+                        reply.extend(message(b'Z', b"I"));
+                        if stream.write_all(&reply).await.is_err() {
+                            return;
+                        }
+                    }
+                    b'P' => match script {
+                        Script::RejectsQueries { code, message: text } => {
+                            pending.clear();
+                            pending.extend(error_response("ERROR", code, text));
+                            failed = true;
+                        }
+                        _ => pending.extend(message(b'1', &[])),
+                    },
                     b'D' => {
                         if body.first() == Some(&b'S') {
                             pending.extend(message(b't', &0u16.to_be_bytes()));
@@ -348,6 +383,7 @@ where
                             return;
                         }
                         pending.clear();
+                        failed = false;
                     }
                     _ => {}
                 }
@@ -376,10 +412,10 @@ fn row_description() -> Vec<u8> {
     message(b'T', &body)
 }
 
-/// `ErrorResponse`: 심각도, 오류 코드, 문구
-fn error_response(code: &str, text: &str) -> Vec<u8> {
+/// `ErrorResponse`: 심각도(`FATAL`이면 서버가 연결을 끊는 오류, `ERROR`면 이어 쓸 수 있는 오류), 오류 코드, 문구
+fn error_response(severity: &str, code: &str, text: &str) -> Vec<u8> {
     let mut body = Vec::new();
-    for (field, value) in [(b'S', "FATAL"), (b'V', "FATAL"), (b'C', code), (b'M', text)] {
+    for (field, value) in [(b'S', severity), (b'V', severity), (b'C', code), (b'M', text)] {
         body.push(field);
         body.extend_from_slice(value.as_bytes());
         body.push(0);
