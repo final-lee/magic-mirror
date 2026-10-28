@@ -56,8 +56,25 @@ fn failing_config(why: &'static str) -> SdkConfig {
 
 #[test]
 fn the_rds_bundle_loads() {
+    // 읽지 못한 인증서가 조용히 빠지면 신뢰 저장소가 줄어든다: 번들의 인증서 블록 수와 읽은 수가 같아야 한다
+    let blocks = String::from_utf8_lossy(RDS_BUNDLE).matches("-----BEGIN CERTIFICATE-----").count();
+    assert!(blocks > 10, "번들에서 인증서 {blocks}개만 찾았어요");
     let roots = rds_roots();
-    assert!(roots.len() > 10, "{}개만 읽었어요", roots.len());
+    assert_eq!(roots.len(), blocks, "번들의 인증서 {blocks}개 중 {}개만 읽었어요", roots.len());
+}
+
+#[test]
+#[should_panic(expected = "읽을 수 없는 인증서")]
+fn a_bundle_with_an_unparsable_certificate_is_a_programming_error() {
+    // PEM으로는 맞지만 인증서(DER)가 아니다
+    roots_from(b"-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n");
+}
+
+#[test]
+#[should_panic(expected = "읽을 수 없는 인증서")]
+fn a_bundle_with_broken_pem_is_a_programming_error() {
+    // PEM 자체가 깨졌다. `add_parsable_certificates`에는 닿지 못하는 항목이라 따로 센다
+    roots_from(b"-----BEGIN CERTIFICATE-----\n!!!!\n-----END CERTIFICATE-----\n");
 }
 
 #[test]
@@ -100,6 +117,66 @@ fn iam_off_is_reported_without_connecting() {
     );
     assert_eq!(connect_check(&info_at(5432, TargetKind::Cluster, true)), Ok(()));
     assert_eq!(connect_check(&info_at(5432, TargetKind::Instance, true)), Ok(()));
+}
+
+const INVALID_LOGIN: &str = "DB 사용자 이름이 올바르지 않아요. 공백이나 \" < > # & % + 같은 문자는 쓸 수 없어요";
+
+/// 거절해야 하는 로그인 이름과 그 이유. SDK의 토큰 서명기는 앞의 다섯 종류(공백, 제어 문자, `"`, `<`, `>`)에서 패닉하고,
+/// `#`·`&`·`%`·`+`는 다른 이름으로 서명한다
+const UNSAFE_LOGINS: [(&str, &str); 18] = [
+    ("빈 이름", ""),
+    ("뒤 공백", "iam_admin "),
+    ("앞 공백", " iam_admin"),
+    ("가운데 공백", "iam admin"),
+    ("전각 공백", "iam\u{3000}admin"),
+    ("줄 바꿈", "iam_admin\n"),
+    ("탭", "iam_admin\t"),
+    ("NUL", "iam\u{0}admin"),
+    ("DEL", "iam\u{7f}admin"),
+    ("C1 제어 문자", "iam\u{9b}admin"),
+    ("큰따옴표", "a\"b"),
+    ("작다", "a<b"),
+    ("크다", "a>b"),
+    ("샵", "a#b"),
+    ("앰퍼샌드", "a&b"),
+    ("퍼센트", "a%b"),
+    ("플러스", "a+b"),
+    ("공백만", "   "),
+];
+
+#[test]
+fn ordinary_login_names_pass() {
+    for name in ["iam_admin", "관리자", "IAM-Admin.01", "user@corp", "a_b"] {
+        assert_eq!(check_login_name(name), Ok(()), "{name}");
+    }
+}
+
+#[test]
+fn unsafe_login_names_are_refused() {
+    for (case, name) in UNSAFE_LOGINS {
+        assert_eq!(check_login_name(name), Err(AppError::other(INVALID_LOGIN)), "{case}: {name:?}");
+    }
+}
+
+#[tokio::test]
+async fn auth_token_refuses_an_unsafe_login_name_instead_of_panicking() {
+    // 토큰 서명기는 `"iam_admin "`처럼 URL에 못 쓰는 이름에서 패닉한다. 서명하기 전에 걸러야 한다
+    let cfg = static_config().await;
+    for (case, name) in UNSAFE_LOGINS {
+        assert_eq!(auth_token(&cfg, "db.example", 5432, name).await, Err(AppError::other(INVALID_LOGIN)), "{case}: {name:?}");
+    }
+}
+
+#[tokio::test]
+async fn the_login_name_is_checked_before_credentials_are_looked_at() {
+    let no_credentials = SdkConfig::builder().region(Region::new("ap-northeast-2")).build();
+    assert_eq!(auth_token(&no_credentials, "db.example", 5432, "iam_admin ").await, Err(AppError::other(INVALID_LOGIN)));
+}
+
+#[tokio::test]
+async fn auth_token_signs_names_that_are_not_ascii() {
+    let token = auth_token(&static_config().await, "db.example", 5432, "관리자").await.unwrap();
+    assert!(token.starts_with("db.example:5432/?Action=connect&DBUser="), "토큰이 만들어졌어야 해요");
 }
 
 #[tokio::test]
@@ -213,6 +290,22 @@ async fn a_tls_failure_is_found_even_though_io_error_hides_its_source() {
     assert!(matches!(failure_of(&err), ConnFailure::Tls(_)), "{err:?} → {:?}", failure_of(&err));
 }
 
+#[tokio::test]
+async fn a_server_that_declines_tls_is_a_tls_failure() {
+    // tokio-postgres는 'N' 답을 "error performing TLS handshake"라는 TLS 종류의 오류로 올린다. 원인은 rustls도 io도 아니다
+    let err = tls_error(Script::DeclinesTls).await;
+    assert!(err.to_string().starts_with("error performing TLS handshake"), "{err}");
+    assert!(matches!(failure_of(&err), ConnFailure::Tls(_)), "{err:?} → {:?}", failure_of(&err));
+}
+
+#[tokio::test]
+async fn a_connection_lost_during_the_tls_handshake_is_still_a_network_failure() {
+    // 같은 "TLS 협상 오류"라도 원인이 io 오류(연결이 끊김)면 VPN 문제다. 인증서 문구로 바꾸면 안 된다
+    let err = tls_error(Script::TlsThenHangUp).await;
+    assert!(err.to_string().starts_with("error performing TLS handshake"), "{err}");
+    assert!(matches!(failure_of(&err), ConnFailure::Io(_)), "{err:?} → {:?}", failure_of(&err));
+}
+
 #[test]
 fn the_tls_config_does_not_need_a_process_default_crypto_provider() {
     // 이 빌드에는 ring과 aws-lc-rs가 둘 다 들어 있어서 기본 공급자를 고를 수 없다. 공급자를 직접 넘겨야 패닉이 나지 않는다
@@ -292,6 +385,16 @@ async fn connect_checks_iam_auth_before_it_signs_or_dials() {
 }
 
 #[tokio::test]
+async fn connect_refuses_an_unsafe_login_name_before_anything_else() {
+    // IAM 인증이 꺼져 있고 자격 증명도 없는 설정이다. 이름 검사가 맨 앞이 아니면 다른 오류가 나온다
+    let cfg = SdkConfig::builder().build();
+    for (case, name) in UNSAFE_LOGINS {
+        let err = connect(&cfg, &info_at(closed_port(), TargetKind::Cluster, false), name, "app").await.err().unwrap();
+        assert_eq!(err, AppError::other(INVALID_LOGIN), "{case}: {name:?}");
+    }
+}
+
+#[tokio::test]
 async fn connect_reports_an_unreachable_endpoint_as_a_network_error() {
     let port = closed_port();
     let err = connect(&static_config().await, &info_at(port, TargetKind::Cluster, true), "iam_admin", "app").await.err().unwrap();
@@ -309,7 +412,7 @@ async fn connect_refuses_a_server_whose_tls_cannot_be_verified() {
 async fn connect_does_not_fall_back_to_plaintext_when_the_server_declines_tls() {
     let server = FakeServer::start(Script::DeclinesTls).await;
     let err = connect(&static_config().await, &info_at(server.port, TargetKind::Cluster, true), "iam_admin", "app").await.err().expect("TLS 없이는 연결하면 안 돼요");
-    assert!(matches!(err, AppError::Network { .. }), "{err:?}");
+    assert_eq!(err, AppError::other("서버 인증서를 확인하지 못했어요"));
     // 가짜 서버는 'N'을 보낸 뒤 평문 시작 메시지가 오는지 잠시 기다린다. 그 창이 지나도록 아무것도 오지 않아야 한다
     tokio::time::sleep(Duration::from_millis(400)).await;
     assert_eq!(server.plaintext_startups(), 0, "TLS를 거절당한 뒤 평문으로 이어 갔어요");

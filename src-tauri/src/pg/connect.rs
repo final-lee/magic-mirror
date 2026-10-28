@@ -81,7 +81,10 @@ pub fn describe_failure(f: &ConnFailure, c: &ConnCtx) -> AppError {
 /// `tokio-postgres` 오류를 `ConnFailure`로 가른다. 순서가 중요하다.
 /// 1. 서버가 보낸 오류: 인증 오류(`28000`·`28P01`)는 역할이 없으면 `NoRole`, 아니면 `Auth`. 나머지는 코드와 문구를 그대로 `Db`에 담는다.
 /// 2. 원인 사슬에 rustls 오류가 있으면 `Tls`.
-/// 3. 원인 사슬에 `io::Error`가 있으면 `Io`. 어느 쪽도 아니면 오류 문구로 `Io`.
+/// 3. 원인 사슬에 `io::Error`가 있으면 `Io`. TLS 협상 도중 연결이 끊긴 경우도 여기라서 VPN 문구가 나간다.
+/// 4. TLS 협상 단계의 오류인데 원인이 rustls도 io도 아니면 서버가 TLS를 거절한 것(SSLRequest에 'N')이라 `Tls`. tokio-postgres는 이것을
+///    "error performing TLS handshake"라는 문구의 TLS 종류 오류로 올리고 종류를 밖으로 내놓지 않아서 문구로 알아본다(테스트가 문구를 지킨다).
+/// 5. 그 밖에는 오류 문구로 `Io`.
 pub fn failure_of(e: &tokio_postgres::Error) -> ConnFailure {
     if let Some(db) = e.as_db_error() {
         let (code, message) = (db.code().code(), db.message());
@@ -108,7 +111,19 @@ pub fn failure_of(e: &tokio_postgres::Error) -> ConnFailure {
     match (tls, io) {
         (Some(tls), _) => ConnFailure::Tls(tls),
         (None, Some(io)) => ConnFailure::Io(io),
+        (None, None) if e.to_string().starts_with(TLS_HANDSHAKE_ERROR) => ConnFailure::Tls(with_cause(e)),
         (None, None) => ConnFailure::Io(e.to_string()),
+    }
+}
+
+/// `tokio_postgres::Error`의 TLS 종류 오류 문구(`Display`)
+const TLS_HANDSHAKE_ERROR: &str = "error performing TLS handshake";
+
+/// 오류 문구에 원인을 이어 붙인다(진단용)
+fn with_cause(e: &tokio_postgres::Error) -> String {
+    match e.source() {
+        Some(cause) => format!("{e}: {cause}"),
+        None => e.to_string(),
     }
 }
 
@@ -123,11 +138,35 @@ pub fn connect_check(info: &PgTargetInfo) -> Result<(), AppError> {
     }))
 }
 
-/// 번들에 든 RDS CA들. 읽지 못하는 인증서는 건너뛴다(개수는 테스트가 지킨다).
+/// 번들에 든 RDS CA들. 번들은 앱에 들어 있는 고정된 파일이고 모든 인증서가 읽혀야 한다(테스트가 지킨다).
 pub fn rds_roots() -> RootCertStore {
+    roots_from(RDS_BUNDLE)
+}
+
+/// PEM 번들에서 신뢰할 CA를 읽는다. 읽을 수 없는 항목이 하나라도 있으면 번들이 깨진 것이므로 패닉한다(프로그래밍 오류).
+/// 일부만 읽은 신뢰 저장소로 조용히 이어 가지 않으려는 것이다. 앱에 넣은 번들은 정해져 있고 테스트가 읽어 보므로 실행 중에는 일어나지 않는다.
+/// `add_parsable_certificates`는 PEM으로는 맞는데 인증서가 아닌 항목만 세므로, PEM 자체가 깨진 항목은 따로 센다.
+fn roots_from(bundle: &[u8]) -> RootCertStore {
+    let entries: Vec<_> = CertificateDer::pem_slice_iter(bundle).collect();
+    let broken_pem = entries.iter().filter(|entry| entry.is_err()).count();
     let mut roots = RootCertStore::empty();
-    roots.add_parsable_certificates(CertificateDer::pem_slice_iter(RDS_BUNDLE).filter_map(Result::ok));
+    let (_loaded, broken_certificates) = roots.add_parsable_certificates(entries.into_iter().flatten());
+    assert_eq!(broken_pem + broken_certificates, 0, "RDS CA 번들에 읽을 수 없는 인증서가 있어요");
     roots
+}
+
+const INVALID_LOGIN_NAME: &str = "DB 사용자 이름이 올바르지 않아요. 공백이나 \" < > # & % + 같은 문자는 쓸 수 없어요";
+
+/// 로그인 이름이 토큰을 서명해도 되는 이름인지 본다. 이름은 입력창의 자유 텍스트다.
+/// SDK의 토큰 서명기는 이름을 URL 쿼리에 그대로 붙인다. 공백·제어 문자·`"`·`<`·`>`는 URL로 읽히지 않아 서명기가 패닉하고
+/// (명령 작업이 패닉하면 호출이 끝나지 않는다), `#`·`&`·`%`·`+`는 다른 이름으로 서명되어 로그인이 엉뚱한 이유로 실패한다.
+/// 서명이나 접속보다 먼저 불러야 한다.
+pub fn check_login_name(user: &str) -> Result<(), AppError> {
+    let unsafe_char = |c: char| c.is_whitespace() || c.is_control() || matches!(c, '"' | '<' | '>' | '#' | '&' | '%' | '+');
+    if user.is_empty() || user.chars().any(unsafe_char) {
+        return Err(AppError::other(INVALID_LOGIN_NAME));
+    }
+    Ok(())
 }
 
 /// 접속에 쓰는 TLS 설정: RDS CA만 믿고, 서버 인증서와 호스트 이름을 검증한다.
@@ -148,7 +187,12 @@ fn tls_config_with(roots: RootCertStore) -> Result<ClientConfig, AppError> {
 
 /// IAM 데이터베이스 인증 토큰(15분 유효)을 만든다. 서명은 로컬에서 하고 네트워크를 쓰지 않는다(자격 증명을 새로 받아야 할 때만 예외).
 /// 자격 증명을 얻지 못하면 AWS 호출과 같은 분류를 거친다: 만료된 SSO 세션은 `SsoExpired`가 되어 자동 로그인이 이어받는다.
+///
+/// 자격 증명은 SdkConfig의 캐시를 거치지 않고 공급자 사슬에 바로 요청한다(SDK의 토큰 서명기도 그렇게 한다).
+/// SSO나 역할 맡기 프로필은 새 연결마다 한 번 더 네트워크를 쓸 수 있고, 여러 데이터베이스를 잇따라 여는 점검이 그만큼 곱해진다.
+/// 새 연결마다 한 번이라 받아들였다.
 pub async fn auth_token(cfg: &SdkConfig, host: &str, port: u16, user: &str) -> Result<String, AppError> {
+    check_login_name(user)?;
     let provider = cfg.credentials_provider().ok_or_else(|| AppError::other("자격 증명 공급자를 찾을 수 없어요"))?;
     let credentials = provider.provide_credentials().await.map_err(|e| credentials_error(&format!("{}", DisplayErrorContext(&e))))?;
     let signing_error = |e: &dyn StdError| AppError::other(format!("IAM 인증 토큰을 만들지 못했어요: {e}"));
@@ -167,6 +211,7 @@ pub async fn auth_token(cfg: &SdkConfig, host: &str, port: u16, user: &str) -> R
 
 /// 대상 엔드포인트에 IAM 인증으로 연결한다. 토큰은 연결할 때마다 새로 만든다.
 pub async fn connect(cfg: &SdkConfig, info: &PgTargetInfo, user: &str, database: &str) -> Result<Connected, AppError> {
+    check_login_name(user)?;
     connect_check(info)?;
     connect_with(cfg, info, user, database, tls_config()?).await
 }

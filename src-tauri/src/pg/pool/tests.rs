@@ -57,6 +57,64 @@ async fn different_databases_users_and_targets_make_separate_entries() {
 }
 
 #[tokio::test]
+async fn a_connect_that_close_target_interrupts_is_not_stored() {
+    let server = FakeServer::start(Script::Ready).await;
+    let pool = Pool::default();
+    // 연결하는 사이에 탭이 닫힌다
+    let interrupted = pool
+        .get_or_connect(key("a", "app"), || async {
+            pool.close_target(&target("a"));
+            open(&server, 1).await
+        })
+        .await;
+    assert_eq!(interrupted.err(), Some(AppError::other("먼저 연결해 주세요")));
+    assert!(pool.backend_pids(&target("a")).is_empty(), "닫힌 대상의 연결이 보관됐어요");
+    // 닫은 뒤에 새로 여는 연결은 보관된다
+    get(&pool, &server, key("a", "app"), 2).await;
+    assert_eq!(pool.backend_pids(&target("a")), vec![2]);
+}
+
+#[tokio::test]
+async fn closing_another_target_does_not_interrupt_a_connect() {
+    let server = FakeServer::start(Script::Ready).await;
+    let pool = Pool::default();
+    let kept = pool
+        .get_or_connect(key("a", "app"), || async {
+            pool.close_target(&target("b"));
+            open(&server, 1).await
+        })
+        .await;
+    assert!(kept.is_ok());
+    assert_eq!(pool.backend_pids(&target("a")), vec![1]);
+}
+
+#[tokio::test]
+async fn a_connect_started_after_the_close_is_stored_even_if_an_older_one_finishes_later() {
+    let server = FakeServer::start(Script::Ready).await;
+    let pool = Pool::default();
+    // 오래된 연결(닫기 전에 시작)이 새 연결(닫은 뒤에 시작)보다 늦게 끝난다: 신호로 순서를 고정한다
+    let (closed_tx, closed_rx) = tokio::sync::oneshot::channel::<()>();
+    let (stored_tx, stored_rx) = tokio::sync::oneshot::channel::<()>();
+    let (older, newer) = tokio::join!(
+        pool.get_or_connect(key("a", "app"), || async {
+            pool.close_target(&target("a"));
+            closed_tx.send(()).unwrap();
+            stored_rx.await.unwrap();
+            open(&server, 1).await
+        }),
+        async {
+            closed_rx.await.unwrap();
+            let newer = pool.get_or_connect(key("a", "app"), || open(&server, 2)).await;
+            stored_tx.send(()).unwrap();
+            newer
+        }
+    );
+    assert_eq!(older.err(), Some(AppError::other("먼저 연결해 주세요")));
+    assert!(newer.is_ok());
+    assert_eq!(pool.backend_pids(&target("a")), vec![2], "닫은 뒤에 시작한 연결만 남아야 해요");
+}
+
+#[tokio::test]
 async fn sweep_drops_connections_idle_past_the_limit_and_keeps_recent_ones() {
     let server = FakeServer::start(Script::Ready).await;
     let pool = Pool::default();
