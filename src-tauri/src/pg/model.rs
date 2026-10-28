@@ -266,7 +266,7 @@ pub struct DbSnapshot {
     pub relations: Vec<RelationRec>,
     pub functions: Vec<FunctionRec>,
     pub default_acls: Vec<DefaultAclRec>,
-    /// 객체가 너무 많아 관계와 함수를 일부만 읽었다
+    /// 객체가 너무 많아 일부만 읽었다. 관계가 먼저 자리를 잡고(이름순 앞쪽), 함수는 남는 자리만큼만 읽는다
     pub truncated: bool,
     /// ISO 8601 UTC
     pub fetched_at: String,

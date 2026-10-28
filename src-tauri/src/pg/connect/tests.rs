@@ -423,7 +423,10 @@ async fn open_connects_spawns_the_connection_and_reads_the_backend_pid() {
     assert!(!connected.client.is_closed());
     assert_eq!(server.plaintext_startups(), 1);
     // 로그인 직후의 질의도 읽기 전용 트랜잭션 안에서 간다
-    assert_eq!(server.simple_queries(), ["START TRANSACTION READ ONLY", "SET LOCAL statement_timeout = '30s'", "COMMIT"]);
+    assert_eq!(
+        server.simple_queries(),
+        ["START TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY", "SET LOCAL statement_timeout = '30s'", "COMMIT"]
+    );
 }
 
 #[tokio::test]
