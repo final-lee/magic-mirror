@@ -4,6 +4,8 @@ import type {
   AccessLevel,
   ActionGrant,
   ApplyResult,
+  BatchPreview,
+  BatchResult,
   ChangeLogEntry,
   ChangePreview,
   Findings,
@@ -14,6 +16,7 @@ import type {
   PolicyView,
   PrincipalView,
   SimulateResult,
+  UndoBatch,
   ValidationResult,
   WhoCanResult,
 } from "./types";
@@ -43,4 +46,8 @@ export const iamApi = {
     invoke<ApplyResult>("iam_apply", { profile, change, confirmText, undoOf }),
   changeLog: () => invoke<ChangeLogEntry[]>("iam_change_log"),
   undoChange: (entryId: string) => invoke<IamChange>("iam_undo_change", { entryId }),
+  previewBatch: (profile: string, changes: IamChange[]) => invoke<BatchPreview>("iam_preview_batch", { profile, changes }),
+  applyBatch: (profile: string, changes: IamChange[], confirmText: string | null, undoOf: string[] | null) =>
+    invoke<BatchResult>("iam_apply_batch", { profile, changes, confirmText, undoOf }),
+  undoBatch: (batchId: string) => invoke<UndoBatch>("iam_undo_batch", { batchId }),
 };

@@ -5,6 +5,8 @@ import type {
   ActionGrant,
   Badge,
   BadgeKind,
+  BatchPreview,
+  BatchResult,
   ChangeLogEntry,
   ChangePreview,
   FindingGroup,
@@ -67,19 +69,7 @@ export function principal(kind: PrincipalKind, name: string, extra: Partial<Prin
   };
 }
 
-export const alice = principal("user", "alice", { lastUsed: "2026-10-20T12:00:00Z", policyCount: 3 });
-export const bob = principal("user", "bob", { lastUsed: "2026-05-02T12:00:00Z", policyCount: 1, badges: [BADGES.noMfa, BADGES.oldKey] });
-export const ciBot = principal("user", "ci-bot", { policyCount: 1, badges: [BADGES.admin] });
-export const devTeam = principal("group", "dev-team", { policyCount: 1, memberCount: 2 });
-export const admins = principal("group", "admins", { policyCount: 1, memberCount: 1, badges: [BADGES.admin] });
-export const appRole = principal("role", "app-role", { lastUsed: "2026-10-25T12:00:00Z", policyCount: 2 });
-export const partnerRole = principal("role", "partner-access", { policyCount: 1, badges: [BADGES.externalTrust] });
-export const supportRole = principal("role", "AWSServiceRoleForSupport", {
-  path: "/aws-service-role/support.amazonaws.com/",
-  policyCount: 1,
-  badges: [BADGES.serviceLinked],
-});
-
+// 주체의 attached가 가리키므로 주체보다 먼저 선언한다(const는 선언 전에 읽을 수 없다)
 export const adminPolicy: PolicySummary = {
   id: policyArn("AdministratorAccess", true),
   arn: policyArn("AdministratorAccess", true),
@@ -120,6 +110,31 @@ export const orphanPolicy: PolicySummary = {
   updatedAt: null,
   badges: [BADGES.unattached],
 };
+
+// attached·groups·boundary는 아래 aliceView·devTeamView·appRoleView가 보여 주는 직접 할당과 맞춘다
+export const alice = principal("user", "alice", {
+  lastUsed: "2026-10-20T12:00:00Z",
+  policyCount: 3,
+  attached: [readOnlyPolicy.arn],
+  groups: ["dev-team"],
+  boundary: policyArn("dev-boundary"),
+});
+export const bob = principal("user", "bob", {
+  lastUsed: "2026-05-02T12:00:00Z",
+  policyCount: 1,
+  badges: [BADGES.noMfa, BADGES.oldKey],
+  groups: ["dev-team"],
+});
+export const ciBot = principal("user", "ci-bot", { policyCount: 1, badges: [BADGES.admin], attached: [adminPolicy.arn] });
+export const devTeam = principal("group", "dev-team", { policyCount: 1, memberCount: 2, attached: [deployPolicy.arn] });
+export const admins = principal("group", "admins", { policyCount: 1, memberCount: 1, badges: [BADGES.admin], attached: [adminPolicy.arn] });
+export const appRole = principal("role", "app-role", { lastUsed: "2026-10-25T12:00:00Z", policyCount: 2, attached: [readOnlyPolicy.arn] });
+export const partnerRole = principal("role", "partner-access", { policyCount: 1, badges: [BADGES.externalTrust] });
+export const supportRole = principal("role", "AWSServiceRoleForSupport", {
+  path: "/aws-service-role/support.amazonaws.com/",
+  policyCount: 1,
+  badges: [BADGES.serviceLinked],
+});
 
 export function sampleOverview(extra: Partial<IamOverview> = {}): IamOverview {
   return {
@@ -552,6 +567,26 @@ export function previewOf(change: IamChange, extra: Partial<ChangePreview> = {})
     reversible: true,
     ...extra,
   };
+}
+
+/** 묶음 미리보기 응답. 변경마다 previewOf와 같은 가장 단순한 항목을 두고, 묶음 전체는 경고·영향 없이 되돌릴 수 있다. */
+export function previewBatchOf(changes: IamChange[], extra: Partial<BatchPreview> = {}): BatchPreview {
+  return {
+    changes: changes.map((change) => {
+      const { summary, calls, warnings } = previewOf(change);
+      return { change, summary, calls, warnings };
+    }),
+    impacts: [],
+    warnings: [],
+    confirmText: null,
+    reversible: true,
+    ...extra,
+  };
+}
+
+/** 묶음을 끝까지 적용한 결과. 중간에 멈추려면 failed를 넘긴다. */
+export function batchResult(extra: Partial<BatchResult> = {}): BatchResult {
+  return { batchId: "batch-1", logIds: ["log-1"], failed: null, ...extra };
 }
 
 export const permDelta = (prefix: string, level: AccessLevel, count: number, sample: string[] = []): PermDelta => ({ prefix, level, count, sample });
