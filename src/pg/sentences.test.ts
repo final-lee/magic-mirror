@@ -7,6 +7,7 @@ import {
   PUBLIC_LABEL,
   defaultPrivilegeSentence,
   granteeLabel,
+  noGrantSentence,
   objectPhrase,
   sourceText,
 } from "./sentences";
@@ -66,10 +67,18 @@ describe("defaultPrivilegeSentence", () => {
     );
   });
 
-  test("PUBLIC is named 모든 역할(PUBLIC) in the place of the grantee", () => {
+  test("PUBLIC is named 모든 역할(PUBLIC) and is not followed by a second 역할", () => {
     expect(defaultPrivilegeSentence(row({ objectType: "functions" }), grant("PUBLIC", "EXECUTE"))).toBe(
-      "app_owner 역할이 app에 새 함수를 만들면 모든 역할(PUBLIC) 역할이 EXECUTE 권한을 받아요",
+      "app_owner 역할이 app에 새 함수를 만들면 모든 역할(PUBLIC)이 EXECUTE 권한을 받아요",
     );
+    expect(defaultPrivilegeSentence(row({ schema: null, objectType: "types" }), grant("PUBLIC", "USAGE"))).toBe(
+      "app_owner 역할이 모든 스키마에 새 타입을 만들면 모든 역할(PUBLIC)이 USAGE 권한을 받아요",
+    );
+  });
+
+  test("every other grantee, also one that only looks like PUBLIC, keeps 역할이", () => {
+    expect(defaultPrivilegeSentence(row(), grant("public", "SELECT"))).toBe("app_owner 역할이 app에 새 테이블을 만들면 public 역할이 SELECT 권한을 받아요");
+    expect(defaultPrivilegeSentence(row(), grant("PUBLIC_READ", "SELECT"))).toBe("app_owner 역할이 app에 새 테이블을 만들면 PUBLIC_READ 역할이 SELECT 권한을 받아요");
   });
 
   test.each<[PgDefaultObjectType, string]>([
@@ -90,7 +99,27 @@ describe("defaultPrivilegeSentence", () => {
 });
 
 test("the note about what PostgreSQL grants by default is the exact text", () => {
-  expect(BUILTIN_NOTE).toBe("PostgreSQL 기본값: 함수는 모든 역할(PUBLIC)이 EXECUTE, 타입은 USAGE를 받아요. 위 표에서 바꾸지 않았다면 그대로예요");
+  expect(BUILTIN_NOTE).toBe("PostgreSQL 기본값: 함수는 모든 역할(PUBLIC)이 EXECUTE, 타입은 USAGE를 받아요. 기본 권한을 바꾸지 않았다면 그대로예요");
+});
+
+describe("noGrantSentence", () => {
+  test("says that nobody gets anything when the creator makes the object", () => {
+    expect(noGrantSentence(row())).toBe("app_owner 역할이 app에 새 테이블을 만들어도 아무 역할도 권한을 받지 않아요");
+  });
+
+  test("a default for every schema says 모든 스키마", () => {
+    expect(noGrantSentence(row({ schema: null, objectType: "types" }))).toBe("app_owner 역할이 모든 스키마에 새 타입을 만들어도 아무 역할도 권한을 받지 않아요");
+  });
+
+  test.each<[PgDefaultObjectType, string]>([
+    ["tables", "새 테이블을 만들어도"],
+    ["sequences", "새 시퀀스를 만들어도"],
+    ["functions", "새 함수를 만들어도"],
+    ["types", "새 타입을 만들어도"],
+    ["schemas", "새 스키마를 만들어도"],
+  ])("%s: the particle matches the object", (objectType, phrase) => {
+    expect(noGrantSentence(row({ objectType }))).toContain(` ${phrase} `);
+  });
 });
 
 describe("sourceText", () => {

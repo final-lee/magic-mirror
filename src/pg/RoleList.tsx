@@ -2,7 +2,7 @@ import { formatDay } from "../iam/format";
 import { ListTable, type ListColumn } from "../iam/ListTable";
 import { BadgeList } from "./Badges";
 import { ROLE_KIND_LABEL } from "./labels";
-import { RoleKinds, roleShown, type RoleKindsValue } from "./RoleKinds";
+import { RoleKinds, filterRoles, type RoleKindsValue } from "./RoleKinds";
 import type { PgRoleSummary } from "./types";
 
 const expiryOf = (r: PgRoleSummary) => {
@@ -47,9 +47,8 @@ interface Props {
 }
 
 export function RoleList({ roles, filter, kinds, onKinds, selectedId, onSelect, onOpen }: Props) {
-  const f = filter.trim().toLowerCase();
-  // 툴바 필터는 이름에만 적용한다(대소문자 무시)
-  const rows = roles.filter((r) => roleShown(r, kinds) && r.name.toLowerCase().includes(f));
+  // 툴바 필터는 이름에만 적용한다(대소문자 무시). 권한 표와 같은 규칙이다.
+  const rows = filterRoles(roles, kinds, filter);
   return (
     <section className="center">
       <div className="pg-bar">

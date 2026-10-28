@@ -110,6 +110,9 @@ export function PgTab({ target, active, filter }: Props) {
   // 역할 목록과 권한 표가 함께 쓰는 칩과 시스템 역할 토글, 역할 목록에서 고른 행. 상세를 보고 돌아와도 남는다.
   const [kinds, setKinds] = useState(DEFAULT_KINDS);
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
+  // 권한 표, 기본 권한(누가 할 수 있나도)이 함께 쓰는 데이터베이스 선택. 탭 하나에 하나이고, 기록(경로)이 아니라 여기에만 둔다.
+  // 아직 안 골랐거나 고른 데이터베이스에 연결할 수 없게 되면 화면이 대상의 기본 데이터베이스를 보인다(pickDatabase).
+  const [database, setDatabase] = useState<string | undefined>(undefined);
 
   // 로그인 사용자를 바꿔 새로 연결하면, 데이터베이스·역할·점검 …은 이전 사용자의 연결로 읽은 것이다. 새 개요가 오면 나머지를 다시 읽는다.
   // 첫 연결에서는 읽을 것이 없고, 개요를 다시 읽는 새로 고침은 사용자가 같아서 여기에 걸리지 않는다.
@@ -180,17 +183,9 @@ export function PgTab({ target, active, filter }: Props) {
               onOpen={(name) => go(roleRoute(name))}
             />
           ) : route.view === "privileges" ? (
-            <PrivilegeGrid
-              target={target}
-              overview={o}
-              database={route.database}
-              onDatabase={(database) => remember({ database })}
-              filter={filter}
-              kinds={kinds}
-              onKinds={setKinds}
-            />
+            <PrivilegeGrid target={target} overview={o} database={database} onDatabase={setDatabase} filter={filter} kinds={kinds} onKinds={setKinds} />
           ) : route.view === "defaults" ? (
-            <DefaultPrivileges target={target} overview={o} database={route.database} onDatabase={(database) => remember({ database })} />
+            <DefaultPrivileges target={target} overview={o} database={database} onDatabase={setDatabase} />
           ) : (
             // 점검, 누가 할 수 있나, 세션은 다음 작업에서 이 자리에 들어온다
             <div className="empty">{PG_VIEW_LABEL[route.view]} 화면은 아직 준비 중이에요</div>

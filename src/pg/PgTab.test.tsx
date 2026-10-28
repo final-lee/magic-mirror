@@ -974,7 +974,50 @@ describe("privileges", () => {
     expect(screen.getByRole("checkbox", { name: "시스템 역할 보기" })).toBeChecked();
   });
 
-  test("the database that was chosen is remembered by the history entry, so back brings it again", async () => {
+  test("the database that was chosen is the choice of the tab: 기본 권한 opens on it, directly and by way of 역할", async () => {
+    setup();
+    await openPrivileges();
+    fireEvent.change(picker(), { target: { value: "analytics" } });
+    await waitFor(() => expect(m.database).toHaveBeenCalledWith(pgTarget, "analytics", false));
+    openMenu("기본 권한");
+    await screen.findByRole("table", { name: "기본 권한" });
+    expect(picker()).toHaveValue("analytics");
+    openMenu("역할");
+    openMenu("기본 권한");
+    await screen.findByRole("table", { name: "기본 권한" });
+    expect(picker()).toHaveValue("analytics");
+    openMenu("권한");
+    await loadedGrid();
+    expect(picker()).toHaveValue("analytics");
+    // 세 화면이 analytics를 한 번만 읽었다(같은 읽기를 함께 쓴다)
+    expect(m.database.mock.calls.filter((call) => call[1] === "analytics")).toEqual([[pgTarget, "analytics", false]]);
+  });
+
+  test("a database chosen on 기본 권한 is the one 권한 opens on", async () => {
+    setup();
+    await connected();
+    openMenu("기본 권한");
+    await screen.findByRole("table", { name: "기본 권한" });
+    fireEvent.change(picker(), { target: { value: "postgres" } });
+    await waitFor(() => expect(m.database).toHaveBeenCalledWith(pgTarget, "postgres", false));
+    openMenu("권한");
+    await loadedGrid();
+    expect(picker()).toHaveValue("postgres");
+  });
+
+  test("the choice stays when the snapshot is read again", async () => {
+    setup();
+    await openPrivileges();
+    fireEvent.change(picker(), { target: { value: "analytics" } });
+    await waitFor(() => expect(m.database).toHaveBeenCalledWith(pgTarget, "analytics", false));
+    m.database.mockClear();
+    fireEvent.click(topBar().getByRole("button", { name: "다시 읽기" }));
+    await waitFor(() => expect(m.database).toHaveBeenCalledWith(pgTarget, "analytics", true));
+    expect(picker()).toHaveValue("analytics");
+    expect(m.database).not.toHaveBeenCalledWith(pgTarget, "orders", expect.anything());
+  });
+
+  test("the database that was chosen stays chosen when back brings the screen again", async () => {
     setup();
     await openPrivileges();
     fireEvent.change(picker(), { target: { value: "analytics" } });
@@ -1062,7 +1105,7 @@ describe("default privileges", () => {
     expect(screen.getByText("app_owner 역할이 app에 새 테이블을 만들면 app_read 역할이 SELECT 권한을 받아요")).toBeInTheDocument();
   });
 
-  test("the database that was chosen is remembered by the history entry too", async () => {
+  test("the database that was chosen stays chosen when back brings the screen again, here too", async () => {
     setup();
     await connected();
     openMenu("기본 권한");

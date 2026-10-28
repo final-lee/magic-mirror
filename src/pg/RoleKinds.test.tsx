@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { appRead, iamAdmin, rdsSuperuser } from "./fixtures";
-import { DEFAULT_KINDS, RoleKinds, roleShown, type RoleKindsValue } from "./RoleKinds";
+import { ROLES, alice, appRead, iamAdmin, rdsSuperuser } from "./fixtures";
+import { DEFAULT_KINDS, RoleKinds, filterRoles, roleShown, type RoleKindsValue } from "./RoleKinds";
 
 describe("roleShown", () => {
   test("by default users and groups are shown and system roles are not", () => {
@@ -21,6 +21,36 @@ describe("roleShown", () => {
     const withSystem = { ...DEFAULT_KINDS, system: true };
     expect(roleShown(rdsSuperuser, withSystem)).toBe(true);
     expect(roleShown(rdsSuperuser, { ...withSystem, groups: false })).toBe(false);
+  });
+});
+
+describe("filterRoles", () => {
+  const names = (roles: { name: string }[]) => roles.map((r) => r.name);
+
+  test("without a filter it is the roles the chips and the toggle show, in the order they come", () => {
+    expect(names(filterRoles(ROLES, DEFAULT_KINDS, ""))).toEqual(["alice", "app_owner", "app_read", "app_write", "bob", "iam_admin", "postgres"]);
+    expect(names(filterRoles(ROLES, { users: false, groups: true, system: true }, ""))).toEqual(["app_read", "app_write", "pg_read_all_data", "rds_iam", "rds_superuser"]);
+  });
+
+  test("the filter matches the name, ignoring case and the spaces around it", () => {
+    expect(names(filterRoles(ROLES, DEFAULT_KINDS, "APP_"))).toEqual(["app_owner", "app_read", "app_write"]);
+    expect(names(filterRoles(ROLES, DEFAULT_KINDS, "  iam_  "))).toEqual(["iam_admin"]);
+    expect(names(filterRoles(ROLES, DEFAULT_KINDS, "   "))).toHaveLength(7);
+  });
+
+  test("the filter matches nothing but the name: not the comment, not a badge", () => {
+    expect(filterRoles(ROLES, DEFAULT_KINDS, "orders")).toEqual([]);
+    expect(filterRoles(ROLES, DEFAULT_KINDS, "관리자급")).toEqual([]);
+  });
+
+  test("the filter and the chips both have to agree, and the filter reaches the system roles that were switched on", () => {
+    expect(filterRoles(ROLES, { ...DEFAULT_KINDS, groups: false }, "app_")).toEqual([ROLES.find((r) => r.name === "app_owner")]);
+    expect(names(filterRoles(ROLES, { ...DEFAULT_KINDS, system: true }, "rds"))).toEqual(["rds_iam", "rds_superuser"]);
+    expect(filterRoles(ROLES, DEFAULT_KINDS, "rds")).toEqual([]);
+  });
+
+  test("it keeps the very objects it was given", () => {
+    expect(filterRoles([alice], DEFAULT_KINDS, "")[0]).toBe(alice);
   });
 });
 
