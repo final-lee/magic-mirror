@@ -160,16 +160,18 @@ RDS 목록에서 PostgreSQL 클러스터나 인스턴스를 더블클릭하면 "
 1단계
 ```ts
 type PgTarget = { profile: string; region: string; kind: "cluster" | "instance"; id: string };
-pg_login_user(arn: string): string | null
-pg_set_login_user(arn: string, user: string): void
-pg_open(target: PgTarget, loginUser: string): PgOverview          // 대상 확인, 연결, 클러스터 전체 스냅숏
-pg_database(target: PgTarget, database: string): PgDatabaseView   // 데이터베이스 하나의 스냅숏(스키마, 객체, ACL, 기본 권한)
+pg_target(target: PgTarget): PgTargetInfo                          // RDS API로 대상 확인(연결하지 않음)
+pg_open(target: PgTarget, loginUser: string): PgOverview          // 연결, 클러스터 전체 스냅숏
+pg_database(target: PgTarget, database: string, force: boolean): PgDatabaseView  // 데이터베이스 하나의 스냅숏(스키마, 객체, ACL, 기본 권한)
+pg_cell(target: PgTarget, database: string, role: string, schema: string): PgCellDetail
+pg_objects(target: PgTarget, database: string, query: string): PgObjectRef[]
 pg_role(target: PgTarget, role: string): PgRoleView
 pg_who_can(target: PgTarget, database: string, object: PgObjectRef, privilege: string): PgWhoCan
 pg_sessions(target: PgTarget): PgSession[]
-pg_findings(target: PgTarget): PgFindings                         // 연결할 수 있는 데이터베이스를 모두 읽는다
+pg_findings(target: PgTarget, force: boolean): PgFindings         // 연결할 수 있는 데이터베이스를 모두 읽는다
 pg_close(target: PgTarget): void                                  // 탭을 닫을 때
 ```
+- 로그인 사용자 이름은 기존 설정(`Settings.pgLogins`: 대상 ARN → 사용자 이름)에 저장한다.
 2단계
 ```ts
 pg_preview(target: PgTarget, change: PgChange): PgPreview
