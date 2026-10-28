@@ -466,7 +466,7 @@ pub struct MemberGrant { pub grantor: String, pub admin: bool, pub inherit: Opti
 - Modify:
   - `src-tauri/src/pg/change.rs`
   - `src-tauri/src/pg/eval.rs`: direct and owned values in `SchemaCell`, plus the walks `Rights` needs that are private today: closures over any membership edge with each grant row's ADMIN flag, and the inheriting BFS with its depth, ties broken by role OID.
-  - `src-tauri/src/pg/summary.rs`: `PgSchemaCell.direct` and `PgDbPrivilegeRow.direct`.
+  - `src-tauri/src/pg/summary.rs`: `PgSchemaCell.direct` and `.owned`, `PgDbPrivilegeRow.direct` and `.owned`.
   - `src-tauri/src/pg/fixtures.rs`
   - `src-tauri/src/pg/live_tests.rs`
 
@@ -616,8 +616,8 @@ pub struct DirectCell { pub usage: bool, pub create: bool, pub read: Coverage, p
        - the grantee isn't the owner;
        - the grantee is the grantor of an entry for the same privilege on the same object;
        - the grantee keeps no grant option for that privilege through another entry or an inherited role;
-     - a role named PUBLIC (case-insensitive) as grantee, member, group, role or creator;
-     - the execution database: not in the cluster snapshot, not connectable, or a template or `rdsadmin`;
+     - when the cluster has a role named exactly `PUBLIC`: a change whose member, group, role or creator is `PUBLIC` (the PUBLIC-role text). A grantee `PUBLIC` always means the PUBLIC pseudo-role. The grid and the pickers don't offer a role named exactly `PUBLIC`;
+     - the execution database: not in the cluster snapshot, not connectable, or a template or `rdsadmin` (a backstop; the commands check it before connecting, QB4 test 7);
      - `dropRole`, judged on the snapshot after the batch's earlier items, with the undo-after-create text when the role:
        - owns an object in the execution database;
        - appears in an ACL or default-ACL entry there;
@@ -758,9 +758,9 @@ pub fn confirm_target(change: &PgChange) -> &str;   // createRole: name; members
        - `[dropRole name]` with an existing group or no preset.
        - A group with a preset: its revokes then `dropRole`.
      - membership:
-       - add without ADMIN: a remove of the row it created. A pair that already existed gives `Some(vec![])`.
+       - add without ADMIN: a remove of the row it created. When the row from that grantor already existed, `Some(vec![])`. From 160000, when only other grantors' rows existed, None: the GRANT adds a new row with default options, and a remove can't name only that row.
        - add with `admin: true`: a full remove when the pair had no row before, and an ADMIN-only remove when it had one.
-       - remove, from 160000: `Some([add])` only when every removed row had inherit equal to the member's `rolinherit`, set true, and the grantor a re-grant would get. Otherwise None, because a re-grant can't restore those options or grantors.
+       - remove, from 160000: `Some([add])`, with `admin: true` when the removed row had ADMIN, only when every removed row had inherit equal to the member's `rolinherit`, set true, and the grantor a re-grant would get. Otherwise None, because a re-grant can't restore those options or grantors.
        - remove, before 160000: the opposite add, with ADMIN when the removed row had it.
        - Test each case.
      - attributes: the before set.
@@ -824,7 +824,7 @@ pub fn confirm_target(change: &PgChange) -> &str;   // createRole: name; members
 
 ```rust
 // pg::connect
-pub struct Notice { pub code: String, pub severity: String, pub message: String }
+pub struct Notice { pub code: String, pub severity: String, pub message: String }   // severity from DbError::parsed_severity() (the non-localized V field), not severity()
 pub fn spawn_connection<S, T>(connection: tokio_postgres::Connection<S, T>) -> UnboundedReceiver<Notice>;
 // The one place that spawns a connection task. It polls `Connection::poll_message` and forwards every
 // `AsyncMessage::Notice` synchronously before polling again. `connect`, the live helper and the fake-server tests use it.
@@ -874,22 +874,24 @@ where X: FnOnce(Vec<Step>) -> XF, XF: Future<Output = Result<(), ExecError>>,
        - seen before the COMMIT call gives `Failed` with the before-COMMIT text, since the server aborts an open transaction when its client leaves;
        - from the COMMIT call itself gives `CommitUnknown`.
   3. **commit, single change.** The flow, in order:
-     1. When `undoOf` is set, check the log entries:
+     1. The `dropRole` guard, whether or not `undoOf` is set:
+        - A change list with `dropRole` is rejected with "되돌릴 수 없는 변경이에요" unless `undoOf` is set and every undone entry's change is a `createRole` whose name or created group is that role.
+        - A `dropRole` whose role has members or groups that the undone entry's change didn't create is rejected with the undo-after-create text.
+     1a. When `undoOf` is set, check the log entries:
         - each exists, is `ok` and not `undone`, and has the same `targetArn`;
         - their `inverse` lists, concatenated in `undoOf` order, equal the changes as passed (before any batch reordering).
         Each failure has its exact text.
-        - A change list with `dropRole` is rejected with "되돌릴 수 없는 변경이에요" unless `undoOf` is set and every undone entry's change is a `createRole` whose name or created group is that role.
-        - Also block a `dropRole` when the role has members or groups that the undone entry's change didn't create.
-     2. Re-read the cluster and the execution database with `force`.
+     2. (In `pg_commands`, before calling commit.) Re-read the cluster and the execution database with `force`.
      3. Recompute the preview, take the remembered plan, and compare the whole previews. A miss or a difference gives the stale text.
      4. Gate with IAM's texts: blocked, wrong confirm text, or a confirm warning without text.
      5. If the change needs a password (a `createRole` with `login: true`, or `password`), generate it, hash it, and fill the Password part.
      6. `exec::run` in the execution database's pooled connection.
-     6a. On `CommitUnknown`, call `reread` and compare it with the preview's snapshot after this change:
-        - equal: treat the change as applied. Log it as `ok` with its inverse, and return the result, password included, with the note "연결이 끊겼지만 적용된 것을 확인했어요";
-        - equal to the snapshot before: log the failure and return the before-COMMIT text;
-        - otherwise, or when `reread` fails: log `ok: false` with the unknown text.
-        - A `password` change can't be confirmed by a re-read. Its unknown text adds " 비밀번호를 다시 재설정해 주세요".
+     6a. On `CommitUnknown`:
+        - A `password` change skips the comparison, because passwords aren't in the snapshot: log `ok: false` with the unknown text plus " 비밀번호를 다시 재설정해 주세요".
+        - Otherwise call `reread` and compare it with the preview's snapshot after this change:
+          - equal: treat the change as applied. Log it as `ok` with its inverse, and return the result, password included, with the note "연결이 끊겼지만 적용된 것을 확인했어요";
+          - equal to the snapshot before: log the failure and return the before-COMMIT text;
+          - otherwise, or when `reread` fails: log `ok: false` with the unknown text.
      7. Append the log entry (with `ok` false and `error` on failure), and `mark_undone` the `undoOf` entries on success.
      8. On success, re-read and store the cluster snapshot and the execution database snapshot. Failures there are ignored, because the frontend reads again anyway.
      9. Return `PgApplyResult`, with `password` only when step 5 ran.
@@ -921,6 +923,7 @@ where X: FnOnce(Vec<Step>) -> XF, XF: Future<Output = Result<(), ExecError>>,
      - `pg_apply` and `pg_apply_batch` take it once.
      - The heavy work runs in `spawn_blocking`.
      - Every command except `pg_change_log`, `pg_undo` and `pg_undo_batch` needs `pg_open`.
+     - `pg_preview`, `pg_preview_batch`, `pg_apply` and `pg_apply_batch` check the execution database against the cluster snapshot before connecting. A database that isn't in it, isn't connectable, or is a template or `rdsadmin` gives the execution-database text as the error.
   8. **Hygiene** (extend PB4's test):
      - `.query(`, `.query_one(`, `.query_opt(`, `.execute(`, `batch_execute(`, `simple_query(`, `build_transaction(` and `.transaction(` appear only in `pg/catalog.rs` and `pg/exec.rs`.
      - Every `build_transaction()` in catalog.rs is followed by `.read_only(true)`.
@@ -972,11 +975,12 @@ where X: FnMut(&str /* database */, Vec<Step>) -> XF, XF: Future<Output = Result
        - CONNECT on the database;
        - `usage`, `read: All`, `write: None` and no `create` in S's cell;
        - SELECT on every sequence of S;
-       - for each current table owner C of S other than the group, a default ACL (for S or global) that grants SELECT on tables to the group or to a role it inherits.
+       - for each current table owner C of S other than the group, a default ACL (for S or global) that grants SELECT on tables to the group or to a role it inherits;
+       - for each current sequence owner C of S other than the group, a default ACL (for S or global) that grants SELECT on sequences to the group or to a role it inherits.
      - **readWrite:**
        - as readOnly, with every table of S also giving INSERT, UPDATE and DELETE;
        - USAGE as well as SELECT on every sequence;
-       - the default ACL also covering INSERT, UPDATE and DELETE.
+       - the table default ACL covering SELECT, INSERT, UPDATE and DELETE, and the sequence default ACL covering USAGE and SELECT.
      - **owner:** CONNECT, plus `usage` and `create` in every chosen S.
      - **admin:** always empty.
   2. **Suggest, `proposedName`:**
@@ -1010,9 +1014,10 @@ where X: FnMut(&str /* database */, Vec<Step>) -> XF, XF: Future<Output = Result
        - unreachable databases;
        - truncated databases;
        - a NOINHERIT login before 160000 (the drop-rights text with the INHERIT requirement), because the added membership would give it nothing;
+       - from 160000, when the membership step is needed and `membership_grantor(role)` fails: the ADMIN-through-non-inheriting text;
        - privileges that would stay: entries the predicted effect leaves, with count, the first 3 as `${object} ${privilege}`, and the grantors;
        - reassign checks:
-         - for each schema the role owns, the login has CREATE on that database, and, when `reassignTo` isn't the login, can SET ROLE to it (from 160000 through a chain where every grant has SET, before that through any membership);
+         - for each schema the role owns, the login, with the role counted in its inheriting closure during the step, has CREATE on that database, and, when `reassignTo` isn't the login, can SET ROLE to it (from 160000 through a chain where every grant has SET, before that through any membership);
          - for each function the role owns, `reassignTo` has CREATE on the function's schema (a schema the role owns counts as `reassignTo`'s).
      - Objects the snapshot doesn't read (collations, operators, text-search objects, extended statistics) can still stop a step. The drop-result text covers them.
      - Confirm: the drop text, and the granted-memberships text when `grantedMemberships` isn't empty.
@@ -1021,6 +1026,7 @@ where X: FnMut(&str /* database */, Vec<Step>) -> XF, XF: Future<Output = Result
      - Re-read the cluster and every connectable database with `force`, recompute, and compare with the remembered plan, ignoring only `sessions` and the sessions-stay warning (stale text on a difference). Gate on the confirm text.
      - Run the steps in order, each through `exec::run` in its database's pooled connection.
      - On the first failure, stop. `stopped` is the drop-result text, where `done` counts the database steps finished and `total` counts all database steps. Don't run any later step.
+     - A `CommitUnknown` also stops the drop. `stopped` uses the unknown text as the reason, and `done` doesn't count that database.
      - Log one entry with every step's SQL and `inverse: null`.
      - Re-read the snapshots afterwards.
      - Tests use a fake exec, as QB4's do. Include a failure in the second database.
@@ -1069,9 +1075,9 @@ where X: FnMut(&str /* database */, Vec<Step>) -> XF, XF: Future<Output = Result
   - `src/pg/ChangeLog.tsx`
   - Tests for each.
 - Modify:
-  - `src/pg/types.ts`: the Contract additions, including `direct` on cells and database rows.
+  - `src/pg/types.ts`: the Contract additions, including `direct` and `owned` on cells and database rows.
   - `src/pg/api.ts` and `src/pg/queries.ts`: commands, `pgKeys.changeLog`, `usePgChangeLog`.
-  - `src/pg/fixtures.ts`: `samplePreview`, `sampleBatchPreview`, `sampleChangeLog`, `samplePresetSuggestion` and `sampleDropPlan`. Every existing cell and database row gains `direct`.
+  - `src/pg/fixtures.ts`: `samplePreview`, `sampleBatchPreview`, `sampleChangeLog`, `samplePresetSuggestion` and `sampleDropPlan`. Every existing cell and database row gains `direct` and `owned`.
   - `src/pg/route.ts`: view `"changes"`, label "변경 기록".
   - `src/pg/PgNav.tsx` and `src/pg/PgTab.tsx`
   - `src/styles.css`
@@ -1147,7 +1153,7 @@ export function usePgBatch(target: PgTarget): {
      - "되돌리기" calls `pg_undo`. One change opens the single flow with `undoOf`. More than one opens the batch flow in `PgUndo.database` with `undoOf`.
      - "묶음 되돌리기" calls `pg_undo_batch`.
      - Errors from the call show with `PgError`.
-  9. Every existing pg test still passes with the `direct` field added to fixtures.
+  9. Every existing pg test still passes with the `direct` and `owned` fields added to fixtures.
 - [ ] **Step 2: Implement.**
 - [ ] **Step 3: Verify** with `npx vitest run`, `npx tsc --noEmit` and `npm run build`. Mutation checks:
   - Keep the password in the notice: test 3 must fail.
@@ -1170,7 +1176,7 @@ export function usePgBatch(target: PgTarget): {
   - `src/styles.css`
 
 **Interfaces:**
-- Consumes QF1's hooks and dialogs, and `PgSchemaCell.direct` and `PgDbPrivilegeRow.direct`.
+- Consumes QF1's hooks and dialogs, and the `direct` and `owned` fields of `PgSchemaCell` and `PgDbPrivilegeRow`.
 - Produces:
 
 ```ts
@@ -1188,7 +1194,7 @@ export function usePgDraft(target: PgTarget, ov: PgOverview | undefined): {
   1. **Draft rules (`draft.ts`):**
      - The key of each kind:
        - grant: `grant|${database}|${grantee}|${target key}|${privileges}`;
-       - membership: `membership|${group}|${member}|${admin}`, so an ADMIN toggle and a membership toggle for one pair are separate items;
+       - membership: `membership|${group}|${member}|${admin}`. Toggling uses the key, but a new membership item replaces any pending item for the same pair with the other `admin` value, as attributes items do, so the batch never holds two changes for one pair;
        - attributes: `attributes|${role}`;
        - default privilege: `default|${database}|${creator}|${schema ?? "*"}|${objectType}|${grantee}|${privileges}`.
      - Toggling a pending key removes it.
@@ -1314,7 +1320,7 @@ export function usePgDraft(target: PgTarget, ov: PgOverview | undefined): {
        - With `matching`, a radio: "같은 권한을 가진 그룹에 넣어요" with a select of `matching` (the first chosen), or "새 그룹을 만들어요" with a name field.
        - Without `matching`, only the new-group option, with the name field filled with `proposedName`.
      - **The suggestion, for a 그룹:** `같은 권한을 가진 그룹이 이미 있어요: ${names}` as information. The new group takes the privileges itself.
-     - **Creators.** readOnly and readWrite show "기본 권한을 줄 역할": checkboxes of `creators`, with the note "앞으로 이 역할들이 만드는 테이블과 시퀀스에도 같은 권한을 줘요". Creators in `blockedCreators` start unchecked and disabled, with their reason shown next to them. The others start checked.
+     - **Creators.** When "같은 권한을 가진 그룹에 넣어요" is chosen, the creators are hidden and `creators: []` is sent, since only the membership is added. Otherwise readOnly and readWrite show "기본 권한을 줄 역할": checkboxes of `creators`, with the note "앞으로 이 역할들이 만드는 테이블과 시퀀스에도 같은 권한을 줘요". Creators in `blockedCreators` start unchecked and disabled, with their reason shown next to them. The others start checked.
      - **Preview.** "미리보기" builds the `createRole` change exactly. Test each preset and each group choice. It then starts `usePgChange`. A 사용자 ends in the password phase.
   2. **Password reset:** "비밀번호 재설정" shows only for login roles. It starts `{ kind: "password", role }` and ends in the password phase.
   3. **DropRoleDialog** (title "역할 삭제"):
