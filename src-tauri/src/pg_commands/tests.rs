@@ -113,6 +113,56 @@ fn closing_forgets_everything_of_that_target_and_only_that_target_and_counts_the
     assert_eq!(state.opened(&a).expect("opened").epoch, 1);
 }
 
+#[tokio::test]
+async fn opening_as_another_login_closes_the_connections_of_the_previous_login_and_only_those() {
+    let server = FakeServer::start(Script::Ready).await;
+    let state = PgState::default();
+    let (a, b) = (target("a"), target("b"));
+    let epoch = open(&state, &a);
+    open(&state, &b);
+    // iam_admin이 연 연결 둘(기본 데이터베이스와 다른 데이터베이스)과 다른 대상의 연결 하나
+    pool_a_connection(&state, &server, &a, epoch, "appdb", 7).await;
+    pool_a_connection(&state, &server, &a, epoch, "orders", 8).await;
+    pool_a_connection(&state, &server, &b, state.pool.epoch(&b), "appdb", 20).await;
+    // 로그인 사용자를 바꾸는 열기는 새 사용자로 먼저 연결하고, 클러스터를 읽은 뒤에 로그인을 바꾼다(`open`)
+    let key = ConnKey { target: a.clone(), user: "other_user".into(), database: "appdb".into() };
+    state.pool.get_or_connect_at_epoch(key, epoch, || async { Ok(server.connected(9).await) }).await.expect("connect as the new login");
+    assert_eq!(state.pool.backend_pids(&a), vec![7, 8, 9]);
+
+    state.finish_open(&a, epoch, "other_user".into(), info(), cluster()).expect("switch");
+    assert_eq!(state.pool.backend_pids(&a), vec![9], "이전 사용자의 연결이 남았어요");
+    assert_eq!(state.pool.backend_pids(&b), vec![20], "다른 대상의 연결은 그대로예요");
+    assert_eq!(state.pool.epoch(&a), epoch, "대상을 닫은 것이 아니에요");
+    assert_eq!(state.opened(&a).expect("opened").login, "other_user");
+
+    // 같은 사용자로 다시 열면(다시 읽기) 그 사용자의 연결을 닫지 않는다
+    state.finish_open(&a, epoch, "other_user".into(), info(), cluster()).expect("reopen");
+    assert_eq!(state.pool.backend_pids(&a), vec![9]);
+    // 처음 열 때(기억한 로그인이 없다)는 닫을 이전 사용자가 없다
+    let c = target("c");
+    let first = ConnKey { target: c.clone(), user: "iam_admin".into(), database: "appdb".into() };
+    state.pool.get_or_connect_at_epoch(first, 0, || async { Ok(server.connected(30).await) }).await.expect("connect");
+    open(&state, &c);
+    assert_eq!(state.pool.backend_pids(&c), vec![30]);
+}
+
+#[tokio::test]
+async fn a_late_open_that_is_refused_closes_nothing_of_the_tab_opened_since() {
+    // 닫기 전에 시작한 열기가 늦게 끝났다. 그 사이 다시 연 탭의 연결과 로그인은 건드리지 않는다
+    let server = FakeServer::start(Script::Ready).await;
+    let state = PgState::default();
+    let a = target("a");
+    let started_at = state.pool.epoch(&a);
+    state.close(&a);
+    let epoch = open(&state, &a);
+    pool_a_connection(&state, &server, &a, epoch, "appdb", 7).await;
+
+    let late = state.finish_open(&a, started_at, "other_user".into(), info(), cluster());
+    assert_eq!(late.err(), not_opened_error());
+    assert_eq!(state.pool.backend_pids(&a), vec![7]);
+    assert_eq!(state.opened(&a).expect("opened").login, "iam_admin");
+}
+
 #[test]
 fn an_open_that_started_before_a_close_stores_nothing() {
     let state = PgState::default();
@@ -240,7 +290,8 @@ async fn a_database_that_fails_is_skipped_with_the_error_text_and_the_walk_goes_
     let state = PgState::default();
     let a = target("a");
     let epoch = open(&state, &a);
-    let (snapshots, skipped) = collect_snapshots(&state, &a, epoch, &names(&["analytics", "legacy", "orders", "reports"]), false, |database| async move {
+    // 끝점에 닿지 못한 오류(네트워크)는 뒤의 데이터베이스를 읽지 않게 하니 맨 뒤에 둔다. 그 앞의 오류는 건너뛰기만 하고 순회는 이어 간다
+    let (snapshots, skipped) = collect_snapshots(&state, &a, epoch, &names(&["analytics", "orders", "reports", "legacy"]), false, |database| async move {
         match database.as_str() {
             "analytics" => Err(AppError::other("analytics에 연결하지 못했어요: permission denied for database \"analytics\"")),
             "legacy" => Err(AppError::Network { message: "엔드포인트에 연결하지 못했어요(db.example:5432). VPN이 켜져 있는지 확인하세요".into() }),
@@ -256,12 +307,113 @@ async fn a_database_that_fails_is_skipped_with_the_error_text_and_the_walk_goes_
         skipped,
         [
             PgSkippedDatabase { database: "analytics".into(), reason: "analytics에 연결하지 못했어요: permission denied for database \"analytics\"".into() },
-            PgSkippedDatabase { database: "legacy".into(), reason: "엔드포인트에 연결하지 못했어요(db.example:5432). VPN이 켜져 있는지 확인하세요".into() },
             PgSkippedDatabase { database: "reports".into(), reason: "질의가 30초 안에 끝나지 않았어요. 잠시 뒤 다시 읽어 주세요".into() },
+            PgSkippedDatabase { database: "legacy".into(), reason: "엔드포인트에 연결하지 못했어요(db.example:5432). VPN이 켜져 있는지 확인하세요".into() },
         ]
     );
     // 건너뛴 데이터베이스는 담지 않는다
     assert!(state.cached_db(&a, "analytics").is_none() && state.cached_db(&a, "orders").is_some());
+}
+
+const VPN_TEXT: &str = "엔드포인트에 연결하지 못했어요(db.example:5432). VPN이 켜져 있는지 확인하세요";
+
+fn skipped_as(databases: &[&str], reason: &str) -> Vec<PgSkippedDatabase> {
+    databases.iter().map(|database| PgSkippedDatabase { database: database.to_string(), reason: reason.to_string() }).collect()
+}
+
+#[tokio::test]
+async fn after_the_first_network_error_the_walk_stops_connecting_and_skips_the_rest_with_the_same_reason() {
+    // 한 대상의 데이터베이스는 끝점 하나를 같이 쓴다. VPN이 꺼졌으면 데이터베이스마다 10초씩 기다릴 이유가 없다
+    let state = PgState::default();
+    let a = target("a");
+    let epoch = open(&state, &a);
+    let calls = std::sync::Mutex::new(Vec::new());
+    let (snapshots, skipped) = collect_snapshots(&state, &a, epoch, &names(&["analytics", "legacy", "orders", "reports"]), false, |database| {
+        calls.lock().unwrap().push(database.clone());
+        async move {
+            if database == "legacy" {
+                Err(AppError::Network { message: VPN_TEXT.into() })
+            } else {
+                Ok(snapshot(&database))
+            }
+        }
+    })
+    .await
+    .expect("끝점에 닿지 못해도 호출은 실패하지 않아요");
+    assert_eq!(*calls.lock().unwrap(), ["analytics", "legacy"], "닿지 못한 뒤에는 읽으러 가지 않아요");
+    assert_eq!(snapshots.iter().map(|s| s.database.as_str()).collect::<Vec<_>>(), ["analytics"]);
+    assert_eq!(skipped, skipped_as(&["legacy", "orders", "reports"], VPN_TEXT));
+    assert!(state.cached_db(&a, "orders").is_none() && state.cached_db(&a, "analytics").is_some());
+}
+
+#[tokio::test]
+async fn an_error_that_is_not_a_network_error_does_not_stop_the_walk() {
+    let state = PgState::default();
+    let a = target("a");
+    let epoch = open(&state, &a);
+    let reads = AtomicUsize::new(0);
+    let (snapshots, skipped) = collect_snapshots(&state, &a, epoch, &names(&["one", "two", "three"]), false, |database| {
+        reads.fetch_add(1, Ordering::SeqCst);
+        async move {
+            if database == "one" {
+                Err(AppError::other("one에 연결하지 못했어요: permission denied"))
+            } else {
+                Ok(snapshot(&database))
+            }
+        }
+    })
+    .await
+    .expect("walk");
+    assert_eq!(reads.load(Ordering::SeqCst), 3);
+    assert_eq!(snapshots.len(), 2);
+    assert_eq!(skipped, skipped_as(&["one"], "one에 연결하지 못했어요: permission denied"));
+}
+
+#[tokio::test]
+async fn the_snapshots_already_read_are_still_used_after_a_network_error() {
+    let state = PgState::default();
+    let a = target("a");
+    let epoch = open(&state, &a);
+    let kept = Arc::new(snapshot("reports"));
+    state.keep_db(&a, epoch, "reports", kept.clone());
+    let calls = std::sync::Mutex::new(Vec::new());
+    let (snapshots, skipped) = collect_snapshots(&state, &a, epoch, &names(&["legacy", "orders", "reports"]), false, |database| {
+        calls.lock().unwrap().push(database.clone());
+        async move {
+            if database == "legacy" {
+                Err(AppError::Network { message: VPN_TEXT.into() })
+            } else {
+                Ok(snapshot(&database))
+            }
+        }
+    })
+    .await
+    .expect("walk");
+    assert_eq!(*calls.lock().unwrap(), ["legacy"]);
+    // 읽어 둔 reports는 연결 없이 그대로 쓰고, 읽어 둔 것이 없는 orders만 건너뛴다
+    assert_eq!(snapshots.len(), 1);
+    assert!(Arc::ptr_eq(&snapshots[0], &kept));
+    assert_eq!(skipped, skipped_as(&["legacy", "orders"], VPN_TEXT));
+}
+
+#[tokio::test]
+async fn a_forced_walk_cannot_read_again_after_a_network_error_so_it_skips_the_rest_like_any_failed_read() {
+    let state = PgState::default();
+    let a = target("a");
+    let epoch = open(&state, &a);
+    state.keep_db(&a, epoch, "reports", Arc::new(snapshot("reports")));
+    let reads = AtomicUsize::new(0);
+    let (snapshots, skipped) = collect_snapshots(&state, &a, epoch, &names(&["legacy", "reports"]), true, |_| {
+        reads.fetch_add(1, Ordering::SeqCst);
+        async { Err(AppError::Network { message: VPN_TEXT.into() }) }
+    })
+    .await
+    .expect("walk");
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+    assert!(snapshots.is_empty());
+    assert_eq!(skipped, skipped_as(&["legacy", "reports"], VPN_TEXT));
+    // 건너뛰어도 읽어 둔 것은 지우지 않는다
+    assert!(state.cached_db(&a, "reports").is_some());
 }
 
 #[test]
@@ -515,7 +667,7 @@ async fn the_commands_answer_from_the_kept_snapshots_without_connecting() {
     assert_eq!(state.role(&a, "alice".into()).await, summary::role_view(&cluster, &[&*db], "alice", now_secs(), &[]));
     // 틀린 입력은 빌더의 오류 그대로 나간다
     assert_eq!(state.who_can(&app, &a, "appdb", orders, "SUPERPOWER").await.err(), Some(AppError::other("알 수 없는 권한이에요: SUPERPOWER")));
-    assert_eq!(state.cell(&app, &a, "appdb", "nobody".into(), "app".into()).await.err(), Some(AppError::other("알 수 없는 역할이에요: nobody")));
+    assert_eq!(state.cell(&app, &a, "appdb", "nobody".into(), "app".into()).await.err(), Some(AppError::other("역할을 찾을 수 없어요: nobody")));
 
     let checked = state.findings(&app, &a, false).await.expect("findings");
     let expected = checks::findings(&cluster, &[&*db], Vec::new(), now_secs());
@@ -536,7 +688,7 @@ async fn a_role_view_marks_the_sessions_of_the_connections_this_app_holds() {
 
     let view = state.role(&a, "alice".into()).await.expect("role");
     assert_eq!(view.sessions.iter().map(|s| (s.pid, s.own)).collect::<Vec<_>>(), [(7, true), (8, false)]);
-    assert_eq!(state.role(&a, "nobody".into()).await.err(), Some(AppError::other("알 수 없는 역할이에요: nobody")));
+    assert_eq!(state.role(&a, "nobody".into()).await.err(), Some(AppError::other("역할을 찾을 수 없어요: nobody")));
 }
 
 #[tokio::test]

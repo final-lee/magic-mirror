@@ -23,6 +23,9 @@ pub const RDS_SUPERUSER: &str = "rds_superuser";
 pub const RDS_IAM: &str = "rds_iam";
 
 const MANAGE_REASON: &str = "이 사용자는 rds_superuser 멤버가 아니고 CREATEROLE도 없어서 바꿀 수 없어요";
+/// 로그인 사용자가 `rds_superuser`의 직접 구성원이거나 `SET ROLE`을 한 뒤에 그 권한을 쓰는 경우의 이유. 문장은 `SET ROLE` 없이 돌아서 바꿀 수 없지만,
+/// 역할 목록은 이 사용자를 관리자급으로 보이니 "멤버가 아니다"라고 하면 틀린 말이다
+const MANAGE_REASON_SET_ROLE: &str = "이 사용자는 SET ROLE로만 rds_superuser 권한을 쓸 수 있어서 바꿀 수 없어요";
 
 /// 만료까지 이 일수 안이면 "곧 만료"다
 pub const EXPIRING_SOON_DAYS: i64 = 30;
@@ -45,8 +48,9 @@ pub fn is_system_role(name: &str) -> bool {
     name.starts_with("pg_") || name.starts_with("rds_") || matches!(name, "rdsadmin" | "rdstopmgr" | "rdsrepladmin")
 }
 
+/// 역할·스키마·객체를 찾을 수 없다는 오류의 문구는 모두 같은 꼴이다: "…을 찾을 수 없어요: 이름". 한 탭에서 한 가지 말을 쓴다
 fn unknown_role(role: &str) -> AppError {
-    AppError::other(format!("알 수 없는 역할이에요: {role}"))
+    AppError::other(format!("역할을 찾을 수 없어요: {role}"))
 }
 
 // ───────────────────────── 만료 ─────────────────────────
@@ -208,12 +212,17 @@ pub fn role_summaries(cluster: &ClusterSnapshot, now: i64) -> Vec<PgRoleSummary>
 }
 
 /// 탭을 열 때 한 번 받는 개요. 로그인 사용자가 `rds_superuser`의 권한을 상속하거나 CREATEROLE이 있거나 superuser면 관리할 수 있다.
+/// 관리할 수 없을 때의 이유는 둘이다: `rds_superuser`의 직접 구성원이거나 `SET ROLE`을 하면 그 권한을 쓰는 사용자는 `SET ROLE`로만 쓴다는 이유(역할 목록이
+/// 관리자급으로 보이는 사용자와 말이 맞는다), 그 밖에는 멤버가 아니고 CREATEROLE도 없다는 이유다.
 pub fn overview(info: &PgTargetInfo, cluster: &ClusterSnapshot, now: i64) -> PgOverview {
     // 역할 요약과 같은 `Eval`을 쓴다
     let index = Index::new(cluster);
     let login = cluster.roles.iter().find(|r| r.name == cluster.login_user);
-    let inherits_admin = index.eval.role(&cluster.login_user).inherited().iter().any(|i| i.role == RDS_SUPERUSER);
+    let view = index.eval.role(&cluster.login_user);
+    let inherits_admin = view.inherited().iter().any(|i| i.role == RDS_SUPERUSER);
     let can_manage = inherits_admin || login.is_some_and(|r| r.create_role || r.superuser);
+    let direct_admin = index.groups_of.get(cluster.login_user.as_str()).is_some_and(|groups| groups.iter().any(|m| m.group == RDS_SUPERUSER));
+    let reason = if direct_admin || view.usable_after_set_role().contains(RDS_SUPERUSER) { MANAGE_REASON_SET_ROLE } else { MANAGE_REASON };
     PgOverview {
         target: info.clone(),
         login_user: cluster.login_user.clone(),
@@ -224,7 +233,7 @@ pub fn overview(info: &PgTargetInfo, cluster: &ClusterSnapshot, now: i64) -> PgO
         roles: index.summaries(now),
         databases: cluster.databases.iter().map(|d| PgDatabaseInfo { name: d.name.clone(), owner: d.owner.clone(), allow_conn: d.allow_conn }).collect(),
         can_manage,
-        manage_reason: (!can_manage).then(|| MANAGE_REASON.to_string()),
+        manage_reason: (!can_manage).then(|| reason.to_string()),
     }
 }
 
@@ -348,7 +357,7 @@ pub fn cell_detail(cluster: &ClusterSnapshot, db: &DbSnapshot, role: &str, schem
         return Err(unknown_role(role));
     }
     if !db.schemas.iter().any(|s| s.name == schema) {
-        return Err(AppError::other(format!("스키마를 찾지 못했어요: {schema}")));
+        return Err(AppError::other(format!("스키마를 찾을 수 없어요: {schema}")));
     }
     let ctx = Ctx { cluster, db };
     let eval = Eval::new(&ctx);
@@ -546,7 +555,7 @@ fn resolve<'a>(cluster: &'a ClusterSnapshot, db: &'a DbSnapshot, object: &PgObje
 
 /// 한 객체에 한 권한을 가진 역할들. 그 객체를 스냅숏에서 찾지 못하면 오류고, 그 객체에 없는 권한이면 빈 목록이다.
 pub fn who_can_view(cluster: &ClusterSnapshot, db: &DbSnapshot, object: &PgObjectRef, privilege: Privilege) -> Result<PgWhoCan, AppError> {
-    let (obj, canonical) = resolve(cluster, db, object).ok_or_else(|| AppError::other(format!("객체를 찾지 못했어요: {}", object_text(object))))?;
+    let (obj, canonical) = resolve(cluster, db, object).ok_or_else(|| AppError::other(format!("객체를 찾을 수 없어요: {}", object_text(object))))?;
     let logins: HashMap<&str, bool> = cluster.roles.iter().map(|r| (r.name.as_str(), r.login)).collect();
     let allowed = who_can(&Ctx { cluster, db }, obj, privilege)
         .into_iter()
