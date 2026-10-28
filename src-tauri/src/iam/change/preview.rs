@@ -27,7 +27,7 @@ pub struct ChangePreview {
     pub reversible: bool,
 }
 
-fn rank(level: WarnLevel) -> u8 {
+pub(super) fn rank(level: WarnLevel) -> u8 {
     match level {
         WarnLevel::Block => 0,
         WarnLevel::Confirm => 1,

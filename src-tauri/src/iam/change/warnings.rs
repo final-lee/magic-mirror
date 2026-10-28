@@ -217,12 +217,19 @@ fn scoped_denies_added(s: &Snapshot, c: &IamChange) -> Vec<String> {
         .collect()
 }
 
-/// 이 변경 뒤에 앱이 쓰는 주체(`caller`)가 `inverse`를 실행할 IAM 권한을 갖고 있지 않거나, 조건 없이 갖고 있던 그 권한이 조건부가 되면
-/// (예: MFA가 없으면 거부) 그 이유. 원래부터 조건부였던 권한은 이 변경 탓이 아니라서 말하지 않는다.
-fn undo_problem(before: &Snapshot, after: &Snapshot, caller: &str, inverse: Option<&IamChange>) -> Option<String> {
+/// 이 변경 뒤에 앱이 쓰는 주체(`caller`)가 `inverses`를 실행할 IAM 권한을 갖고 있지 않거나, 조건 없이 갖고 있던 그 권한이 조건부가 되면
+/// (예: MFA가 없으면 거부) 그 이유. 원래부터 조건부였던 권한은 이 변경 탓이 아니라서 말하지 않는다. 되돌릴 변경이 없으면 None이다.
+/// 되돌릴 변경이 여럿이면 같은 API가 겹치니, 처음 나온 순서를 지키면서 API마다 한 번만 말한다.
+fn undo_problem(before: &Snapshot, after: &Snapshot, caller: &str, inverses: &[IamChange]) -> Option<String> {
     let status = |s: &Snapshot, api: &str| evaluate_action(s, caller, api, None).map(|eval| eval.status);
+    let mut apis: Vec<String> = Vec::new();
+    for api in inverses.iter().flat_map(|inverse| calls(after, inverse)).map(|call| call.api) {
+        if !apis.contains(&api) {
+            apis.push(api);
+        }
+    }
     let (mut gone, mut conditional) = (Vec::new(), Vec::new());
-    for api in calls(after, inverse?).into_iter().map(|call| call.api) {
+    for api in apis {
         match status(after, &api) {
             Some(Status::Allowed) => {}
             Some(Status::Conditional) => {
@@ -247,12 +254,20 @@ fn names(s: &Snapshot, arns: &[String]) -> String {
     shortened(&labels, SHOWN_NAMES)
 }
 
+/// 변경 하나의 영향 비교에서 나오는 경고(`analysis_warnings`). `inverse`는 그 변경을 되돌리는 변경이다.
+pub(super) fn from_analysis(before: &Snapshot, after: &Snapshot, c: &IamChange, a: &Analysis, inverse: Option<&IamChange>) -> (Vec<Warning>, bool) {
+    let inverses: Vec<IamChange> = inverse.cloned().into_iter().collect();
+    let edits_document = matches!(c, IamChange::PutInlinePolicy { .. } | IamChange::UpdateManagedPolicy { .. });
+    analysis_warnings(before, after, a, &inverses, edits_document)
+}
+
 /// 영향 계산에서 나오는 확인·주의: 문서를 읽지 못한 정책이 붙거나 떨어짐(증감을 다 계산하지 못했다), 앱 자격 증명에게 그대로 남는 읽지 못한
 /// 정책, 앱 자격 증명의 권한 축소(잃거나 조건부로 바뀜), 새 관리자급·권한 상승, 카탈로그에 없는 작업, 다른 주체의 권한이 조건부로 바뀜,
-/// 그대로 계산에서 빠진 정책, 영향받는 주체 수. `inverse`는 되돌리는 변경이다(적용 뒤에도 되돌릴 권한이 남는지 본다). 두 번째 값은 앱이
+/// 그대로 계산에서 빠진 정책, 영향받는 주체 수. `inverses`는 되돌리는 변경들을 되돌리는 순서대로다(적용 뒤에도 되돌릴 권한이 남는지 본다).
+/// `edits_document`는 사용자가 쓴 정책 문서를 다루는 변경인지다: 카탈로그에 없는 작업은 그런 변경에서만 오타로 본다. 두 번째 값은 앱이
 /// 쓰는 자격 증명이 되돌릴 권한을 잃거나 그 권한이 조건부가 되는지, 또는 문서를 읽지 못한 정책 때문에 그것을 알 수 없는지다(그러면
 /// 미리보기는 되돌릴 수 없다고 말한다).
-pub(super) fn from_analysis(before: &Snapshot, after: &Snapshot, c: &IamChange, a: &Analysis, inverse: Option<&IamChange>) -> (Vec<Warning>, bool) {
+pub(super) fn analysis_warnings(before: &Snapshot, after: &Snapshot, a: &Analysis, inverses: &[IamChange], edits_document: bool) -> (Vec<Warning>, bool) {
     let mut out = Vec::new();
     // 앱 자격 증명의 권한에 읽지 못한 정책이 끼어 있으면(붙거나 떨어지거나 그대로 남거나) 되돌릴 권한이 남는지 모른다
     let mut undo_lost = a.caller_unreadable;
@@ -268,7 +283,7 @@ pub(super) fn from_analysis(before: &Snapshot, after: &Snapshot, c: &IamChange, 
     }
     if let (true, Some(caller)) = (a.caller_lost || a.caller_restricted, before.caller_principal_arn.as_deref()) {
         // 되돌릴 권한이 없다는 말은 앞의 확인 하나에만 붙인다
-        let mut undo = undo_problem(before, after, caller, inverse);
+        let mut undo = undo_problem(before, after, caller, inverses);
         undo_lost |= undo.is_some();
         let mut with_undo = |mut message: String| {
             if let Some(problem) = undo.take() {
@@ -292,7 +307,7 @@ pub(super) fn from_analysis(before: &Snapshot, after: &Snapshot, c: &IamChange, 
         out.push(confirm(format!("권한 상승에 쓸 수 있는 권한을 새로 얻는 주체: {}", names(before, &a.newly_privesc))));
     }
     // 카탈로그에 없는 작업 이름은 사용자가 쓴 문서에서만 점검한다: AWS가 만든 정책에 든 새 작업까지 오타로 보면 안 된다
-    if !a.new_unknown.is_empty() && matches!(c, IamChange::PutInlinePolicy { .. } | IamChange::UpdateManagedPolicy { .. }) {
+    if !a.new_unknown.is_empty() && edits_document {
         out.push(warn(format!("카탈로그에 없는 작업이 있어요: {}. 오타인지 확인하세요", shortened(&a.new_unknown, SHOWN_NAMES))));
     }
     if a.restricted_others > 0 {

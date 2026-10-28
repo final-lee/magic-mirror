@@ -8,9 +8,14 @@
 //! - `warnings`·`document`: 막힘·확인·주의 규칙과 정책 문서 검사
 //! - `inverse`: 되돌리기용 역변경
 //! - `preview`: 위 조각을 모은 `ChangePreview`
+//! - `batch`: 붙이기·떼기·넣기·빼기 여러 개를 적용 순서로 늘어놓고 한 번에 미리보는 `BatchPreview`(변경마다는 그 시점 상태로, 영향은 처음과 끝 상태로 계산)
 
 use serde::{Deserialize, Serialize};
 
+// 묶음 적용(`commit`)과 명령이 쓰기 전까지는 쓰는 곳이 없어 안 쓰는 코드 경고가 나니 테스트에서만 빌드한다.
+// 그것들을 붙일 때 이 `cfg(test)`와 `pub use batch` 위의 `cfg(test)`를 뺀다
+#[cfg(test)]
+mod batch;
 mod calls;
 pub(crate) mod document;
 mod facts;
@@ -24,6 +29,8 @@ mod warnings;
 #[cfg(test)]
 mod scenarios;
 
+#[cfg(test)]
+pub use batch::{application_order, ordered, preview_batch, BatchItem, BatchPreview, MAX_BATCH};
 pub use calls::{calls, ApiCall};
 pub use facts::{deletes_policy_version, Facts, PolicyCheck};
 pub use impact::Impact;
