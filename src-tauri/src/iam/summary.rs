@@ -29,6 +29,13 @@ pub(super) fn summary_of<'a>(s: &Snapshot, principal: Principal, sources: &'a [S
             _ => None,
         },
         badges: badges_from(s, principal, sources, boundary),
+        attached: principal.attached().to_vec(),
+        groups: match principal {
+            Principal::User(user) => user.groups.clone(),
+            _ => Vec::new(),
+        },
+        // 그룹에는 권한 경계를 걸 수 없다(`boundary_arn`이 None)
+        boundary: principal.boundary_arn().map(str::to_string),
     }
 }
 
@@ -342,6 +349,46 @@ mod tests {
         assert!(!listed.contains(&"Unused"), "{listed:?}");
         assert!(listed.contains(&"Counted") && listed.contains(&"Referenced"), "{listed:?}");
         assert!(listed.contains(&"unused-policy"), "붙은 곳 없는 고객 관리형 정책은 보여요: {listed:?}");
+    }
+
+    #[test]
+    fn principal_summaries_carry_assignments() {
+        let mut s = snapshot();
+        // alice는 그룹뿐 아니라 관리형 정책도 직접 붙은 사용자로 바꾼다. 역할 deploy에는 권한 경계를 건다
+        s.users[0].attached = vec![S3_FULL.into()];
+        s.roles.iter_mut().find(|r| r.arn == DEPLOY).expect("deploy").boundary = Some(CAROL_BOUNDARY.into());
+        let json_of = |arn: &str| serde_json::to_value(principal_summary(&s, arn).expect("주체")).expect("직렬화");
+
+        let alice = json_of(ALICE);
+        assert_eq!((&alice["attached"], &alice["groups"]), (&json!([S3_FULL]), &json!(["admins"])));
+        assert!(alice.get("boundary").is_none());
+
+        // 아무것도 없으면 키를 보내지 않는다
+        let bob = json_of(BOB);
+        for key in ["attached", "groups", "boundary"] {
+            assert!(bob.get(key).is_none(), "{key}: {bob}");
+        }
+
+        // 권한 경계가 있는 사용자
+        let carol = json_of(CAROL);
+        assert_eq!((&carol["attached"], &carol["boundary"]), (&json!([S3_FULL]), &json!(CAROL_BOUNDARY)));
+        assert!(carol.get("groups").is_none());
+
+        // 그룹은 붙은 정책만 있다: 소속 그룹도 권한 경계도 없다
+        let admins = json_of(ADMINS);
+        assert_eq!(admins["attached"], json!([ADMIN_POLICY]));
+        assert!(admins.get("groups").is_none() && admins.get("boundary").is_none(), "{admins}");
+
+        // 역할은 권한 경계를 가질 수 있고, 소속 그룹은 없다
+        let deploy = json_of(DEPLOY);
+        assert_eq!(deploy["boundary"], json!(CAROL_BOUNDARY));
+        assert!(deploy.get("attached").is_none() && deploy.get("groups").is_none(), "{deploy}");
+
+        // 개요 목록의 요약도 같다
+        let (users, groups, roles, _) = summaries(&s);
+        assert_eq!(serde_json::to_value(users.iter().find(|u| u.name == "carol").expect("carol")).unwrap(), carol);
+        assert_eq!(serde_json::to_value(&groups[0]).unwrap(), admins);
+        assert_eq!(serde_json::to_value(roles.iter().find(|r| r.name == "deploy").expect("deploy")).unwrap(), deploy);
     }
 
     #[test]

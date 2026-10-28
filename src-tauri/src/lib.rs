@@ -78,6 +78,9 @@ pub fn run() {
             iam_commands::iam_apply,
             iam_commands::iam_change_log,
             iam_commands::iam_undo_change,
+            iam_commands::iam_preview_batch,
+            iam_commands::iam_apply_batch,
+            iam_commands::iam_undo_batch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

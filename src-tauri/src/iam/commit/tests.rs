@@ -173,6 +173,7 @@ fn recorded(id: &str, change: IamChange, inverse: Option<IamChange>) -> ChangeLo
         inverse,
         undo_of: None,
         undone: false,
+        batch_id: None,
     }
 }
 
@@ -411,6 +412,7 @@ async fn a_successful_change_is_logged_with_its_inverse_and_calls() {
             inverse: Some(detach(BOB, S3_FULL)),
             undo_of: None,
             undone: false,
+            batch_id: None,
         }]
     );
 }

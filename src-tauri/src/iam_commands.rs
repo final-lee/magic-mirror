@@ -1,6 +1,6 @@
 //! IAM 작업 공간의 명령. 계정의 IAM 상태(스냅숏)는 프로필마다 한 번 읽어 캐시해 두고, 대부분의 명령은 그 스냅숏으로 계산한다.
 //! IAM은 글로벌 서비스라 리전은 `GLOBAL_REGION`을 쓴다. 이 파일의 AWS 호출은 모두 읽기 전용이다:
-//! 변경(`iam_apply`)은 `iam::commit`이 거른 뒤 `iam::write`가 한다.
+//! 변경(`iam_apply`, 묶음은 `iam_apply_batch`)은 `iam::commit`이 거른 뒤 `iam::write`가 한다.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -16,8 +16,10 @@ use crate::aws::context::GLOBAL_REGION;
 use crate::commands::AppState;
 use crate::error::AppError;
 use crate::iam::catalog::{catalog, AccessLevel};
-use crate::iam::change::{deletes_policy_version, preview, ApiCall, ChangePreview, Facts, IamChange, PolicyCheck};
+use crate::iam::change::{deletes_policy_version, ordered, preview, preview_batch, ApiCall, BatchPreview, ChangePreview, Facts, IamChange, PolicyCheck, MAX_BATCH};
 use crate::iam::clock::{now_secs, parse_iso};
+use crate::iam::commit::batch::{commit_batch, undo_batch_of, BatchRequest, BatchResult, UndoBatch};
+use crate::iam::commit::plan::BatchPlan;
 use crate::iam::commit::{commit, is_stale, new_log_id, undo_change_of, ApplyResult, Plan, PlanStore, Request};
 use crate::iam::eval::{evaluate, principal_actions, principal_view, who_can};
 use crate::iam::fetch::checks::{self, FindingLevel, SimulateResult, ValidationResult};
@@ -115,6 +117,8 @@ pub struct IamState {
     log_path: PathBuf,
     /// 미리보기에서 사용자가 본 계획. 적용할 때 다시 계산한 계획과 견준다
     plans: Mutex<PlanStore>,
+    /// 묶음 미리보기에서 사용자가 본 계획
+    batch_plans: Mutex<PlanStore<BatchPlan>>,
     /// 프로필마다 마지막으로 IAM을 바꾼 시각(유닉스 초)
     written: Mutex<HashMap<String, i64>>,
 }
@@ -443,6 +447,12 @@ async fn preview_and_remember(iam: &IamState, profile: &str, s: Arc<Snapshot>, c
     Ok(shown)
 }
 
+/// 확인을 마친 호출 목록을 IAM에 쓴다. 이 파일에서 IAM 쓰기를 부르는 곳은 여기 하나다: 하나짜리 적용(`iam_apply`)과 묶음 적용(`iam_apply_batch`)이
+/// 같은 길을 쓴다(`write`의 `only_the_apply_command_reaches_the_writer`가 `write::apply` 호출이 이 파일에 한 번뿐인지 본다).
+async fn write_calls(client: &aws_sdk_iam::Client, plan: &[ApiCall]) -> write::Applied {
+    write::apply(client, plan).await
+}
+
 /// 적용 요청: 어느 프로필에서 무엇을, 어떤 확인 문구로, (되돌리기면) 어느 기록을 되돌리는지.
 struct ApplyRequest {
     profile: String,
@@ -503,7 +513,106 @@ pub async fn iam_apply(
 ) -> Result<ApplyResult, AppError> {
     let (s, facts, client) = gather(&state, &iam, &profile, &change).await?;
     let req = ApplyRequest { profile, change, confirm_text, undo_of };
-    apply_with(&iam, req, s, facts, move |plan: Vec<ApiCall>| async move { write::apply(&client, &plan).await }).await
+    apply_with(&iam, req, s, facts, move |plan: Vec<ApiCall>| async move { write_calls(&client, &plan).await }).await
+}
+
+/// 붙일 정책이 스냅숏에 없으면 변경마다 읽어 넣고(앞 변경에서 읽은 정책은 다시 읽지 않는다), 변경마다의 재료를 `changes`와 같은 순서로 만든다.
+/// 50개를 넘는 묶음은 미리보기가 막으니 앞의 50개까지만 읽고 나머지에는 기본 재료를 둔다.
+async fn read_missing_policies(client: &aws_sdk_iam::Client, mut s: Arc<Snapshot>, changes: &[IamChange]) -> Result<(Arc<Snapshot>, Vec<Facts>), AppError> {
+    let mut facts = Vec::with_capacity(changes.len());
+    for c in changes.iter().take(MAX_BATCH) {
+        let (next, policy_error) = ensure_policy(client, s, c).await?;
+        s = next;
+        facts.push(Facts { policy_error, ..Facts::default() });
+    }
+    facts.resize(changes.len(), Facts::default());
+    Ok((s, facts))
+}
+
+/// 묶음의 재료: 최신 스냅숏(붙일 정책의 문서를 채운 것)과 변경마다의 재료(`read_missing_policies`).
+async fn gather_batch(state: &AppState, iam: &IamState, profile: &str, changes: &[IamChange]) -> Result<(Arc<Snapshot>, Vec<Facts>, aws_sdk_iam::Client), AppError> {
+    let s = fresh_snapshot(state, iam, profile).await?;
+    let cfg = state.ctx.config(profile, GLOBAL_REGION).await?;
+    let client = aws_sdk_iam::Client::new(&cfg);
+    let (s, facts) = read_missing_policies(&client, s, changes).await?;
+    Ok((s, facts, client))
+}
+
+/// 묶음 미리보기를 계산하고 사용자가 본 계획으로 기억해 둔다. 계획은 적용 순서로 늘어놓은 변경 목록 아래에 둔다: 담은 순서만 다른 묶음은 같은 미리보기다.
+async fn preview_batch_and_remember(iam: &IamState, profile: &str, s: Arc<Snapshot>, changes: Vec<IamChange>, facts: Vec<Facts>) -> Result<BatchPreview, AppError> {
+    let account_id = s.account_id.clone();
+    let key = ordered(&changes);
+    let shown = tokio::task::spawn_blocking(move || preview_batch(&s, &changes, &facts))
+        .await
+        .map_err(|e| AppError::other(format!("미리보기를 계산하지 못했어요: {e}")))?;
+    locked(&iam.batch_plans).remember(profile, &key, BatchPlan::of(&account_id, &shown), now_secs());
+    Ok(shown)
+}
+
+/// 묶음 적용 요청: 어느 프로필에서 어떤 변경들을(받은 순서), 어떤 확인 문구로, (되돌리기면) 변경마다 어느 기록을 되돌리는지.
+struct BatchApplyRequest {
+    profile: String,
+    changes: Vec<IamChange>,
+    confirm_text: Option<String>,
+    undo_of: Option<Vec<String>>,
+}
+
+/// 묶음 미리보기에서 본 계획을 꺼내(꺼낸 계획은 맞든 틀리든 다시 쓰지 않는다) `commit_batch`에 넘기고, IAM에 썼으면 읽어 둔 스냅숏을 버리고 쓴 시각을 적는다.
+/// 쓰기는 `write`로 받는다: `iam_apply_batch`는 실제 쓰기를, 테스트는 가짜 쓰기를 넣는다.
+async fn apply_batch_with<W, Fut>(iam: &IamState, req: BatchApplyRequest, s: Arc<Snapshot>, facts: Vec<Facts>, write: W) -> Result<BatchResult, AppError>
+where
+    W: FnMut(Vec<ApiCall>) -> Fut,
+    Fut: Future<Output = write::Applied>,
+{
+    let BatchApplyRequest { profile, changes, confirm_text, undo_of } = req;
+    let now = now_secs();
+    let seen = locked(&iam.batch_plans).take(&profile, &ordered(&changes), now);
+    let request = BatchRequest {
+        profile: profile.clone(),
+        snapshot: s,
+        facts,
+        changes,
+        confirm_text,
+        undo_of,
+        seen,
+        log_path: iam.log_path.clone(),
+        now,
+        batch_id: new_log_id(now_millis()),
+    };
+    let committed = commit_batch(request, write).await;
+    if committed.wrote {
+        // 중간에 멈췄어도 앞 변경은 적용됐다. `apply_with`처럼 쓴 시각을 먼저 적고 읽어 둔 스냅숏을 버린다
+        mark_written(iam, &profile, now_secs());
+        invalidate(iam, &profile);
+    }
+    committed.result
+}
+
+/// 묶음 미리보기. 적용할 때와 같은 재료로 계산하고, 사용자가 본 계획을 기억해 둔다.
+#[tauri::command]
+pub async fn iam_preview_batch(state: State<'_, AppState>, iam: State<'_, IamState>, profile: String, changes: Vec<IamChange>) -> Result<BatchPreview, AppError> {
+    let (s, facts, _) = gather_batch(&state, &iam, &profile, &changes).await?;
+    preview_batch_and_remember(&iam, &profile, s, changes, facts).await
+}
+
+/// 묶음 적용. 최신 스냅숏으로 묶음 미리보기를 다시 계산해, 사용자가 본 계획과 같고 막힘·확인 문구를 통과할 때만 적용 순서대로 변경마다 IAM을 바꾸고
+/// 변경마다 기록을 남긴다. 변경 하나가 실패하면 거기서 멈추고(앞 변경은 그대로) 실패한 위치를 결과로 알린다. 미리보기 하나로는 한 번만 적용한다.
+#[tauri::command]
+pub async fn iam_apply_batch(
+    state: State<'_, AppState>,
+    iam: State<'_, IamState>,
+    profile: String,
+    changes: Vec<IamChange>,
+    confirm_text: Option<String>,
+    undo_of: Option<Vec<String>>,
+) -> Result<BatchResult, AppError> {
+    let (s, facts, client) = gather_batch(&state, &iam, &profile, &changes).await?;
+    let req = BatchApplyRequest { profile, changes, confirm_text, undo_of };
+    apply_batch_with(&iam, req, s, facts, move |plan: Vec<ApiCall>| {
+        let client = client.clone();
+        async move { write_calls(&client, &plan).await }
+    })
+    .await
 }
 
 /// 변경 기록, 최신순.
@@ -529,11 +638,23 @@ pub async fn iam_undo_change(iam: State<'_, IamState>, entry_id: String) -> Resu
     undo_change_in(&iam, &entry_id).await
 }
 
+/// 묶음의 역변경과 되돌릴 기록 id. 변경 기록(`change_log_of`)은 새것이 먼저라서 그 순서가 곧 되돌릴 순서다.
+async fn undo_batch_in(iam: &IamState, batch_id: &str) -> Result<UndoBatch, AppError> {
+    undo_batch_of(&change_log_of(iam).await?, batch_id)
+}
+
+/// 적용은 이 값을 묶음 미리보기로 확인한 뒤 `iam_apply_batch(undo_of = 기록 id들)`로 한다.
+#[tauri::command]
+pub async fn iam_undo_batch(iam: State<'_, IamState>, batch_id: String) -> Result<UndoBatch, AppError> {
+    undo_batch_in(&iam, &batch_id).await
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+    use crate::iam::commit::plan::DRIFTED;
     use crate::iam::model::Scope;
 
     fn snapshot_of(account: &str) -> Snapshot {
@@ -1045,6 +1166,228 @@ mod tests {
         assert!(written_at(&iam, "dev").is_some_and(|at| at >= before));
     }
 
+    // ── 묶음: 미리보기 → 적용 ──
+
+    fn remove_s3_from_carol() -> IamChange {
+        IamChange::DetachPolicy { target: crate::iam::fixtures::CAROL.into(), policy_arn: crate::iam::fixtures::S3_FULL.into() }
+    }
+
+    fn batch_request(profile: &str, changes: &[IamChange]) -> BatchApplyRequest {
+        BatchApplyRequest { profile: profile.into(), changes: changes.to_vec(), confirm_text: None, undo_of: None }
+    }
+
+    /// 몇 번 불렸는지 세고, 받은 호출을 모두 성공시키는 가짜 쓰기. 묶음은 변경마다 쓰기를 부르니 여러 번 쓸 수 있다.
+    fn counting_each(writes: &AtomicUsize) -> impl FnMut(Vec<ApiCall>) -> std::future::Ready<write::Applied> + '_ {
+        move |plan| {
+            writes.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(write::Applied { done: plan, result: Ok(()) })
+        }
+    }
+
+    fn logged_ids(iam: &IamState) -> Vec<(String, Option<String>)> {
+        change_log::read_all(&iam.log_path).into_iter().map(|e| (e.id, e.batch_id)).collect()
+    }
+
+    #[tokio::test]
+    async fn a_batch_apply_without_a_preview_is_refused_and_writes_nothing() {
+        let ((_dir, iam), writes) = (with_log(), AtomicUsize::new(0));
+        let s = snapshot_with(&iam, "dev", false, || async { Ok(crate::iam::fixtures::snapshot()) }).await.unwrap();
+        let changes = vec![attach_s3_to_bob(), remove_s3_from_carol()];
+        let refused = apply_batch_with(&iam, batch_request("dev", &changes), s, vec![Facts::default(); 2], counting_each(&writes)).await;
+        assert_eq!(refused, Err(AppError::other(DRIFTED)));
+        assert_eq!(writes.load(Ordering::SeqCst), 0);
+        assert_eq!(written_at(&iam, "dev"), None, "쓰지 않았으면 쓴 시각도 없어요");
+        assert!(iam.snapshots.get("dev").is_some(), "쓰지 않았으면 읽어 둔 스냅숏도 그대로예요");
+        assert!(logged_ids(&iam).is_empty());
+    }
+
+    #[tokio::test]
+    async fn one_batch_preview_allows_exactly_one_apply() {
+        let ((_dir, iam), writes) = (with_log(), AtomicUsize::new(0));
+        let s = Arc::new(crate::iam::fixtures::snapshot());
+        let changes = vec![attach_s3_to_bob(), remove_s3_from_carol()];
+        let facts = vec![Facts::default(); 2];
+        let shown = preview_batch_and_remember(&iam, "dev", s.clone(), changes.clone(), facts.clone()).await.unwrap();
+        assert_eq!(shown.changes.iter().map(|item| item.change.clone()).collect::<Vec<_>>(), changes);
+
+        let first = apply_batch_with(&iam, batch_request("dev", &changes), s.clone(), facts.clone(), counting_each(&writes)).await.unwrap();
+        assert_eq!((first.log_ids.len(), first.failed.is_none()), (2, true));
+        assert_eq!(writes.load(Ordering::SeqCst), 2);
+        assert!(written_at(&iam, "dev").is_some());
+        assert_eq!(logged_ids(&iam), vec![(format!("{}-1", first.batch_id), Some(first.batch_id.clone())), (format!("{}-2", first.batch_id), Some(first.batch_id.clone()))]);
+
+        let second = apply_batch_with(&iam, batch_request("dev", &changes), s, facts, counting_each(&writes)).await;
+        assert_eq!(second, Err(AppError::other(DRIFTED)));
+        assert_eq!(writes.load(Ordering::SeqCst), 2, "같은 미리보기로 두 번 쓰지 않아요");
+    }
+
+    #[tokio::test]
+    async fn a_batch_preview_in_another_tray_order_with_the_same_ordered_changes_still_matches() {
+        let ((_dir, iam), writes) = (with_log(), AtomicUsize::new(0));
+        let s = Arc::new(crate::iam::fixtures::snapshot());
+        // 붙이기가 먼저, 떼기가 나중: [a, b]도 [b, a]도 적용 순서는 [a, b]다
+        let (a, b) = (attach_s3_to_bob(), remove_s3_from_carol());
+        preview_batch_and_remember(&iam, "dev", s.clone(), vec![a.clone(), b.clone()], vec![Facts::default(); 2]).await.unwrap();
+
+        let applied = apply_batch_with(&iam, batch_request("dev", &[b.clone(), a.clone()]), s, vec![Facts::default(); 2], counting_each(&writes)).await.unwrap();
+
+        assert_eq!((applied.log_ids.len(), applied.failed), (2, None));
+        assert_eq!(writes.load(Ordering::SeqCst), 2);
+        let applied_changes: Vec<IamChange> = change_log::read_all(&iam.log_path).into_iter().map(|e| e.change).collect();
+        assert_eq!(applied_changes, vec![a, b], "기록은 적용 순서대로예요");
+    }
+
+    #[tokio::test]
+    async fn a_batch_preview_of_other_changes_or_another_profile_does_not_count() {
+        let ((_dir, iam), writes) = (with_log(), AtomicUsize::new(0));
+        let s = Arc::new(crate::iam::fixtures::snapshot());
+        let changes = vec![attach_s3_to_bob(), remove_s3_from_carol()];
+        preview_batch_and_remember(&iam, "prod", s.clone(), changes.clone(), vec![Facts::default(); 2]).await.unwrap();
+        // 다른 프로필에서 적용한다
+        let elsewhere = apply_batch_with(&iam, batch_request("dev", &changes), s.clone(), vec![Facts::default(); 2], counting_each(&writes)).await;
+        assert_eq!(elsewhere, Err(AppError::other(DRIFTED)));
+        // 미리보기에 없던 변경을 하나 더 얹어 적용한다
+        let more = vec![attach_s3_to_bob(), remove_s3_from_carol(), IamChange::AddToGroup { user_name: "carol".into(), group_name: "admins".into() }];
+        let bigger = apply_batch_with(&iam, batch_request("prod", &more), s, vec![Facts::default(); 3], counting_each(&writes)).await;
+        assert_eq!(bigger, Err(AppError::other(DRIFTED)));
+        assert_eq!(writes.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn a_batch_that_stops_midway_still_drops_the_cached_snapshot_and_records_when_it_happened() {
+        let ((_dir, iam), writes) = (with_log(), AtomicUsize::new(0));
+        let s = snapshot_with(&iam, "dev", false, || async { Ok(crate::iam::fixtures::snapshot()) }).await.unwrap();
+        let changes = vec![attach_s3_to_bob(), remove_s3_from_carol()];
+        preview_batch_and_remember(&iam, "dev", s.clone(), changes.clone(), vec![Facts::default(); 2]).await.unwrap();
+        let before = now_secs();
+        // 두 번째 쓰기가 거부된다
+        let denied = AppError::AccessDenied { action: "iam:DetachUserPolicy".into() };
+        let failing = |plan: Vec<ApiCall>| {
+            let n = writes.fetch_add(1, Ordering::SeqCst) + 1;
+            let result = if n == 2 { Err(denied.clone()) } else { Ok(()) };
+            std::future::ready(write::Applied { done: if n == 2 { Vec::new() } else { plan }, result })
+        };
+
+        let result = apply_batch_with(&iam, batch_request("dev", &changes), s, vec![Facts::default(); 2], failing).await.unwrap();
+
+        assert_eq!(result.failed.as_ref().map(|f| (f.index, f.message.as_str())), Some((1, "권한 없음 (iam:DetachUserPolicy)")));
+        assert_eq!(result.log_ids.len(), 1);
+        assert_eq!(writes.load(Ordering::SeqCst), 2);
+        assert!(iam.snapshots.get("dev").is_none(), "앞 변경은 적용됐으니 읽어 둔 스냅숏을 버려요");
+        assert!(written_at(&iam, "dev").is_some_and(|at| at >= before));
+    }
+
+    #[tokio::test]
+    async fn undoing_a_batch_walks_the_change_log_newest_first() {
+        let (_dir, iam) = with_log();
+        let attach_to_bob = |policy: &str| IamChange::AttachPolicy { target: crate::iam::fixtures::BOB.into(), policy_arn: policy.into() };
+        let remove_from_bob = |policy: &str| IamChange::DetachPolicy { target: crate::iam::fixtures::BOB.into(), policy_arn: policy.into() };
+        // 적용한 순서대로 쌓인 기록: b1-1, b1-2는 되고 b1-3은 실패했다. 묶음이 아닌 기록과 다른 묶음의 기록이 섞여 있다
+        let batched = |id: &str, batch: &str, inverse: Option<IamChange>| ChangeLogEntry { batch_id: Some(batch.into()), ..log_entry(id, inverse) };
+        let mut failed = batched("b1-3", "b1", None);
+        failed.ok = false;
+        for entry in [
+            batched("b1-1", "b1", Some(remove_from_bob("arn:aws:iam::aws:policy/A"))),
+            log_entry("single", Some(remove_from_bob("arn:aws:iam::aws:policy/S"))),
+            batched("b1-2", "b1", Some(remove_from_bob("arn:aws:iam::aws:policy/B"))),
+            batched("b2-1", "b2", Some(attach_to_bob("arn:aws:iam::aws:policy/C"))),
+            failed,
+        ] {
+            change_log::append(&iam.log_path, &entry).unwrap();
+        }
+
+        let undo = undo_batch_in(&iam, "b1").await.unwrap();
+
+        assert_eq!(undo.undo_of, vec!["b1-2", "b1-1"]);
+        assert_eq!(undo.changes, vec![remove_from_bob("arn:aws:iam::aws:policy/B"), remove_from_bob("arn:aws:iam::aws:policy/A")]);
+        assert_eq!(undo_batch_in(&iam, "nope").await, Err(AppError::other("변경 기록을 찾지 못했어요")));
+        change_log::mark_undone(&iam.log_path, "b2-1").unwrap();
+        assert_eq!(undo_batch_in(&iam, "b2").await, Err(AppError::other("되돌릴 변경이 없어요")));
+    }
+
+    const POLICY_DOC: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"*"}]}"#;
+
+    /// 어떤 정책이든 `POLICY_DOC`을 기본 버전 문서로 가진 것처럼 답한다. `hidden`으로 시작하는 ARN은 읽을 권한이 없다.
+    fn serving_policies(hidden: &'static str) -> crate::iam::mock_aws::Recorder {
+        use crate::iam::mock_aws::{error_xml, ok_with, Recorder, Sent};
+        Recorder::new(move |sent: &Sent| match (sent.action.as_str(), sent.params.get("PolicyArn").map(String::as_str)) {
+            ("GetPolicy", Some(arn)) if arn.starts_with(hidden) => (403, error_xml("AccessDenied", "no")),
+            ("GetPolicy", Some(arn)) => {
+                let name = arn.rsplit('/').next().unwrap_or(arn);
+                let policy = format!("<Policy><PolicyName>{name}</PolicyName><PolicyId>ANPAEXAMPLE</PolicyId><Arn>{arn}</Arn><Path>/</Path><DefaultVersionId>v1</DefaultVersionId><AttachmentCount>0</AttachmentCount><IsAttachable>true</IsAttachable><UpdateDate>2026-01-02T03:04:05Z</UpdateDate></Policy>");
+                (200, ok_with("GetPolicy", &policy))
+            }
+            ("GetPolicyVersion", _) => {
+                let version = format!("<PolicyVersion><Document>{}</Document><VersionId>v1</VersionId><IsDefaultVersion>true</IsDefaultVersion><CreateDate>2026-01-02T03:04:05Z</CreateDate></PolicyVersion>", crate::adapters::util::url_encode(POLICY_DOC));
+                (200, ok_with("GetPolicyVersion", &version))
+            }
+            (other, _) => (400, error_xml("InvalidAction", other)),
+        })
+    }
+
+    #[tokio::test]
+    async fn a_batch_reads_each_missing_policy_once_and_keeps_each_reason_with_its_change() {
+        use crate::iam::fixtures::{ADMIN_POLICY, ALICE, BOB, CAROL};
+        let (readable, hidden) = ("arn:aws:iam::aws:policy/Readable", "arn:aws:iam::aws:policy/Hidden");
+        let recorder = serving_policies(hidden);
+        let attach = |target: &str, policy: &str| IamChange::AttachPolicy { target: target.into(), policy_arn: policy.into() };
+        // 읽을 수 있는 정책은 한 번만 읽고, 읽지 못한 이유는 그 정책을 붙이는 변경(받은 순서의 둘째)에만 붙는다. 스냅숏에 있는 정책은 읽지 않는다
+        let changes = vec![attach(BOB, readable), attach(CAROL, hidden), attach(ALICE, readable), attach(BOB, ADMIN_POLICY)];
+        let original = Arc::new(crate::iam::fixtures::snapshot());
+
+        let (s, facts) = read_missing_policies(&recorder.client(), original.clone(), &changes).await.unwrap();
+
+        let reads: Vec<String> = recorder.sent().into_iter().map(|sent| format!("{} {}", sent.action, sent.params["PolicyArn"])).collect();
+        assert_eq!(reads, [format!("GetPolicy {readable}"), format!("GetPolicyVersion {readable}"), format!("GetPolicy {hidden}")]);
+        let reasons: Vec<Option<&str>> = facts.iter().map(|f| f.policy_error.as_deref()).collect();
+        assert_eq!(reasons, [None, Some("권한 없음 (iam:GetPolicy)"), None, None]);
+        assert!(s.policies[readable].document.is_some() && !s.policies.contains_key(hidden));
+        assert!(!original.policies.contains_key(readable), "캐시된 스냅숏은 그대로예요");
+    }
+
+    #[tokio::test]
+    async fn a_batch_over_the_limit_reads_policies_for_the_first_fifty_changes_only() {
+        let recorder = serving_policies("arn:aws:iam::aws:policy/Nothing");
+        let policy = |i: usize| format!("arn:aws:iam::aws:policy/P{i:02}");
+        let changes: Vec<IamChange> = (0..=MAX_BATCH).map(|i| IamChange::AttachPolicy { target: crate::iam::fixtures::BOB.into(), policy_arn: policy(i) }).collect();
+        assert_eq!(changes.len(), MAX_BATCH + 1);
+
+        let (s, facts) = read_missing_policies(&recorder.client(), Arc::new(crate::iam::fixtures::snapshot()), &changes).await.unwrap();
+
+        // 재료는 변경마다 하나이고, 51번째 정책은 읽지 않는다(미리보기가 막는 묶음이다)
+        assert_eq!(facts.len(), MAX_BATCH + 1);
+        assert_eq!(recorder.sent().len(), 2 * MAX_BATCH);
+        assert!(s.policies.contains_key(&policy(MAX_BATCH - 1)) && !s.policies.contains_key(&policy(MAX_BATCH)));
+    }
+
+    #[tokio::test]
+    async fn a_batch_sends_the_previewed_requests_in_application_order() {
+        use crate::iam::mock_aws::Recorder;
+        let ((_dir, iam), recorder) = (with_log(), Recorder::ok());
+        let client = recorder.client();
+        let s = Arc::new(crate::iam::fixtures::snapshot());
+        // 받은 순서는 [떼기, 붙이기]이고 적용 순서는 [붙이기, 떼기]다
+        let changes = vec![remove_s3_from_carol(), attach_s3_to_bob()];
+        let shown = preview_batch_and_remember(&iam, "dev", s.clone(), changes.clone(), vec![Facts::default(); 2]).await.unwrap();
+
+        let writer = move |plan: Vec<ApiCall>| {
+            let client = client.clone();
+            async move { write_calls(&client, &plan).await }
+        };
+        let result = apply_batch_with(&iam, batch_request("dev", &changes), s, vec![Facts::default(); 2], writer).await.unwrap();
+
+        assert_eq!((result.log_ids.len(), result.failed), (2, None));
+        let sent = recorder.sent();
+        assert_eq!(sent.iter().map(|s| s.action.as_str()).collect::<Vec<_>>(), ["AttachUserPolicy", "DetachUserPolicy"]);
+        // 미리보기에 보인 호출 그대로 나간다
+        for (request, item) in sent.iter().zip(&shown.changes) {
+            assert_eq!(item.calls.len(), 1);
+            assert_eq!(request.params, item.calls[0].params, "{}", item.summary);
+        }
+        assert_eq!(sent[0].params["UserName"], "bob");
+        assert_eq!(sent[1].params["UserName"], "carol");
+    }
+
     #[tokio::test]
     async fn the_apps_own_key_id_is_read_from_the_credentials_it_uses() {
         use aws_credential_types::provider::SharedCredentialsProvider;
@@ -1155,6 +1498,7 @@ mod tests {
             inverse,
             undo_of: None,
             undone: false,
+            batch_id: None,
         }
     }
 

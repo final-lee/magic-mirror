@@ -241,14 +241,14 @@ fn an_explicit_deny_counts_as_losing_the_action() {
 }
 
 #[test]
-fn at_most_fifty_principals_are_computed_and_the_caller_is_always_one_of_them() {
+fn at_most_fifty_principals_plus_the_caller_are_computed() {
     let mut s = snapshot();
     let reader = add_policy(&mut s, "reader", json!([{ "Effect": "Allow", "Action": "sqs:ReceiveMessage", "Resource": "*" }]));
     s.groups.push(group_rec("many", &[&reader]));
     for i in 0..60 {
         s.users.push(member_of(&format!("u{i:02}"), "many"));
     }
-    // 앱을 쓰는 주체는 구성원 목록의 맨 끝이라 그냥 앞에서 50개를 자르면 빠진다
+    // 앱을 쓰는 주체는 구성원 목록의 맨 끝이라 그냥 앞에서 50개를 자르면 빠진다. 한도 밖에서 앞으로 옮겨 오는 만큼 한 자리를 더 받는다
     let zed = member_of("zed", "many");
     s.caller_principal_arn = Some(zed.arn.clone());
     s.users.push(zed);
@@ -256,13 +256,31 @@ fn at_most_fifty_principals_are_computed_and_the_caller_is_always_one_of_them() 
     let change = detach(&account_arn("group/many"), &reader);
     assert_eq!(affected(&s, &change).len(), 62);
     let p = preview(&s, &change, None);
-    // 50명을 계산해서 30명은 자세히, 나머지 20명은 수만 보낸다
-    assert_eq!((p.impacts.len(), p.impacts_omitted), (MAX_SHOWN, MAX_AFFECTED - MAX_SHOWN));
+    // 앞의 50명과 앱이 쓰는 주체까지 51명을 계산해서 30명은 자세히, 나머지 21명은 수만 보낸다
+    assert_eq!((p.impacts.len(), p.impacts_omitted), (MAX_SHOWN, MAX_AFFECTED + 1 - MAX_SHOWN));
     assert_eq!(p.impacts[0].principal.name, "zed");
     assert_eq!(messages(&p, WarnLevel::Warn).iter().filter(|m| **m == "영향받는 대상이 많아 처음 50개만 계산했어요").count(), 1);
     // 앱이 쓰는 주체가 권한을 잃으니 확인이 필요하다
     assert!(has_level(&p, WarnLevel::Confirm));
     assert_eq!(p.confirm_text.as_deref(), Some("many"));
+}
+
+#[test]
+fn a_caller_inside_the_limit_takes_no_extra_slot() {
+    let mut s = snapshot();
+    let reader = add_policy(&mut s, "reader", json!([{ "Effect": "Allow", "Action": "sqs:ReceiveMessage", "Resource": "*" }]));
+    s.groups.push(group_rec("many", &[&reader]));
+    for i in 0..60 {
+        s.users.push(member_of(&format!("u{i:02}"), "many"));
+    }
+    // 앱을 쓰는 주체는 구성원 목록의 앞쪽이라 이미 한도 안에 든다: 앞으로 옮기기만 하고 한 자리를 더 받지 않는다
+    let early = s.users.iter().find(|u| u.name == "u03").expect("u03").arn.clone();
+    s.caller_principal_arn = Some(early);
+
+    let p = preview(&s, &detach(&account_arn("group/many"), &reader), None);
+
+    assert_eq!(p.impacts.len() + p.impacts_omitted, MAX_AFFECTED);
+    assert_eq!(p.impacts[0].principal.name, "u03");
 }
 
 #[test]

@@ -149,7 +149,8 @@ mod hygiene {
 
     #[test]
     fn only_the_apply_command_reaches_the_writer() {
-        // 쓰기는 항상 `commit`의 관문(막힘·확인 문구 재검증)을 거쳐야 하므로 `write::apply`를 부르는 곳은 `iam_apply` 하나다
+        // 쓰기는 항상 `commit`·`commit_batch`의 관문(막힘·확인 문구 재검증)을 거쳐야 하므로 `write::apply`를 부르는 곳은 `iam_commands.rs`의
+        // `write_calls` 하나이고, `iam_apply`와 `iam_apply_batch`가 그것을 함께 쓴다
         let call = ["write", "apply("].join("::");
         for path in all_sources() {
             let text = fs::read_to_string(&path).unwrap();

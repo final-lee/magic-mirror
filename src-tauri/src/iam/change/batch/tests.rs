@@ -471,3 +471,27 @@ fn the_received_order_does_not_change_which_targets_are_analyzed() {
     assert_eq!(messages(&admin_first.warnings, WarnLevel::Confirm), messages(&group_first.warnings, WarnLevel::Confirm));
     assert_eq!(admin_first.confirm_text, group_first.confirm_text);
 }
+
+#[test]
+fn the_caller_reached_only_through_a_group_does_not_push_the_last_target_out() {
+    // 50개를 모두 다른 주체에게 직접 바꾸는데, 앱이 쓰는 alice는 admins 그룹의 구성원으로만 영향받는다(대상이 아니다)
+    let mut s = snapshot();
+    let reader = add_policy(&mut s, "reader", allowing(&["s3:GetObject"]));
+    let mut changes = vec![attach(ADMINS, &reader)];
+    for i in 0..48 {
+        let newcomer = user(&format!("n{i:02}"));
+        changes.push(attach(&newcomer.arn, &reader));
+        s.users.push(newcomer);
+    }
+    changes.push(attach(BOB, ADMIN_POLICY));
+    assert_eq!(changes.len(), MAX_BATCH);
+
+    let p = preview_batch(&s, &changes, &[]);
+
+    // 계산 한도(50명)를 넘어서 앱이 쓰는 alice를 앞으로 옮긴다. 그래도 마지막 대상 bob이 빠지면 안 된다
+    assert!(p.warnings.iter().any(|w| w.message.contains("처음 50개만 계산했어요")), "{:?}", p.warnings);
+    assert_eq!(messages(&p.warnings, WarnLevel::Confirm), vec![NEW_ADMIN_BOB]);
+    assert_eq!(p.confirm_text.as_deref(), Some("변경 50개 적용"));
+    // 달라지는 주체는 새 사용자 48명과 bob이다(alice와 admins는 이미 관리자라 reader가 더하는 것이 없다)
+    assert_eq!(p.impacts.len() + p.impacts_omitted, 49);
+}
