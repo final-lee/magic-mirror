@@ -33,6 +33,22 @@ fn the_oid_follows_the_name_and_not_the_order_the_roles_were_given_in() {
 }
 
 #[test]
+fn system_roles_get_the_lower_oids_like_on_a_server_and_each_group_follows_name_order() {
+    let names = ["zed", "rds_superuser", "alpha", "pg_read_all_data", "rdsadmin", "pg_monitor", "rds_iam"];
+    let cluster = cluster(PG16, names.iter().map(|name| role(name)).collect(), vec![], vec![]);
+    // 시스템 역할(`pg_`, `rds_`, `rdsadmin` …)이 먼저 10000부터 이름순이고, 나머지는 16384부터 이름순이다. 역할 목록의 순서는 그대로다
+    let oids: Vec<(&str, u32)> = cluster.roles.iter().map(|r| (r.name.as_str(), r.oid)).collect();
+    assert_eq!(
+        oids,
+        [("zed", 16_385), ("rds_superuser", 10_003), ("alpha", 16_384), ("pg_read_all_data", 10_001), ("rdsadmin", 10_004), ("pg_monitor", 10_000), ("rds_iam", 10_002)]
+    );
+    // 서버처럼 시스템 역할은 어떤 사용자 역할보다 OID가 작고, 서버가 직접 만든 역할의 OID(16384 아래)에 든다
+    let (system, other): (Vec<_>, Vec<_>) = cluster.roles.iter().partition(|r| is_system_role(&r.name));
+    assert_eq!((system.len(), other.len()), (5, 2));
+    assert!(system.iter().all(|s| s.oid < 16_384 && other.iter().all(|o| s.oid < o.oid)));
+}
+
+#[test]
 fn a_cluster_with_no_roles_is_fine() {
     assert!(cluster(PG16, vec![], vec![], vec![]).roles.is_empty());
 }

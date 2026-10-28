@@ -111,7 +111,9 @@ fn every_literal_reads_back_as_exactly_the_value_it_was_made_from() {
 fn only_the_exact_word_public_is_the_keyword() {
     assert_eq!(grantee("PUBLIC"), "PUBLIC");
     assert_eq!(grantee("alice"), "\"alice\"");
-    // 소문자나 섞은 철자는 역할 이름으로 따옴표를 친다: 그런 이름의 역할은 만들 수 없어서 서버가 "없는 역할"이라고 거절한다
+    // 다른 철자는 식별자로 감싼다. `Public`은 보통 역할의 이름이다. 소문자 `public`도 감싸 주지만, 서버는 따옴표를 친 "public"을 PUBLIC(모든 역할)으로 읽는다:
+    // 이 함수는 그것을 막지 못하니 부르는 쪽이 스냅숏의 역할 이름이나 글자 그대로의 PUBLIC만 넘긴다(서버의 규칙은 라이브 시험이 붙들어 둔다).
+    // 반대로 이름이 `PUBLIC`인 역할은 만들 수 있지만 이 함수로는 가리킬 수 없다: "PUBLIC"은 늘 키워드다
     assert_eq!(grantee("public"), "\"public\"");
     assert_eq!(grantee("Public"), "\"Public\"");
     // 이름 안에 든 PUBLIC은 키워드가 아니다

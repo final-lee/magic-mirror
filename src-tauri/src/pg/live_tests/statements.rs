@@ -3,6 +3,7 @@
 //! 문장을 보내는 길은 이 시험의 도구(`batch_execute`)다. 앱이 문장을 보내는 길(`exec`)은 따로 있다.
 //! 심는 장면과 접속 도구는 부모(`live_tests`)의 것을 쓴다. 이 시험이 만드는 역할은 `mm_stmt`로 시작하고 시험이 끝날 때 지운다.
 
+use tokio_postgres::error::SqlState;
 use tokio_postgres::NoTls;
 
 use super::*;
@@ -29,11 +30,12 @@ async fn run_with_password(conn: &Connected, statement: &Statement, hash: &Scram
     }
 }
 
-/// 이 역할이 이 비밀번호로 로그인되는가(시험 데이터베이스는 PUBLIC의 CONNECT를 거뒀으니 `postgres`에 붙는다)
-async fn can_log_in(scene: &Scene, user: &str, password: &str) -> bool {
+/// 이 역할이 이 비밀번호로 로그인하고 곧 끊는다(시험 데이터베이스는 PUBLIC의 CONNECT를 거뒀으니 `postgres`에 붙는다).
+/// 실패하면 서버가 보낸 오류를 돌려준다: 잘못된 비밀번호(28P01)와 다른 까닭의 거절을 가를 수 있다
+async fn log_in(scene: &Scene, user: &str, password: &str) -> Result<(), tokio_postgres::Error> {
     let mut config = scene.config_as(user, password, "mm-live-statements");
     config.dbname("postgres");
-    config.connect(NoTls).await.is_ok()
+    config.connect(NoTls).await.map(|_| ())
 }
 
 async fn cluster(conn: &mut Connected) -> ClusterSnapshot {
@@ -94,15 +96,17 @@ pub(super) async fn role_statements_create_alter_and_reset_roles(server: Server)
     assert_eq!((user.login, user.conn_limit, user.valid_until.as_deref()), (true, 5, Some("2031-01-01T00:00:00Z")));
     // 서버가 우리가 만든 SCRAM 검증값을 받아들였고, 그 비밀번호로 로그인된다
     let first_password = first.expose();
-    assert!(can_log_in(&scene, "mm_stmt_user", &first_password).await, "만든 비밀번호로 로그인되지 않아요");
+    log_in(&scene, "mm_stmt_user", &first_password).await.expect("만든 비밀번호로 로그인되지 않아요");
 
     // 비밀번호를 다시 정하면 새 비밀번호만 로그인된다
     let second = NewPassword::generate();
     let second_hash = second.scram();
     run_with_password(&conn, &alter_role_password("mm_stmt_user"), &second_hash).await;
     let second_password = second.expose();
-    assert!(can_log_in(&scene, "mm_stmt_user", &second_password).await, "다시 정한 비밀번호로 로그인되지 않아요");
-    assert!(!can_log_in(&scene, "mm_stmt_user", &first_password).await, "이전 비밀번호로 아직 로그인돼요");
+    log_in(&scene, "mm_stmt_user", &second_password).await.expect("다시 정한 비밀번호로 로그인되지 않아요");
+    // 이전 비밀번호는 다른 까닭이 아니라 비밀번호가 틀려서(28P01) 거절돼야 한다
+    let refused = log_in(&scene, "mm_stmt_user", &first_password).await.expect_err("이전 비밀번호로 아직 로그인돼요");
+    assert_eq!(refused.code(), Some(&SqlState::INVALID_PASSWORD), "비밀번호가 틀려서가 아니라 다른 까닭으로 거절됐어요: {refused:?}");
 
     // 속성을 모두 반대로, 그리고 순서를 뒤집어 다시 되돌린다
     let off = [AttrClause::Login(false), AttrClause::CreateDb(true), AttrClause::CreateRole(false), AttrClause::Inherit(false), AttrClause::ConnectionLimit(-1), AttrClause::ValidUntil(None)];
@@ -217,7 +221,7 @@ pub(super) async fn privilege_statements_change_the_acls(server: Server) {
     let scene = seed(server).await;
     let mut conn = scene.connect().await;
     let who = "mm_stmt_acl";
-    drop_leftovers(&conn, &[who]).await;
+    drop_leftovers(&conn, &[who, "PUBLIC"]).await;
     run(&conn, &create_role(who, false, false, -1, None)).await;
     let database = scene.database.as_str();
 
@@ -280,6 +284,24 @@ pub(super) async fn privilege_statements_change_the_acls(server: Server) {
     assert!(granted(&function(&objects(&mut conn, &scene).await, "plain").acl, None).is_empty());
     run(&conn, &grant_privileges(&[Execute], &on_routine, "PUBLIC")).await;
     assert_eq!(granted(&function(&objects(&mut conn, &scene).await, "plain").acl, None), ["EXECUTE"]);
+
+    // `grantee`가 PUBLIC에 대해 기대는 서버의 규칙(주석은 `pg::sql::grantee`):
+    // 1) 서버는 따옴표를 친 소문자 "public"도 PUBLIC(모든 역할)으로 읽는다. 그래서 `grantee("public")`도 모든 역할에게 준다
+    run(&conn, &grant_privileges(&[Select], &on_locked, "public")).await;
+    assert_eq!(granted(&relation(&objects(&mut conn, &scene).await, "app", "locked").acl, None), ["SELECT"], "\"public\"은 모든 역할이에요");
+    run(&conn, &revoke_privileges(&[Select], &on_locked, "PUBLIC")).await;
+    assert!(granted(&relation(&objects(&mut conn, &scene).await, "app", "locked").acl, None).is_empty());
+    // 2) 소문자 public은 역할 이름으로 예약돼 있다
+    let reserved = conn.client.batch_execute(&create_role("public", false, false, -1, None).shown()).await.expect_err("public이라는 역할이 만들어졌어요");
+    assert!(reserved.as_db_error().is_some_and(|db| db.message().contains("is reserved")), "{reserved}");
+    // 3) 이름이 PUBLIC인 역할은 만들 수 있다. 하지만 `grantee("PUBLIC")`은 그 역할이 아니라 언제나 모든 역할이다
+    run(&conn, &create_role("PUBLIC", false, false, -1, None)).await;
+    run(&conn, &grant_privileges(&[Select], &on_locked, "PUBLIC")).await;
+    let acl = relation(&objects(&mut conn, &scene).await, "app", "locked").acl.clone();
+    assert_eq!(granted(&acl, None), ["SELECT"], "모든 역할이 받아야 해요");
+    assert!(granted(&acl, Some("PUBLIC")).is_empty(), "이름이 PUBLIC인 역할이 받으면 안 돼요");
+    run(&conn, &revoke_privileges(&[Select], &on_locked, "PUBLIC")).await;
+    run(&conn, &drop_role("PUBLIC")).await;
 
     // 기본 권한: 객체 종류마다 주고 거둔다. 스키마의 기본 권한은 스키마를 정할 수 없다
     let cases: [DefaultCase; 5] = [

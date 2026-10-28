@@ -122,7 +122,7 @@ fn revoking_a_role_with_and_without_options() {
 fn granting_on_each_kind_of_object() {
     let cases = [
         (vec![Select, Insert], OnClause::Table("app", "orders"), r#"GRANT SELECT, INSERT ON TABLE "app"."orders" TO "app_read""#),
-        // 목록은 `Privilege`의 선언 순서다(SELECT가 USAGE보다 앞). 브리프는 이 줄을 `USAGE, SELECT`로 적었지만 같은 브리프의 순서 규칙과 맞지 않아 규칙을 따랐다
+        // 목록은 `Privilege`의 선언 순서다(SELECT가 USAGE보다 앞)
         (vec![Usage, Select], OnClause::Sequence("app", "orders_id_seq"), r#"GRANT SELECT, USAGE ON SEQUENCE "app"."orders_id_seq" TO "app_read""#),
         (vec![Execute], OnClause::Routine("app", "touch_order", "integer"), r#"GRANT EXECUTE ON ROUTINE "app"."touch_order"(integer) TO "app_read""#),
         (vec![Usage], OnClause::Schema("app"), r#"GRANT USAGE ON SCHEMA "app" TO "app_read""#),
