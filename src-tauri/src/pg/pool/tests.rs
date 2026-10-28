@@ -146,6 +146,86 @@ async fn sweep_keeps_a_connection_idle_for_exactly_the_limit_and_the_one_used_ag
     assert!(pool.backend_pids(&target("a")).is_empty());
 }
 
+// ───────────────────────── 벽시계 ─────────────────────────
+// macOS의 `Instant`는 맥이 잠자는 동안 멈춘다. 밤새 자고 일어나도 `Instant`로는 몇 초 쉰 연결이라서, 벽시계(`SystemTime`)로도 잰다.
+
+/// 두 시계를 함께 주입해 연결한다
+async fn get_at_wall(pool: &Pool, server: &FakeServer, key: ConnKey, now: Instant, wall: SystemTime, pid: i32) -> Arc<Mutex<Connected>> {
+    pool.get_or_connect_at_wall(key, now, wall, || open(server, pid)).await.unwrap()
+}
+
+#[tokio::test]
+async fn a_connection_idle_over_the_limit_by_the_wall_clock_is_replaced_though_the_monotonic_clock_says_seconds() {
+    let server = FakeServer::start(Script::Ready).await;
+    let pool = Pool::default();
+    let (t0, wall0) = (Instant::now(), SystemTime::now());
+    let first = get_at_wall(&pool, &server, key("a", "app"), t0, wall0, 1).await;
+    // 맥이 자고 일어났다: Instant는 5초 갔고 벽시계는 11분 갔다
+    let second = get_at_wall(&pool, &server, key("a", "app"), t0 + Duration::from_secs(5), wall0 + IDLE + Duration::from_secs(60), 2).await;
+    assert!(!Arc::ptr_eq(&first, &second), "벽시계로 10분을 넘게 쉰 연결을 내줬어요");
+    assert_eq!(pool.backend_pids(&target("a")), vec![2]);
+    assert_eq!(server.accepted(), 2);
+}
+
+#[tokio::test]
+async fn a_connection_idle_for_exactly_the_limit_by_the_wall_clock_is_reused_and_the_use_restarts_both_clocks() {
+    let server = FakeServer::start(Script::Ready).await;
+    let pool = Pool::default();
+    let (t0, wall0) = (Instant::now(), SystemTime::now());
+    let first = get_at_wall(&pool, &server, key("a", "app"), t0, wall0, 1).await;
+    // 딱 IDLE만큼 쉰 연결은 그대로 쓴다(Instant와 같은 규칙이다)
+    let again = get_at_wall(&pool, &server, key("a", "app"), t0 + Duration::from_secs(5), wall0 + IDLE, 2).await;
+    assert!(Arc::ptr_eq(&first, &again));
+    // 쓴 시각은 두 시계 모두 새로 적는다: 그 뒤 IDLE 안이면 벽시계로 따져도 남는다
+    pool.sweep_at(t0 + Duration::from_secs(6), wall0 + IDLE + IDLE);
+    assert_eq!(pool.backend_pids(&target("a")), vec![1], "벽시계의 쓴 시각이 새로 적히지 않았어요");
+    pool.sweep_at(t0 + Duration::from_secs(6), wall0 + IDLE + IDLE + Duration::from_secs(1));
+    assert!(pool.backend_pids(&target("a")).is_empty());
+}
+
+#[tokio::test]
+async fn sweep_drops_a_connection_idle_over_the_limit_by_the_wall_clock_only() {
+    let server = FakeServer::start(Script::Ready).await;
+    let pool = Pool::default();
+    let (t0, wall0) = (Instant::now(), SystemTime::now());
+    get_at_wall(&pool, &server, key("a", "one"), t0, wall0, 1).await;
+    get_at_wall(&pool, &server, key("a", "two"), t0, wall0, 2).await;
+    // Instant로는 5초, 벽시계로는 딱 IDLE: 남는다
+    pool.sweep_at(t0 + Duration::from_secs(5), wall0 + IDLE);
+    assert_eq!(pool.backend_pids(&target("a")), vec![1, 2]);
+    // Instant로는 여전히 5초지만 벽시계로는 IDLE을 1초 넘었다: 닫힌다
+    pool.sweep_at(t0 + Duration::from_secs(5), wall0 + IDLE + Duration::from_secs(1));
+    assert!(pool.backend_pids(&target("a")).is_empty(), "벽시계로 10분을 넘게 쉰 연결이 남았어요");
+}
+
+#[tokio::test]
+async fn a_wall_clock_that_went_backwards_does_not_expire_a_connection() {
+    // 시계를 뒤로 돌리면(시간 동기화 …) 쉰 시간을 알 수 없다. 그것만으로 연결을 버리지 않는다
+    let server = FakeServer::start(Script::Ready).await;
+    let pool = Pool::default();
+    let (t0, wall0) = (Instant::now(), SystemTime::now());
+    let first = get_at_wall(&pool, &server, key("a", "app"), t0, wall0, 1).await;
+    pool.sweep_at(t0 + Duration::from_secs(1), wall0 - Duration::from_secs(3600));
+    assert_eq!(pool.backend_pids(&target("a")), vec![1]);
+    let again = get_at_wall(&pool, &server, key("a", "app"), t0 + Duration::from_secs(2), wall0 - Duration::from_secs(3600), 2).await;
+    assert!(Arc::ptr_eq(&first, &again));
+}
+
+#[tokio::test]
+async fn a_connection_marked_broken_is_replaced_on_the_next_get_though_its_client_is_open() {
+    // 읽다가 응답이 끊긴 연결: 서버가 닫지 않아서 클라이언트는 열려 있다고 믿는다. `broken`이 풀에게 알려 준다
+    let server = FakeServer::start(Script::Ready).await;
+    let pool = Pool::default();
+    let first = get(&pool, &server, key("a", "app"), 1).await;
+    assert!(!first.lock().await.client.is_closed());
+    first.lock().await.broken = true;
+    let second = get(&pool, &server, key("a", "app"), 2).await;
+    assert!(!Arc::ptr_eq(&first, &second));
+    assert_eq!(pool.backend_pids(&target("a")), vec![2]);
+    assert!(!second.lock().await.broken);
+    assert_eq!(server.accepted(), 2);
+}
+
 #[tokio::test]
 async fn close_target_drops_every_entry_of_that_target_and_only_that_target() {
     let server = FakeServer::start(Script::Ready).await;

@@ -616,6 +616,90 @@ async fn after_a_lost_connection_the_next_read_reconnects() {
     assert_eq!(read(&mut *second.lock().await, async |tx| tx.batch_execute("SELECT 1").await).await, Ok(()));
 }
 
+// ───────────────────────── 응답이 끊긴 연결 ─────────────────────────
+// 서버가 연결을 닫지도 오류를 보내지도 않고 조용해지면(VPN이 바뀌거나 중간 장비가 연결을 버린 경우) 드라이버는 끝없이 기다린다.
+// 서버가 지켜 주는 `statement_timeout`도 소용이 없다. 읽기 전체에 이쪽에서 거는 제한 시간이 있다.
+
+const CLOSED: &str = "데이터베이스 연결이 끊겼어요. 다시 읽으면 새로 연결해요";
+
+#[test]
+fn the_read_deadline_is_three_statement_timeouts() {
+    assert_eq!(READ_DEADLINE, Duration::from_secs(90));
+}
+
+#[tokio::test]
+async fn a_read_that_gets_no_answer_gives_up_with_the_closed_text_and_marks_the_connection_broken() {
+    let server = FakeServer::start(Script::SilentAfterPid).await;
+    let mut conn = server.connected(0).await;
+    // 로그인과 pid 읽기까지는 끝난다. 그 뒤로 서버는 말이 없다
+    assert_eq!(backend_pid(&mut conn.client).await.unwrap(), FAKE_PID);
+    assert!(!conn.broken);
+
+    let started = std::time::Instant::now();
+    let failed = read_within(&mut conn, Duration::from_millis(200), async |tx| tx.batch_execute("SELECT 1").await).await;
+    assert_eq!(failed, Err(AppError::Network { message: CLOSED.into() }));
+    assert!(started.elapsed() < Duration::from_secs(5), "제한 시간에 끝나야 해요: {:?}", started.elapsed());
+    assert!(conn.broken, "풀이 이 연결을 버리려면 표시가 있어야 해요");
+    // 서버가 닫지 않았으니 클라이언트는 열린 것으로 안다: `broken`이 아니면 풀이 알아볼 길이 없다
+    assert!(!conn.client.is_closed());
+}
+
+#[tokio::test]
+async fn a_connection_marked_broken_fails_at_once_and_sends_nothing() {
+    // 같은 연결의 자물쇠를 기다리던 다른 명령이 이어서 쓰는 경우: 또 제한 시간을 기다리지 않는다
+    let server = FakeServer::start(Script::Ready).await;
+    let mut conn = server.connected(1).await;
+    conn.broken = true;
+    let failed = read(&mut conn, async |tx| tx.batch_execute("SELECT 1").await).await;
+    assert_eq!(failed, Err(AppError::Network { message: CLOSED.into() }));
+    assert!(server.simple_queries().is_empty(), "끊긴 것으로 표시한 연결에는 문장을 보내지 않아요: {:?}", server.simple_queries());
+}
+
+#[tokio::test]
+async fn a_read_that_finishes_in_time_does_not_touch_the_flag() {
+    let server = FakeServer::start(Script::Ready).await;
+    let mut conn = server.connected(1).await;
+    assert_eq!(read_within(&mut conn, Duration::from_secs(5), async |tx| tx.batch_execute("SELECT 1").await).await, Ok(()));
+    assert!(!conn.broken);
+    // 서버가 보낸 오류나 끊어진 연결은 제한 시간과 상관없이 그대로의 오류다
+    server.close_connections();
+    wait_until_closed(&conn).await;
+    let failed = read_within(&mut conn, Duration::from_secs(5), async |tx| tx.batch_execute("SELECT 1").await).await;
+    assert_eq!(failed, Err(AppError::Network { message: CLOSED.into() }));
+    assert!(!conn.broken, "이미 닫힌 연결은 클라이언트가 스스로 알려 줘서 표시가 필요 없어요");
+}
+
+#[tokio::test]
+async fn after_a_read_gave_up_the_next_get_opens_a_new_connection() {
+    use crate::pg::pool::{ConnKey, Pool};
+    use crate::pg::target::{PgTarget, TargetKind};
+
+    let server = FakeServer::start(Script::SilentAfterPid).await;
+    let pool = Pool::default();
+    let target = PgTarget { profile: "dev".into(), region: "ap-northeast-2".into(), kind: TargetKind::Cluster, id: "a".into() };
+    let key = ConnKey { target: target.clone(), user: "iam_admin".into(), database: "app".into() };
+    let epoch = pool.epoch(&target);
+    // 연결 함수는 진짜 접속처럼 로그인하고 pid까지 읽는다
+    let served = &server;
+    let connect = || async move {
+        let mut conn = served.connected(0).await;
+        conn.backend_pid = backend_pid(&mut conn.client).await.expect("pid");
+        Ok::<_, AppError>(conn)
+    };
+
+    let first = pool.get_or_connect_at_epoch(key.clone(), epoch, connect).await.unwrap();
+    let failed = read_within(&mut *first.lock().await, Duration::from_millis(200), async |tx| tx.batch_execute("SELECT 1").await).await;
+    assert_eq!(failed, Err(AppError::Network { message: CLOSED.into() }));
+    assert_eq!(server.accepted(), 1);
+
+    // 다시 읽으면: 풀이 응답이 끊긴 연결을 버리고 새로 연결한다
+    let second = pool.get_or_connect_at_epoch(key, epoch, connect).await.unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&first, &second));
+    assert_eq!(server.accepted(), 2, "새 연결을 열어야 해요");
+    assert_eq!(pool.backend_pids(&target), vec![FAKE_PID]);
+    assert!(!second.lock().await.broken);
+}
+
 #[tokio::test]
 async fn a_failure_that_is_not_the_network_is_not_reported_as_one() {
     // 없는 열을 읽는 프로그래밍 오류다. 네트워크 탓으로 보이면 안 된다

@@ -43,6 +43,9 @@ pub enum Script {
     AskPassword,
     /// 시작 메시지는 받아들이지만 그 뒤의 질의에는 답하지 않는다
     MuteAfterStartup,
+    /// `Ready`처럼 굴되, 첫 읽기 전용 트랜잭션이 `COMMIT`으로 끝난 뒤(로그인과 `SELECT pg_backend_pid()`까지 끝난 뒤)로는 아무것도 답하지 않는다.
+    /// 연결은 열려 있다. 로그인과 첫 읽기를 마친 연결이 그 뒤로 말이 끊긴 경우(VPN이 바뀌거나 중간 장비가 연결을 버린 경우)를 본다
+    SilentAfterPid,
     /// 시작 메시지에 오류(`FATAL`)로 답한다
     Fatal { code: &'static str, message: &'static str },
     /// SSLRequest에 'S'(TLS 좋아요)라고 해 놓고 TLS가 아닌 바이트를 보낸다
@@ -192,7 +195,7 @@ impl FakeServer {
         tokio::spawn(async move {
             let _ = connection.await;
         });
-        Connected { client, backend_pid }
+        Connected { client, backend_pid, broken: false }
     }
 }
 
@@ -347,11 +350,16 @@ where
     let mut pending: Vec<u8> = Vec::new();
     // 확장 질의가 오류가 나면 서버는 다음 Sync까지 오는 메시지를 버린다
     let mut failed = false;
+    // `Script::SilentAfterPid`가 첫 `COMMIT`에 답한 뒤: 받는 것을 모두 버리고 답하지 않는다(클라이언트의 종료 메시지만 본다)
+    let mut quiet = false;
     loop {
         tokio::select! {
             _ = closing.changed() => return,
             received = read_message(&mut stream) => {
                 let Ok((tag, body)) = received else { return };
+                if quiet && tag != b'X' {
+                    continue;
+                }
                 if failed && !matches!(tag, b'S' | b'X') {
                     continue;
                 }
@@ -367,6 +375,7 @@ where
                         if stream.write_all(&reply).await.is_err() {
                             return;
                         }
+                        quiet |= matches!(script, Script::SilentAfterPid) && command == "COMMIT";
                     }
                     b'P' => {
                         // Parse: 문장 이름 \0, 질의 \0, 매개변수 타입

@@ -1,13 +1,14 @@
 //! 카탈로그 읽기. 앱이 PostgreSQL에 보내는 질의는 모두 이 파일에 있고, 하나도 빠짐없이 읽기 전용 트랜잭션 안에서 돈다.
 //! 다른 파일에는 질의도 트랜잭션도 두지 않는다(이 규칙을 지키는 검사 테스트는 `pg::hygiene`이다).
 //!
-//! - `read`: 읽기 전용 트랜잭션 하나를 열고 `statement_timeout`을 30초로 건 뒤 주어진 작업을 돌리고 커밋한다.
+//! - `read`: 읽기 전용 트랜잭션 하나를 열고 `statement_timeout`을 30초로 건 뒤 주어진 작업을 돌리고 커밋한다. 읽기 전체에 90초 제한도 건다.
 //! - `cluster_snapshot`, `db_snapshot`, `sessions`: 질의 결과를 `model`의 레코드로 바꾼다. 호출 하나가 트랜잭션 하나다.
 //! - 접근 권한은 `aclexplode`가 풀어 준 줄을 `group_acl`이 객체별로 묶는다. ACL이 빈 객체는 권한 칸이 NULL인 줄 하나로 온다.
 //!
 //! 이 앱이 모르는 값은 그것만 건너뛴다(새 서버가 더한 권한, 관계·기본 권한 종류). 아는 값의 해석에는 영향이 없다.
 
 use std::error::Error as StdError;
+use std::time::Duration;
 
 use tokio_postgres::error::SqlState;
 use tokio_postgres::{Client, Error, IsolationLevel, Row, Transaction};
@@ -28,6 +29,16 @@ const READ_TIMEOUT: &str = "질의가 30초 안에 끝나지 않았어요. 잠�
 
 /// 읽는 도중 연결이 끊겼을 때(서버가 세션을 끝낸 경우 57P01·57P02·57P03 포함)의 문구. 연결 보관함이 닫힌 연결을 버리므로 다시 읽으면 새로 연결한다
 const CONNECTION_CLOSED: &str = "데이터베이스 연결이 끊겼어요. 다시 읽으면 새로 연결해요";
+
+/// 읽기 하나(트랜잭션 하나, 문장 여럿)가 끝나야 하는 시간: 문장 시간 제한 셋이다. `statement_timeout`은 서버가 지켜 주는 시간이라, 연결이 조용히 끊겨
+/// 서버가 문장을 받지 못하면 소용이 없다. 드라이버는 읽기 제한 시간이 없고 TCP는 보낸 것에 답이 없을 때 몇 분 뒤에야 포기한다.
+/// 건강한 읽기는 이 시간의 일부밖에 쓰지 않는다. 넘기면 그 연결은 버린다(`Connected::broken`).
+const READ_DEADLINE: Duration = Duration::from_secs(90);
+
+/// 연결이 끊겼다는 오류(네트워크 종류): 서버가 세션을 끝냈거나, 서버에 닿지 못했거나, 읽기가 제한 시간을 넘겼다
+fn connection_closed() -> AppError {
+    AppError::Network { message: CONNECTION_CLOSED.to_string() }
+}
 
 /// 데이터베이스 하나에서 읽는 객체(관계와 함수를 합쳐)의 상한. 관계가 먼저 자리를 잡고 함수는 남는 만큼만 든다
 const MAX_OBJECTS: usize = 20_000;
@@ -150,11 +161,31 @@ where
 /// 하지만 세션 `SET`·`SET ROLE`(연결을 보관하면 트랜잭션이 끝나도 남는다)이나 부작용이 있는 함수(`pg_terminate_backend`, 권고 잠금 등)는 막지 못한다.
 /// 그래서 "아무것도 쓰지 않는다"는 보장은 서버가 아니라 이 파일의 고정된 SELECT들과, 다른 파일이 질의를 보내지 못하게 하는 검사 테스트(`pg::hygiene`)에 기댄다.
 /// 오류는 사용자에게 보일 오류로 바꾼다(`app_error`): 서버가 보낸 오류는 서버 문구 그대로(시간 제한은 따로 안내하는 문구), 서버에 닿지 못한 오류는 네트워크 오류.
+/// 읽기 전체에는 `READ_DEADLINE`이 걸려 있다: 서버가 조용해진 연결에서 끝없이 기다리지 않는다. 넘기면 그 연결을 `broken`으로 표시하고(연결 보관함이 버린다)
+/// 연결이 끊겼다는 네트워크 오류를 돌려준다. 이미 `broken`인 연결(같은 연결의 자물쇠를 기다렸다가 이어 쓰는 명령)에는 문장을 보내지 않고 바로 같은 오류다.
 pub async fn read<T, F>(conn: &mut Connected, job: F) -> Result<T, AppError>
 where
     F: AsyncFnOnce(&Transaction<'_>) -> Result<T, Error>,
 {
-    transact(&mut conn.client, job).await.map_err(|e| app_error(&e))
+    read_within(conn, READ_DEADLINE, job).await
+}
+
+/// `read`에 제한 시간을 넘기는 꼴: 시험이 90초를 기다리지 않는다
+pub(super) async fn read_within<T, F>(conn: &mut Connected, deadline: Duration, job: F) -> Result<T, AppError>
+where
+    F: AsyncFnOnce(&Transaction<'_>) -> Result<T, Error>,
+{
+    if conn.broken {
+        return Err(connection_closed());
+    }
+    let outcome = tokio::time::timeout(deadline, transact(&mut conn.client, job)).await;
+    match outcome {
+        Ok(done) => done.map_err(|e| app_error(&e)),
+        Err(_elapsed) => {
+            conn.broken = true;
+            Err(connection_closed())
+        }
+    }
 }
 
 /// 로그인 직후 이 연결의 서버 쪽 프로세스 번호. `Connected`를 만들기 전에 부르므로 클라이언트를 직접 받는다.
@@ -176,7 +207,7 @@ fn app_error(e: &Error) -> AppError {
             return AppError::other(READ_TIMEOUT);
         }
         if [SqlState::ADMIN_SHUTDOWN, SqlState::CRASH_SHUTDOWN, SqlState::CANNOT_CONNECT_NOW].contains(code) {
-            return AppError::Network { message: CONNECTION_CLOSED.to_string() };
+            return connection_closed();
         }
         return AppError::other(db.message());
     }
@@ -187,7 +218,7 @@ fn app_error(e: &Error) -> AppError {
         cause = err.source();
     }
     if unreachable {
-        AppError::Network { message: CONNECTION_CLOSED.to_string() }
+        connection_closed()
     } else {
         AppError::other(e.to_string())
     }
