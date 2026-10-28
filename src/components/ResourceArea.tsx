@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GLOBAL, useResources } from "../api/queries";
 import type { ResourceType, ServiceInfo } from "../api/types";
 import { useCopyShortcut } from "../hooks/useCopyShortcut";
 import { resourceDetail } from "../lib/detail";
 import type { S3Location } from "../lib/s3";
+import { NOT_POSTGRES, pgTargetOf } from "../pg/targets";
+import type { PgTarget } from "../pg/types";
 import { Breadcrumb } from "./Breadcrumb";
 import { DetailPanel } from "./DetailPanel";
 import { ErrorState } from "./ErrorState";
@@ -22,19 +24,33 @@ interface Props {
   onOpenVpc?: (vpc: { vpcId: string; name: string; region: string }) => void;
   /** IAM 사용자·역할·정책을 열 때 IAM 작업 공간으로 보낸다. arn이 없으면 대상 없이 탭만 연다. */
   onOpenIam?: (arn: string | null) => void;
+  /** PostgreSQL 클러스터·인스턴스를 열 때 사용자 관리 탭으로 보낸다. 다른 엔진이면 부르지 않고 안내만 띄운다. */
+  onOpenPg?: (target: PgTarget) => void;
   onRefresh: () => void;
   active: boolean;
 }
 
 const IAM_OPENABLE = ["users", "roles", "policies"];
+/** 안내가 떠 있는 시간 */
+const NOTICE_MS = 5000;
 
-export function ResourceArea({ service, type, profile, region, account, filter, onOpenBucket, onOpenVpc, onOpenIam, onRefresh, active }: Props) {
+export function ResourceArea({ service, type, profile, region, account, filter, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onRefresh, active }: Props) {
   const q = useResources(profile, region, service, type.id);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(noticeTimer.current), []);
   const items = q.data?.items ?? [];
   const selected = items.find((r) => r.id === selectedId) ?? null;
   useCopyShortcut(active ? (selected?.id ?? null) : null);
+
+  // 안내는 띄운 때부터 NOTICE_MS 뒤에 사라진다. 그 사이에 다시 띄우면 처음부터 센다.
+  const showNotice = (text: string) => {
+    clearTimeout(noticeTimer.current);
+    setNotice(text);
+    noticeTimer.current = setTimeout(() => setNotice(null), NOTICE_MS);
+  };
 
   const open = (id: string) => {
     const item = items.find((r) => r.id === id);
@@ -45,6 +61,10 @@ export function ResourceArea({ service, type, profile, region, account, filter, 
       onOpenVpc?.({ vpcId: item.id, name: item.name, region });
     } else if (service.id === "iam" && IAM_OPENABLE.includes(type.id)) {
       onOpenIam?.(item.arn);
+    } else if (service.id === "rds" && (type.id === "db-clusters" || type.id === "db-instances")) {
+      const target = pgTargetOf(item, type.id);
+      if (target) onOpenPg?.({ profile, region, ...target });
+      else showNotice(NOT_POSTGRES);
     }
   };
 
@@ -53,6 +73,11 @@ export function ResourceArea({ service, type, profile, region, account, filter, 
       <section className="center">
         <Breadcrumb service={service} segments={[{ label: type.name }]} count={q.data ? items.length : undefined} />
         {q.data?.truncated && <div className="notice">1,000개까지만 표시해요</div>}
+        {notice && (
+          <div className="notice" role="status">
+            {notice}
+          </div>
+        )}
         {q.isError && q.data && <ErrorState compact error={q.error} profile={profile} onRetry={onRefresh} />}
         {q.isError && !q.data ? (
           <ErrorState error={q.error} profile={profile} onRetry={onRefresh} />
