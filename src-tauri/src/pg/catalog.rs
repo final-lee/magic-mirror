@@ -41,16 +41,17 @@ const SERVER_SQL: &str =
 
 const ROLES_SQL: &str = r#"SELECT r.rolname, r.rolcanlogin, r.rolinherit, r.rolcreaterole, r.rolcreatedb, r.rolreplication, r.rolbypassrls, r.rolsuper, r.rolconnlimit,
        CASE WHEN r.rolvaliduntil IS NULL OR r.rolvaliduntil = 'infinity' THEN NULL
+            WHEN r.rolvaliduntil = '-infinity' THEN '1970-01-01T00:00:00Z'
             ELSE to_char(r.rolvaliduntil AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END,
        shobj_description(r.oid, 'pg_authid')
 FROM pg_roles r ORDER BY r.rolname"#;
 
-/// 구성원 관계, PG16 이상(`server_version_num >= 160000`): 부여마다 INHERIT 옵션이 있다
-const MEMBERS_SQL_16: &str = r#"SELECT m.rolname, g.rolname, am.admin_option, am.inherit_option
+/// 구성원 관계, PG16 이상(`server_version_num >= 160000`): 부여마다 INHERIT·SET 옵션이 있다
+const MEMBERS_SQL_16: &str = r#"SELECT m.rolname, g.rolname, am.admin_option, am.inherit_option, am.set_option
 FROM pg_auth_members am JOIN pg_roles m ON m.oid = am.member JOIN pg_roles g ON g.oid = am.roleid ORDER BY 1, 2"#;
 
-/// 구성원 관계, PG16 미만: INHERIT 옵션이 없다(구성원 역할의 속성이 정한다)
-const MEMBERS_SQL_OLD: &str = r#"SELECT m.rolname, g.rolname, am.admin_option, NULL::bool
+/// 구성원 관계, PG16 미만: INHERIT·SET 옵션이 없다(INHERIT은 구성원 역할의 속성이 정하고, 구성원이면 언제나 `SET ROLE`을 할 수 있다)
+const MEMBERS_SQL_OLD: &str = r#"SELECT m.rolname, g.rolname, am.admin_option, NULL::bool, NULL::bool
 FROM pg_auth_members am JOIN pg_roles m ON m.oid = am.member JOIN pg_roles g ON g.oid = am.roleid ORDER BY 1, 2"#;
 
 const DATABASES_SQL: &str = r#"SELECT d.datname, pg_get_userbyid(d.datdba), d.datallowconn,
@@ -61,11 +62,17 @@ WHERE NOT d.datistemplate AND d.datname <> 'rdsadmin' ORDER BY d.datname"#;
 const SETTINGS_SQL: &str = r#"SELECT CASE WHEN s.setrole = 0 THEN NULL ELSE pg_get_userbyid(s.setrole) END, d.datname, c.setting
 FROM pg_db_role_setting s LEFT JOIN pg_database d ON d.oid = s.setdatabase, LATERAL unnest(s.setconfig) AS c(setting)"#;
 
-/// 클라이언트 세션들. superuser나 `pg_read_all_stats` 멤버가 아니면 서버가 다른 사용자의 세션에서 `backend_type`을 비워 주므로,
-/// 그런 로그인 사용자에게는 이 조건 때문에 자기 세션만 보인다(RDS의 `rds_superuser`는 모든 연결을 볼 수 있다고 AWS 문서에 나온다)
+/// 클라이언트 세션들. 로그인 사용자가 superuser도 `pg_read_all_stats` 멤버도 아니면 서버는 다른 역할의 세션에서
+/// `backend_type`, `state`, `client_addr`, `backend_start`, `query_start`, `wait_event`를 비우고 `pid`, `usename`, `datname`, `application_name`만 준다.
+/// 그래서 둘째 조건이 있다: 역할과 데이터베이스가 있는 줄은 `backend_type`이 비어도 세션으로 읽는다. 자세한 칸이 없는 줄이 뒤(`backend_start`가 NULL)에 온다.
+/// 그런 로그인 사용자에게는 다른 역할의 병렬 작업자와 데이터베이스에 붙은 백그라운드 작업자(논리 복제 등)도 세션처럼 섞여 들어온다.
+/// 서버가 둘을 가를 칸을 주지 않는다. 그 역할이 그 데이터베이스에서 일하고 있다는 뜻이라 없는 연결을 지어내는 것은 아니다.
+/// superuser나 `pg_read_all_stats` 멤버에게는 모든 줄이 `backend_type`과 함께 오므로 둘째 조건에 걸리는 줄이 없다.
 const SESSIONS_SQL: &str = r#"SELECT pid, usename, datname, host(client_addr), coalesce(application_name, ''), state,
        to_char(backend_start AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), to_char(query_start AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), wait_event
-FROM pg_stat_activity WHERE backend_type = 'client backend' ORDER BY backend_start"#;
+FROM pg_stat_activity
+WHERE backend_type = 'client backend' OR (backend_type IS NULL AND usename IS NOT NULL AND datname IS NOT NULL)
+ORDER BY backend_start"#;
 
 /// 연결한 데이터베이스의 소유자
 const DB_OWNER_SQL: &str = "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()";
@@ -131,7 +138,9 @@ where
 }
 
 /// 읽기 전용 트랜잭션 하나에서 `job`을 돌린다: 시작하고, 문장 시간 제한(30초)을 걸고, `job`을 돌리고, 커밋한다.
-/// 읽기 전용이라 `job`이 무엇을 보내도 서버가 쓰기는 거절한다(SQLSTATE `25006`).
+/// READ ONLY는 데이터 변경(INSERT·UPDATE·DELETE), DDL, GRANT, `nextval`을 거절한다(SQLSTATE `25006`).
+/// 하지만 세션 `SET`·`SET ROLE`(연결을 보관하면 트랜잭션이 끝나도 남는다)이나 부작용이 있는 함수(`pg_terminate_backend`, 권고 잠금 등)는 막지 못한다.
+/// 그래서 "아무것도 쓰지 않는다"는 보장은 서버가 아니라 이 파일의 고정된 SELECT들과, 다른 파일이 질의를 보내지 못하게 하는 검사 테스트(PB4)에 기댄다.
 /// 오류는 사용자에게 보일 오류로 바꾼다: 서버가 보낸 오류는 서버 문구 그대로, 서버에 닿지 못한 오류는 네트워크 오류.
 pub async fn read<T, F>(conn: &mut Connected, job: F) -> Result<T, AppError>
 where
@@ -209,23 +218,29 @@ fn acl_row<K>(row: &Row, key: K, first: usize) -> Result<AclRow<K>, Error> {
 }
 
 /// PG16부터 `pg_auth_members`는 부여자마다 한 줄이라 같은 (구성원, 그룹) 쌍이 여러 줄일 수 있다.
-/// 질의가 쌍 순서로 정렬해 주므로 이웃한 줄을 합친다. 서버는 부여 가운데 하나라도 허용하면 허용으로 본다(ADMIN도 INHERIT도).
+/// 질의가 쌍 순서로 정렬해 주므로 이웃한 줄을 합친다. 서버는 부여 가운데 하나라도 허용하면 허용으로 본다(ADMIN도 INHERIT도 SET도).
 fn merge_members(rows: Vec<MemberRec>) -> Vec<MemberRec> {
     let mut merged: Vec<MemberRec> = Vec::new();
     for row in rows {
         match merged.last_mut() {
             Some(last) if last.member == row.member && last.group == row.group => {
                 last.admin |= row.admin;
-                // 옵션이 없는 서버(None)에서는 없는 채로 둔다. 한쪽에만 값이 있으면 그 값이다
-                last.inherit = match (last.inherit, row.inherit) {
-                    (None, None) => None,
-                    (a, b) => Some(a.unwrap_or(false) || b.unwrap_or(false)),
-                };
+                last.inherit = any_grant_allows(last.inherit, row.inherit);
+                last.set = any_grant_allows(last.set, row.set);
             }
             _ => merged.push(row),
         }
     }
     merged
+}
+
+/// 부여 옵션 하나(INHERIT이나 SET)를 두 부여에서 합친다. 하나라도 허용하면 허용이다.
+/// 옵션이 없는 서버(둘 다 None)에서는 없는 채로 두고, 한쪽에만 값이 있으면 그 값이다.
+fn any_grant_allows(a: Option<bool>, b: Option<bool>) -> Option<bool> {
+    match (a, b) {
+        (None, None) => None,
+        (a, b) => Some(a.unwrap_or(false) || b.unwrap_or(false)),
+    }
 }
 
 // ───────────────────────── 객체 수 상한 ─────────────────────────
@@ -313,8 +328,9 @@ pub(super) async fn db_snapshot_capped(conn: &mut Connected, database: &str, max
     .await
 }
 
-/// 지금 접속해 있는 세션들(오래된 순). 매번 새로 읽는다.
-/// 로그인 사용자가 `pg_read_all_stats`나 superuser가 아니면 자기 세션만 읽힌다(`SESSIONS_SQL`의 설명 참고).
+/// 지금 접속해 있는 세션들(오래된 순, 자세한 칸이 없는 줄은 뒤). 매번 새로 읽는다.
+/// 로그인 사용자가 superuser도 `pg_read_all_stats` 멤버도 아니면 다른 역할의 세션은 역할·데이터베이스·응용 이름만 있고
+/// `state`, `client_addr`, `backend_start`, `query_start`, `wait_event`는 None이다(`SESSIONS_SQL`의 설명 참고).
 pub async fn sessions(conn: &mut Connected) -> Result<Vec<SessionRec>, AppError> {
     read(conn, read_sessions).await
 }
@@ -351,7 +367,7 @@ async fn read_members(tx: &Transaction<'_>, version_num: i32) -> Result<Vec<Memb
     let members = rows
         .iter()
         .map(|row| -> Result<MemberRec, Error> {
-            Ok(MemberRec { member: row.try_get(0)?, group: row.try_get(1)?, admin: row.try_get(2)?, inherit: row.try_get(3)? })
+            Ok(MemberRec { member: row.try_get(0)?, group: row.try_get(1)?, admin: row.try_get(2)?, inherit: row.try_get(3)?, set: row.try_get(4)? })
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(merge_members(members))
