@@ -175,7 +175,7 @@ function ObjectPicker({ target, database, onPick, onClose }: PickerProps) {
       onClose={onClose}
       status={status}
       empty="조건에 맞는 객체가 없어요"
-      footnote={found.length >= MAX_FOUND ? `결과가 많아 처음 ${MAX_FOUND}개만 보여요. 이름을 더 입력해 좁혀 보세요` : undefined}
+      footnote={found.length >= MAX_FOUND ? `최대 ${MAX_FOUND}개까지만 보여줘요. 이름을 더 입력해 좁혀 보세요` : undefined}
     />
   );
 }

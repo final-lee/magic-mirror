@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ErrorState } from "../components/ErrorState";
+import { useDebounced } from "../lib/useDebounced";
 import { BadgeList } from "./Badges";
 import { PickerSheet, type PickerOption } from "./PickerSheet";
 import { SCOPE_LABEL } from "./PolicyList";
@@ -9,15 +10,6 @@ import type { PolicyRef } from "./types";
 /** 백엔드가 한 번에 돌려주는 최대 개수(계약: 최대 100) */
 const MAX_RESULTS = 100;
 const SEARCH_DELAY_MS = 250;
-
-function useDebounced<T>(value: T, ms: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), ms);
-    return () => clearTimeout(timer);
-  }, [value, ms]);
-  return debounced;
-}
 
 interface Props {
   profile: string;
