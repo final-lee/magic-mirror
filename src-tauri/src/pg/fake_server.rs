@@ -1,5 +1,6 @@
 //! 테스트용 가짜 PostgreSQL 서버. 로컬 주소에만 열고, 시작 메시지와 `SELECT pg_backend_pid()` 하나, 그리고 트랜잭션을 여닫는 단순 질의만 흉내 낸다.
 //! 단순 질의는 아무 문장이나 받아 주고 받은 문장을 적어 둔다(`simple_queries`): 읽기가 어떤 문장을 어떤 순서로 보내는지 본다.
+//! 확장 질의의 문장도 적어 둔다(`prepared_statements`). `Script::Row`는 어떤 질의에든 정해 둔 문자열 한 줄로 답한다.
 //! 진짜 `tokio_postgres::Client`와 진짜 접속 오류를 네트워크 없이 얻는 데 쓴다. 이 파일은 질의를 보내지 않고 서버 쪽 바이트만 다룬다.
 //! TLS를 받는 서버도 만들 수 있다: `TestPki`가 그때그때 테스트 CA와 서버 인증서를 만든다(비밀 키를 저장소에 두지 않는다).
 
@@ -35,6 +36,9 @@ pub enum Script {
     /// `Ready`처럼 굴되, 확장 질의(준비 단계)마다 연결을 끊지 않는 오류(`ERROR`)로 답한다. 단순 질의는 받아 준다.
     /// 읽기 도중에 서버가 보낸 오류와, 그 뒤에도 연결이 쓸 수 있는지를 본다
     RejectsQueries { code: &'static str, message: &'static str },
+    /// `Ready`처럼 굴되, 확장 질의에는 질의가 무엇이든 문자열 칸으로만 된 한 줄로 답한다(`columns`가 열 이름, `values`가 값).
+    /// 첫 질의의 답으로 읽기의 갈래가 정해지는 경우를 본다
+    Row { columns: &'static [&'static str], values: &'static [&'static str] },
     /// `Ready`처럼 굴되, 먼저 비밀번호(평문)를 요구하고 받은 값을 적어 둔다. IAM 토큰이 비밀번호로 가는지 본다
     AskPassword,
     /// 시작 메시지는 받아들이지만 그 뒤의 질의에는 답하지 않는다
@@ -62,6 +66,8 @@ struct Seen {
     passwords: Mutex<Vec<String>>,
     /// 받은 단순 질의(`Query` 메시지)의 문장, 받은 순서대로
     queries: Mutex<Vec<String>>,
+    /// 준비한 확장 질의(`Parse` 메시지)의 문장, 받은 순서대로
+    prepared: Mutex<Vec<String>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -168,6 +174,11 @@ impl FakeServer {
     /// 지금까지 받은 단순 질의의 문장들(받은 순서). 트랜잭션을 여닫는 문장이 여기에 보인다
     pub fn simple_queries(&self) -> Vec<String> {
         lock(&self.seen.queries).clone()
+    }
+
+    /// 지금까지 준비한 확장 질의의 문장들(받은 순서). 읽기가 어떤 SELECT를 보냈는지 본다
+    pub fn prepared_statements(&self) -> Vec<String> {
+        lock(&self.seen.prepared).clone()
     }
 
     /// 지금 열려 있는 연결을 모두 서버 쪽에서 닫는다. 그 뒤에 오는 연결은 영향이 없다
@@ -357,23 +368,28 @@ where
                             return;
                         }
                     }
-                    b'P' => match script {
-                        Script::RejectsQueries { code, message: text } => {
-                            pending.clear();
-                            pending.extend(error_response("ERROR", code, text));
-                            failed = true;
+                    b'P' => {
+                        // Parse: 문장 이름 \0, 질의 \0, 매개변수 타입
+                        let sql = body.split(|byte| *byte == 0).nth(1).map(|query| String::from_utf8_lossy(query).into_owned()).unwrap_or_default();
+                        lock(&seen.prepared).push(sql);
+                        match script {
+                            Script::RejectsQueries { code, message: text } => {
+                                pending.clear();
+                                pending.extend(error_response("ERROR", code, text));
+                                failed = true;
+                            }
+                            _ => pending.extend(message(b'1', &[])),
                         }
-                        _ => pending.extend(message(b'1', &[])),
-                    },
+                    }
                     b'D' => {
                         if body.first() == Some(&b'S') {
                             pending.extend(message(b't', &0u16.to_be_bytes()));
                         }
-                        pending.extend(row_description());
+                        pending.extend(row_description(script));
                     }
                     b'B' => pending.extend(message(b'2', &[])),
                     b'E' => {
-                        pending.extend(message(b'D', &[1u16.to_be_bytes().as_slice(), 4i32.to_be_bytes().as_slice(), FAKE_PID.to_be_bytes().as_slice()].concat()));
+                        pending.extend(data_row(script));
                         pending.extend(message(b'C', b"SELECT 1\0"));
                     }
                     b'C' => pending.extend(message(b'3', &[])),
@@ -399,17 +415,38 @@ fn message(tag: u8, body: &[u8]) -> Vec<u8> {
     out
 }
 
-/// `RowDescription`: int4 열 하나(`pg_backend_pid`)
-fn row_description() -> Vec<u8> {
-    let mut body = 1u16.to_be_bytes().to_vec();
-    body.extend_from_slice(b"pg_backend_pid\0");
-    body.extend_from_slice(&0u32.to_be_bytes()); // 테이블 OID
-    body.extend_from_slice(&0u16.to_be_bytes()); // 열 번호
-    body.extend_from_slice(&23u32.to_be_bytes()); // 타입 OID: int4
-    body.extend_from_slice(&4i16.to_be_bytes()); // 타입 크기
-    body.extend_from_slice(&(-1i32).to_be_bytes()); // 타입 변경자
-    body.extend_from_slice(&0u16.to_be_bytes()); // 형식: 문 설명에서는 아직 정해지지 않아 0이다
+/// `RowDescription`: 기본은 int4 열 하나(`pg_backend_pid`)고, `Script::Row`는 문자열(text) 열들이다
+fn row_description(script: Script) -> Vec<u8> {
+    let columns: Vec<(&str, u32, i16)> = match script {
+        Script::Row { columns, .. } => columns.iter().map(|name| (*name, 25, -1)).collect(),
+        _ => vec![("pg_backend_pid", 23, 4)],
+    };
+    let mut body = (columns.len() as u16).to_be_bytes().to_vec();
+    for (name, type_oid, type_size) in columns {
+        body.extend_from_slice(name.as_bytes());
+        body.push(0);
+        body.extend_from_slice(&0u32.to_be_bytes()); // 테이블 OID
+        body.extend_from_slice(&0u16.to_be_bytes()); // 열 번호
+        body.extend_from_slice(&type_oid.to_be_bytes()); // 타입 OID: int4(23), text(25)
+        body.extend_from_slice(&type_size.to_be_bytes()); // 타입 크기
+        body.extend_from_slice(&(-1i32).to_be_bytes()); // 타입 변경자
+        body.extend_from_slice(&0u16.to_be_bytes()); // 형식: 문 설명에서는 아직 정해지지 않아 0이다
+    }
     message(b'T', &body)
+}
+
+/// `DataRow` 한 줄: 기본은 `FAKE_PID` 하나고, `Script::Row`는 값들이다(문자열은 바이너리 형식으로도 UTF-8 바이트 그대로다)
+fn data_row(script: Script) -> Vec<u8> {
+    let values: Vec<Vec<u8>> = match script {
+        Script::Row { values, .. } => values.iter().map(|value| value.as_bytes().to_vec()).collect(),
+        _ => vec![FAKE_PID.to_be_bytes().to_vec()],
+    };
+    let mut body = (values.len() as u16).to_be_bytes().to_vec();
+    for value in values {
+        body.extend_from_slice(&(value.len() as i32).to_be_bytes());
+        body.extend_from_slice(&value);
+    }
+    message(b'D', &body)
 }
 
 /// `ErrorResponse`: 심각도(`FATAL`이면 서버가 연결을 끊는 오류, `ERROR`면 이어 쓸 수 있는 오류), 오류 코드, 문구

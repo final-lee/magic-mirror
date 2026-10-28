@@ -280,74 +280,86 @@ fn only_the_same_pair_is_merged() {
 }
 
 // ───────────────────────── 객체 수 상한 ─────────────────────────
+// 관계를 먼저 읽는다(권한 격자와 점검이 다루는 것은 주로 테이블이다). 함수는 관계가 남긴 자리만큼 읽는다.
 
 #[test]
-fn relations_get_what_the_functions_left_plus_one() {
+fn functions_get_what_the_relations_left_plus_one() {
     assert_eq!(MAX_OBJECTS, 20_000, "데이터베이스 하나에서 읽는 객체는 관계와 함수를 합쳐 2만 개까지다");
-    assert_eq!(relation_limit(0, MAX_OBJECTS), Some(20_001));
-    assert_eq!(relation_limit(100, MAX_OBJECTS), Some(19_901));
-    assert_eq!(relation_limit(19_999, MAX_OBJECTS), Some(2));
-    assert_eq!(relation_limit(20_000, MAX_OBJECTS), Some(1));
+    assert_eq!(function_limit(0, MAX_OBJECTS), Some(20_001));
+    assert_eq!(function_limit(100, MAX_OBJECTS), Some(19_901));
+    assert_eq!(function_limit(19_999, MAX_OBJECTS), Some(2));
+    assert_eq!(function_limit(20_000, MAX_OBJECTS), Some(1));
 }
 
 #[test]
-fn no_relations_are_read_when_the_functions_alone_exceed_the_cap() {
-    // 함수를 상한보다 하나 더(20 001개) 읽었다: 관계를 읽을 자리가 없다
-    assert_eq!(relation_limit(20_001, MAX_OBJECTS), None);
-    assert_eq!(relation_limit(5, 4), None);
+fn no_functions_are_read_when_the_relations_alone_exceed_the_cap() {
+    // 관계를 상한보다 하나 더(20 001개) 읽었다: 함수를 읽을 자리가 없다
+    assert_eq!(function_limit(20_001, MAX_OBJECTS), None);
+    assert_eq!(function_limit(5, 4), None);
 }
 
 #[test]
 fn objects_under_or_at_the_cap_are_not_cut() {
-    let (mut functions, mut relations) = (vec![0; 3], vec![0; 7]);
-    assert!(!cap_objects(&mut functions, &mut relations, 10));
-    assert_eq!((functions.len(), relations.len()), (3, 7));
-    let (mut functions, mut relations) = (vec![0; 0], vec![0; 10]);
-    assert!(!cap_objects(&mut functions, &mut relations, 10));
-    assert_eq!((functions.len(), relations.len()), (0, 10));
+    let (mut relations, mut functions) = (vec![0; 7], vec![0; 3]);
+    assert!(!cap_objects(&mut relations, &mut functions, 10));
+    assert_eq!((relations.len(), functions.len()), (7, 3));
+    let (mut relations, mut functions) = (vec![0; 10], vec![0; 0]);
+    assert!(!cap_objects(&mut relations, &mut functions, 10));
+    assert_eq!((relations.len(), functions.len()), (10, 0));
 }
 
 #[test]
-fn relations_are_cut_to_what_the_cap_leaves_after_the_functions() {
-    // 관계는 `max + 1 - 함수 수`개까지 읽으므로, 그만큼 읽혔다면 상한을 넘은 것이다
-    let mut functions = vec!['f'; 3];
-    let mut relations: Vec<usize> = (0..relation_limit(3, 10).unwrap()).collect();
-    assert_eq!(relations.len(), 8);
-    assert!(cap_objects(&mut functions, &mut relations, 10));
-    assert_eq!(functions.len(), 3, "함수는 그대로예요");
-    assert_eq!(relations, (0..7).collect::<Vec<_>>(), "이름순으로 앞의 관계가 남아요");
+fn functions_are_cut_to_what_the_cap_leaves_after_the_relations() {
+    // 함수는 `max + 1 - 관계 수`개까지 읽으므로, 그만큼 읽혔다면 상한을 넘은 것이다
+    let mut relations = vec!['r'; 3];
+    let mut functions: Vec<usize> = (0..function_limit(3, 10).unwrap()).collect();
+    assert_eq!(functions.len(), 8);
+    assert!(cap_objects(&mut relations, &mut functions, 10));
+    assert_eq!(relations.len(), 3, "관계는 그대로예요");
+    assert_eq!(functions, (0..7).collect::<Vec<_>>(), "이름순으로 앞의 함수가 남아요");
 }
 
 #[test]
-fn functions_over_the_cap_are_cut_and_leave_no_room_for_relations() {
-    let mut functions: Vec<usize> = (0..10 + 1).collect();
-    let mut relations: Vec<usize> = Vec::new();
-    assert!(relation_limit(functions.len(), 10).is_none());
-    assert!(cap_objects(&mut functions, &mut relations, 10));
-    assert_eq!(functions, (0..10).collect::<Vec<_>>());
-    assert!(relations.is_empty());
+fn relations_keep_their_place_when_both_kinds_are_over_the_cap() {
+    // 관계 8개가 먼저 자리를 잡고, 함수는 남은 2자리만 얻는다
+    let mut relations = vec![0; 8];
+    let mut functions: Vec<usize> = (0..function_limit(8, 10).unwrap()).collect();
+    assert_eq!(functions.len(), 3);
+    assert!(cap_objects(&mut relations, &mut functions, 10));
+    assert_eq!((relations.len(), functions.len()), (8, 2));
 }
 
 #[test]
-fn a_cap_full_of_functions_leaves_no_relation() {
-    // 함수가 상한과 같으면 관계는 1개만 읽는다. 그 하나가 있으면 상한을 넘는 것이다
-    let mut functions = vec![0; 10];
-    let mut relations = vec![0; relation_limit(10, 10).unwrap()];
-    assert_eq!(relations.len(), 1);
-    assert!(cap_objects(&mut functions, &mut relations, 10));
-    assert_eq!((functions.len(), relations.len()), (10, 0));
+fn relations_over_the_cap_are_cut_and_leave_no_room_for_functions() {
+    let mut relations: Vec<usize> = (0..10 + 1).collect();
+    let mut functions: Vec<usize> = Vec::new();
+    assert!(function_limit(relations.len(), 10).is_none());
+    assert!(cap_objects(&mut relations, &mut functions, 10));
+    assert_eq!(relations, (0..10).collect::<Vec<_>>());
+    assert!(functions.is_empty());
+}
+
+#[test]
+fn a_cap_full_of_relations_leaves_no_function() {
+    // 관계가 상한과 같으면 함수는 1개만 읽는다. 그 하나가 있으면 상한을 넘는 것이다
+    let mut relations = vec![0; 10];
+    let mut functions = vec![0; function_limit(10, 10).unwrap()];
+    assert_eq!(functions.len(), 1);
+    assert!(cap_objects(&mut relations, &mut functions, 10));
+    assert_eq!((relations.len(), functions.len()), (10, 0));
     // 하나도 없으면 딱 상한이라 자르지 않는다
-    let (mut functions, mut relations) = (vec![0; 10], Vec::<usize>::new());
-    assert!(!cap_objects(&mut functions, &mut relations, 10));
+    let (mut relations, mut functions) = (vec![0; 10], Vec::<usize>::new());
+    assert!(!cap_objects(&mut relations, &mut functions, 10));
 }
 
 #[test]
 fn the_real_cap_is_applied_to_relations_and_functions_together() {
-    let mut functions = vec![0u8; 12_000];
-    let mut relations = vec![0u8; relation_limit(12_000, MAX_OBJECTS).unwrap()];
-    assert_eq!(relations.len(), 8_001);
-    assert!(cap_objects(&mut functions, &mut relations, MAX_OBJECTS));
-    assert_eq!(functions.len() + relations.len(), MAX_OBJECTS);
+    let mut relations = vec![0u8; 12_000];
+    let mut functions = vec![0u8; function_limit(12_000, MAX_OBJECTS).unwrap()];
+    assert_eq!(functions.len(), 8_001);
+    assert!(cap_objects(&mut relations, &mut functions, MAX_OBJECTS));
+    assert_eq!(relations.len() + functions.len(), MAX_OBJECTS);
+    assert_eq!(relations.len(), 12_000, "관계가 우선이에요");
 }
 
 // ───────────────────────── 열쇠 만들기 ─────────────────────────
@@ -381,7 +393,7 @@ const ALL_SQL: [(&str, &str); 13] = [
     ("DATABASES_SQL", DATABASES_SQL),
     ("SETTINGS_SQL", SETTINGS_SQL),
     ("SESSIONS_SQL", SESSIONS_SQL),
-    ("DB_OWNER_SQL", DB_OWNER_SQL),
+    ("DB_IDENTITY_SQL", DB_IDENTITY_SQL),
     ("SCHEMAS_SQL", SCHEMAS_SQL),
     ("RELATIONS_SQL", RELATIONS_SQL),
     ("FUNCTIONS_SQL", FUNCTIONS_SQL),
@@ -455,13 +467,20 @@ fn a_role_that_expired_forever_reads_as_the_oldest_time() {
 }
 
 #[test]
+fn the_database_query_reads_the_name_the_server_gives_next_to_the_owner() {
+    assert!(DB_IDENTITY_SQL.starts_with("SELECT current_database(), pg_get_userbyid(datdba)"), "{DB_IDENTITY_SQL}");
+    assert!(DB_IDENTITY_SQL.contains("WHERE datname = current_database()"), "{DB_IDENTITY_SQL}");
+}
+
+#[test]
 fn the_statement_timeout_is_30_seconds_and_local_to_the_transaction() {
     assert_eq!(STATEMENT_TIMEOUT, "SET LOCAL statement_timeout = '30s'");
 }
 
 // ───────────────────────── 읽기 전용 트랜잭션 (가짜 서버) ─────────────────────────
 
-const OPEN_READ_ONLY: [&str; 2] = ["START TRANSACTION READ ONLY", "SET LOCAL statement_timeout = '30s'"];
+/// 읽기가 여는 트랜잭션: 읽기 전용이고, 한 읽기의 모든 문장이 한 시점을 본다(REPEATABLE READ)
+const OPEN_READ_ONLY: [&str; 2] = ["START TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY", "SET LOCAL statement_timeout = '30s'"];
 
 /// 클라이언트가 연결이 닫힌 것을 알아챌 때까지 기다린다
 async fn wait_until_closed(conn: &Connected) {
@@ -548,6 +567,18 @@ async fn backend_pid_fails_with_the_drivers_error_so_the_connect_step_can_classi
     wait_until_closed(&conn).await;
     let failed: Error = backend_pid(&mut conn.client).await.unwrap_err();
     assert!(failed.is_closed(), "{failed:?}");
+}
+
+#[tokio::test]
+async fn a_snapshot_of_another_database_than_requested_is_refused() {
+    // 풀이 연결을 잘못 내줬거나 이름이 어긋났다. 서버가 말하는 이름이 요청과 다르면 요청한 이름을 붙여 돌려주지 않고 거절한다
+    let server = FakeServer::start(Script::Row { columns: &["current_database", "pg_get_userbyid"], values: &["other_db", "app_owner"] }).await;
+    let mut conn = server.connected(1).await;
+    let failed = db_snapshot(&mut conn, "app").await;
+    assert_eq!(failed, Err(AppError::other("연결한 데이터베이스가 요청과 달라요: app / other_db")));
+    // 첫 질의(이름과 소유자)에서 멈췄다: 그 데이터베이스의 스키마와 객체는 읽지 않았고, 읽기는 정상으로 끝났다
+    assert_eq!(server.prepared_statements(), [DB_IDENTITY_SQL]);
+    assert_eq!(server.simple_queries(), [OPEN_READ_ONLY[0], OPEN_READ_ONLY[1], "COMMIT"]);
 }
 
 fn assert_send<T: Send>(_: &T) {}

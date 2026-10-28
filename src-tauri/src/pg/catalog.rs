@@ -9,7 +9,7 @@
 
 use std::error::Error as StdError;
 
-use tokio_postgres::{Client, Error, Row, Transaction};
+use tokio_postgres::{Client, Error, IsolationLevel, Row, Transaction};
 
 use super::connect::Connected;
 use super::model::{
@@ -22,7 +22,7 @@ use crate::iam::clock;
 /// 읽기 하나가 쓸 수 있는 시간. 읽기 전용 트랜잭션 안에서 가장 먼저 건다. 넘기면 서버가 그 문장을 취소한다
 const STATEMENT_TIMEOUT: &str = "SET LOCAL statement_timeout = '30s'";
 
-/// 데이터베이스 하나에서 읽는 객체(관계와 함수를 합쳐)의 상한
+/// 데이터베이스 하나에서 읽는 객체(관계와 함수를 합쳐)의 상한. 관계가 먼저 자리를 잡고 함수는 남는 만큼만 든다
 const MAX_OBJECTS: usize = 20_000;
 
 /// 시스템 스키마(`pg_catalog`, `information_schema`, `pg_toast`, 임시 스키마)를 거르는 조건. `n`은 `pg_namespace`의 별칭이다.
@@ -74,8 +74,8 @@ FROM pg_stat_activity
 WHERE backend_type = 'client backend' OR (backend_type IS NULL AND usename IS NOT NULL AND datname IS NOT NULL)
 ORDER BY backend_start"#;
 
-/// 연결한 데이터베이스의 소유자
-const DB_OWNER_SQL: &str = "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()";
+/// 연결한 데이터베이스의 이름(서버가 말하는 것)과 소유자
+const DB_IDENTITY_SQL: &str = "SELECT current_database(), pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()";
 
 const SCHEMAS_SQL: &str = concat!(
     r#"SELECT n.nspname, pg_get_userbyid(n.nspowner),
@@ -86,7 +86,7 @@ WHERE "#,
     " ORDER BY n.nspname"
 );
 
-/// 관계: `$1`개까지만 읽는다. 상한보다 하나 더 읽어서 잘렸는지 알아본다
+/// 관계: `$1`개까지만 읽는다. 상한보다 하나 더 읽어서 잘렸는지 알아본다(관계를 먼저 읽는다)
 const RELATIONS_SQL: &str = concat!(
     r#"WITH o AS (
   SELECT c.oid, n.nspname, c.relname, c.relkind, c.relowner, c.relrowsecurity, c.relacl
@@ -101,7 +101,7 @@ FROM o LEFT JOIN LATERAL aclexplode(coalesce(o.relacl, acldefault(CASE WHEN o.re
 ORDER BY o.nspname, o.relname"#
 );
 
-/// 함수와 프로시저: `$1`개까지만 읽는다
+/// 함수와 프로시저: `$1`개까지만 읽는다(관계가 남긴 자리만큼)
 const FUNCTIONS_SQL: &str = concat!(
     r#"WITH o AS (
   SELECT p.oid, n.nspname, p.proname, pg_get_function_identity_arguments(p.oid) AS args, p.proowner, p.prosecdef, p.proconfig, p.proacl
@@ -125,19 +125,20 @@ LEFT JOIN LATERAL aclexplode(d.defaclacl) a ON true ORDER BY 1, 2, 3"#;
 // ───────────────────────── 읽기 전용 트랜잭션 ─────────────────────────
 
 /// 읽기 전용 트랜잭션 하나에서 `job`을 돌리고 커밋한다. 이 앱에서 트랜잭션을 여는 곳은 여기 하나뿐이다.
+/// REPEATABLE READ라서 `job`의 모든 문장이 한 시점(첫 문장이 정한다)을 본다. 읽는 도중 역할이 바뀌어도 역할 목록과 구성원 관계가 서로 다른 상태에서 오지 않는다.
 /// `job`이 실패하면 트랜잭션은 커밋되지 않고 버려진다(드라이버가 롤백을 보낸다). 연결은 이어서 쓸 수 있다.
 async fn transact<T, F>(client: &mut Client, job: F) -> Result<T, Error>
 where
     F: AsyncFnOnce(&Transaction<'_>) -> Result<T, Error>,
 {
-    let tx = client.build_transaction().read_only(true).start().await?;
+    let tx = client.build_transaction().read_only(true).isolation_level(IsolationLevel::RepeatableRead).start().await?;
     tx.batch_execute(STATEMENT_TIMEOUT).await?;
     let out = job(&tx).await?;
     tx.commit().await?;
     Ok(out)
 }
 
-/// 읽기 전용 트랜잭션 하나에서 `job`을 돌린다: 시작하고, 문장 시간 제한(30초)을 걸고, `job`을 돌리고, 커밋한다.
+/// 읽기 전용 REPEATABLE READ 트랜잭션 하나에서 `job`을 돌린다: 시작하고, 문장 시간 제한(30초)을 걸고, `job`을 돌리고, 커밋한다.
 /// READ ONLY는 데이터 변경(INSERT·UPDATE·DELETE), DDL, GRANT, `nextval`을 거절한다(SQLSTATE `25006`).
 /// 하지만 세션 `SET`·`SET ROLE`(연결을 보관하면 트랜잭션이 끝나도 남는다)이나 부작용이 있는 함수(`pg_terminate_backend`, 권고 잠금 등)는 막지 못한다.
 /// 그래서 "아무것도 쓰지 않는다"는 보장은 서버가 아니라 이 파일의 고정된 SELECT들과, 다른 파일이 질의를 보내지 못하게 하는 검사 테스트(PB4)에 기댄다.
@@ -244,18 +245,19 @@ fn any_grant_allows(a: Option<bool>, b: Option<bool>) -> Option<bool> {
 }
 
 // ───────────────────────── 객체 수 상한 ─────────────────────────
+// 관계를 먼저 읽는다: 권한 격자와 점검이 다루는 것은 주로 테이블이다. 확장이 만드는 함수가 수백 개씩 있어도 테이블이 밀려나지 않는다.
 
-/// 함수를 `functions`개 읽은 뒤 관계를 몇 개까지 읽을지. 상한을 넘는지 알아보려고 하나 더 읽는다.
-/// 함수만으로 상한을 넘었으면 관계는 읽지 않는다(None).
-fn relation_limit(functions: usize, max: usize) -> Option<usize> {
-    (functions <= max).then(|| max + 1 - functions)
+/// 관계를 `relations`개 읽은 뒤 함수를 몇 개까지 읽을지. 상한을 넘는지 알아보려고 하나 더 읽는다.
+/// 관계만으로 상한을 넘었으면 함수는 읽지 않는다(None).
+fn function_limit(relations: usize, max: usize) -> Option<usize> {
+    (relations <= max).then(|| max + 1 - relations)
 }
 
-/// 읽은 함수와 관계를 상한(`max`) 안으로 자른다. 함수를 먼저 두고 남는 만큼만 관계를 둔다. 잘랐으면 true.
-fn cap_objects<F, R>(functions: &mut Vec<F>, relations: &mut Vec<R>, max: usize) -> bool {
-    let truncated = functions.len() + relations.len() > max;
-    functions.truncate(max);
-    relations.truncate(max - functions.len());
+/// 읽은 관계와 함수를 상한(`max`) 안으로 자른다. 관계를 먼저 두고 남는 만큼만 함수를 둔다. 잘랐으면 true.
+fn cap_objects<R, F>(relations: &mut Vec<R>, functions: &mut Vec<F>, max: usize) -> bool {
+    let truncated = relations.len() + functions.len() > max;
+    relations.truncate(max);
+    functions.truncate(max - relations.len());
     truncated
 }
 
@@ -305,27 +307,34 @@ pub async fn cluster_snapshot(conn: &mut Connected, login_user: &str) -> Result<
 }
 
 /// 연결한 데이터베이스 하나의 스냅숏: 스키마, 관계, 함수, 기본 권한. 읽기 전용 트랜잭션 하나에서 읽는다.
-/// 관계와 함수는 합쳐서 2만 개까지만 읽고, 넘으면 `truncated`를 켠다.
+/// 관계와 함수는 합쳐서 2만 개까지만 읽고(관계가 먼저, 함수는 남는 만큼), 넘으면 `truncated`를 켠다.
+/// 스냅숏의 이름은 서버가 말하는 연결한 데이터베이스의 이름이다. `database`와 다르면 읽지 않고 오류를 돌려준다.
 pub async fn db_snapshot(conn: &mut Connected, database: &str) -> Result<DbSnapshot, AppError> {
     db_snapshot_capped(conn, database, MAX_OBJECTS).await
 }
 
 /// `db_snapshot`에 객체 상한을 넘기는 꼴: 시험이 작은 상한으로 잘림을 본다
 pub(super) async fn db_snapshot_capped(conn: &mut Connected, database: &str, max_objects: usize) -> Result<DbSnapshot, AppError> {
-    read(conn, async |tx| {
-        let owner = read_db_owner(tx).await?;
+    let snapshot = read(conn, async |tx| {
+        let (actual, owner) = read_db_identity(tx).await?;
+        if actual != database {
+            // 요청한 이름을 붙여 돌려주지 않는다. 그 데이터베이스의 객체는 읽지 않고 멈춘다
+            return Ok(Err(actual));
+        }
         let schemas = read_schemas(tx).await?;
-        // 함수를 먼저 읽는다. 상한보다 하나 더 읽어서 넘었는지 알아본다
-        let mut functions = read_functions(tx, max_objects + 1).await?;
-        let mut relations = match relation_limit(functions.len(), max_objects) {
-            Some(limit) => read_relations(tx, limit).await?,
+        // 관계를 먼저 읽는다. 상한보다 하나 더 읽어서 넘었는지 알아본다
+        let mut relations = read_relations(tx, max_objects + 1).await?;
+        // 함수는 관계가 남긴 자리만큼 읽는다. 관계만으로 상한을 넘었으면 읽지 않는다
+        let mut functions = match function_limit(relations.len(), max_objects) {
+            Some(limit) => read_functions(tx, limit).await?,
             None => Vec::new(),
         };
-        let truncated = cap_objects(&mut functions, &mut relations, max_objects);
+        let truncated = cap_objects(&mut relations, &mut functions, max_objects);
         let default_acls = read_default_acls(tx).await?;
-        Ok(DbSnapshot { database: database.to_string(), owner, schemas, relations, functions, default_acls, truncated, fetched_at: now_iso() })
+        Ok(Ok(DbSnapshot { database: actual, owner, schemas, relations, functions, default_acls, truncated, fetched_at: now_iso() }))
     })
-    .await
+    .await?;
+    snapshot.map_err(|actual| AppError::other(format!("연결한 데이터베이스가 요청과 달라요: {database} / {actual}")))
 }
 
 /// 지금 접속해 있는 세션들(오래된 순, 자세한 칸이 없는 줄은 뒤). 매번 새로 읽는다.
@@ -413,8 +422,10 @@ async fn read_sessions(tx: &Transaction<'_>) -> Result<Vec<SessionRec>, Error> {
         .collect()
 }
 
-async fn read_db_owner(tx: &Transaction<'_>) -> Result<String, Error> {
-    tx.query_one(DB_OWNER_SQL, &[]).await?.try_get(0)
+/// 연결한 데이터베이스의 이름과 소유자
+async fn read_db_identity(tx: &Transaction<'_>) -> Result<(String, String), Error> {
+    let row = tx.query_one(DB_IDENTITY_SQL, &[]).await?;
+    Ok((row.try_get(0)?, row.try_get(1)?))
 }
 
 async fn read_schemas(tx: &Transaction<'_>) -> Result<Vec<SchemaRec>, Error> {

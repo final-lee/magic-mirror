@@ -260,7 +260,9 @@ on_both_servers!(
     db_snapshot_reads_schemas_relations_functions_and_default_acls,
     the_object_cap_cuts_the_snapshot,
     read_refuses_to_write,
-    a_read_has_a_statement_timeout_that_ends_with_it,
+    a_read_is_a_read_only_repeatable_read_transaction_with_a_local_timeout,
+    all_statements_of_a_read_see_one_snapshot,
+    a_snapshot_is_named_by_the_server_and_refuses_another_name,
     sessions_list_the_client_backends,
     a_user_with_pg_read_all_stats_sees_every_session,
     the_backend_pid_is_the_servers_own,
@@ -571,6 +573,7 @@ async fn db_snapshot_reads_schemas_relations_functions_and_default_acls(server: 
     assert_eq!(granted(&sequences.acl, Some("app_owner")), ["SELECT", "UPDATE", "USAGE"], "모든 스키마의 기본 권한은 서버 기본값에서 출발해요");
 }
 
+/// 관계가 먼저 자리를 잡고(권한 격자와 점검이 다루는 것은 주로 테이블이다), 함수는 남는 자리만큼 든다
 async fn the_object_cap_cuts_the_snapshot(server: Server) {
     let scene = seed(server).await;
     let mut conn = scene.connect().await;
@@ -586,28 +589,41 @@ async fn the_object_cap_cuts_the_snapshot(server: Server) {
     let exact = capped(&mut conn, 13).await;
     assert_eq!(DbSnapshot { fetched_at: full.fetched_at.clone(), ..exact }, full);
 
-    // 하나 모자라면 이름순으로 뒤의 관계 하나가 잘린다. 함수는 그대로
+    // 하나 모자라면 관계는 모두 들고, 이름순으로 뒤의 함수 하나가 잘린다
     let cut = capped(&mut conn, 12).await;
     assert!(cut.truncated);
-    assert_eq!(names(&cut), (all_relations[..8].to_vec(), all_functions.clone()));
+    assert_eq!(names(&cut), (all_relations.clone(), all_functions[..3].to_vec()));
 
-    // 함수 4개가 먼저 자리를 잡고 관계가 남는 만큼만 든다
+    // 관계 9개가 먼저 자리를 잡고 함수는 남는 한 자리만 얻는다
+    let cut = capped(&mut conn, 10).await;
+    assert!(cut.truncated);
+    assert_eq!(names(&cut), (all_relations.clone(), all_functions[..1].to_vec()));
+
+    // 관계만으로 꽉 차면 함수는 하나도 없다
+    let cut = capped(&mut conn, 9).await;
+    assert!(cut.truncated);
+    assert_eq!(names(&cut), (all_relations.clone(), vec![]));
+
+    // 관계만으로 넘으면 관계도 상한까지만 들고, 함수는 읽지 않는다
     let cut = capped(&mut conn, 6).await;
     assert!(cut.truncated);
-    assert_eq!(names(&cut), (all_relations[..2].to_vec(), all_functions.clone()));
-
-    // 함수만으로 꽉 차면 관계는 하나도 없다
-    let cut = capped(&mut conn, 4).await;
-    assert!(cut.truncated);
-    assert_eq!(names(&cut), (vec![], all_functions.clone()));
-
-    // 함수만으로 넘으면 함수도 상한까지만 든다
+    assert_eq!(names(&cut), (all_relations[..6].to_vec(), vec![]));
     let cut = capped(&mut conn, 3).await;
     assert!(cut.truncated);
-    assert_eq!(names(&cut), (vec![], all_functions[..3].to_vec()));
+    assert_eq!(names(&cut), (all_relations[..3].to_vec(), vec![]));
 
     // 자르는 것은 관계와 함수뿐이다
     assert_eq!((cut.schemas, cut.default_acls), (full.schemas, full.default_acls));
+
+    // 함수가 하나도 없어도 관계가 잘린 것은 알아봐야 한다(함수를 읽다가 우연히 넘는 것이 아니다)
+    conn.client
+        .batch_execute("DROP FUNCTION app.touch(integer), app.safe_touch(integer), app.plain(integer, text); DROP PROCEDURE app.cleanup();")
+        .await
+        .expect("함수를 지우지 못했어요");
+    let exact = capped(&mut conn, 9).await;
+    assert_eq!((exact.relations.len(), exact.functions.len(), exact.truncated), (9, 0, false), "딱 상한이면 자르지 않아요");
+    let cut = capped(&mut conn, 8).await;
+    assert_eq!((names(&cut), cut.truncated), ((all_relations[..8].to_vec(), vec![]), true));
 }
 
 async fn read_refuses_to_write(server: Server) {
@@ -641,17 +657,19 @@ async fn read_refuses_to_write(server: Server) {
     assert!(sessions(&mut conn).await.is_ok());
 }
 
-async fn a_read_has_a_statement_timeout_that_ends_with_it(server: Server) {
+/// 읽기 하나는 읽기 전용이고 한 시점을 보는(REPEATABLE READ) 트랜잭션 하나다. 문장 시간 제한은 그 트랜잭션에만 걸린다
+async fn a_read_is_a_read_only_repeatable_read_transaction_with_a_local_timeout(server: Server) {
     let scene = seed(server).await;
     let mut conn = scene.connect().await;
     let inside = read(&mut conn, async |tx| {
         let timeout: String = tx.query_one("SHOW statement_timeout", &[]).await?.try_get(0)?;
         let read_only: String = tx.query_one("SHOW transaction_read_only", &[]).await?.try_get(0)?;
-        Ok((timeout, read_only))
+        let isolation: String = tx.query_one("SELECT current_setting('transaction_isolation')", &[]).await?.try_get(0)?;
+        Ok((timeout, read_only, isolation))
     })
     .await
     .expect("읽지 못했어요");
-    assert_eq!(inside, ("30s".to_string(), "on".to_string()));
+    assert_eq!(inside, ("30s".to_string(), "on".to_string(), "repeatable read".to_string()));
     // `SET LOCAL`이라 트랜잭션이 끝나면 연결에 남지 않는다
     let show = async |name: &str| -> String {
         let sql = format!("SHOW {name}");
@@ -659,6 +677,47 @@ async fn a_read_has_a_statement_timeout_that_ends_with_it(server: Server) {
     };
     assert_eq!(show("statement_timeout").await, "0");
     assert_eq!(show("transaction_read_only").await, "off");
+    assert_eq!(show("transaction_isolation").await, "read committed");
+}
+
+/// 한 읽기의 모든 문장은 같은 시점을 본다. 읽는 도중 다른 세션이 역할을 만들어도 이 읽기에는 보이지 않는다
+/// (READ COMMITTED였다면 문장마다 새 시점을 봐서 역할 목록과 구성원 관계가 서로 다른 상태에서 올 수 있다)
+async fn all_statements_of_a_read_see_one_snapshot(server: Server) {
+    let scene = seed(server).await;
+    let mut conn = scene.connect().await;
+    let other = connect_to(&scene.config).await;
+    other.batch_execute("DROP ROLE IF EXISTS mm_snapshot_probe").await.expect("지난 시험의 역할을 지우지 못했어요");
+
+    let count_probe = "SELECT count(*) FROM pg_roles WHERE rolname = 'mm_snapshot_probe'";
+    let (first, second) = read(&mut conn, async |tx| {
+        let first: i64 = tx.query_one(count_probe, &[]).await?.try_get(0)?;
+        // 읽는 도중에 다른 세션이 역할을 만들고 바로 커밋한다
+        other.batch_execute("CREATE ROLE mm_snapshot_probe NOLOGIN").await?;
+        let second: i64 = tx.query_one(count_probe, &[]).await?.try_get(0)?;
+        Ok((first, second))
+    })
+    .await
+    .expect("읽지 못했어요");
+    assert_eq!((first, second), (0, 0), "읽는 동안 만들어진 역할이 보이면 문장마다 다른 시점을 보는 거예요");
+
+    // 읽기가 끝난 뒤의 새 읽기에는 보인다
+    let seen_later = read(&mut conn, async |tx| tx.query_one(count_probe, &[]).await?.try_get::<_, i64>(0)).await.expect("읽지 못했어요");
+    assert_eq!(seen_later, 1);
+
+    other.batch_execute("DROP ROLE mm_snapshot_probe").await.expect("시험 역할을 지우지 못했어요");
+}
+
+/// 스냅숏의 이름은 서버가 말해 주는 연결한 데이터베이스의 이름이다. 요청한 이름과 다르면 거절한다
+async fn a_snapshot_is_named_by_the_server_and_refuses_another_name(server: Server) {
+    let scene = seed(server).await;
+    let mut conn = scene.connect().await;
+    let snap = db_snapshot(&mut conn, &scene.database).await.expect("데이터베이스 스냅숏을 읽지 못했어요");
+    assert_eq!(snap.database, scene.database);
+
+    let refused = db_snapshot(&mut conn, "not_this_database").await;
+    assert_eq!(refused, Err(AppError::other(format!("연결한 데이터베이스가 요청과 달라요: not_this_database / {}", scene.database))));
+    // 거절한 뒤에도 연결은 쓸 수 있다
+    assert!(db_snapshot(&mut conn, &scene.database).await.is_ok());
 }
 
 async fn sessions_list_the_client_backends(server: Server) {
