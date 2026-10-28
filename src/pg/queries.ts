@@ -1,4 +1,4 @@
-import { hashKey, useQuery, type Query, type QueryClient, type QueryKey } from "@tanstack/react-query";
+import { hashKey, partialMatchKey, useQuery, type Query, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import type { AppError } from "../api/types";
 import { pgApi } from "./api";
 import { targetKey } from "./targets";
@@ -15,6 +15,9 @@ import type {
   PgWhoCan,
 } from "./types";
 
+/** 한 대상·한 데이터베이스의 객체 검색들이 공유하는 키 앞부분(검색어만 다르다) */
+const objectSearch = (t: PgTarget, database: string | null) => ["pg", targetKey(t), "objects", database] as const;
+
 /**
  * 쿼리 키. 대상별 데이터는 모두 ["pg", targetKey(target), ...] 아래에 두어 한 번에 무효화하거나 지울 수 있다.
  * 세 번째 요소가 종류다(refreshPg가 종류로 순서를 정한다).
@@ -27,7 +30,8 @@ export const pgKeys = {
   database: (t: PgTarget, database: string | null) => ["pg", targetKey(t), "database", database] as const,
   cell: (t: PgTarget, database: string | null, role: string | null, schema: string | null) =>
     ["pg", targetKey(t), "cell", database, role, schema] as const,
-  objects: (t: PgTarget, database: string | null, query: string) => ["pg", targetKey(t), "objects", database, query] as const,
+  objectSearch,
+  objects: (t: PgTarget, database: string | null, query: string) => [...objectSearch(t, database), query] as const,
   role: (t: PgTarget, role: string | null) => ["pg", targetKey(t), "role", role] as const,
   whoCan: (t: PgTarget, database: string | null, object: PgObjectRef | null, privilege: string | null) =>
     ["pg", targetKey(t), "whoCan", database, object, privilege] as const,
@@ -99,15 +103,16 @@ export function usePgCell(target: PgTarget, database: string | null, role: strin
 }
 
 /**
- * 객체 검색(부분 일치, 최대 100개). 같은 데이터베이스에서 입력을 바꾸는 동안에는 이전 목록을 그대로 보여 주어 목록이 깜빡이지 않게 한다.
- * 데이터베이스를 바꾸면 이전 데이터베이스의 목록은 보여 주지 않는다.
+ * 객체 검색(부분 일치, 최대 100개). 같은 대상의 같은 데이터베이스에서 입력을 바꾸는 동안에는 이전 목록을 그대로 보여 주어 목록이 깜빡이지 않게 한다.
+ * 대상이나 데이터베이스를 바꾸면 이전 목록은 보여 주지 않는다.
  */
 export function usePgObjects(target: PgTarget, database: string | null, query: string) {
   return useQuery<PgObjectRef[], AppError>({
     queryKey: pgKeys.objects(target, database, query),
     queryFn: () => pgApi.objects(target, database!, query),
     enabled: !!database,
-    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[3] === database ? previous : undefined),
+    placeholderData: (previous, previousQuery) =>
+      previousQuery && partialMatchKey(previousQuery.queryKey, pgKeys.objectSearch(target, database)) ? previous : undefined,
     staleTime: Infinity,
     retry: false,
   });

@@ -272,6 +272,25 @@ describe("hooks", () => {
     await waitFor(() => expect(result.current.data?.[0].name).toBe("touch_order"));
   });
 
+  test("the object search does not show another target's list while a new target loads", async () => {
+    const { wrapper } = makeClient();
+    const other: PgTarget = { ...t, id: "billing" };
+    m.objects.mockImplementation(async (target) => (target.id === t.id ? [ordersTable] : [touchOrderFn]));
+    const { result, rerender } = renderHook(({ target }) => usePgObjects(target, "orders", "o"), { wrapper, initialProps: { target: t } });
+    await waitFor(() => expect(result.current.data?.[0].name).toBe("orders"));
+
+    let release!: () => void;
+    m.objects.mockImplementation(async () => {
+      await new Promise<void>((r) => (release = r));
+      return [touchOrderFn];
+    });
+    rerender({ target: other }); // 같은 이름의 데이터베이스라도 다른 대상이다
+    expect(result.current.data).toBeUndefined();
+    expect(result.current.isPlaceholderData).toBe(false);
+    release();
+    await waitFor(() => expect(result.current.data?.[0].name).toBe("touch_order"));
+  });
+
   test("sessions are read again each time their screen opens", async () => {
     const { qc, wrapper } = makeClient();
     const first = renderHook(() => usePgSessions(t), { wrapper });

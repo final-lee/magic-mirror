@@ -1,6 +1,6 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 import { ResourceArea } from "./ResourceArea";
-import { makeResource, renderWithClient, sampleServices } from "../test/utils";
+import { dbRow, makeResource, rdsService, renderWithClient, sampleServices } from "../test/utils";
 import { api } from "../api/client";
 
 vi.mock("../api/client", () => ({ api: { listResources: vi.fn(), ssoLogin: vi.fn() } }));
@@ -114,15 +114,7 @@ describe("IAM workspace entry", () => {
 });
 
 describe("PostgreSQL entry", () => {
-  const column = (key: string) => ({ key, label: key, kind: "text" as const });
-  const rdsService = {
-    id: "rds",
-    name: "RDS",
-    global: false,
-    types: ["db-instances", "db-clusters"].map((id) => ({ id, name: id, columns: [column("name"), column("engine")] })),
-  };
   const typeOf = (id: string) => rdsService.types.find((t) => t.id === id)!;
-  const dbRow = (id: string, engine: string, extra: Record<string, string> = {}) => makeResource(id, { name: id, engine, ...extra });
   const mockRows = (...items: ReturnType<typeof dbRow>[]) => vi.mocked(api.listResources).mockResolvedValue({ items, truncated: false });
   const target = (kind: "cluster" | "instance", id: string) => ({ profile: "prod", region: "ap-northeast-2", kind, id });
   const NOT_POSTGRES = "PostgreSQL 엔진만 열 수 있어요";

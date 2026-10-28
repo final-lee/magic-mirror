@@ -115,6 +115,24 @@ describe("database view", () => {
     expect(unusable[0].read).not.toBe("none");
   });
 
+  test("every unusable cell has something to lose", () => {
+    for (const c of view.cells.filter((c) => c.unusable !== null)) {
+      expect(c.usage || c.create || c.read !== "none" || c.write !== "none", `${c.role}/${c.schema}`).toBe(true);
+    }
+  });
+
+  test("an unusable cell names the first thing missing: CONNECT, then schema USAGE; a cell with nothing to lose is never flagged", () => {
+    const connect = new Map(view.dbPrivileges.map((p) => [p.role, p.connect]));
+    for (const c of view.cells) {
+      const somethingToLose = c.usage || c.create || c.read !== "none" || c.write !== "none";
+      const expected = !somethingToLose ? null : !connect.get(c.role) ? "CONNECT 없음" : !c.usage ? "USAGE 없음" : null;
+      expect(c.unusable, `${c.role}/${c.schema}`).toBe(expected);
+    }
+    // 사용자 bob은 CONNECT가 없고 audit에는 USAGE도 없지만, 거기에는 잃을 것이 없다
+    expect(view.cells.find((c) => c.role === "bob" && c.schema === "audit")?.unusable).toBeNull();
+    expect(view.cells.find((c) => c.role === "alice" && c.schema === "audit")?.unusable).toBeNull();
+  });
+
   test("has database privileges for every role, in the same order", () => {
     expect(view.dbPrivileges.map((p) => p.role)).toEqual(ROLE_NAMES);
     // unusable cells and CONNECT agree
@@ -192,12 +210,19 @@ describe("who-can", () => {
     }
   });
 
-  test("shows every kind of source a table gets, and the NOINHERIT member is absent", () => {
+  test("shows every kind of source a table gets, the longest group path, and a row that cannot be used", () => {
     const kinds = new Set(whoCan.allowed.flatMap((r) => r.sources.map((s) => s.kind)));
     expect(kinds).toEqual(new Set(["owner", "direct", "group", "predefined"]));
     expect(whoCan.allowed.some((r) => r.unusable === "CONNECT 없음")).toBe(true);
     // paths run from the role to the role that holds the grant, without the role itself
     expect(whoCan.allowed.find((r) => r.role === "alice")!.sources[0].via).toEqual(["app_write", "app_read"]);
+  });
+
+  test("bob has the privilege only through his own grant, because his membership in app_read does not inherit", () => {
+    const row = whoCan.allowed.find((r) => r.role === "bob")!;
+    expect(roleOf("bob").memberOf).toEqual([{ group: "app_read", inherit: false, admin: false }]);
+    expect(row.sources.map((s) => s.kind)).toEqual(["direct"]);
+    expect(row.sources.some((s) => s.via.includes("app_read"))).toBe(false);
   });
 
   test("agrees with the database view on who cannot use the grant", () => {
