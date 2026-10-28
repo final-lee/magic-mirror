@@ -18,7 +18,8 @@
 //! 구성: 공개된 것은 `Eval`(한 명령이 한 번 만들어 쓰는 계산기)과 그것이 역할마다 돌려주는 `RoleView`, `schema_cells`(역할 × 스키마),
 //! `who_can`(한 객체에 권한이 있는 역할들)이다. 시험에는 `Ctx`의 메서드도 있다(부를 때마다 `Eval`을 새로 만드는 한 줄 포장).
 //! `Eval`이 `Ctx`에서 역할 그래프를 한 번 만들고, `RoleView`가 역할마다 상속하는 역할의 집합을 한 번 구해 둔다.
-//! `schema_cells`와 `who_can`은 명령 하나에 `Eval` 하나를 쓴다. 데이터베이스 스냅숏 없이 클러스터 스냅숏만 있을 때는 `Eval::for_cluster`다.
+//! `schema_cells`는 호출하는 쪽이 만든 `Eval`을 받아서 한 명령이 `Eval` 하나를 나눠 쓴다. `who_can`은 `Eval` 하나를 스스로 만든다.
+//! 데이터베이스 스냅숏 없이 클러스터 스냅숏만 있을 때는 `Eval::for_cluster`다.
 
 use std::cell::OnceCell;
 use std::collections::HashMap;
@@ -547,10 +548,9 @@ pub struct SchemaCell {
     pub unusable: Option<&'static str>,
 }
 
-/// 역할 × 스키마의 칸들. 주어진 역할 순서대로, 각 역할 안에서는 스키마 이름순이다.
+/// 역할 × 스키마의 칸들. 주어진 역할 순서대로, 각 역할 안에서는 스키마 이름순이다. `eval`은 같은 `ctx`로 만든 것이어야 한다.
 /// 20,000개 관계에 역할 200개여도 2초 안에 끝나도록, 역할마다 상속하는 역할의 집합을 한 번만 구한다
-pub fn schema_cells(ctx: &Ctx, roles: &[&str]) -> Vec<SchemaCell> {
-    let eval = Eval::new(ctx);
+pub fn schema_cells(eval: &Eval, ctx: &Ctx, roles: &[&str]) -> Vec<SchemaCell> {
     let mut schemas: Vec<&SchemaRec> = ctx.db.schemas.iter().collect();
     schemas.sort_by(|a, b| a.name.cmp(&b.name));
     let mut relations: HashMap<&str, Vec<&RelationRec>> = HashMap::new();

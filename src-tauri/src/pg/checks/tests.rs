@@ -169,7 +169,7 @@ fn with_rds_superusers() -> Scene {
 }
 
 #[test]
-fn rds_superuser_finds_direct_and_inherited_members_and_says_how() {
+fn rds_superuser_finds_direct_inherited_and_set_role_members_and_says_how() {
     let found = run(&with_rds_superusers());
     let group = group(&found, RdsSuperuser).expect("group");
     assert_eq!((group.title.as_str(), group.level), ("rds_superuser 멤버", PgFindingLevel::High));
@@ -178,6 +178,8 @@ fn rds_superuser_finds_direct_and_inherited_members_and_says_how() {
         shown,
         [
             ("admins", "rds_superuser의 직접 구성원이에요"),
+            // 상속하지 않는 구성원이 그룹을 거치면 SET ROLE로 쓴다
+            ("blocked", "SET ROLE로 rds_superuser 권한을 쓸 수 있어요"),
             ("deep", "ops → admins 역할을 거쳐 rds_superuser 권한을 받아요"),
             ("etl", "admins 역할을 거쳐 rds_superuser 권한을 받아요"),
             // 상속하지 않는 직접 구성원도 SET ROLE로 쓸 수 있다
@@ -191,15 +193,46 @@ fn rds_superuser_finds_direct_and_inherited_members_and_says_how() {
 }
 
 #[test]
-fn rds_superuser_skips_system_roles_and_members_that_cannot_use_the_privilege() {
+fn rds_superuser_skips_system_roles_and_roles_that_cannot_reach_the_privilege() {
     let found = run(&with_rds_superusers());
     let roles = roles_of(&found, RdsSuperuser);
-    // rdsadmin(시스템 역할)과 rds_superuser 자신은 빠지고, NOINHERIT 구성원이 그룹을 거쳐서는 닿지 못한다
-    for name in ["rdsadmin", "rds_superuser", "blocked", "alice", "app_owner"] {
+    // rdsadmin(시스템 역할)과 rds_superuser 자신은 빠진다. 상속하지 않는 구성원이 그룹을 거쳐서는 SET ROLE로 닿으니 빠지지 않는다(blocked)
+    for name in ["rdsadmin", "rds_superuser", "alice", "app_owner"] {
         assert!(!roles.contains(&name), "{name}");
     }
+    assert!(roles.contains(&"blocked"));
     // 이 역할이 없는 클러스터에는 그룹이 없다
     assert!(group(&run(&app_scene(PG16)), RdsSuperuser).is_none());
+}
+
+#[test]
+fn from_pg16_a_set_role_member_needs_the_set_option_on_every_link() {
+    let setup = |version: i32| {
+        let mut scene = with_rds_superusers();
+        scene.cluster.version_num = version;
+        scene.cluster.roles.extend([RoleRec { inherit: false, ..login("first_off") }, RoleRec { inherit: false, ..login("last_off") }, role("sealed")]);
+        let options = |who: &str, group: &str, set: bool| if version >= 160_000 { member_with(who, group, false, set) } else { member(who, group) };
+        scene.cluster.members.extend([
+            // 첫 관계에 SET 옵션이 없다
+            options("first_off", "admins", false),
+            // 마지막 관계에 SET 옵션이 없다
+            options("sealed", "rds_superuser", false),
+            options("last_off", "sealed", true),
+        ]);
+        scene
+    };
+    let reached = |version: i32| {
+        let found = run(&setup(version));
+        let all: Vec<String> = roles_of(&found, RdsSuperuser).into_iter().map(str::to_string).collect();
+        all
+    };
+    // PG16: blocked의 관계에는 옵션이 없어 SET이 허용된다. SET 옵션을 끈 관계를 지나는 first_off와 last_off는 닿지 못한다
+    let pg16 = reached(PG16);
+    assert!(pg16.contains(&"blocked".to_string()));
+    assert!(!pg16.contains(&"first_off".to_string()) && !pg16.contains(&"last_off".to_string()), "{pg16:?}");
+    // PG15 이하에는 SET 옵션이 없다
+    let pg15 = reached(PG15);
+    assert!(["blocked", "first_off", "last_off"].iter().all(|name| pg15.contains(&name.to_string())), "{pg15:?}");
 }
 
 #[test]
@@ -468,6 +501,29 @@ fn the_gap_needs_select_on_every_table_through_a_direct_or_group_source() {
     }
     assert!(!roles_of(&run(&scene), DefaultPrivilegeGap).contains(&"tourist"));
     assert!(!roles_of(&run(&scene), DefaultPrivilegeGap).contains(&"carol"));
+}
+
+#[test]
+fn a_role_that_also_reads_through_a_predefined_role_or_as_a_superuser_has_no_gap() {
+    // carol은 pg_read_all_data의 구성원이다: 그 역할이 새 테이블의 SELECT도 준다. app의 테이블을 직접 받았어도 빈틈이 아니다.
+    // superuser인 root도 새 테이블을 읽는다. 직접 받은 것뿐인 dave는 빈틈이 있다
+    let mut scene = app_scene(PG16);
+    scene.cluster.roles.extend([login("dave"), RoleRec { superuser: true, ..login("root") }]);
+    for rel in scene.db.relations.iter_mut().filter(|r| r.schema == "app" && r.kind == RelKind::Table) {
+        for who in ["carol", "dave", "root"] {
+            rel.acl.push(entry("app_owner", Some(who), Select));
+        }
+    }
+    let roles = roles_of(&run(&scene), DefaultPrivilegeGap).into_iter().map(str::to_string).collect::<Vec<_>>();
+    assert!(roles.contains(&"dave".to_string()), "{roles:?}");
+    assert!(!roles.contains(&"carol".to_string()) && !roles.contains(&"root".to_string()), "{roles:?}");
+
+    // 모든 테이블에서 그런 것이 아니면 빈틈이다: 테이블 하나의 SELECT가 직접 받은 것뿐이면(미리 정의된 역할이 없는 PG13) 걸린다
+    let mut scene = app_scene(PG13);
+    for rel in scene.db.relations.iter_mut().filter(|r| r.schema == "app" && r.kind == RelKind::Table) {
+        rel.acl.push(entry("app_owner", Some("carol"), Select));
+    }
+    assert!(roles_of(&run(&scene), DefaultPrivilegeGap).contains(&"carol"), "PG13에는 pg_read_all_data가 없어요");
 }
 
 #[test]

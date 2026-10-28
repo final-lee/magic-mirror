@@ -3,7 +3,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::*;
-use crate::pg::eval::{schema_cells, who_can, Coverage, Ctx, Obj, SourceKind};
+use crate::pg::eval::{schema_cells, who_can, Coverage, Ctx, Eval, Obj, SourceKind};
 
 // ───────────────────────── 실효 권한을 서버와 맞대 보기 ─────────────────────────
 //
@@ -364,7 +364,7 @@ async fn compare_with_postgres(client: &Client, ctx: &Ctx<'_>, server: Server) -
         _ => Coverage::Some,
     };
     let role_names: Vec<&str> = ctx.cluster.roles.iter().map(|r| r.name.as_str()).collect();
-    let cells = schema_cells(ctx, &role_names);
+    let cells = schema_cells(&Eval::new(ctx), ctx, &role_names);
     // 칸은 물은 역할 순서대로 나오고, 역할마다 스키마 이름순이다. 아래는 칸이 말하는 역할로 서버의 답을 찾으니 순서를 따로 본다
     let mut schema_names: Vec<&str> = ctx.db.schemas.iter().map(|s| s.name.as_str()).collect();
     schema_names.sort_unstable();
@@ -485,10 +485,11 @@ pub(super) async fn effective_privileges_match_postgres(server: Server) {
     assert_eq!(ctx.sources("mm_cmp_deep", orders, Privilege::Select)[0].via, ["mm_cmp_deep_a", "mm_cmp_deep_b", "app_read"]);
     // audit의 외래 테이블에는 app_read가 DELETE만, 파티션 테이블에는 app_write가 UPDATE만 받았다. 쓰기는 셋 가운데 하나면 되고,
     // app_read는 외래 테이블만 쓰니 일부, app_write는 app_read를 상속해서 둘 다 쓰니 모두다
-    let write = |role: &str| schema_cells(&ctx, &[role]).into_iter().find(|c| c.schema == "audit").map(|c| c.write);
+    let eval = Eval::new(&ctx);
+    let write = |role: &str| schema_cells(&eval, &ctx, &[role]).into_iter().find(|c| c.schema == "audit").map(|c| c.write);
     assert_eq!((write("app_read"), write("app_write")), (Some(Coverage::Some), Some(Coverage::All)));
     // 스키마에 CREATE만 있는 칸은 USAGE가 없어도 못 쓰는 이유가 아니다(서버도 USAGE 없이 만들게 한다). CONNECT가 없으면 그것이 이유다
-    let cell = |role: &str, schema: &str| schema_cells(&ctx, &[role]).into_iter().find(|c| c.schema == schema).expect("칸이 없어요");
+    let cell = |role: &str, schema: &str| schema_cells(&eval, &ctx, &[role]).into_iter().find(|c| c.schema == schema).expect("칸이 없어요");
     let shown = |c: &crate::pg::eval::SchemaCell| (c.usage, c.create, c.read, c.write, c.unusable);
     // alice는 app_write를 거쳐 scratch의 CREATE만 갖고, CONNECT는 app_read에서 받는다
     assert_eq!(shown(&cell("alice", "scratch")), (false, true, Coverage::None, Coverage::None, None));

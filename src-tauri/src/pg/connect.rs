@@ -41,8 +41,10 @@ const IAM_OFF_INSTANCE: &str = "이 인스턴스는 IAM 데이터베이스 인�
 const CERTIFICATE_UNVERIFIED: &str = "서버 인증서를 확인하지 못했어요";
 
 /// 연결 하나. 질의는 `&mut Connected`를 받아 읽기 전용 트랜잭션을 연다.
+/// 날것의 `client`는 `pg` 안에서만 닿는다: `pg_commands`가 읽기 전용 트랜잭션 밖에서 문장을 보낼 수 없게 막는 타입 수준의 울타리다
+/// (검사 테스트 `pg::hygiene`가 글자로 같은 것을 지킨다).
 pub struct Connected {
-    pub client: tokio_postgres::Client,
+    pub(in crate::pg) client: tokio_postgres::Client,
     pub backend_pid: i32,
 }
 

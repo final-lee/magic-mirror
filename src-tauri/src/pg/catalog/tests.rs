@@ -566,12 +566,29 @@ async fn a_statement_timeout_reads_as_the_read_timeout_text() {
 
 #[tokio::test]
 async fn only_the_cancel_code_reads_as_a_timeout() {
-    // 다른 서버 오류는 서버 문구 그대로다: 57014 하나만 시간 제한 문구가 된다
-    for (code, message) in [("57P01", "terminating connection due to administrator command"), ("55P03", "could not obtain lock on relation"), ("42501", "permission denied")] {
+    // 다른 서버 오류는 서버 문구 그대로다: 57014 하나만 시간 제한 문구가 된다(세션을 끝내는 코드는 아래 시험)
+    for (code, message) in [("55P03", "could not obtain lock on relation"), ("42501", "permission denied"), ("57P04", "database \"x\" is being dropped"), ("57000", "operator intervention")] {
         let server = FakeServer::start(Script::RejectsQueries { code, message }).await;
         let mut conn = server.connected(1).await;
         let failed = read(&mut conn, async |tx| tx.query_one("SELECT 1", &[]).await.map(|_| ())).await;
         assert_eq!(failed, Err(AppError::other(message)), "{code}");
+    }
+}
+
+#[tokio::test]
+async fn a_server_that_ends_the_session_reads_as_a_closed_connection() {
+    // 재부팅이나 장애 조치, `pg_terminate_backend`(57P01), 다른 프로세스의 충돌(57P02), 아직 시작하는 중(57P03):
+    // 서버는 오류를 보내고 연결을 닫는다. 서버의 영어 문구 대신 연결이 끊겼다고 알리고, 다시 읽으면 새로 연결한다
+    for (code, message) in [
+        ("57P01", "terminating connection due to administrator command"),
+        ("57P02", "terminating connection because of crash of another server process"),
+        ("57P03", "the database system is starting up"),
+    ] {
+        let server = FakeServer::start(Script::RejectsQueries { code, message }).await;
+        let mut conn = server.connected(1).await;
+        let failed = read(&mut conn, async |tx| tx.query_one("SELECT 1", &[]).await.map(|_| ())).await;
+        assert_eq!(failed, Err(AppError::Network { message: "데이터베이스 연결이 끊겼어요. 다시 읽으면 새로 연결해요".into() }), "{code}");
+        assert!(!format!("{failed:?}").contains(message), "서버의 영어 문구는 나가지 않아요: {failed:?}");
     }
 }
 

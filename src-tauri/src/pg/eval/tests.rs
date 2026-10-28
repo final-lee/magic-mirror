@@ -9,6 +9,11 @@ use crate::pg::model::Privilege::{
 use crate::pg::model::RelKind::Sequence;
 use crate::pg::model::{Privilege, RoleRec};
 
+/// 부를 때마다 `Eval`을 새로 만들어 `schema_cells`에 묻는다(명령은 `Eval`을 하나 만들어 나눠 쓴다)
+pub(super) fn schema_cells(ctx: &Ctx, roles: &[&str]) -> Vec<SchemaCell> {
+    super::schema_cells(&Eval::new(ctx), ctx, roles)
+}
+
 fn src(kind: SourceKind, via: &[&str], grantor: Option<&str>) -> Source {
     Source { kind, via: via.iter().map(|s| s.to_string()).collect(), grantor: grantor.map(str::to_string) }
 }

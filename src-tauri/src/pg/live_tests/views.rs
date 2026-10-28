@@ -5,12 +5,19 @@
 //! 기본 권한을 거두면 같은 app_read가 빈틈으로 잡혀야 한다: 점검이 기본 권한 때문에 조용한 것인지, 그냥 못 보는 것인지를 가른다.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use super::*;
+use crate::aws::context::AwsContext;
+use crate::commands::AppState;
 use crate::pg::checks::findings;
 use crate::pg::eval::SourceKind;
+use crate::pg::pool::ConnKey;
 use crate::pg::summary::{cell_detail, database_view, parse_privilege, role_summaries, search_objects, who_can_view};
+use crate::pg::target::{PgTarget, PgTargetInfo, TargetKind};
 use crate::pg::view::{PgCoverage, PgFindingKind, PgFindings, PgObjectKind, PgObjectRef};
+use crate::pg_commands::PgState;
 
 /// 다른 시험이 만든 역할과 겹치지 않는 이름이다. 이미 있으면 만들지 않는다(역할은 클러스터 전체의 것이다)
 const VIEW_ROLES: &str = r#"
@@ -190,4 +197,43 @@ pub(super) async fn a_statement_timeout_reads_as_the_read_timeout_text(server: S
     assert_eq!(failed, Err(AppError::other("질의가 30초 안에 끝나지 않았어요. 잠시 뒤 다시 읽어 주세요")));
     // 연결은 그대로 쓸 수 있다
     assert_eq!(read(&mut conn, async |tx| tx.batch_execute("SELECT 1").await).await, Ok(()));
+}
+
+/// `pg_sessions`: 세션 목록에서 앱의 연결 보관함에 든 연결만 `own`이다. 가짜 서버는 `pg_stat_activity`에 답하지 못해서 진짜 서버로 본다.
+/// AWS에는 닿지 않는다: 이 시험의 연결을 보관함에 미리 넣어 두면 명령은 새로 연결하지 않고 그것을 쓴다.
+pub(super) async fn the_sessions_command_marks_the_connection_the_app_holds(server: Server) {
+    let scene = seed(server).await;
+    let mut held = scene.connect().await;
+    let cluster = cluster_snapshot(&mut held, "iam_admin").await.expect("클러스터 스냅숏");
+    // 보관함에 넣지 않은 이 시험의 다른 연결: 서버에는 세션으로 보이지만 앱의 연결은 아니다
+    let elsewhere = scene.connect().await;
+    let (held_pid, elsewhere_pid) = (held.backend_pid, elsewhere.backend_pid);
+    assert_ne!(held_pid, elsewhere_pid);
+
+    let target = PgTarget { profile: "dev".into(), region: "ap-northeast-2".into(), kind: TargetKind::Cluster, id: "live".into() };
+    let info = PgTargetInfo {
+        arn: "arn:aws:rds:ap-northeast-2:123456789012:cluster:live".into(),
+        identifier: "live".into(),
+        kind: TargetKind::Cluster,
+        engine: "aurora-postgresql".into(),
+        engine_version: format!("{}.0", server.major()),
+        endpoint: "127.0.0.1".into(),
+        port: 5432,
+        default_database: scene.database.clone(),
+        iam_auth: true,
+        read_replica: false,
+    };
+    let state = PgState::default();
+    let epoch = state.pool.epoch(&target);
+    state.finish_open(&target, epoch, "iam_admin".into(), info, Arc::new(cluster)).expect("열기");
+    let key = ConnKey { target: target.clone(), user: "iam_admin".into(), database: scene.database.clone() };
+    state.pool.get_or_connect_at_epoch(key, epoch, || async { Ok(held) }).await.expect("보관함에 넣지 못했어요");
+
+    let app = AppState { ctx: AwsContext::default(), adapters: Vec::new(), settings_path: PathBuf::new(), sso: Default::default() };
+    let listed = state.sessions(&app, &target).await.expect("세션을 읽지 못했어요");
+    let own: BTreeMap<i32, bool> = listed.iter().map(|session| (session.pid, session.own)).collect();
+    assert_eq!(own.get(&held_pid), Some(&true), "보관함의 연결이 앱의 연결로 표시되지 않았어요: {own:?}");
+    assert_eq!(own.get(&elsewhere_pid), Some(&false), "보관함 밖의 연결은 앱의 연결이 아니에요: {own:?}");
+    assert_eq!(own.values().filter(|own| **own).count(), 1, "앱의 연결은 보관함의 하나뿐이에요: {own:?}");
+    drop(elsewhere);
 }

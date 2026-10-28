@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use super::SourceKind::{Direct, Owner, Superuser};
-use super::tests::inh;
+use super::tests::{inh, schema_cells};
 use super::*;
 use crate::pg::fixtures::*;
 use crate::pg::model::Privilege::{Connect, Create, Delete, Insert, Maintain, Select, Temporary, Update, Usage};

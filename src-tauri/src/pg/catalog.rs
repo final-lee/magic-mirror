@@ -26,7 +26,7 @@ const STATEMENT_TIMEOUT: &str = "SET LOCAL statement_timeout = '30s'";
 /// 문장 시간 제한(`STATEMENT_TIMEOUT`)에 걸려 서버가 문장을 취소했을 때(SQLSTATE 57014)의 문구
 const READ_TIMEOUT: &str = "질의가 30초 안에 끝나지 않았어요. 잠시 뒤 다시 읽어 주세요";
 
-/// 읽는 도중 연결이 끊겼을 때의 문구. 연결 보관함이 닫힌 연결을 버리므로 다시 읽으면 새로 연결한다
+/// 읽는 도중 연결이 끊겼을 때(서버가 세션을 끝낸 경우 57P01·57P02·57P03 포함)의 문구. 연결 보관함이 닫힌 연결을 버리므로 다시 읽으면 새로 연결한다
 const CONNECTION_CLOSED: &str = "데이터베이스 연결이 끊겼어요. 다시 읽으면 새로 연결해요";
 
 /// 데이터베이스 하나에서 읽는 객체(관계와 함수를 합쳐)의 상한. 관계가 먼저 자리를 잡고 함수는 남는 만큼만 든다
@@ -165,11 +165,20 @@ pub(super) async fn backend_pid(client: &mut Client) -> Result<i32, Error> {
 
 /// 질의 오류를 사용자에게 보일 오류로 바꾼다.
 /// - 서버가 보낸 오류는 서버 문구 그대로(SQLSTATE는 넣지 않는다). 다만 문장 시간 제한이 문장을 취소한 오류(57014)는 `READ_TIMEOUT` 문구다.
+/// - 서버가 세션을 끝낸 오류(57P01 관리자의 종료: 재부팅·장애 조치·`pg_terminate_backend`, 57P02 충돌, 57P03 아직 시작하는 중)는
+///   연결이 곧 닫히니 연결이 끊긴 것과 같다: 네트워크 오류이고 `CONNECTION_CLOSED` 문구다.
 /// - 서버에 닿지 못한 오류(닫힌 연결, 입출력 오류)는 네트워크 오류이고 `CONNECTION_CLOSED` 문구다. 드라이버의 영어 문구는 보이지 않는다.
 /// - 그 밖에는 드라이버의 문구.
 fn app_error(e: &Error) -> AppError {
     if let Some(db) = e.as_db_error() {
-        return AppError::other(if *db.code() == SqlState::QUERY_CANCELED { READ_TIMEOUT } else { db.message() });
+        let code = db.code();
+        if *code == SqlState::QUERY_CANCELED {
+            return AppError::other(READ_TIMEOUT);
+        }
+        if [SqlState::ADMIN_SHUTDOWN, SqlState::CRASH_SHUTDOWN, SqlState::CANNOT_CONNECT_NOW].contains(code) {
+            return AppError::Network { message: CONNECTION_CLOSED.to_string() };
+        }
+        return AppError::other(db.message());
     }
     let mut unreachable = e.is_closed();
     let mut cause: Option<&(dyn StdError + 'static)> = Some(e);
