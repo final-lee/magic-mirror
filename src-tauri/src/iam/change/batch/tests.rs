@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 use super::*;
 use crate::iam::catalog::AccessLevel;
-use crate::iam::change::impact::{PermDelta, MAX_AFFECTED};
+use crate::iam::change::impact::{Analysis, PermDelta, MAX_AFFECTED};
 use crate::iam::change::preview as preview_one;
 use crate::iam::change::scenarios::{account_arn, add_policy, add_to_group, allowing, attach, detach, group_rec, remove_from_group, set_status};
 // 묶음을 쓰는 쪽이 보는 경로(`change`가 다시 내보내는 이름)로 가져온다
@@ -499,4 +499,166 @@ fn the_caller_reached_only_through_a_group_does_not_push_the_last_target_out() {
     assert_eq!(p.confirm_text.as_deref(), Some("변경 50개 적용"));
     // 달라지는 주체는 새 사용자 48명과 bob이다(alice와 admins는 이미 관리자라 reader가 더하는 것이 없다)
     assert_eq!(p.impacts.len() + p.impacts_omitted, 49);
+}
+
+// ── 중간에 멈추는 경우 ──────────────────────────────────────────────────
+
+const MID_ADMIN_BOB: &str = "중간에 멈추면 관리자급 권한을 새로 얻는 주체: bob";
+const MID_ADMIN_DAVE: &str = "중간에 멈추면 관리자급 권한을 새로 얻는 주체: dave";
+const MID_PRIVESC_BOB: &str = "중간에 멈추면 권한 상승에 쓸 수 있는 권한을 새로 얻는 주체: bob";
+
+/// 구성원이 없는 그룹 `ops`에 `attached` 정책이 붙은 스냅숏과 ops의 ARN.
+fn with_ops(attached: &[&str]) -> (Snapshot, String) {
+    let mut s = snapshot();
+    s.groups.push(group_rec("ops", attached));
+    (s, account_arn("group/ops"))
+}
+
+/// 묶음 경고와 변경마다의 경고 가운데 "중간에 멈추면"으로 시작하는 것.
+fn mid_stop_messages(p: &BatchPreview) -> Vec<&str> {
+    every_warning(p).map(|w| w.message.as_str()).filter(|m| m.starts_with("중간에 멈추면")).collect()
+}
+
+#[test]
+fn a_stop_between_the_grants_and_the_removals_needs_confirm() {
+    // 끝 상태에서 bob은 달라지는 게 없다. 하지만 그룹에서 관리자 정책을 떼는 변경이 실패해 멈추면 bob은 관리자급이 된 채로 남는다
+    let (s, ops) = with_ops(&[ADMIN_POLICY]);
+    let changes = vec![add_to_group("bob", "ops"), detach(&ops, ADMIN_POLICY)];
+
+    let p = preview_batch(&s, &changes, &[]);
+
+    assert_eq!(messages(&p.warnings, WarnLevel::Confirm), vec![MID_ADMIN_BOB], "{:?}", p.warnings);
+    assert_eq!(p.confirm_text.as_deref(), Some("변경 2개 적용"));
+    // 묶음의 확인이다: 변경마다의 경고는 없고, 영향은 처음과 끝만 비교해서 bob은 나오지 않고, 되돌릴 수 있음도 그대로다
+    assert!(p.changes.iter().all(|item| item.warnings.is_empty()), "{:?}", p.changes);
+    assert_eq!(impact_names(&p), vec!["ops"]);
+    assert!(p.reversible);
+    // 대조: 첫 변경만 반영한 상태를 따로 보면 같은 주체가 끝 상태의 확인으로 나온다
+    let first_only = preview_batch(&s, &changes[..1], &[]);
+    assert_eq!(messages(&first_only.warnings, WarnLevel::Confirm), vec![NEW_ADMIN_BOB]);
+}
+
+#[test]
+fn a_stop_that_leaves_a_way_up_needs_confirm_too() {
+    let mut s = snapshot();
+    let passer = add_policy(&mut s, "passer", allowing(&["iam:PassRole"]));
+    s.groups.push(group_rec("ops", &[passer.as_str()]));
+    let changes = vec![add_to_group("bob", "ops"), detach(&account_arn("group/ops"), &passer)];
+
+    let p = preview_batch(&s, &changes, &[]);
+
+    assert_eq!(messages(&p.warnings, WarnLevel::Confirm), vec![MID_PRIVESC_BOB], "{:?}", p.warnings);
+    assert_eq!(p.confirm_text.as_deref(), Some("변경 2개 적용"));
+    assert!(p.reversible);
+}
+
+#[test]
+fn whoever_the_end_state_confirms_is_not_named_again() {
+    // ops에는 관리자 정책과 S3 정책이 붙어 있다. S3 정책을 떼도 ops는 관리자급이라 bob은 끝 상태에서도 관리자급을 새로 얻는다
+    let (s, ops) = with_ops(&[ADMIN_POLICY, S3_FULL]);
+
+    let p = preview_batch(&s, &[add_to_group("bob", "ops"), detach(&ops, S3_FULL)], &[]);
+
+    assert_eq!(messages(&p.warnings, WarnLevel::Confirm), vec![NEW_ADMIN_BOB], "{:?}", p.warnings);
+    assert!(mid_stop_messages(&p).is_empty(), "{:?}", mid_stop_messages(&p));
+    assert_eq!(p.confirm_text.as_deref(), Some("변경 2개 적용"));
+}
+
+#[test]
+fn the_mid_stop_confirm_names_only_those_the_end_confirm_leaves_out() {
+    // bob은 끝 상태에서도 ops 덕에 관리자급이다. dave는 temp에서 관리자 정책이 떨어져 끝 상태에서는 아니다
+    let mut s = snapshot();
+    s.groups.push(group_rec("ops", &[ADMIN_POLICY, S3_FULL]));
+    s.groups.push(group_rec("temp", &[ADMIN_POLICY]));
+    s.users.push(user("dave"));
+    let changes = vec![add_to_group("bob", "ops"), add_to_group("dave", "temp"), detach(&account_arn("group/ops"), S3_FULL), detach(&account_arn("group/temp"), ADMIN_POLICY)];
+
+    let p = preview_batch(&s, &changes, &[]);
+
+    // 끝 상태의 확인이 먼저고, 멈출 때의 확인이 그 뒤에 온다
+    assert_eq!(messages(&p.warnings, WarnLevel::Confirm), vec![NEW_ADMIN_BOB, MID_ADMIN_DAVE], "{:?}", p.warnings);
+    assert_eq!(p.confirm_text.as_deref(), Some("변경 4개 적용"));
+}
+
+#[test]
+fn the_mid_stop_covers_members_reached_through_a_group() {
+    // team에 관리자 정책을 붙이는 변경은 구성원 dave에게도 닿는다. 그 뒤 dave를 team에서 빼면 끝 상태의 dave는 달라지는 게 없지만, 멈추면 관리자급이다
+    let mut s = snapshot();
+    s.groups.push(group_rec("team", &[]));
+    let mut dave = user("dave");
+    dave.groups = vec!["team".into()];
+    s.users.push(dave);
+    let changes = vec![attach(&account_arn("group/team"), ADMIN_POLICY), remove_from_group("dave", "team")];
+
+    let p = preview_batch(&s, &changes, &[]);
+
+    assert_eq!(messages(&p.warnings, WarnLevel::Confirm), vec!["관리자급 권한을 새로 얻는 주체: team 그룹", MID_ADMIN_DAVE], "{:?}", p.warnings);
+    assert_eq!(p.confirm_text.as_deref(), Some("변경 2개 적용"));
+}
+
+#[test]
+fn a_batch_with_only_grants_or_only_removals_has_no_mid_stop_confirm() {
+    let (s, ops) = with_ops(&[ADMIN_POLICY]);
+
+    // 붙이기·넣기뿐이면 끝 상태가 멈출 수 있는 가장 허용적인 상태다: 끝 상태의 확인 하나뿐이다
+    let grants = preview_batch(&s, &[add_to_group("bob", "ops")], &[]);
+    assert_eq!(messages(&grants.warnings, WarnLevel::Confirm), vec![NEW_ADMIN_BOB], "{:?}", grants.warnings);
+    assert!(mid_stop_messages(&grants).is_empty());
+    assert_eq!(grants.confirm_text.as_deref(), Some("bob"));
+
+    // 떼기·빼기뿐이면 멈춰도 권한이 늘어난 상태는 없다
+    let removals = preview_batch(&s, &[detach(&ops, ADMIN_POLICY)], &[]);
+    assert!(mid_stop_messages(&removals).is_empty());
+    assert_eq!(removals.confirm_text, None);
+}
+
+#[test]
+fn a_blocked_batch_gets_no_mid_stop_confirm() {
+    let (s, ops) = with_ops(&[ADMIN_POLICY]);
+    let probe = vec![add_to_group("bob", "ops"), detach(&ops, ADMIN_POLICY)];
+    assert_eq!(mid_stop_messages(&preview_batch(&s, &probe, &[])), vec![MID_ADMIN_BOB]);
+
+    // 변경 하나가 막히면(서비스 연결 역할) 묶음 전체를 적용할 수 없으니 확인을 받지 않는다
+    let mut locked = probe.clone();
+    locked.push(attach(SLR, S3_FULL));
+    let p = preview_batch(&s, &locked, &[]);
+    assert!(every_warning(&p).any(|w| w.level == WarnLevel::Block));
+    assert!(every_warning(&p).all(|w| w.level != WarnLevel::Confirm), "{:?}", every_warning(&p).collect::<Vec<_>>());
+    assert_eq!(p.confirm_text, None);
+
+    // 묶음 규칙이 막아도(같은 칸이 겹친다) 마찬가지다
+    let mut overlapping = probe.clone();
+    overlapping.push(probe[0].clone());
+    let p = preview_batch(&s, &overlapping, &[]);
+    assert_eq!(messages(&p.warnings, WarnLevel::Block), vec![OVERLAP]);
+    assert!(every_warning(&p).all(|w| w.level != WarnLevel::Confirm), "{:?}", every_warning(&p).collect::<Vec<_>>());
+    assert_eq!(p.confirm_text, None);
+}
+
+#[test]
+fn mid_stop_confirms_skip_whoever_the_end_confirms_already_name() {
+    // 멈춘 상태: bob·carol이 새로 관리자급이 되고, alice·deploy·ci가 새로 권한 상승 권한을 얻는다
+    // 끝 상태: bob·deploy가 새로 관리자급이 되고, carol·alice가 새로 권한 상승 권한을 얻는다
+    let arns = |list: &[&str]| list.iter().map(|arn| arn.to_string()).collect::<Vec<_>>();
+    let stopped = Analysis { newly_admin: arns(&[BOB, CAROL]), newly_privesc: arns(&[ALICE, DEPLOY, CI]), ..Default::default() };
+    let end = Analysis { newly_admin: arns(&[BOB, DEPLOY]), newly_privesc: arns(&[CAROL, ALICE]), ..Default::default() };
+
+    let found = warnings::mid_stop(&snapshot(), &stopped, &end);
+
+    // bob은 끝 상태에서도 관리자급이라 뺀다. carol은 끝 상태에서 권한 상승뿐이라 관리자급은 말한다
+    // alice는 끝 상태에서도 권한 상승이라 뺀다. deploy는 끝 상태에서 관리자급이면 권한 상승은 따로 말하지 않으니 뺀다. ci만 남는다
+    assert_eq!(
+        found,
+        vec![
+            Warning::new(WarnLevel::Confirm, "중간에 멈추면 관리자급 권한을 새로 얻는 주체: carol"),
+            Warning::new(WarnLevel::Confirm, "중간에 멈추면 권한 상승에 쓸 수 있는 권한을 새로 얻는 주체: ci 역할"),
+        ]
+    );
+    // 멈춰도 새로 얻는 것이 없으면 말하지 않는다
+    assert_eq!(warnings::mid_stop(&snapshot(), &Analysis::default(), &end), vec![]);
+    // 이름이 많으면 다른 확인처럼 줄여 보인다
+    let many = Analysis { newly_admin: arns(&[ALICE, BOB, CAROL, DEPLOY, CI, VENDOR, OPEN]), ..Default::default() };
+    let found = warnings::mid_stop(&snapshot(), &many, &Analysis::default());
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].message, "중간에 멈추면 관리자급 권한을 새로 얻는 주체: alice, bob, carol, deploy 역할, ci 역할 외 2개");
 }
