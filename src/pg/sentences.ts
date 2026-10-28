@@ -17,8 +17,8 @@ export const DEFAULT_OBJECT_LABEL: Record<PgDefaultObjectType, string> = {
   schemas: "스키마",
 };
 
-/** 위 표에 없는 PostgreSQL의 기본값. 표를 바꾸지 않았다면 그대로다. */
-export const BUILTIN_NOTE = "PostgreSQL 기본값: 함수는 모든 역할(PUBLIC)이 EXECUTE, 타입은 USAGE를 받아요. 위 표에서 바꾸지 않았다면 그대로예요";
+/** 기본 권한 표에 나오지 않는 PostgreSQL의 기본값. 기본 권한을 바꾸지 않았다면 그대로다. */
+export const BUILTIN_NOTE = "PostgreSQL 기본값: 함수는 모든 역할(PUBLIC)이 EXECUTE, 타입은 USAGE를 받아요. 기본 권한을 바꾸지 않았다면 그대로예요";
 
 export const granteeLabel = (grantee: string) => (grantee === PUBLIC_GRANTEE ? PUBLIC_LABEL : grantee);
 
@@ -28,13 +28,24 @@ export function objectPhrase(type: PgDefaultObjectType): string {
   return `${label}${objectParticle(label)}`;
 }
 
+type SentenceRow = Pick<PgDefaultAclRow, "creator" | "schema" | "objectType">;
+
+/** "<만드는 역할> 역할이 <스키마>에 새 <객체>를"까지의 앞부분. 두 문장이 함께 쓴다. */
+const newObject = (row: SentenceRow) => `${row.creator} 역할이 ${row.schema ?? ALL_SCHEMAS}에 새 ${objectPhrase(row.objectType)}`;
+
 /**
  * 기본 권한 한 줄을 문장으로 푼다. 받는 역할 하나, 객체 종류 하나마다 한 문장이다.
+ * 모든 역할(PUBLIC)은 이름이 이미 "역할"로 끝나서 "… 모든 역할(PUBLIC)이 …"로 쓰고, 다른 역할은 "… <이름> 역할이 …"로 쓴다.
  * 위임 가능 여부(grantable)는 문장에 넣지 않는다.
  */
-export function defaultPrivilegeSentence(row: Pick<PgDefaultAclRow, "creator" | "schema" | "objectType">, grant: PgDefaultAclRow["grants"][number]): string {
-  const where = row.schema ?? ALL_SCHEMAS;
-  return `${row.creator} 역할이 ${where}에 새 ${objectPhrase(row.objectType)} 만들면 ${granteeLabel(grant.grantee)} 역할이 ${grant.privileges.join(", ")} 권한을 받아요`;
+export function defaultPrivilegeSentence(row: SentenceRow, grant: PgDefaultAclRow["grants"][number]): string {
+  const who = grant.grantee === PUBLIC_GRANTEE ? `${PUBLIC_LABEL}이` : `${grant.grantee} 역할이`;
+  return `${newObject(row)} 만들면 ${who} ${grant.privileges.join(", ")} 권한을 받아요`;
+}
+
+/** 기본 권한 줄은 있는데 받는 역할이 하나도 없을 때(받는 역할을 모두 회수한 뒤) */
+export function noGrantSentence(row: SentenceRow): string {
+  return `${newObject(row)} 만들어도 아무 역할도 권한을 받지 않아요`;
 }
 
 /**

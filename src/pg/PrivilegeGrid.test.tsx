@@ -389,8 +389,20 @@ describe("a cell", () => {
     const why = bob.getAttribute("aria-describedby");
     expect(why).toBeTruthy();
     expect(document.getElementById(why!)).toHaveTextContent("권한은 있지만 실제로는 못 써요 (CONNECT 없음)");
+    expect(document.getElementById(why!)).toHaveClass("sr-only"); // 눈에는 보이지 않는 글이다(IAM 표의 안내와 같은 규칙)
     expect(within(grid()).getAllByText(/실제로는 못 써요/)).toHaveLength(1); // 못 쓰는 칸만 말한다
     expect(cellOf("app_owner", "app")).not.toHaveAttribute("aria-describedby");
+  });
+
+  test("has a short line with the reason for the keyboard focus, in the cell and apart from its name", async () => {
+    setup();
+    await loaded();
+    const hint = cellOf("bob", "app").querySelector(".pg-hint");
+    expect(hint).toHaveTextContent(/^CONNECT 없음$/);
+    expect(hint).toHaveAttribute("aria-hidden", "true"); // 이름과 설명이 이미 읽어 준다
+    expect(cellOf("bob", "app")).toHaveAccessibleName("bob · app: 사용 x, 만들기 x, 읽기 일부 테이블, 쓰기 없음");
+    expect(grid().querySelectorAll(".pg-hint")).toHaveLength(1); // 못 쓰는 칸만
+    expect(within(grid()).getAllByText("⚠")).toHaveLength(1);
   });
 
   test("says USAGE when that is what is missing", async () => {
@@ -399,6 +411,7 @@ describe("a cell", () => {
     setup();
     await loaded();
     expect(cellOf("alice", "audit")).toHaveAttribute("title", "권한은 있지만 실제로는 못 써요 (USAGE 없음)");
+    expect(cellOf("alice", "audit").querySelector(".pg-hint")).toHaveTextContent(/^USAGE 없음$/);
   });
 
   test("a dimmed cell that cannot be used says both", async () => {
@@ -518,6 +531,29 @@ describe("the detail of a cell", () => {
     expect(cellOf("alice", "app")).toHaveFocus();
   });
 
+  test("Esc on another cell closes it and leaves the focus on that cell", async () => {
+    setup();
+    await loaded();
+    fireEvent.click(cellOf("alice", "app"));
+    await screen.findByText("app.customers");
+    act(() => cellOf("bob", "audit").focus()); // 키보드로 표로 돌아와 다른 칸에 있다
+    fireEvent.keyDown(cellOf("bob", "audit"), { key: "Escape" });
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(cellOf("bob", "audit")).toHaveFocus();
+    expect(within(grid()).queryAllByRole("gridcell", { selected: true })).toHaveLength(0);
+  });
+
+  test("Esc inside the panel still gives the focus back to the cell it was opened from", async () => {
+    setup();
+    await loaded();
+    fireEvent.click(cellOf("alice", "app"));
+    await screen.findByText("app.customers");
+    act(() => cellOf("bob", "audit").focus());
+    act(() => panel().focus());
+    fireEvent.keyDown(panel(), { key: "Escape" });
+    expect(cellOf("alice", "app")).toHaveFocus();
+  });
+
   test("Esc with nothing open does nothing", async () => {
     setup();
     await loaded();
@@ -563,6 +599,63 @@ describe("the detail of a cell", () => {
     await waitFor(() => expect(cellAt("alice", "audit")).not.toBeInTheDocument());
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
     expect(cellOf("alice", "app")).toBeInTheDocument();
+  });
+
+  test("closes when a filter hides its role, and does not come back when the filter does", async () => {
+    const { update } = setup();
+    await loaded();
+    fireEvent.click(cellOf("alice", "app"));
+    await screen.findByText("app.customers");
+    update({ filter: "bob" });
+    expect(within(grid()).queryByRole("rowheader", { name: "alice" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    const reads = m.cell.mock.calls.length;
+    update({ filter: "" });
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(within(grid()).queryAllByRole("gridcell", { selected: true })).toHaveLength(0);
+    expect(m.cell).toHaveBeenCalledTimes(reads); // 저절로 다시 열려 읽지도 않는다
+  });
+
+  test("closes when a chip hides its role, and does not come back when the chip does", async () => {
+    setup();
+    await loaded();
+    fireEvent.click(cellOf("alice", "app"));
+    await screen.findByText("app.customers");
+    fireEvent.click(screen.getByRole("checkbox", { name: "사용자" }));
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "사용자" }));
+    expect(within(grid()).getByRole("rowheader", { name: "alice" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(within(grid()).queryAllByRole("gridcell", { selected: true })).toHaveLength(0);
+  });
+
+  test("a schema that was dropped and then comes back in a later read does not bring the detail back", async () => {
+    const { qc } = setup();
+    await loaded();
+    fireEvent.click(cellOf("alice", "audit"));
+    await screen.findByText("app.customers");
+    m.database.mockResolvedValue(viewOf(ROLES, ["app"]));
+    await act(async () => {
+      await qc.invalidateQueries({ queryKey: pgKeys.database(pgTarget, "orders") });
+    });
+    await waitFor(() => expect(cellAt("alice", "audit")).not.toBeInTheDocument());
+    m.database.mockResolvedValue(sampleDatabaseView());
+    await act(async () => {
+      await qc.invalidateQueries({ queryKey: pgKeys.database(pgTarget, "orders") });
+    });
+    expect(await screen.findByRole("button", { name: (n) => n.startsWith("alice · audit: ") })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  });
+
+  test("a role that was dropped and then comes back does not bring the detail back", async () => {
+    const { update } = setup();
+    await loaded();
+    fireEvent.click(cellOf("alice", "app"));
+    await screen.findByText("app.customers");
+    update({ overview: sampleOverview({ roles: ROLES.filter((r) => r.name !== "alice") }) });
+    update({ overview });
+    expect(within(grid()).getByRole("rowheader", { name: "alice" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
   });
 
   test("closes when the cell is gone: the role was dropped", async () => {
@@ -643,16 +736,90 @@ describe("the keyboard", () => {
     expect(cellOf("alice", "audit")).toHaveAttribute("tabindex", "-1");
   });
 
-  test("they stop at the edges of the grid", async () => {
+  test("they stop at the edges of the grid: the database column on the left", async () => {
     const user = userEvent.setup();
     setup();
     await loaded();
     focusCell(cellOf("alice", "app"));
-    await user.keyboard("{ArrowUp}{ArrowLeft}");
+    await user.keyboard("{ArrowUp}");
     expect(cellOf("alice", "app")).toHaveFocus();
+    await user.keyboard("{ArrowLeft}");
+    expect(dbCell("alice")).toHaveFocus();
+    await user.keyboard("{ArrowLeft}{ArrowUp}");
+    expect(dbCell("alice")).toHaveFocus();
     focusCell(cellOf("app_write", "audit"));
     await user.keyboard("{ArrowDown}{ArrowRight}");
     expect(cellOf("app_write", "audit")).toHaveFocus();
+  });
+
+  test("the database column is reached with the arrows too, one role after the other, and leads on to the first schema", async () => {
+    const user = userEvent.setup();
+    setup();
+    await loaded();
+    focusCell(cellOf("alice", "app"));
+    await user.keyboard("{ArrowLeft}");
+    expect(dbCell("alice")).toHaveFocus();
+    expect(dbCell("alice")).toHaveAccessibleName("alice · 데이터베이스: CONNECT o, CREATE x, TEMP o");
+    await user.keyboard("{ArrowDown}");
+    expect(dbCell("app_owner")).toHaveFocus();
+    expect(dbCell("app_owner")).toHaveAccessibleName("app_owner · 데이터베이스: CONNECT o, CREATE o, TEMP o");
+    await user.keyboard("{ArrowDown}");
+    expect(dbCell("bob")).toHaveFocus();
+    expect(dbCell("bob")).toHaveAccessibleName("bob · 데이터베이스: CONNECT x, CREATE x, TEMP o");
+    await user.keyboard("{ArrowRight}");
+    expect(cellOf("bob", "app")).toHaveFocus();
+  });
+
+  test("the database column goes over the heading of a kind like the schemas do", async () => {
+    const user = userEvent.setup();
+    setup();
+    await loaded();
+    focusCell(dbCell("postgres"));
+    await user.keyboard("{ArrowDown}");
+    expect(dbCell("app_read")).toHaveFocus();
+  });
+
+  test("the grid is still one stop for Tab when the database column can have the focus, and the stop goes with it", async () => {
+    const user = userEvent.setup();
+    setup();
+    await loaded();
+    const stops = () => [...grid().querySelectorAll('[data-pos][tabindex="0"]')];
+    expect(stops()).toHaveLength(1);
+    expect(stops()[0]).toBe(cellOf("alice", "app")); // 처음 닿는 곳은 첫 스키마 칸이다
+    focusCell(cellOf("alice", "app"));
+    await user.keyboard("{ArrowLeft}");
+    expect(stops()).toEqual([dbCell("alice")]);
+    expect(cellOf("alice", "app")).toHaveAttribute("tabindex", "-1");
+    focusCell(dbCell("bob")); // 화살표가 아니라 Tab이나 클릭으로 초점이 와도 탭이 닿는 칸은 그 칸이다
+    expect(stops()).toEqual([dbCell("bob")]);
+  });
+
+  test("a database cell is read-only: Enter and Space open nothing, and Esc closes an open detail", async () => {
+    const user = userEvent.setup();
+    setup();
+    await loaded();
+    focusCell(dbCell("alice"));
+    await user.keyboard("{Enter}{ }");
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(m.cell).not.toHaveBeenCalled();
+    expect(dbCell("alice")).toHaveFocus();
+    fireEvent.click(cellOf("alice", "app"));
+    await screen.findByText("app.customers");
+    focusCell(dbCell("bob"));
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(dbCell("bob")).toHaveFocus();
+  });
+
+  test("a database without schemas still has its database column to move in, and Tab reaches it", async () => {
+    const user = userEvent.setup();
+    m.database.mockResolvedValue(viewOf(ROLES, []));
+    setup();
+    await loaded();
+    expect(dbCell("alice")).toHaveAttribute("tabindex", "0");
+    focusCell(dbCell("alice"));
+    await user.keyboard("{ArrowDown}{ArrowRight}");
+    expect(dbCell("app_owner")).toHaveFocus();
   });
 
   test("they go over the heading of a kind", async () => {
@@ -743,6 +910,16 @@ describe("tall grids", () => {
     act(() => cellOf("user-000", "app").focus());
     for (let i = 0; i < 40; i++) await user.keyboard("{ArrowDown}");
     expect(cellOf("user-040", "app")).toHaveFocus();
+    expect(within(grid()).getAllByRole("row").length).toBeLessThan(60);
+  });
+
+  test("the arrow keys keep going past the rows that are drawn in the database column too", async () => {
+    const user = userEvent.setup();
+    setup({ overview: bigOverview() });
+    await loaded();
+    act(() => dbCell("user-000").focus());
+    for (let i = 0; i < 40; i++) await user.keyboard("{ArrowDown}");
+    expect(dbCell("user-040")).toHaveFocus();
     expect(within(grid()).getAllByRole("row").length).toBeLessThan(60);
   });
 

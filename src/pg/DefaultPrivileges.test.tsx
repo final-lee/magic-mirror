@@ -139,7 +139,7 @@ describe("the note about what PostgreSQL grants by default", () => {
   test("is the exact text, above the table", async () => {
     setup();
     await loaded();
-    const note = screen.getByText("PostgreSQL 기본값: 함수는 모든 역할(PUBLIC)이 EXECUTE, 타입은 USAGE를 받아요. 위 표에서 바꾸지 않았다면 그대로예요");
+    const note = screen.getByText("PostgreSQL 기본값: 함수는 모든 역할(PUBLIC)이 EXECUTE, 타입은 USAGE를 받아요. 기본 권한을 바꾸지 않았다면 그대로예요");
     expect(note.compareDocumentPosition(table()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
@@ -196,6 +196,30 @@ describe("the table", () => {
     expect(within(cellsOf("etl · staging")[1]).getByText("analyst")).toBeInTheDocument();
   });
 
+  test("a kind whose row grants nothing shows 없음, and a kind without a row stays blank", async () => {
+    m.database.mockResolvedValue(
+      withDefaults([aclRow("etl", "staging", "tables"), aclRow("etl", "staging", "sequences", ["analyst", ["USAGE"]]), aclRow("etl", "staging", "types")]),
+    );
+    setup();
+    await loaded();
+    const [tables, sequences, functions, types, schemas] = cellsOf("etl · staging");
+    expect(tables).toHaveTextContent(/^없음$/);
+    expect(within(tables).queryAllByRole("listitem")).toHaveLength(0);
+    expect(within(sequences).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["analyst USAGE"]);
+    expect(functions).toBeEmptyDOMElement(); // 이 종류의 기본 권한은 설정한 적이 없다
+    expect(types).toHaveTextContent(/^없음$/);
+    expect(schemas).toBeEmptyDOMElement();
+  });
+
+  test("a row of a kind that grants nothing next to one that grants is the one that grants", async () => {
+    m.database.mockResolvedValue(withDefaults([aclRow("etl", "staging", "tables"), aclRow("etl", "staging", "tables", ["analyst", ["SELECT"]])]));
+    setup();
+    await loaded();
+    expect(within(cellsOf("etl · staging")[0]).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["analyst SELECT"]);
+    expect(screen.queryByText("없음")).not.toBeInTheDocument();
+    expect(sentencesOf("etl · staging")).toEqual(["etl 역할이 staging에 새 테이블을 만들면 analyst 역할이 SELECT 권한을 받아요"]);
+  });
+
   test("says so when no default privilege was set, and shows no table", async () => {
     m.database.mockResolvedValue(withDefaults([]));
     setup();
@@ -220,7 +244,7 @@ describe("the sentences", () => {
     setup();
     await loaded();
     expect(sentencesOf("app_owner · 모든 스키마")).toEqual([
-      "app_owner 역할이 모든 스키마에 새 타입을 만들면 모든 역할(PUBLIC) 역할이 USAGE 권한을 받아요",
+      "app_owner 역할이 모든 스키마에 새 타입을 만들면 모든 역할(PUBLIC)이 USAGE 권한을 받아요",
       "app_owner 역할이 모든 스키마에 새 스키마를 만들면 app_read 역할이 USAGE 권한을 받아요",
     ]);
     expect(sentencesOf("postgres · 모든 스키마")).toEqual(["postgres 역할이 모든 스키마에 새 테이블을 만들면 iam_admin 역할이 SELECT 권한을 받아요"]);
@@ -239,6 +263,36 @@ describe("the sentences", () => {
     setup();
     await loaded();
     expect(sentencesOf("etl · staging").map((s) => /새 (\S+) 만들면/.exec(s)?.[1])).toEqual(["테이블을", "시퀀스를", "함수를", "타입을", "스키마를"]);
+  });
+
+  test("a pair whose kind has no grantee says that nobody gets anything, and the other kinds say who does", async () => {
+    m.database.mockResolvedValue(
+      withDefaults([
+        aclRow("etl", "staging", "tables"),
+        aclRow("etl", "staging", "sequences", ["analyst", ["USAGE"]]),
+        aclRow("etl", null, "types"),
+      ]),
+    );
+    setup();
+    await loaded();
+    expect(sentencesOf("etl · staging")).toEqual([
+      "etl 역할이 staging에 새 테이블을 만들어도 아무 역할도 권한을 받지 않아요",
+      "etl 역할이 staging에 새 시퀀스를 만들면 analyst 역할이 USAGE 권한을 받아요",
+    ]);
+    expect(sentencesOf("etl · 모든 스키마")).toEqual(["etl 역할이 모든 스키마에 새 타입을 만들어도 아무 역할도 권한을 받지 않아요"]);
+  });
+
+  test("a kind with grants and a kind without keep to the order of the columns", async () => {
+    m.database.mockResolvedValue(
+      withDefaults([
+        aclRow("etl", "staging", "schemas", ["a", ["USAGE"]]),
+        aclRow("etl", "staging", "functions"),
+        aclRow("etl", "staging", "tables", ["b", ["SELECT"]]),
+      ]),
+    );
+    setup();
+    await loaded();
+    expect(sentencesOf("etl · staging").map((s) => /새 (\S+) 만들(?:면|어도)/.exec(s)?.[1])).toEqual(["테이블을", "함수를", "스키마를"]);
   });
 
   test("are not changed by the grant option, which the sentence does not mention", async () => {

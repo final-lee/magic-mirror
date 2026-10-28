@@ -6,11 +6,11 @@ test("the six views have the labels of the menu", () => {
   expect(Object.keys(PG_VIEW_LABEL).sort()).toEqual([...views].sort());
 });
 
-test("the same screen is the same view and id; the sub-tab and the database are only what was being looked at", () => {
+test("the same screen is the same view and id; the sub-tab is only what was being looked at", () => {
   const detail: PgRoute = { view: "roles", id: "alice" };
   expect(samePgRoute(detail, { ...detail })).toBe(true);
   expect(samePgRoute(detail, { ...detail, tab: "members" })).toBe(true);
-  expect(samePgRoute({ view: "privileges" }, { view: "privileges", database: "orders" })).toBe(true);
+  expect(samePgRoute({ view: "privileges" }, { view: "privileges" })).toBe(true);
   expect(samePgRoute(detail, { view: "roles", id: "bob" })).toBe(false);
   expect(samePgRoute(detail, { view: "roles" })).toBe(false);
   expect(samePgRoute({ view: "roles" }, { view: "sessions" })).toBe(false);

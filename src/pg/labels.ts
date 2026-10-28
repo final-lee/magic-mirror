@@ -20,6 +20,9 @@ export const COVERAGE_LABEL: Record<PgCoverage, string> = { all: "모든 테이�
 /** 권한은 있지만 데이터베이스 CONNECT나 스키마 USAGE가 없어 쓸 수 없는 칸의 설명. reason은 "CONNECT 없음" 또는 "USAGE 없음". */
 export const unusableText = (reason: string) => `권한은 있지만 실제로는 못 써요 (${reason})`;
 
+/** 보이는 권한의 출처가 그룹, PUBLIC, 미리 정의된 역할뿐인 칸(inheritedOnly)의 설명. 역할 상세와 권한 표가 함께 쓴다. */
+export const INHERITED_ONLY_TEXT = "그룹·PUBLIC으로만 받음";
+
 /** 사람이 읽는 객체 이름: schema.name, 함수는 인자까지. 데이터베이스와 스키마는 이름만이다. */
 export function objectName(o: PgObjectRef): string {
   const base = o.kind === "database" || o.kind === "schema" || !o.schema ? o.name : `${o.schema}.${o.name}`;

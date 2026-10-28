@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { formatDateTime, formatDay } from "../iam/format";
 import { BadgeList } from "./Badges";
-import { COVERAGE_LABEL, OBJECT_KIND_LABEL, ROLE_KIND_LABEL, objectName, unusableText } from "./labels";
+import { COVERAGE_LABEL, INHERITED_ONLY_TEXT, OBJECT_KIND_LABEL, ROLE_KIND_LABEL, objectName, unusableText } from "./labels";
 import { PgError } from "./PgError";
 import { usePgDatabase, usePgRole } from "./queries";
 import { roleRoute, type PgRoute } from "./route";
@@ -291,7 +291,7 @@ function SchemaPrivileges({ db }: { db: PgRoleDatabase }) {
             <td>{has(c.create)}</td>
             <td>{c.read === "none" ? <span className="dim">{COVERAGE_LABEL.none}</span> : COVERAGE_LABEL[c.read]}</td>
             <td>{c.write === "none" ? <span className="dim">{COVERAGE_LABEL.none}</span> : COVERAGE_LABEL[c.write]}</td>
-            <td className="dim">{c.inheritedOnly ? "그룹·PUBLIC으로만 받음" : "직접 받음·소유"}</td>
+            <td className="dim">{c.inheritedOnly ? INHERITED_ONLY_TEXT : "직접 받음·소유"}</td>
           </tr>
         ))}
       </tbody>

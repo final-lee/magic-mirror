@@ -1,4 +1,4 @@
-import { COVERAGE_LABEL, OBJECT_KIND_LABEL, ROLE_KIND_LABEL, objectName, unusableText } from "./labels";
+import { COVERAGE_LABEL, INHERITED_ONLY_TEXT, OBJECT_KIND_LABEL, ROLE_KIND_LABEL, objectName, unusableText } from "./labels";
 import { customersTable, object, ordersIdSeq, touchOrderFn } from "./fixtures";
 
 test("role kinds read as 사용자 and 그룹", () => {
@@ -26,6 +26,10 @@ test("table coverage reads as 모든 테이블, 일부 테이블 or 없음", () 
 test("an unusable privilege says why it cannot be used", () => {
   expect(unusableText("CONNECT 없음")).toBe("권한은 있지만 실제로는 못 써요 (CONNECT 없음)");
   expect(unusableText("USAGE 없음")).toBe("권한은 있지만 실제로는 못 써요 (USAGE 없음)");
+});
+
+test("what inherited-only means is told in one place for the role detail and the grid", () => {
+  expect(INHERITED_ONLY_TEXT).toBe("그룹·PUBLIC으로만 받음");
 });
 
 describe("objectName", () => {

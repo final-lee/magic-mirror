@@ -109,6 +109,8 @@ tbody tr.on td { background: var(--accent) !important; color: #fff; }
 .qitem .bar i { display: block; height: 100%; background: var(--accent); }
 .ok { color: var(--green); }
 .dim { color: var(--dim); }
+/* 눈에는 안 보이고 읽어 주는 도구에만 읽히는 글. IAM 할당 표의 맨 끝 열 머리(.asg-sr)와 PostgreSQL 권한 표가 함께 쓴다 */
+.sr-only, .iam-asg .asg-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .drag-chip { position: fixed; z-index: 20; pointer-events: none; background: #3a3a3d; border: 1px solid #666; border-radius: 6px; padding: 4px 8px; font-size: 11px; box-shadow: 0 6px 20px #000a; }
 .details { max-height: 160px; overflow: auto; margin: 0 0 10px; padding-left: 18px; font-size: 11px; }
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; font-size: 12px; color: var(--dim); }
@@ -481,8 +483,6 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .iam-asg .asg-table thead .asg-end { right: 0; z-index: 4; }
 /* 표 안의 배지와 칩만 작게 한다. 같은 화면의 선택 창(열 추가, 같게 만들기)은 다른 곳과 같은 크기를 쓴다 */
 .iam-asg .asg-table .iam-badge, .iam-asg .asg-table .iam-chip { padding: 0 5px; line-height: 14px; font-size: 10px; }
-/* 눈에는 안 보이고 읽어 주는 도구에만 읽히는 글: 맨 끝 열의 머리 */
-.iam-asg .asg-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .iam-asg .asg-colhead .asg-name { display: block; width: 100%; font-weight: 600; line-height: 14px; }
 .iam-asg .asg-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; word-break: break-all; }
 .iam-asg .asg-colmeta { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
@@ -637,8 +637,10 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .pg-mark.pg-none { color: #66666b; }
 /* 출처가 그룹이나 PUBLIC뿐인 칸은 흐리게 */
 .pg-dimmed .pg-mark { opacity: .45; }
-/* 눈에는 안 보이고 읽어 주는 도구에만 읽히는 글 */
-.pg-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* 못 쓰는 칸의 이유는 키보드로 왔을 때 표시 자리를 덮어 보인다(마우스는 title). ⚠ 자리는 남겨 둔다 */
+.pg-hint { display: none; position: absolute; top: 2px; bottom: 2px; left: 2px; right: 22px; align-items: center; justify-content: center; padding: 0 6px; overflow: hidden; background: var(--panel); color: var(--yellow); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+.pg-cell:focus-visible .pg-hint { display: flex; }
+.pg-grid .pg-dbcell:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .pg-warn-mark { position: absolute; right: 5px; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--yellow); }
 .pg-grid .pg-table .pg-row .pg-picked { background: #0a84ff22; box-shadow: inset 0 0 0 1px var(--accent); }
 
@@ -671,6 +673,7 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .pg-defaults tbody .pg-sentences td { padding: 0 14px 10px 28px; color: var(--dim); font-size: 12px; }
 .pg-defaults tbody tr:not(.pg-sentences) td { padding: 8px 14px; }
 .pg-def-group { border-bottom: 1px solid var(--line); }
+.pg-defaults tbody .pg-def-who { white-space: nowrap; }
 .pg-def-who b { font-weight: 600; }
 .pg-grants { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
 .pg-grants li { display: flex; flex-wrap: wrap; gap: 0 8px; }

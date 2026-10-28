@@ -1,8 +1,8 @@
 import { useMemo } from "react";
-import { DatabasePicker, pickDatabase } from "./DatabasePicker";
+import { DatabaseScreen } from "./DatabaseScreen";
 import { PgError } from "./PgError";
 import { usePgDatabase } from "./queries";
-import { ALL_SCHEMAS, BUILTIN_NOTE, DEFAULT_OBJECT_LABEL, DEFAULT_OBJECT_ORDER, defaultPrivilegeSentence, granteeLabel } from "./sentences";
+import { ALL_SCHEMAS, BUILTIN_NOTE, DEFAULT_OBJECT_LABEL, DEFAULT_OBJECT_ORDER, defaultPrivilegeSentence, granteeLabel, noGrantSentence } from "./sentences";
 import type { PgDefaultAclRow, PgDefaultObjectType, PgOverview, PgTarget } from "./types";
 
 type Grants = PgDefaultAclRow["grants"];
@@ -29,7 +29,7 @@ function groupRows(rows: PgDefaultAclRow[]): Group[] {
 interface Props {
   target: PgTarget;
   overview: PgOverview;
-  /** 경로에 기억된 데이터베이스 선택. 없거나 연결할 수 없으면 대상의 기본 데이터베이스 */
+  /** 이 탭에서 고른 데이터베이스(PgTab이 들고 있다). 없거나 연결할 수 없으면 대상의 기본 데이터베이스 */
   database: string | undefined;
   onDatabase: (database: string) => void;
 }
@@ -40,12 +40,10 @@ interface Props {
  * 표에 없는 PostgreSQL의 기본값은 표 위에 안내한다.
  */
 export function DefaultPrivileges({ target, overview, database, onDatabase }: Props) {
-  const db = pickDatabase(overview.databases, database, overview.target.defaultDatabase);
   return (
-    <section className="center pg-screen">
-      <div className="pg-bar">{db !== null && <DatabasePicker databases={overview.databases} value={db} onChange={onDatabase} />}</div>
-      {db === null ? <div className="empty small">연결할 수 있는 데이터베이스가 없어요</div> : <DatabaseDefaults key={db} target={target} database={db} />}
-    </section>
+    <DatabaseScreen overview={overview} database={database} onDatabase={onDatabase}>
+      {(db) => <DatabaseDefaults target={target} database={db} />}
+    </DatabaseScreen>
   );
 }
 
@@ -90,9 +88,13 @@ function DatabaseDefaults({ target, database }: { target: PgTarget; database: st
 /** 표의 한 행과 그 아래의 문장들 */
 function GroupRows({ group }: { group: Group }) {
   const where = group.schema ?? ALL_SCHEMAS;
-  const sentences = DEFAULT_OBJECT_ORDER.flatMap((objectType) =>
-    (group.grants.get(objectType) ?? []).map((grant) => defaultPrivilegeSentence({ creator: group.creator, schema: group.schema, objectType }, grant)),
-  );
+  // 설정한 적 없는 종류(grants에 없다)는 말하지 않는다. 설정은 했는데 받는 역할이 없는 종류는 아무도 받지 않는다고 말한다.
+  const sentences = DEFAULT_OBJECT_ORDER.flatMap((objectType) => {
+    const grants = group.grants.get(objectType);
+    const row = { creator: group.creator, schema: group.schema, objectType };
+    if (grants === undefined) return [];
+    return grants.length === 0 ? [noGrantSentence(row)] : grants.map((grant) => defaultPrivilegeSentence(row, grant));
+  });
   return (
     <tbody className="pg-def-group">
       <tr>
@@ -100,10 +102,12 @@ function GroupRows({ group }: { group: Group }) {
           <b>{group.creator}</b> · {where}
         </th>
         {DEFAULT_OBJECT_ORDER.map((type) => {
-          const grants = group.grants.get(type) ?? [];
+          const grants = group.grants.get(type);
           return (
             <td key={type}>
-              {grants.length > 0 && (
+              {grants === undefined ? null : grants.length === 0 ? (
+                <span className="dim">없음</span>
+              ) : (
                 <ul className="pg-grants">
                   {grants.map((g, i) => (
                     <li key={`${g.grantee}:${i}`}>
