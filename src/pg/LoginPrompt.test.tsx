@@ -145,9 +145,22 @@ describe("names the backend refuses", () => {
   test("there is no message for an empty field or for spaces only, just a button that waits", () => {
     const { input } = setup();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(connect()).toBeDisabled();
     typed(input, "   ");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(input).not.toHaveAttribute("aria-invalid", "true");
     expect(connect()).toBeDisabled();
+  });
+
+  test("clearing the field takes the message away, though an empty name is refused too", () => {
+    const { onSubmit, input } = setup();
+    typed(input, "iam admin");
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    typed(input, "");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(connect()).toBeDisabled();
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   test("the message goes away when the name is fixed, and then the name can be submitted", async () => {

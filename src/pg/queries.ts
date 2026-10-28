@@ -166,10 +166,14 @@ const BASE = new Set(["target", "overview"]);
 /** 클러스터 스냅숏 위에서 만드는 스냅숏 */
 const SNAPSHOTS = new Set(["database", "findings"]);
 
-/** 이 대상의 스냅숏 쿼리(데이터베이스, 점검)가 다음에 조회할 때 force=true를 쓰도록 표시한다 */
+/**
+ * 이 대상의 스냅숏 쿼리(데이터베이스, 점검)가 다음에 조회할 때 force=true를 쓰도록 표시한다.
+ * 한 번도 읽은 적 없는 쿼리(data가 없다)는 표시하지 않는다. 새로 읽을 사본이 없고, 첫 읽기는 force가 아니다.
+ * 점검 화면을 열기 전에도 점검 쿼리는 만들어져 있고, 처음 읽다 실패한 쿼리도 그렇다. 읽은 적이 있으면 마지막 읽기가 실패했어도 표시한다.
+ */
 function markSnapshots(qc: QueryClient, target: PgTarget) {
   for (const q of qc.getQueryCache().findAll({ queryKey: pgKeys.root(target) })) {
-    if (SNAPSHOTS.has(kindOf(q))) markForce(qc, q.queryHash);
+    if (SNAPSHOTS.has(kindOf(q)) && q.state.data !== undefined) markForce(qc, q.queryHash);
   }
 }
 

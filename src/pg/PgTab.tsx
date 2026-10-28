@@ -102,7 +102,7 @@ export function PgTab({ target, active, filter }: Props) {
   const { route, canBack, canForward, navigate, replace, back, forward } = useRouteHistory(HOME, samePgRoute);
   useHistoryKeys(active, back, forward);
   // 점검은 모든 데이터베이스를 읽어 무겁다. 점검 화면을 열었을 때만 읽는다. 이 탭이 계속 구독하니 한 번 읽은 건수는 화면을 떠나도 메뉴에 남는다.
-  // 점검이 보이지 않는 동안의 새로 고침은 표시와 무효화만 하고, 점검을 다시 열 때 force로 읽는다(refreshPg).
+  // 점검이 보이지 않는 동안의 새로 고침은, 이미 읽은 점검이면 표시와 무효화만 해 두었다가 다시 열 때 force로 읽는다(refreshPg). 한 번도 열지 않았으면 아무것도 하지 않는다.
   const findings = usePgFindings(target, !!ov && route.view === "findings");
   const [changing, setChanging] = useState(false);
   // 역할 목록의 칩과 시스템 역할 토글, 고른 행. 상세를 보고 돌아와도 남는다.

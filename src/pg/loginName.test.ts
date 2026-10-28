@@ -50,8 +50,8 @@ test("the whitespace and control rules are Unicode's, as Rust's char methods are
   expect(loginNameError("a\tb")).toBe(LOGIN_NAME_INVALID);
 });
 
-test("an empty name has no message of its own: the prompt only keeps its button off", () => {
-  expect(loginNameError("")).toBeNull();
+test("an empty name is refused with the invalid-name message, as the backend refuses it", () => {
+  expect(loginNameError("")).toBe(LOGIN_NAME_INVALID);
 });
 
 test.each([
