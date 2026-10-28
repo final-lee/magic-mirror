@@ -42,7 +42,9 @@ type Step = (ov: IamOverview, items: DraftItem[]) => { draft: DraftItem[]; full:
 /**
  * 장바구니 상태. IAM 탭이 들고 있어서 IAM 안의 다른 화면을 보고 돌아와도 남는다.
  * ov는 불러오는 중에는 undefined일 수 있고, 그동안은 담지도 정리하지도 않는다.
- * 같은 개요는 같은 객체여야 한다(react-query의 data처럼). 렌더마다 새 객체를 주면 렌더가 끝나지 않는다.
+ * 같은 개요는 같은 객체여야 한다(react-query의 data처럼). 값이 같아도 새 객체는 새 개요로 센다: 장바구니를 다시 정리하느라 한 번 더 그린다.
+ * 부모가 렌더마다 값이 같은 새 객체를 넘기면 부모가 그릴 때마다 그 한 번이 들 뿐이다. 하지만 이 훅을 부르는 컴포넌트 안에서 개요를 만들어 넘기면
+ * 두 번째 렌더부터는 정리하느라 다시 그릴 때마다 또 새 개요라서 렌더가 끝나지 않는다. IamTab은 overview.data를 그대로 넘긴다.
  */
 export function useAssignmentDraft(profile: string, ov: IamOverview | undefined) {
   const [stored, setStored] = useState<Tray>(() => emptyTray(profile, ov));
