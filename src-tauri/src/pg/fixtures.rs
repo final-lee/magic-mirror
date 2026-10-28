@@ -12,11 +12,12 @@ use super::model::{
     MEMBERSHIP_OPTIONS_SINCE,
 };
 
-/// 서버 버전(`server_version_num`). 미리 정의된 데이터 역할과 `pg_database_owner`는 14부터, 구성원 관계마다의 옵션은 16부터 있다
+/// 서버 버전(`server_version_num`). 미리 정의된 데이터 역할과 `pg_database_owner`는 14부터, 구성원 관계마다의 옵션은 16부터, MAINTAIN은 17부터 있다
 pub const PG13: i32 = 130_000;
 pub const PG14: i32 = 140_000;
 pub const PG15: i32 = 150_000;
 pub const PG16: i32 = 160_000;
+pub const PG17: i32 = 170_000;
 
 /// 속성이 서버 기본값인 NOLOGIN 역할(INHERIT만 켜져 있다)
 pub fn role(name: &str) -> RoleRec {
