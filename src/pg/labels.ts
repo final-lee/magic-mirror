@@ -29,6 +29,12 @@ export const unusableText = (reason: string) => `권한은 있지만 실제로�
 /** 보이는 권한의 출처가 그룹, PUBLIC, 미리 정의된 역할뿐인 칸(inheritedOnly)의 설명. 역할 상세와 권한 표가 함께 쓴다. */
 export const INHERITED_ONLY_TEXT = "그룹·PUBLIC으로만 받음";
 
+/**
+ * 확인 문구 입력 칸의 안내. 문구는 쌍점 뒤에 둔다: 역할 이름 같은 문구에 조사를 직접 붙이면 받침에 따라 틀린 말이 된다.
+ * 변경 하나짜리와 묶음의 미리보기 창이 같은 말을 쓴다.
+ */
+export const confirmLabel = (confirmText: string) => `확인하려면 입력하세요: ${confirmText}`;
+
 /** 객체가 너무 많아 데이터베이스를 일부만 읽었을 때 알리는 말. 그 스냅숏으로 만든 화면이 모두 같은 말을 쓴다. */
 export const TRUNCATED_TEXT = "객체가 많아 일부만 읽었어요";
 

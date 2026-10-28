@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import { errorMessage } from "../api/errors";
 import { ErrorState } from "../components/ErrorState";
+import { arrange, batchKey, usePrepare } from "../lib/changeLog";
 import { iamApi } from "./api";
 import { formatDateTime } from "./format";
 import { useChangeLog } from "./queries";
@@ -17,41 +18,8 @@ interface Props {
   onStartBatch: (changes: IamChange[], opts: { undoOf: string[] }) => void;
 }
 
-/** 표에 그릴 줄: 묶음 머리, 또는 기록 하나(묶음 안에 있는지) */
-type Line = { kind: "batch"; batchId: string; entries: ChangeLogEntry[] } | { kind: "entry"; entry: ChangeLogEntry; inBatch: boolean };
-
-/**
- * 같은 묶음의 기록을 그 묶음에서 가장 최근 기록의 자리에 모아 머리 밑에 둔다. 다른 기록이 사이에 끼어 있었어도 한 덩어리다.
- * 그 밖의 순서는 받은 그대로(최신순)다.
- */
-function arrange(entries: ChangeLogEntry[]): Line[] {
-  const groups = new Map<string, ChangeLogEntry[]>();
-  for (const e of entries) {
-    if (!e.batchId) continue;
-    const members = groups.get(e.batchId);
-    if (members) members.push(e);
-    else groups.set(e.batchId, [e]);
-  }
-  const lines: Line[] = [];
-  const placed = new Set<string>();
-  for (const e of entries) {
-    if (!e.batchId) {
-      lines.push({ kind: "entry", entry: e, inBatch: false });
-    } else if (!placed.has(e.batchId)) {
-      placed.add(e.batchId);
-      const members = groups.get(e.batchId) ?? [];
-      lines.push({ kind: "batch", batchId: e.batchId, entries: members });
-      for (const member of members) lines.push({ kind: "entry", entry: member, inBatch: true });
-    }
-  }
-  return lines;
-}
-
 /** 이 기록은 되돌릴 수 있는가: 성공했고, 아직 되돌리지 않았고, 역변경이 있다 */
 const canUndo = (e: ChangeLogEntry) => e.ok && !e.undone && e.inverse !== null;
-
-// 묶음의 바쁨·오류 키. 기록 id와 겹치지 않는다
-const batchKey = (batchId: string) => `batch:${batchId}`;
 
 /**
  * 변경 기록 화면: 이 앱으로 한 IAM 변경을 최신순으로 보여주고, 되돌릴 수 있는 변경은 [되돌리기]로 역변경 미리보기를 연다.
@@ -59,27 +27,11 @@ const batchKey = (batchId: string) => `batch:${batchId}`;
  */
 export function ChangeLog({ profile, accountId, onStart, onStartBatch }: Props) {
   const q = useChangeLog();
-  const [busy, setBusy] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const inFlight = useRef(false);
+  const { busy, errors, prepare } = usePrepare();
   const entries = q.data;
   const lines = useMemo(() => arrange(entries ?? []), [entries]);
-
-  /** 되돌리기 준비 하나. key는 바쁨·오류를 붙일 자리(기록 id 또는 묶음 키)이고, 한 번에 하나만 돌린다 */
-  const prepare = async (key: string, task: () => Promise<void>) => {
-    if (inFlight.current) return;
-    inFlight.current = true;
-    setBusy(key);
-    setErrors((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => k !== key)));
-    try {
-      await task();
-    } catch (e) {
-      setErrors((prev) => ({ ...prev, [key]: errorMessage(e) }));
-    } finally {
-      inFlight.current = false;
-      setBusy(null);
-    }
-  };
+  /** 그 자리에서 되돌리기 준비가 실패한 이유. 없으면 빈 글이라 아무것도 그리지 않는다 */
+  const failure = (key: string) => (key in errors ? errorMessage(errors[key]) : "");
 
   const undo = (entry: ChangeLogEntry) =>
     prepare(entry.id, async () => {
@@ -127,7 +79,7 @@ export function ChangeLog({ profile, accountId, onStart, onStartBatch }: Props) 
                       <td colSpan={4}>
                         {/* 목록이 최신순이라 첫 기록이 묶음에서 가장 최근 기록이다. 머리의 시각도 그 시각이다 */}
                         <div>{`묶음 · 변경 ${line.entries.length}개 · ${formatDateTime(line.entries[0].at)}`}</div>
-                        {errors[key] && <div className="err">{errors[key]}</div>}
+                        {failure(key) && <div className="err">{failure(key)}</div>}
                       </td>
                       <td className="cl-act">
                         <BatchAction entries={line.entries} accountId={accountId} busy={busy === key} onUndo={() => void undoBatch(line.batchId)} />
@@ -145,7 +97,7 @@ export function ChangeLog({ profile, accountId, onStart, onStartBatch }: Props) 
                     <td className="cl-sum">
                       <div>{e.summary}</div>
                       {!e.ok && e.error && <div className="err">{e.error}</div>}
-                      {errors[e.id] && <div className="err">{errors[e.id]}</div>}
+                      {failure(e.id) && <div className="err">{failure(e.id)}</div>}
                     </td>
                     <td className="cl-state">
                       <span className={`iam-chip ${e.ok ? "allowed" : "denied"}`}>{e.ok ? "성공" : "실패"}</span>

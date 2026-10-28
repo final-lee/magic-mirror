@@ -26,6 +26,8 @@ const m = vi.mocked(pgApi);
 const applied: PgApplyResult = { logId: "log-9", summary: "권한 주기: app_read · audit 스키마의 모든 테이블 SELECT" };
 const NEW_PASSWORD = "Xk3pQ9mZtR7vNb2WcH5yJd4a";
 const REREAD = "2026-10-29T12:30:00Z";
+// 전역 제약의 정확한 문구. 글이 바뀌면 시험이 알려 준다
+const REFRESH_FAILED = "적용은 됐지만 목록을 다시 읽지 못했어요. [다시 읽기]를 눌러 주세요";
 const confirmPreview = (change: PgChange, text = "app_read") =>
   samplePreview({ change, warnings: [{ level: "confirm", message: "되돌릴 수 없어요", add: [] }], confirmText: text });
 const blockPreview = (change: PgChange) => samplePreview({ change, warnings: [{ level: "block", message: "시스템 역할이라 바꿀 수 없어요: rds_superuser", add: [] }] });
@@ -382,15 +384,111 @@ describe("after a successful apply", () => {
     await act(async () => {}); // 개요를 받은 뒤의 일까지 마친다
     expect(qc.getQueryState(pgKeys.overview(pgTarget, LOGIN_USER))).toBeUndefined();
   });
+});
 
-  test("when pg_overview cannot be built, the overview is read through its own query instead of staying old", async () => {
-    m.overview.mockRejectedValueOnce({ kind: "other", message: "먼저 연결해 주세요" });
+describe("when the list cannot be read again after a successful apply", () => {
+  const NO_CONNECTION = { kind: "other", message: "먼저 연결해 주세요" };
+
+  test("the success notice stays and says so with the exact words, as a note that keeps it until it is dismissed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    m.overview.mockRejectedValue(NO_CONNECTION);
     const h = setup();
     await settled(h);
     await startAndWait(h, grantAuditRead);
     await act(async () => h.flow().apply(""));
-    await waitFor(() => expect(m.open).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(h.flow().notices).toEqual([{ id: expect.any(Number), summary: applied.summary, notes: [REFRESH_FAILED] }]));
     expect(h.flow().pending).toBeNull(); // 적용은 성공했다
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(h.flow().notices).toHaveLength(1);
+    act(() => h.flow().dismissNotice(h.flow().notices[0].id));
+    expect(h.flow().notices).toEqual([]);
+  });
+
+  test("the notes of the backend come first", async () => {
+    m.apply.mockResolvedValueOnce({ ...applied, notes: ["연결이 끊겼지만 적용된 것을 확인했어요"] });
+    m.overview.mockRejectedValue(NO_CONNECTION);
+    const h = setup();
+    await settled(h);
+    await startAndWait(h, grantAuditRead);
+    await act(async () => h.flow().apply(""));
+    await waitFor(() => expect(h.flow().notices[0]?.notes).toEqual(["연결이 끊겼지만 적용된 것을 확인했어요", REFRESH_FAILED]));
+    expect(h.flow().notices).toHaveLength(1);
+  });
+
+  test("a list that was read says nothing extra", async () => {
+    const h = setup();
+    await settled(h);
+    await startAndWait(h, grantAuditRead);
+    await act(async () => h.flow().apply(""));
+    await waitFor(() => expect(h.result.current.overview.data?.fetchedAt).toBe(REREAD));
+    expect(h.flow().notices).toEqual([{ id: expect.any(Number), summary: applied.summary, notes: [] }]);
+  });
+
+  test("nothing connects again by itself: the user is told to press 다시 읽기", async () => {
+    m.overview.mockRejectedValue(NO_CONNECTION);
+    const h = setup();
+    await settled(h);
+    await startAndWait(h, grantAuditRead);
+    await act(async () => h.flow().apply(""));
+    await waitFor(() => expect(h.flow().notices[0]?.notes).toEqual([REFRESH_FAILED]));
+    expect(m.open).toHaveBeenCalledTimes(1);
+    expect(h.result.current.overview.data?.fetchedAt).toBe("2026-10-28T12:00:00Z"); // 낡은 개요 그대로다
+  });
+
+  test("the rest of the refresh still runs", async () => {
+    m.overview.mockRejectedValue(NO_CONNECTION);
+    const h = setup();
+    await settled(h);
+    m.database.mockClear();
+    await startAndWait(h, grantAuditRead);
+    await act(async () => h.flow().apply(""));
+    await waitFor(() => expect(m.database).toHaveBeenCalledWith(pgTarget, "orders", true));
+    await waitFor(() => expect(m.changeLog).toHaveBeenCalledTimes(2));
+  });
+
+  test("a notice that faded before the refresh gave up comes back with the note", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const slow = deferred<ReturnType<typeof sampleOverview>>();
+    m.overview.mockReturnValueOnce(slow.promise);
+    const h = setup();
+    await settled(h);
+    await startAndWait(h, grantAuditRead);
+    await act(async () => h.flow().apply(""));
+    expect(h.flow().notices[0]?.notes).toEqual([]);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(11_000);
+    });
+    expect(h.flow().notices).toEqual([]);
+    await act(async () => slow.reject(NO_CONNECTION));
+    await waitFor(() => expect(h.flow().notices).toEqual([{ id: expect.any(Number), summary: applied.summary, notes: [REFRESH_FAILED] }]));
+  });
+
+  test("a failed apply never says it was applied: the dialog's own error is what shows", async () => {
+    m.apply.mockRejectedValueOnce({ kind: "other", message: "적용하지 못했어요: permission denied" });
+    m.overview.mockRejectedValue(NO_CONNECTION);
+    const h = setup();
+    await settled(h);
+    await startAndWait(h, grantAuditRead);
+    await act(async () => h.flow().apply(""));
+    await waitFor(() => expect(m.overview).toHaveBeenCalled());
+    await act(async () => {});
+    expect(h.flow().notices).toEqual([]);
+    expect(h.flow().pending?.error?.message).toBe("적용하지 못했어요: permission denied");
+  });
+
+  test("with a new password the note is there too, and the password is still nowhere but in the pending state", async () => {
+    m.apply.mockResolvedValueOnce({ logId: "log-10", summary: "역할 만들기: carol", password: NEW_PASSWORD });
+    m.overview.mockRejectedValue(NO_CONNECTION);
+    const h = setup();
+    await settled(h);
+    await startAndWait(h, createCarol);
+    await act(async () => h.flow().apply(""));
+    await waitFor(() => expect(h.flow().notices[0]?.notes).toEqual([REFRESH_FAILED]));
+    expect(h.flow().pending?.phase).toBe("password");
+    expect(JSON.stringify(h.flow().notices)).not.toContain(NEW_PASSWORD);
+    expect(JSON.stringify(h.qc.getQueryCache().getAll().map((q) => q.state.data))).not.toContain(NEW_PASSWORD);
   });
 });
 
@@ -582,6 +680,46 @@ describe("target", () => {
     await act(async () => h.flow().apply(""));
     expect(m.preview).toHaveBeenCalledWith(pgTarget, grantAuditRead);
     expect(m.apply).toHaveBeenCalledWith(pgTarget, grantAuditRead, null, null);
+  });
+});
+
+describe("a closed tab", () => {
+  // 탭이 닫힌 뒤에 온 응답은 어디에도 쓰이지 않는다: 안내도, 콜백도, 다시 읽기도 없다. 성공이든 실패든 같다.
+  async function closeWhileApplying(onApplied?: () => void) {
+    const slow = deferred<PgApplyResult>();
+    m.apply.mockReturnValueOnce(slow.promise);
+    const h = setup();
+    await settled(h);
+    await startAndWait(h, grantAuditRead, { onApplied });
+    act(() => h.flow().apply(""));
+    expect(h.flow().pending?.phase).toBe("applying");
+    h.unmount();
+    vi.clearAllMocks();
+    return slow;
+  }
+
+  test("a late success calls nothing back and reads nothing again", async () => {
+    const onApplied = vi.fn();
+    const slow = await closeWhileApplying(onApplied);
+    await act(async () => slow.resolve(applied));
+    expect(onApplied).not.toHaveBeenCalled();
+    expect(m.overview).not.toHaveBeenCalled();
+  });
+
+  test("a late failure reads nothing again either", async () => {
+    const slow = await closeWhileApplying();
+    await act(async () => slow.reject({ kind: "other", message: "적용하지 못했어요" }));
+    expect(m.overview).not.toHaveBeenCalled();
+  });
+
+  test("a late answer, either way, makes no noise: no error is logged", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const ok = await closeWhileApplying();
+    await act(async () => ok.resolve(applied));
+    const bad = await closeWhileApplying();
+    await act(async () => bad.reject(new Error("x")));
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });
 

@@ -1,8 +1,10 @@
 import { PRIVILEGE_ORDER, batchSummary, changeSummary, grantWhat, privilegeList, targetLabel } from "./changeText";
 import { addBobToWriters, createAppAudit, createCarol, dropAppAudit, grantAuditRead, resetAlicePassword, revokeAuditRead, samplePreview } from "./fixtures";
-import type { PgChange, PgGrantItem, PgGrantTarget } from "./types";
+import { granteeLabel } from "./sentences";
+import type { PgChange, PgGrantItem, PgGrantTarget, PgPresetChoice } from "./types";
 
-// 백엔드 pg::change::text::summary와 글자까지 같아야 한다. 아래 예는 그 쪽 시험(QB1)의 예와 같고, 나머지는 전역 제약의 "Summaries"와 "What"이다.
+// 백엔드 pg::change::text::summary와 글자까지 같아야 한다. 맨 아래 "QB1's examples"는 그 쪽 시험(src-tauri/src/pg/change/text/tests.rs)의 입력과 기대 글을
+// 하나씩 그대로 옮긴 것이라 어느 쪽이 달라져도 시험이 깨진다. 나머지는 전역 제약의 "Summaries"와 "What"을 이 화면의 보기에 맞춘 예다.
 
 const grant = (grantee: string, add: boolean, items: PgGrantItem[]): PgChange => ({ kind: "grant", database: "orders", grantee, add, items });
 const item = (target: PgGrantTarget, ...privileges: string[]): PgGrantItem => ({ target, privileges });
@@ -137,4 +139,101 @@ describe("grantWhat", () => {
 test("a batch is 변경 N개", () => {
   expect(batchSummary(3)).toBe("변경 3개");
   expect(batchSummary(1)).toBe("변경 1개");
+});
+
+test("the order of the privileges is read-only for callers: no one can sort or push into it and reorder every summary", () => {
+  // @ts-expect-error 읽기 전용 목록에는 sort가 없다
+  void PRIVILEGE_ORDER.sort;
+  // @ts-expect-error 읽기 전용 목록에는 push가 없다
+  void PRIVILEGE_ORDER.push;
+  expect(PRIVILEGE_ORDER[0]).toBe("SELECT");
+});
+
+describe("QB1's examples, string for string (src-tauri/src/pg/change/text/tests.rs)", () => {
+  const relation = (schema: string, name: string): PgGrantTarget => ({ kind: "relation", schema, name });
+  const grantOn = (grantee: string, add: boolean, items: PgGrantItem[]): PgChange => ({ kind: "grant", database: "appdb", grantee, add, items });
+  const membership = (add: boolean, admin: boolean): PgChange => ({ kind: "membership", group: "app_read", member: "alice", add, admin });
+  const defaultPrivilege = (grantee: string, add: boolean): PgChange => ({
+    kind: "defaultPrivilege",
+    database: "appdb",
+    creator: "app_owner",
+    schema: "app",
+    objectType: "tables",
+    grantee,
+    privileges: ["SELECT"],
+    add,
+  });
+
+  test("creating a role names it, with or without a preset", () => {
+    const plain: PgChange = { kind: "createRole", name: "alice", login: true, groups: [], connectionLimit: -1, validUntil: null, preset: null };
+    expect(changeSummary(plain)).toBe("역할 만들기: alice");
+    const preset: PgPresetChoice = { preset: "readOnly", database: "appdb", schemas: ["app"], creators: [], group: null, createGroup: false };
+    const withPreset: PgChange = { kind: "createRole", name: "alice", login: true, groups: ["app_read"], connectionLimit: 5, validUntil: null, preset };
+    expect(changeSummary(withPreset)).toBe("역할 만들기: alice");
+  });
+
+  test("a membership change reads member arrow group", () => {
+    expect(changeSummary(membership(true, false))).toBe("그룹에 넣기: alice → app_read");
+    expect(changeSummary(membership(false, false))).toBe("그룹에서 빼기: alice → app_read");
+  });
+
+  test("a membership change that is about the admin option says so", () => {
+    expect(changeSummary(membership(true, true))).toBe("ADMIN OPTION 주기: alice → app_read");
+    expect(changeSummary(membership(false, true))).toBe("ADMIN OPTION 빼기: alice → app_read");
+  });
+
+  test("attributes, a password and a drop name the role", () => {
+    const set = { login: true, createDb: false, createRole: false, inherit: true, connectionLimit: -1, validUntil: null };
+    expect(changeSummary({ kind: "attributes", role: "alice", set })).toBe("속성 바꾸기: alice");
+    expect(changeSummary({ kind: "password", role: "alice" })).toBe("비밀번호 재설정: alice");
+    expect(changeSummary({ kind: "dropRole", role: "alice" })).toBe("역할 삭제: alice");
+  });
+
+  test("a grant of one item names the object and its privileges", () => {
+    expect(changeSummary(grantOn("app_read", true, [item({ kind: "allTables", schema: "app" }, "SELECT")]))).toBe("권한 주기: app_read · app 스키마의 모든 테이블 SELECT");
+    expect(changeSummary(grantOn("PUBLIC", false, [item({ kind: "database", name: "orders" }, "CONNECT")]))).toBe("권한 빼기: 모든 역할(PUBLIC) · 데이터베이스 orders CONNECT");
+  });
+
+  test("the privileges of a grant are joined in the order of the list, once each", () => {
+    expect(changeSummary(grantOn("app_read", true, [item(relation("app", "orders"), "INSERT", "SELECT", "INSERT")]))).toBe("권한 주기: app_read · app.orders SELECT, INSERT");
+  });
+
+  test("a grant of several items counts the objects", () => {
+    const three = [item(relation("app", "orders"), "SELECT"), item({ kind: "schema", name: "app" }, "USAGE"), item({ kind: "database", name: "appdb" }, "CONNECT")];
+    expect(changeSummary(grantOn("app_read", true, three))).toBe("권한 주기: app_read · 객체 3개");
+    const two = [item(relation("app", "a"), "SELECT"), item(relation("app", "b"), "SELECT")];
+    expect(changeSummary(grantOn("PUBLIC", false, two))).toBe("권한 빼기: 모든 역할(PUBLIC) · 객체 2개");
+  });
+
+  test("a default privilege reads creator arrow grantee", () => {
+    expect(changeSummary(defaultPrivilege("app_read", true))).toBe("기본 권한 주기: app_owner → app_read");
+    expect(changeSummary(defaultPrivilege("PUBLIC", false))).toBe("기본 권한 빼기: app_owner → 모든 역할(PUBLIC)");
+  });
+
+  test("ending a session names the role and the pid, whether or not the start time is known", () => {
+    expect(changeSummary({ kind: "terminate", pid: 4242, role: "bob", backendStart: "2026-10-28T12:00:00Z" })).toBe("세션 끊기: bob (pid 4242)");
+    expect(changeSummary({ kind: "terminate", pid: 7, role: "bob", backendStart: null })).toBe("세션 끊기: bob (pid 7)");
+  });
+
+  test("every kind of target has its label", () => {
+    const all: [PgGrantTarget, string][] = [
+      [{ kind: "database", name: "orders" }, "데이터베이스 orders"],
+      [{ kind: "schema", name: "app" }, "스키마 app"],
+      [relation("app", "orders"), "app.orders"],
+      [{ kind: "sequence", schema: "app", name: "orders_id_seq" }, "app.orders_id_seq"],
+      [{ kind: "function", schema: "app", name: "touch", signature: "order_id integer" }, "app.touch(order_id integer)"],
+      [{ kind: "function", schema: "app", name: "cleanup", signature: "" }, "app.cleanup()"],
+      [{ kind: "allTables", schema: "app" }, "app 스키마의 모든 테이블"],
+      [{ kind: "allSequences", schema: "app" }, "app 스키마의 모든 시퀀스"],
+    ];
+    for (const [target, label] of all) expect(targetLabel(target), label).toBe(label);
+  });
+
+  test("PUBLIC reads as every role and other names stay, `public` in lower case too", () => {
+    expect(granteeLabel("PUBLIC")).toBe("모든 역할(PUBLIC)");
+    expect(granteeLabel("app_read")).toBe("app_read");
+    // 글자 그대로 PUBLIC일 때만이다
+    expect(granteeLabel("public")).toBe("public");
+    expect(changeSummary(grantOn("public", true, [item(relation("app", "orders"), "SELECT")]))).toBe("권한 주기: public · app.orders SELECT");
+  });
 });

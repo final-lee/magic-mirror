@@ -1,7 +1,8 @@
 import { memo, useState } from "react";
-import { CallList, ConfirmField, GATE_HINT, ImpactList, PreviewAlerts, ReversibleNote, useSheetFocus, WarningList } from "./previewParts";
+import { PreviewFooter } from "./PreviewFooter";
+import { CallList, ConfirmField, ImpactList, ReversibleNote, useSheetFocus, WarningList } from "./previewParts";
 import type { ChangePreview } from "./types";
-import { applyGate, type PendingChange } from "./useIamChange";
+import type { PendingChange } from "./useIamChange";
 
 interface Props {
   pending: PendingChange;
@@ -26,12 +27,7 @@ function Sheet({ pending, onApply, onRetry, onCancel }: Props) {
   const [typed, setTyped] = useState("");
   const { sheetRef, trapTab, cancelRef, retryRef } = useSheetFocus(phase, onCancel);
 
-  const gate = preview ? applyGate(preview, typed) : null;
-  const canApply = !!preview && gate?.ok === true && phase === "ready" && !stale;
-  const needsRetry = (error?.kind === "preview" || stale) && !applying;
-  const danger = !!preview && (!!preview.confirmText || preview.warnings.some((w) => w.level !== "block"));
   const title = undoOf ? "되돌리기 미리보기" : "변경 미리보기";
-  const hint = gate && !gate.ok && gate.reason !== "text" ? GATE_HINT[gate.reason] : null;
 
   return (
     <div className="modal">
@@ -42,22 +38,18 @@ function Sheet({ pending, onApply, onRetry, onCancel }: Props) {
           {preview && <PreviewDetails preview={preview} />}
           {preview?.confirmText && <ConfirmField required={preview.confirmText} typed={typed} onTyped={setTyped} locked={applying} />}
         </div>
-        {/* 오류는 스크롤되는 본문 밖, 버튼 바로 위에 둔다: 미리보기가 길어도 가려지지 않는다 */}
-        <PreviewAlerts error={error} stale={stale} />
-        <div className="foot">
-          {hint && <span className="cp-hint">{hint}</span>}
-          <button ref={cancelRef} className="btn plain" disabled={applying} onClick={onCancel}>
-            취소
-          </button>
-          {needsRetry && (
-            <button ref={retryRef} className="btn" onClick={onRetry}>
-              미리보기 다시 받기
-            </button>
-          )}
-          <button className={`btn ${danger ? "danger" : "primary"}`} disabled={!canApply} onClick={() => onApply(typed)}>
-            {applying ? "적용 중…" : "적용"}
-          </button>
-        </div>
+        <PreviewFooter
+          gated={preview}
+          phase={phase}
+          error={error}
+          stale={stale}
+          typed={typed}
+          cancelRef={cancelRef}
+          retryRef={retryRef}
+          onApply={onApply}
+          onRetry={onRetry}
+          onCancel={onCancel}
+        />
       </div>
     </div>
   );

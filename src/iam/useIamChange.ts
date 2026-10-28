@@ -31,13 +31,19 @@ export interface PendingChange {
 
 export type ApplyGate = { ok: true } | { ok: false; reason: "blocked" | "text" | "noText" };
 
+/** applyGate가 보는 것: 미리보기의 경고와 확인 문구. 묶음은 변경마다의 경고까지 모아서 준다 */
+export interface Gated {
+  warnings: PreviewWarning[];
+  confirmText: string | null;
+}
+
 /**
  * 미리보기를 적용해도 되는지. 화면의 [적용] 버튼과 훅의 apply가 같은 규칙을 쓴다.
  * - 막힘(block) 경고가 있으면 무엇을 입력해도 안 된다.
  * - 확인 문구가 있으면 한 글자도 다르지 않게(대소문자·공백 포함) 입력해야 한다.
  * - 확인(confirm) 경고가 있는데 입력할 문구를 받지 못했다면 확인할 방법이 없으니 적용하지 않는다.
  */
-export function applyGate(preview: { warnings: PreviewWarning[]; confirmText: string | null }, typed: string): ApplyGate {
+export function applyGate(preview: Gated, typed: string): ApplyGate {
   if (preview.warnings.some((w) => w.level === "block")) return { ok: false, reason: "blocked" };
   if (preview.confirmText) return typed === preview.confirmText ? { ok: true } : { ok: false, reason: "text" };
   if (preview.warnings.some((w) => w.level === "confirm")) return { ok: false, reason: "noText" };

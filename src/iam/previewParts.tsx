@@ -7,7 +7,8 @@ import { useModal } from "./useModal";
 /** 자세히 보여 주는 주체 수. 백엔드도 이만큼만 자세히 보내고 나머지는 수(impactsOmitted)만 보낸다 */
 const MAX_IMPACTS = 30;
 
-const DELTA = {
+/** 증감 줄의 클래스, 이름, 부호. PostgreSQL 미리보기도 같은 것을 쓴다 */
+export const DELTA = {
   gained: { className: "cp-gain", label: "얻는 권한", sign: "＋" },
   lost: { className: "cp-lose", label: "잃는 권한", sign: "－" },
   restricted: { className: "cp-cond", label: "조건부로 바뀜", sign: "～" },
@@ -179,6 +180,7 @@ export function objectParticle(word: string): "을" | "를" {
 /**
  * 확인 문구 입력. 입력할 때마다 다시 그려지는 것은 이 칸과 버튼뿐이다.
  * 입력해야 할 것이 대상의 이름이면 기본 안내("이름이 달라요")를 쓰고, 문장이면 mismatchHint로 알맞은 말을 넘긴다.
+ * 묻는 말은 기본으로 문구 뒤에 목적격 조사를 붙인다(IAM). 이름 뒤에는 조사를 직접 붙이지 않는 화면(PostgreSQL)은 label로 말을 정한다.
  */
 export function ConfirmField({
   required,
@@ -186,14 +188,16 @@ export function ConfirmField({
   onTyped,
   locked,
   mismatchHint = "입력한 이름이 달라요",
+  label = `확인하려면 ${required}${objectParticle(required)} 입력하세요`,
 }: {
   required: string;
   typed: string;
   onTyped: (v: string) => void;
   locked: boolean;
   mismatchHint?: string;
+  /** 칸의 이름이자 눈에 보이는 안내. 주지 않으면 "확인하려면 {문구}를 입력하세요"다 */
+  label?: string;
 }) {
-  const label = `확인하려면 ${required}${objectParticle(required)} 입력하세요`;
   return (
     <label className="field cp-confirm">
       <span>{label}</span>

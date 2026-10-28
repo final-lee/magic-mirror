@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { ConfirmField, objectParticle, useSheetFocus } from "./previewParts";
+import { ConfirmField, DELTA, objectParticle, useSheetFocus } from "./previewParts";
 
 describe("objectParticle", () => {
   test("a Hangul syllable with a final consonant takes 을", () => {
@@ -39,6 +39,16 @@ describe("objectParticle", () => {
   });
 });
 
+describe("DELTA", () => {
+  test("the class, label and sign of each direction, which the PostgreSQL preview shares", () => {
+    expect(DELTA).toEqual({
+      gained: { className: "cp-gain", label: "얻는 권한", sign: "＋" },
+      lost: { className: "cp-lose", label: "잃는 권한", sign: "－" },
+      restricted: { className: "cp-cond", label: "조건부로 바뀜", sign: "～" },
+    });
+  });
+});
+
 describe("ConfirmField", () => {
   function setup(required: string, extra: { mismatchHint?: string } = {}) {
     function Host() {
@@ -57,6 +67,28 @@ describe("ConfirmField", () => {
     render(<ConfirmField required="bob" typed="" onTyped={() => {}} locked={false} />);
     expect(screen.getByLabelText("확인하려면 bob를 입력하세요")).toBeInTheDocument();
     expect(screen.getByText("확인하려면 bob를 입력하세요")).toBeInTheDocument();
+  });
+
+  test("a label the caller words replaces the question, on the field and for screen readers: no particle is put after the name", () => {
+    render(<ConfirmField required="bob" typed="" onTyped={() => {}} locked={false} label="확인하려면 입력하세요: bob" />);
+    expect(screen.getByLabelText("확인하려면 입력하세요: bob")).toBeInTheDocument();
+    expect(screen.getByText("확인하려면 입력하세요: bob")).toBeInTheDocument();
+    expect(screen.queryByText(/bob를|bob을/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("확인하려면 bob를 입력하세요")).not.toBeInTheDocument();
+  });
+
+  test("the label changes only the question: what has to be typed and the hint still follow `required`", () => {
+    function Host() {
+      const [typed, setTyped] = useState("");
+      return <ConfirmField required="bob" typed={typed} onTyped={setTyped} locked={false} label="확인하려면 입력하세요: bob" />;
+    }
+    render(<Host />);
+    const type = (value: string) => fireEvent.change(screen.getByRole("textbox"), { target: { value } });
+    expect(screen.getByLabelText("확인하려면 입력하세요: bob")).toBeInTheDocument();
+    type("bo");
+    expect(screen.queryByText("입력한 이름이 달라요")).not.toBeInTheDocument();
+    type("bx");
+    expect(screen.getByText("입력한 이름이 달라요")).toBeInTheDocument();
   });
 
   test("tells that the name differs unless the caller words it otherwise", () => {

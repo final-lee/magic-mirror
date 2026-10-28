@@ -98,6 +98,74 @@ describe("useApplyNotices", () => {
     expect(h.result.current.announce).toBe(announce);
     expect(h.result.current.dismissNotice).toBe(dismissNotice);
   });
+
+  describe("replacing a notice that is already shown", () => {
+    /** announce가 돌려준 id를 꺼내려고 한 번 부른 값을 받아 둔다 */
+    function announceOnce(h: ReturnType<typeof setup>, summary: string, notes: string[], replaces?: number) {
+      let id = -1;
+      act(() => {
+        id = h.result.current.announce(summary, notes, replaces);
+      });
+      return id;
+    }
+
+    test("announce gives back the id of the notice it shows", () => {
+      const h = setup();
+      const a = announceOnce(h, "A", []);
+      expect(h.result.current.notices.map((n) => n.id)).toEqual([a]);
+      const b = announceOnce(h, "B", ["x"]);
+      expect(b).not.toBe(a);
+      expect(h.result.current.notices.map((n) => n.id)).toEqual([b]);
+    });
+
+    test("a plain notice can be replaced by the same notice with a note added, which then stays", async () => {
+      vi.useFakeTimers();
+      const h = setup();
+      const first = announceOnce(h, "적용했어요", []);
+      await advance(NOTICE_MS - 1_000);
+      announceOnce(h, "적용했어요", ["목록을 다시 읽지 못했어요"], first);
+      expect(h.result.current.notices).toEqual([{ id: expect.any(Number), summary: "적용했어요", notes: ["목록을 다시 읽지 못했어요"] }]);
+      await advance(NOTICE_MS * 2); // 처음 안내의 사라질 때가 지나도 남는다
+      expect(h.result.current.notices.map((n) => n.summary)).toEqual(["적용했어요"]);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    test("a notice that has notes is replaced too, in place of adding a second one", () => {
+      const h = setup();
+      const first = announceOnce(h, "적용했어요", ["연결이 끊겼지만 적용된 것을 확인했어요"]);
+      announceOnce(h, "적용했어요", ["연결이 끊겼지만 적용된 것을 확인했어요", "목록을 다시 읽지 못했어요"], first);
+      expect(h.result.current.notices).toHaveLength(1);
+      expect(h.result.current.notices[0].notes).toEqual(["연결이 끊겼지만 적용된 것을 확인했어요", "목록을 다시 읽지 못했어요"]);
+    });
+
+    test("other notices that have notes stay", () => {
+      const h = setup();
+      announceOnce(h, "먼저 한 일", ["하지 못한 일"]);
+      const second = announceOnce(h, "나중 일", []);
+      announceOnce(h, "나중 일", ["다시 읽지 못했어요"], second);
+      expect(h.result.current.notices.map((n) => n.summary)).toEqual(["먼저 한 일", "나중 일"]);
+    });
+
+    test("a notice that has gone already (faded or dismissed) is not an error: the new one is simply shown", async () => {
+      vi.useFakeTimers();
+      const h = setup();
+      const first = announceOnce(h, "적용했어요", []);
+      await advance(NOTICE_MS + 1);
+      expect(h.result.current.notices).toEqual([]);
+      announceOnce(h, "적용했어요", ["목록을 다시 읽지 못했어요"], first);
+      expect(h.result.current.notices).toEqual([{ id: expect.any(Number), summary: "적용했어요", notes: ["목록을 다시 읽지 못했어요"] }]);
+    });
+
+    test("replacing without notes keeps the usual fade", async () => {
+      vi.useFakeTimers();
+      const h = setup();
+      const first = announceOnce(h, "A", []);
+      announceOnce(h, "B", [], first);
+      expect(h.result.current.notices.map((n) => n.summary)).toEqual(["B"]);
+      await advance(NOTICE_MS + 1);
+      expect(h.result.current.notices).toEqual([]);
+    });
+  });
 });
 
 describe("useIamRefresh", () => {
@@ -236,5 +304,33 @@ describe("usePendingFlow", () => {
     h.rerender({ p: "prod" });
     expect(h.result.current.commit).toBe(commit);
     expect(h.result.current.cancel).toBe(cancel);
+  });
+
+  test("alive tells whether the hook is still on screen: the late answers of a closed tab check it", () => {
+    const h = setup();
+    const { alive } = h.result.current;
+    expect(alive.current).toBe(true);
+    h.unmount();
+    expect(alive.current).toBe(false);
+  });
+
+  test("under React's strict mode, which runs every effect twice, the hook is alive and commits", () => {
+    const h = renderHook(() => usePendingFlow<Flow, () => void>("prod"), { reactStrictMode: true });
+    expect(h.result.current.alive.current).toBe(true);
+    act(() => h.result.current.commit(ready));
+    expect(h.result.current.pending).toBe(ready);
+    h.unmount();
+    expect(h.result.current.alive.current).toBe(false);
+  });
+
+  test("commit does nothing once the hook is closed: neither the ref nor the state", () => {
+    const h = setup();
+    const { commit, pendingRef } = h.result.current;
+    act(() => commit(ready));
+    h.unmount();
+    commit(applying);
+    expect(pendingRef.current).toBe(ready);
+    commit(null);
+    expect(pendingRef.current).toBe(ready);
   });
 });

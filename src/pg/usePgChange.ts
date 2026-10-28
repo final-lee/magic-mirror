@@ -1,10 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useRef } from "react";
 import { errorMessage } from "../api/errors";
 import { useApplyNotices, usePendingFlow } from "../iam/useApplyFlow";
 import { applyGate } from "../iam/useIamChange";
 import { pgApi } from "./api";
-import { refreshPgAfterChange } from "./queries";
+import { REFRESH_FAILED_TEXT, refreshPgAfterChange } from "./queries";
 import { targetKey } from "./targets";
 import type { PgChange, PgPreview, PgTarget } from "./types";
 
@@ -48,23 +48,17 @@ export interface PendingPgChange {
  * IAM과 다른 점
  * - 적용이 끝나면 화면을 바로 다시 읽는다(refreshPgAfterChange): 커밋은 바로 보이니 IAM처럼 몇 초 기다렸다 한 번 더 읽지 않는다.
  *   성공만이 아니라 실패한 뒤에도 읽는다. 실패도 변경 기록에 남고, 연결이 COMMIT 중에 끊겼다면 적용됐을 수도 있다.
+ *   적용은 됐는데 목록을 다시 읽지 못했으면 같은 안내에 그 말을 더해 닫을 때까지 남긴다(화면이 낡은 채로 있다는 것을 알리려는 것이다).
  * - 결과에 새 비밀번호(password)가 있으면 창을 닫지 않고 phase "password"로 바꿔 한 번만 보여 준다. 그 사이에 새 흐름은 시작할 수 없다.
+ * - 탭이 닫힌 뒤에 온 응답은 어디에도 쓰지 않는다: 상태도, 안내도, 콜백도, 다시 읽기도 없다.
  */
 export function usePgChange(target: PgTarget) {
   const qc = useQueryClient();
-  const { pending, pendingRef, seq, inFlight, onApplied, commit, cancel } = usePendingFlow<PendingPgChange, () => void>(targetKey(target));
+  const { pending, pendingRef, seq, inFlight, onApplied, alive, commit, cancel } = usePendingFlow<PendingPgChange, () => void>(targetKey(target));
   const { notices, announce, dismissNotice } = useApplyNotices();
   // 대상은 객체지만 흐름을 가르는 것은 키다. 부모가 같은 대상을 새 객체로 넘겨도 흐름을 버리지 않으려고 최신 대상을 ref에 둔다.
   const targetRef = useRef(target);
   targetRef.current = target;
-  // 탭이 닫힌 뒤에 온 응답은 안내를 띄우지도, 닫힌 대상을 다시 읽지도 않는다
-  const alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
 
   const load = useCallback(
     async (t: PgTarget, change: PgChange, undoOf: string | null) => {
@@ -113,14 +107,18 @@ export function usePgChange(target: PgTarget) {
       void (async () => {
         try {
           const result = await pgApi.apply(cur.target, cur.change, confirmText, cur.undoOf);
+          if (!alive.current) return; // 탭이 닫혔다: 보여 줄 곳도, 다시 읽을 화면도 없다
           seq.current++;
           // 새 비밀번호가 있으면 창을 닫지 않고 비밀번호 단계로 바꾼다. 비밀번호는 이 상태에만 두고 안내에는 요약과 알릴 일만 넣는다.
           commit(result.password ? { ...cur, phase: "password", password: result.password, error: null, stale: false } : null);
           const done = onApplied.current;
           onApplied.current = undefined;
-          if (!alive.current) return;
-          announce(result.summary, result.notes ?? []);
-          void refreshPgAfterChange(qc, cur.target, database);
+          const notes = result.notes ?? [];
+          const noticeId = announce(result.summary, notes);
+          // 목록을 다시 읽지 못했으면 화면이 낡은 채로 있으니, 같은 안내에 그 말을 더해 닫을 때까지 남긴다
+          void refreshPgAfterChange(qc, cur.target, database).then((read) => {
+            if (!read && alive.current) announce(result.summary, [...notes, REFRESH_FAILED_TEXT], noticeId);
+          });
           // 콜백이 던져도 적용은 이미 끝났다. 실패로 다루지 않는다.
           try {
             done?.();
@@ -128,15 +126,16 @@ export function usePgChange(target: PgTarget) {
             console.error("적용 완료 알림을 처리하다 오류가 났어요", e);
           }
         } catch (e) {
+          if (!alive.current) return;
           // 실패도 기록에 남고, 계획을 다시 비교하느라 백엔드가 새로 읽었으며, COMMIT 중에 끊겼다면 적용됐을 수도 있다
-          if (alive.current) void refreshPgAfterChange(qc, cur.target, database);
+          void refreshPgAfterChange(qc, cur.target, database);
           commit({ ...cur, phase: "ready", error: { kind: "apply", message: errorMessage(e) }, stale: true });
         } finally {
           inFlight.current = false;
         }
       })();
     },
-    [announce, commit, inFlight, onApplied, pendingRef, qc, seq],
+    [alive, announce, commit, inFlight, onApplied, pendingRef, qc, seq],
   );
 
   return { pending, notices, start, apply, retryPreview, cancel, dismissNotice };

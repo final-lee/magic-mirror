@@ -21,6 +21,7 @@ import {
   closePg,
   pgKeys,
   refreshPg,
+  REFRESH_FAILED_TEXT,
   refreshPgAfterChange,
   refreshPgData,
   usePgCell,
@@ -733,7 +734,7 @@ describe("refreshPgAfterChange", () => {
     const { qc, hook } = await mounted();
     // 화면이 개요를 쓰고 있다(react-query는 읽은 값이 바뀔 때만 다시 그린다)
     expect(hook.result.current.overview.data?.fetchedAt).toBe("2026-10-28T12:00:00Z");
-    await refreshPgAfterChange(qc, t, "orders");
+    await expect(refreshPgAfterChange(qc, t, "orders")).resolves.toBe(true);
     expect(m.overview).toHaveBeenCalledTimes(1);
     expect(m.overview).toHaveBeenCalledWith(t);
     expect(qc.getQueryData(pgKeys.overview(t, LOGIN_USER))).toEqual(sampleOverview({ fetchedAt: REREAD }));
@@ -836,15 +837,29 @@ describe("refreshPgAfterChange", () => {
     expect(qc.getQueryState(pgKeys.database(other, "orders"))?.isInvalidated).toBe(false);
   });
 
-  test("when pg_overview fails, the overview query reads itself through pg_open instead of staying old", async () => {
+  test("when pg_overview fails it says so, and the rest of the refresh still runs", async () => {
     const { qc } = await mounted();
     m.overview.mockRejectedValue({ kind: "other", message: "먼저 연결해 주세요" });
-    await refreshPgAfterChange(qc, t, "orders");
-    expect(m.open).toHaveBeenCalledTimes(1);
-    expect(m.open).toHaveBeenCalledWith(t, LOGIN_USER);
-    // 나머지는 그대로 돈다
+    await expect(refreshPgAfterChange(qc, t, "orders")).resolves.toBe(false);
     expect(m.database).toHaveBeenCalledWith(t, "orders", true);
     expect(m.changeLog).toHaveBeenCalledTimes(1);
+    expect(m.role).toHaveBeenCalledTimes(1);
+  });
+
+  test("when pg_overview fails nothing connects again by itself, and the overview keeps what it had", async () => {
+    // 다시 연결하는 것은 사용자가 [다시 읽기]를 눌렀을 때뿐이다: 안 되는 연결을 자동으로 또 두드리지 않는다
+    const { qc, hook } = await mounted();
+    m.overview.mockRejectedValue({ kind: "network", message: "timeout" });
+    await refreshPgAfterChange(qc, t, "orders");
+    expect(m.open).not.toHaveBeenCalled();
+    expect(qc.getQueryData(pgKeys.overview(t, LOGIN_USER))).toEqual(sampleOverview());
+    expect(hook.result.current.overview.isError).toBe(false);
+  });
+
+  test("a rebuilt overview of a login nobody is connected as still counts as read", async () => {
+    const { qc } = await mounted();
+    m.overview.mockResolvedValue(sampleOverview({ loginUser: "someone_else", fetchedAt: REREAD }));
+    await expect(refreshPgAfterChange(qc, t, "orders")).resolves.toBe(true);
   });
 
   test("never rejects, whatever fails: it is fire and forget for the flows", async () => {
@@ -853,6 +868,10 @@ describe("refreshPgAfterChange", () => {
     m.database.mockRejectedValue({ kind: "network", message: "timeout" });
     m.role.mockRejectedValue({ kind: "network", message: "timeout" });
     m.open.mockRejectedValue({ kind: "network", message: "timeout" });
-    await expect(refreshPgAfterChange(qc, t, "orders")).resolves.toBeUndefined();
+    await expect(refreshPgAfterChange(qc, t, "orders")).resolves.toBe(false);
+  });
+
+  test("the refresh-failed text the flows put on the notice is the one the plan fixes", () => {
+    expect(REFRESH_FAILED_TEXT).toBe("적용은 됐지만 목록을 다시 읽지 못했어요. [다시 읽기]를 눌러 주세요");
   });
 });

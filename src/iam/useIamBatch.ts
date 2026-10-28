@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback } from "react";
 import { errorMessage } from "../api/errors";
 import { iamApi } from "./api";
 import type { BatchPreview, BatchResult, IamChange, PreviewWarning } from "./types";
@@ -64,17 +64,10 @@ export const stopMessage = (total: number, failed: Stopped): string => `${total}
  * 되돌려 알리지 않는다) 그 뒤에 IAM 쿼리를 바로 무효화하고 3초 뒤에 overview를 force=true로 한 번 더 읽는다.
  */
 export function useIamBatch(profile: string) {
-  const { pending, pendingRef, profileRef, seq, inFlight, onApplied, commit, cancel } = usePendingFlow<PendingBatch, (applied: IamChange[]) => void>(profile);
+  // alive: 탭이 닫힌 뒤에 온 응답은 장바구니와 안내를 건드리지 않는다
+  const { pending, pendingRef, profileRef, seq, inFlight, onApplied, alive, commit, cancel } = usePendingFlow<PendingBatch, (applied: IamChange[]) => void>(profile);
   const { notices, announce, dismissNotice } = useApplyNotices();
   const { invalidate, refreshLater } = useIamRefresh();
-  // 탭이 닫힌 뒤에 온 응답은 장바구니와 안내를 건드리지 않는다
-  const alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
 
   const load = useCallback(
     async (p: string, changes: IamChange[], undoOf: string[] | null) => {
@@ -168,7 +161,7 @@ export function useIamBatch(profile: string) {
         if (live) refreshLater(cur.profile);
       })();
     },
-    [announce, commit, inFlight, invalidate, onApplied, pendingRef, profileRef, refreshLater],
+    [alive, announce, commit, inFlight, invalidate, onApplied, pendingRef, profileRef, refreshLater],
   );
 
   return { pending, notices, start, apply, retryPreview, cancel, dismissNotice };

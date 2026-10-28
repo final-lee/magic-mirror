@@ -1,3 +1,4 @@
+import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { formatDateTime } from "../iam/format";
 import { renderWithClient } from "../test/utils";
@@ -27,7 +28,7 @@ const OTHER_ARN = "arn:aws:rds:ap-northeast-2:123456789012:cluster:reports-auror
 function setup(entries: PgChangeLogEntry[], extra: Partial<React.ComponentProps<typeof ChangeLog>> = {}) {
   m.changeLog.mockResolvedValue(entries);
   const props = { onStart: vi.fn(), onStartBatch: vi.fn() };
-  const utils = renderWithClient(<ChangeLog target={pgTarget} targetArn={ARN} {...props} {...extra} />);
+  const utils = renderWithClient(<ChangeLog target={pgTarget} targetArn={ARN} blockReason={null} {...props} {...extra} />);
   return { props, ...utils };
 }
 const table = () => screen.findByRole("table", { name: "변경 기록" });
@@ -102,7 +103,7 @@ describe("list", () => {
   test("shows a loading message and an empty message", async () => {
     let resolve!: (v: PgChangeLogEntry[]) => void;
     m.changeLog.mockReturnValueOnce(new Promise((r) => (resolve = r)));
-    renderWithClient(<ChangeLog target={pgTarget} targetArn={ARN} onStart={vi.fn()} onStartBatch={vi.fn()} />);
+    renderWithClient(<ChangeLog target={pgTarget} targetArn={ARN} blockReason={null} onStart={vi.fn()} onStartBatch={vi.fn()} />);
     expect(screen.getByText("변경 기록을 불러오는 중…")).toBeInTheDocument();
     resolve([]);
     expect(await screen.findByText("변경 기록이 없어요")).toBeInTheDocument();
@@ -111,7 +112,7 @@ describe("list", () => {
   test("a failed read shows the error through PgError, and 다시 시도 reads the log again", async () => {
     m.changeLog.mockRejectedValueOnce({ kind: "network", message: "timeout" });
     m.changeLog.mockResolvedValueOnce([sampleLogEntry()]);
-    renderWithClient(<ChangeLog target={pgTarget} targetArn={ARN} onStart={vi.fn()} onStartBatch={vi.fn()} />);
+    renderWithClient(<ChangeLog target={pgTarget} targetArn={ARN} blockReason={null} onStart={vi.fn()} onStartBatch={vi.fn()} />);
     expect(await screen.findByText("네트워크 오류: timeout")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
     expect(await table()).toBeInTheDocument();
@@ -349,6 +350,8 @@ describe("batches", () => {
     expect(props.onStartBatch).not.toHaveBeenCalled();
   });
 
+  // IAM의 규칙과 같다: 되돌릴 수 있는 기록이 하나라도 있으면 켜 둔다. 백엔드의 pg_undo_batch도 IAM의 undo_batch_of처럼 되돌릴 수 있는
+  // 기록(성공했고, 아직 되돌리지 않았고, 역변경이 있는 것)만 골라 주고, 하나도 남지 않을 때만 되돌릴 수 없다고 한다.
   test("a batch that was only partly undone can still be undone for the rest", async () => {
     setup([member("m-2", { undone: true }), member("m-1")]);
     await table();
@@ -373,5 +376,84 @@ describe("batches", () => {
     await table();
     expect(screen.getByText(/^묶음 · 변경 1개 · /)).toBeInTheDocument();
     expect(screen.queryByText(/m-2/)).not.toBeInTheDocument();
+  });
+});
+
+describe("while changes are blocked on this target", () => {
+  const READ_REPLICA = "읽기 전용 복제본이라 바꿀 수 없어요";
+  const MANAGE = "이 DB 사용자는 역할을 관리할 수 없어요 (CREATEROLE이 없어요)";
+  const member = (id: string, extra: Partial<PgChangeLogEntry> = {}) => sampleLogEntry({ id, batchId: "b-1", summary: `${id}: 권한 주기`, inverse: [revokeAuditRead], ...extra });
+  const batchButton = () => screen.getByRole("button", { name: "묶음 되돌리기" });
+
+  test.each([READ_REPLICA, MANAGE])("[되돌리기] is off with the reason as its title and its description: %s", async (reason) => {
+    const { props } = setup([sampleLogEntry()], { blockReason: reason });
+    await table();
+    const button = undoButton(rows()[0]);
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", reason);
+    expect(button).toHaveAccessibleDescription(reason);
+    fireEvent.click(button);
+    expect(m.undo).not.toHaveBeenCalled();
+    expect(props.onStart).not.toHaveBeenCalled();
+    expect(props.onStartBatch).not.toHaveBeenCalled();
+  });
+
+  test.each([READ_REPLICA, MANAGE])("[묶음 되돌리기] is off the same way: %s", async (reason) => {
+    const { props } = setup([member("m-2"), member("m-1")], { blockReason: reason });
+    await table();
+    expect(batchButton()).toBeDisabled();
+    expect(batchButton()).toHaveAttribute("title", reason);
+    expect(batchButton()).toHaveAccessibleDescription(reason);
+    fireEvent.click(batchButton());
+    expect(m.undoBatch).not.toHaveBeenCalled();
+    expect(props.onStartBatch).not.toHaveBeenCalled();
+  });
+
+  test("the entries inside a batch are off too", async () => {
+    setup([member("m-2"), member("m-1")], { blockReason: READ_REPLICA });
+    await table();
+    const inside = within(rows()[1]).getByRole("button", { name: "되돌리기" });
+    expect(inside).toBeDisabled();
+    expect(inside).toHaveAttribute("title", READ_REPLICA);
+  });
+
+  test("without a reason nothing is off and nothing carries a title", async () => {
+    setup([sampleLogEntry(), member("m-2"), member("m-1")], { blockReason: null });
+    await table();
+    for (const button of screen.getAllByRole("button", { name: /되돌리기/ })) {
+      expect(button).toBeEnabled();
+      expect(button).not.toHaveAttribute("title");
+    }
+  });
+
+  test("the reason is not drawn on rows that have no button to turn off", async () => {
+    setup([sampleLogEntry({ undone: true }), sampleLogEntry({ id: "b", inverse: null, summary: "비밀번호 재설정: alice" })], { blockReason: READ_REPLICA });
+    await table();
+    expect(screen.queryByText(READ_REPLICA)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "되돌리기" })).not.toBeInTheDocument();
+    expect(screen.getByText("되돌릴 수 없어요")).toBeInTheDocument();
+  });
+
+  test("a batch with nothing left to undo says so, which is the more specific reason", async () => {
+    setup([member("m-2", { undone: true }), member("m-1", { undone: true })], { blockReason: READ_REPLICA });
+    await table();
+    expect(batchButton()).toBeDisabled();
+    expect(screen.getByText("되돌릴 변경이 없어요")).toBeInTheDocument();
+  });
+
+  test("the block follows the prop: lifting it turns the buttons on", async () => {
+    const entries = [sampleLogEntry(), member("m-2"), member("m-1")];
+    m.changeLog.mockResolvedValue(entries);
+    const onStart = vi.fn();
+    const onStartBatch = vi.fn();
+    const { qc, rerender } = renderWithClient(<ChangeLog target={pgTarget} targetArn={ARN} blockReason={READ_REPLICA} onStart={onStart} onStartBatch={onStartBatch} />);
+    await table();
+    expect(undoButton(rows()[0])).toBeDisabled();
+    rerender(
+      <QueryClientProvider client={qc}>
+        <ChangeLog target={pgTarget} targetArn={ARN} blockReason={null} onStart={onStart} onStartBatch={onStartBatch} />
+      </QueryClientProvider>,
+    );
+    expect(undoButton(rows()[0])).toBeEnabled();
   });
 });

@@ -208,9 +208,13 @@ describe("the password through the whole flow", () => {
     expect(whereIsIt()).toEqual({ dom: false, state: false, queries: false, mutations: false });
   });
 
-  test("Escape closes it the same way", async () => {
+  test("Escape does not close it: only 닫기 throws the password away", async () => {
     await reachPasswordPhase();
     await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: "새 비밀번호" })).toBeInTheDocument();
+    expect(screen.getByDisplayValue(NEW_PASSWORD)).toBeInTheDocument();
+    expect(latest.pending?.phase).toBe("password");
+    fireEvent.click(screen.getByRole("button", { name: "닫기" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(whereIsIt()).toEqual({ dom: false, state: false, queries: false, mutations: false });
   });

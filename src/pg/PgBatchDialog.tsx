@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { ConfirmField, GATE_HINT, PreviewAlerts, useSheetFocus } from "../iam/previewParts";
+import { PreviewFooter } from "../iam/PreviewFooter";
+import { ConfirmField, useSheetFocus } from "../iam/previewParts";
 import { batchSummary } from "./changeText";
+import { confirmLabel } from "./labels";
 import { PreviewBody } from "./PreviewBody";
 import type { PgChange } from "./types";
-import { pgBatchGate, pgBatchWarnings, type PendingPgBatch } from "./usePgBatch";
+import { pgBatchGated, type PendingPgBatch } from "./usePgBatch";
 
 interface Props {
   pending: PendingPgBatch;
@@ -31,13 +33,8 @@ function Sheet({ pending, onApply, onRetry, onCancel, onAddDefaults }: Props) {
   const [typed, setTyped] = useState("");
   const { sheetRef, trapTab, cancelRef, retryRef } = useSheetFocus(phase, onCancel);
 
-  const gate = preview ? pgBatchGate(preview, typed) : null;
-  const canApply = !!preview && gate?.ok === true && phase === "ready" && !stale;
-  const needsRetry = (error?.kind === "preview" || stale) && !applying;
-  const danger = !!preview && (!!preview.confirmText || pgBatchWarnings(preview).some((w) => w.level !== "block"));
   const count = preview?.items.length ?? pending.changes.length;
   const title = undoOf ? "되돌리기 미리보기" : batchSummary(count);
-  const hint = gate && !gate.ok && gate.reason !== "text" ? GATE_HINT[gate.reason] : null;
 
   return (
     <div className="modal">
@@ -47,24 +44,29 @@ function Sheet({ pending, onApply, onRetry, onCancel, onAddDefaults }: Props) {
           {preview && <p className="cp-user">{`적용할 DB 사용자: ${preview.loginUser}`}</p>}
           {phase === "loading" && <p>미리보기를 불러오는 중이에요…</p>}
           {preview && <PreviewBody preview={preview} items={preview.items} onAddDefaults={onAddDefaults} />}
-          {preview?.confirmText && <ConfirmField required={preview.confirmText} typed={typed} onTyped={setTyped} locked={applying} mismatchHint="입력한 문구가 달라요" />}
-        </div>
-        {/* 오류는 스크롤되는 본문 밖, 버튼 바로 위에 둔다: 미리보기가 길어도 가려지지 않는다 */}
-        <PreviewAlerts error={error} stale={stale} />
-        <div className="foot">
-          {hint && <span className="cp-hint">{hint}</span>}
-          <button ref={cancelRef} className="btn plain" disabled={applying} onClick={onCancel}>
-            취소
-          </button>
-          {needsRetry && (
-            <button ref={retryRef} className="btn" onClick={onRetry}>
-              미리보기 다시 받기
-            </button>
+          {preview?.confirmText && (
+            <ConfirmField
+              required={preview.confirmText}
+              typed={typed}
+              onTyped={setTyped}
+              locked={applying}
+              label={confirmLabel(preview.confirmText)}
+              mismatchHint="입력한 문구가 달라요"
+            />
           )}
-          <button className={`btn ${danger ? "danger" : "primary"}`} disabled={!canApply} onClick={() => onApply(typed)}>
-            {applying ? "적용 중…" : "적용"}
-          </button>
         </div>
+        <PreviewFooter
+          gated={preview && pgBatchGated(preview)}
+          phase={phase}
+          error={error}
+          stale={stale}
+          typed={typed}
+          cancelRef={cancelRef}
+          retryRef={retryRef}
+          onApply={onApply}
+          onRetry={onRetry}
+          onCancel={onCancel}
+        />
       </div>
     </div>
   );

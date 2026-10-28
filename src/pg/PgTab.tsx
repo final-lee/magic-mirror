@@ -1,9 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useSettings } from "../api/queries";
-import type { ApplyNotice } from "../iam/useApplyFlow";
+import { DoneNotice } from "../components/DoneNotice";
 import { useHistoryKeys } from "../lib/useHistoryKeys";
 import { useRouteHistory } from "../lib/useRouteHistory";
+import { changeBlockReason } from "./canChange";
 import { ChangeLog } from "./ChangeLog";
 import { DefaultPrivileges } from "./DefaultPrivileges";
 import { Findings } from "./Findings";
@@ -96,27 +97,6 @@ function TopBar({ info, loginUser, connection, fetchedAt, reading, canChange, on
           </button>
         )}
       </span>
-    </div>
-  );
-}
-
-/** 적용을 마친 뒤의 안내 한 줄. 함께 알릴 일(notes)이 있으면 사용자가 닫을 때까지 남는다. IAM과 달리 반영이 늦어진다는 말은 없다: 커밋하면 바로 보인다. */
-function DoneNotice({ notice, onDismiss }: { notice: ApplyNotice; onDismiss: () => void }) {
-  return (
-    <div className="iam-done" role="status">
-      <span aria-hidden="true">✓</span> <span>{notice.summary}</span>
-      <button className="icon" aria-label="알림 닫기" onClick={onDismiss}>
-        ✕
-      </button>
-      {/* 바꾸기는 했지만 하지 못한 일(변경 기록 저장 등). 이 안내는 닫을 때까지 남는다 */}
-      {notice.notes.length > 0 && (
-        <ul className="iam-done-notes" aria-label="함께 알릴 일">
-          {/* 같은 안내가 여러 번 올 수 있고 목록은 순서가 바뀌지 않아서, 글이 아니라 순서를 키로 쓴다 */}
-          {notice.notes.map((note, i) => (
-            <li key={i}>{note}</li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }
@@ -243,7 +223,7 @@ export function PgTab({ target, active, filter }: Props) {
           ) : route.view === "sessions" ? (
             <Sessions target={target} />
           ) : route.view === "changes" ? (
-            <ChangeLog target={target} targetArn={o.target.arn} onStart={change.start} onStartBatch={batch.start} />
+            <ChangeLog target={target} targetArn={o.target.arn} blockReason={changeBlockReason(o.target, o)} onStart={change.start} onStartBatch={batch.start} />
           ) : (
             <Findings target={target} overview={o} onOpenRole={(name) => go(roleRoute(name))} onOpenSchema={openSchema} />
           )}

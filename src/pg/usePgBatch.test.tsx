@@ -6,9 +6,11 @@ import {
   LOGIN_USER,
   addBobToWriters,
   defaultAuditRead,
+  dropAppAudit,
   grantAuditRead,
   pgTarget,
   removeBobFromWriters,
+  revokeAuditRead,
   sampleBatchPreview,
   sampleDatabaseView,
   sampleOverview,
@@ -27,6 +29,8 @@ const CHANGES: PgChange[] = [grantAuditRead, addBobToWriters];
 const applied: PgBatchResult = { batchId: "b-9", logIds: ["b-9-1", "b-9-2"], summary: "변경 2개" };
 const REREAD = "2026-10-29T12:30:00Z";
 const BATCH_CONFIRM = "변경 2개 적용";
+// 전역 제약의 정확한 문구. 글이 바뀌면 시험이 알려 준다
+const REFRESH_FAILED = "적용은 됐지만 목록을 다시 읽지 못했어요. [다시 읽기]를 눌러 주세요";
 const confirmBatch = (extra: Partial<PgBatchPreview> = {}) =>
   sampleBatchPreview({ warnings: [{ level: "confirm", message: "모든 역할(PUBLIC)에 권한을 줘요", add: [] }], confirmText: BATCH_CONFIRM, ...extra });
 
@@ -189,12 +193,22 @@ describe("apply", () => {
     expect(m.applyBatch).toHaveBeenCalledWith(pgTarget, "orders", CHANGES, null, null);
   });
 
-  test("sends the typed confirm text and passes the undo ids through, in the order of the changes", async () => {
+  test("sends the typed confirm text and passes the undo ids through as they came", async () => {
     m.previewBatch.mockImplementation(async () => confirmBatch());
     const h = setup();
     await startAndWait(h, [removeBobFromWriters, { ...grantAuditRead, add: false }], { undoOf: ["b-1-2", "b-1-1"] });
     await act(async () => h.flow().apply(BATCH_CONFIRM));
     expect(m.applyBatch).toHaveBeenCalledWith(pgTarget, "orders", [removeBobFromWriters, { ...grantAuditRead, add: false }], BATCH_CONFIRM, ["b-1-2", "b-1-1"]);
+  });
+
+  test("undoOf is one id per log entry, not one per change: an entry that takes several changes to undo stays one id", async () => {
+    // 만든 역할을 되돌리면 기록 하나가 변경 여럿(권한을 거두고 역할을 지운다)이 된다. 둘의 길이는 같지 않고, 훅은 둘을 그대로 넘긴다
+    const inverse = [revokeAuditRead, dropAppAudit];
+    const h = setup();
+    await startAndWait(h, inverse, { undoOf: ["log-3"] });
+    expect(h.flow().pending).toMatchObject({ changes: inverse, undoOf: ["log-3"] });
+    await act(async () => h.flow().apply(""));
+    expect(m.applyBatch).toHaveBeenCalledWith(pgTarget, "orders", inverse, null, ["log-3"]);
   });
 
   test("never calls the backend while the confirm text is wrong, and never for a block in any change", async () => {
@@ -253,18 +267,28 @@ describe("apply", () => {
     expect(h.flow().notices).toEqual([]);
   });
 
-  test("onApplied runs after the dialog is closed, so the tray is already empty when the overview comes back", async () => {
-    let pendingAtCall: unknown = "unset";
+  test("onApplied runs before the overview is read again, so the tray is emptied before the new overview can come back", async () => {
+    let overviewCallsAtCallback = -1;
     const h = setup();
+    await settled(h);
+    m.overview.mockClear();
     await startAndWait(h, CHANGES, {
       onApplied: () => {
-        pendingAtCall = h.flow().pending;
+        overviewCallsAtCallback = m.overview.mock.calls.length;
       },
     });
     await act(async () => h.flow().apply(""));
-    // 콜백이 불리는 때 흐름은 이미 닫히는 중이다(상태 갱신은 한 묶음이라 다음 렌더에 보인다): 콜백 뒤에도 닫혀 있다
-    expect(pendingAtCall).not.toBe("unset");
-    expect(h.flow().pending).toBeNull();
+    expect(overviewCallsAtCallback).toBe(0);
+    await waitFor(() => expect(m.overview).toHaveBeenCalledTimes(1));
+  });
+
+  test("the flow is already closed when onApplied runs, so a next flow can start at once", async () => {
+    const h = setup();
+    await startAndWait(h, CHANGES, { onApplied: () => h.flow().start("orders", [grantAuditRead]) });
+    await act(async () => h.flow().apply(""));
+    // 아직 "적용 중"이었다면 start는 적용 중인 묶음을 덮어쓰지 않으려고 무시됐을 것이다
+    expect(m.previewBatch).toHaveBeenCalledTimes(2);
+    expect(m.previewBatch).toHaveBeenLastCalledWith(pgTarget, "orders", [grantAuditRead]);
   });
 
   test("notes of the backend stay on the notice until it is dismissed", async () => {
@@ -353,6 +377,86 @@ describe("after a successful apply", () => {
   });
 });
 
+describe("when the list cannot be read again after a successful apply", () => {
+  const NO_CONNECTION = { kind: "other", message: "먼저 연결해 주세요" };
+
+  test("the success notice stays and says so with the exact words, as a note that keeps it until it is dismissed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    m.overview.mockRejectedValue(NO_CONNECTION);
+    const h = setup();
+    await settled(h);
+    await startAndWait(h);
+    await act(async () => h.flow().apply(""));
+    await waitFor(() => expect(h.flow().notices).toEqual([{ id: expect.any(Number), summary: "변경 2개", notes: [REFRESH_FAILED] }]));
+    expect(h.flow().pending).toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(h.flow().notices).toHaveLength(1);
+    act(() => h.flow().dismissNotice(h.flow().notices[0].id));
+    expect(h.flow().notices).toEqual([]);
+  });
+
+  test("the notes of the backend come first", async () => {
+    m.applyBatch.mockResolvedValueOnce({ ...applied, notes: ["연결이 끊겼지만 적용된 것을 확인했어요"] });
+    m.overview.mockRejectedValue(NO_CONNECTION);
+    const h = setup();
+    await settled(h);
+    await startAndWait(h);
+    await act(async () => h.flow().apply(""));
+    await waitFor(() => expect(h.flow().notices[0]?.notes).toEqual(["연결이 끊겼지만 적용된 것을 확인했어요", REFRESH_FAILED]));
+    expect(h.flow().notices).toHaveLength(1);
+  });
+
+  test("a list that was read says nothing extra", async () => {
+    const h = setup();
+    await settled(h);
+    await startAndWait(h);
+    await act(async () => h.flow().apply(""));
+    await waitFor(() => expect(h.result.current.overview.data?.fetchedAt).toBe(REREAD));
+    expect(h.flow().notices).toEqual([{ id: expect.any(Number), summary: "변경 2개", notes: [] }]);
+  });
+
+  test("nothing connects again by itself, and the rest of the refresh still runs", async () => {
+    m.overview.mockRejectedValue(NO_CONNECTION);
+    const h = setup();
+    await settled(h);
+    m.database.mockClear();
+    await startAndWait(h);
+    await act(async () => h.flow().apply(""));
+    await waitFor(() => expect(h.flow().notices[0]?.notes).toEqual([REFRESH_FAILED]));
+    await waitFor(() => expect(m.database).toHaveBeenCalledWith(pgTarget, "orders", true));
+    expect(m.open).toHaveBeenCalledTimes(1);
+  });
+
+  test("the tray is emptied first, and the note comes after the refresh gave up", async () => {
+    const slow = deferred<ReturnType<typeof sampleOverview>>();
+    m.overview.mockReturnValueOnce(slow.promise);
+    const onApplied = vi.fn();
+    const h = setup();
+    await settled(h);
+    await startAndWait(h, CHANGES, { onApplied });
+    await act(async () => h.flow().apply(""));
+    expect(onApplied).toHaveBeenCalledTimes(1);
+    expect(h.flow().notices[0]?.notes).toEqual([]);
+    await act(async () => slow.reject(NO_CONNECTION));
+    await waitFor(() => expect(h.flow().notices[0]?.notes).toEqual([REFRESH_FAILED]));
+  });
+
+  test("a failed apply never says it was applied: the dialog's own error is what shows", async () => {
+    m.applyBatch.mockRejectedValueOnce({ kind: "other", message: "적용하지 못했어요: permission denied" });
+    m.overview.mockRejectedValue(NO_CONNECTION);
+    const h = setup();
+    await settled(h);
+    await startAndWait(h);
+    await act(async () => h.flow().apply(""));
+    await waitFor(() => expect(m.overview).toHaveBeenCalled());
+    await act(async () => {});
+    expect(h.flow().notices).toEqual([]);
+    expect(h.flow().pending?.error?.message).toBe("적용하지 못했어요: permission denied");
+  });
+});
+
 describe("a failed apply", () => {
   test("keeps the flow open with the error and refuses another apply until the preview is read again", async () => {
     m.applyBatch.mockRejectedValueOnce({ kind: "other", message: "적용하지 못했어요: permission denied for table events" });
@@ -410,6 +514,46 @@ describe("target", () => {
     await act(async () => slow.resolve(applied));
     expect(onApplied).not.toHaveBeenCalled();
     expect(flow.notices).toEqual([]);
+  });
+});
+
+describe("a closed tab", () => {
+  // 탭이 닫힌 뒤에 온 응답은 어디에도 쓰이지 않는다: 안내도, 콜백도, 다시 읽기도 없다. 성공이든 실패든 같다.
+  async function closeWhileApplying(onApplied?: (applied: PgChange[]) => void) {
+    const slow = deferred<PgBatchResult>();
+    m.applyBatch.mockReturnValueOnce(slow.promise);
+    const h = setup();
+    await settled(h);
+    await startAndWait(h, CHANGES, { onApplied });
+    act(() => h.flow().apply(""));
+    expect(h.flow().pending?.phase).toBe("applying");
+    h.unmount();
+    vi.clearAllMocks();
+    return slow;
+  }
+
+  test("a late success calls nothing back and reads nothing again", async () => {
+    const onApplied = vi.fn();
+    const slow = await closeWhileApplying(onApplied);
+    await act(async () => slow.resolve(applied));
+    expect(onApplied).not.toHaveBeenCalled();
+    expect(m.overview).not.toHaveBeenCalled();
+  });
+
+  test("a late failure reads nothing again either", async () => {
+    const slow = await closeWhileApplying();
+    await act(async () => slow.reject({ kind: "other", message: "적용하지 못했어요" }));
+    expect(m.overview).not.toHaveBeenCalled();
+  });
+
+  test("a late answer, either way, makes no noise: no error is logged", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const ok = await closeWhileApplying();
+    await act(async () => ok.resolve(applied));
+    const bad = await closeWhileApplying();
+    await act(async () => bad.reject(new Error("x")));
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });
 

@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState } from "react";
+import { DoneNotice } from "../components/DoneNotice";
 import { ErrorState } from "../components/ErrorState";
 import { useHistoryKeys } from "../lib/useHistoryKeys";
 import { Assignments } from "./AssignmentsScreen";
@@ -17,7 +18,6 @@ import { policyNameFromId, policyRoute, principalRoute, routeForFocus, VIEW_LABE
 import type { IamOverview, PrincipalKind } from "./types";
 import { useAddedColumns } from "./useAddedColumns";
 import { useAssignmentDraft } from "./useAssignmentDraft";
-import type { ApplyNotice } from "./useApplyFlow";
 import { useIamBatch } from "./useIamBatch";
 import { useIamChange } from "./useIamChange";
 import { useIamHistory } from "./useIamHistory";
@@ -57,26 +57,8 @@ function listCount(ov: IamOverview, view: IamView): number | null {
   return view === "policies" ? ov.policies.length : null;
 }
 
-/** 적용을 마친 뒤의 안내 한 줄. 함께 알릴 일(notes)이 있으면 사용자가 닫을 때까지 남는다 */
-function DoneNotice({ notice, onDismiss }: { notice: ApplyNotice; onDismiss: () => void }) {
-  return (
-    <div className="iam-done" role="status">
-      <span aria-hidden="true">✓</span> <span>{notice.summary}</span> <span className="dim">반영까지 몇 초 걸릴 수 있어요</span>
-      <button className="icon" aria-label="알림 닫기" onClick={onDismiss}>
-        ✕
-      </button>
-      {/* 바꾸기는 했지만 하지 못한 일(변경 기록 저장 등). 이 안내는 닫을 때까지 남는다 */}
-      {notice.notes.length > 0 && (
-        <ul className="iam-done-notes" aria-label="함께 알릴 일">
-          {/* 같은 안내가 여러 번 올 수 있고(되돌림 표시를 못 한 기록마다 같은 문구) 목록은 순서가 바뀌지 않아서, 글이 아니라 순서를 키로 쓴다 */}
-          {notice.notes.map((note, i) => (
-            <li key={i}>{note}</li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
+/** IAM은 적용한 뒤 반영되기까지 시간이 걸린다. 완료 안내마다 이 말을 붙인다 */
+const PROPAGATION_HINT = "반영까지 몇 초 걸릴 수 있어요";
 
 export function IamTab({ profile, active, filter, focus, nonce }: Props) {
   const qc = useQueryClient();
@@ -254,10 +236,10 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
         )}
         {overview.isError && <ErrorState compact error={overview.error} profile={profile} onRetry={() => void overview.refetch()} />}
         {change.notices.map((notice) => (
-          <DoneNotice key={`change-${notice.id}`} notice={notice} onDismiss={() => change.dismissNotice(notice.id)} />
+          <DoneNotice key={`change-${notice.id}`} notice={notice} hint={PROPAGATION_HINT} onDismiss={() => change.dismissNotice(notice.id)} />
         ))}
         {batch.notices.map((notice) => (
-          <DoneNotice key={`batch-${notice.id}`} notice={notice} onDismiss={() => batch.dismissNotice(notice.id)} />
+          <DoneNotice key={`batch-${notice.id}`} notice={notice} hint={PROPAGATION_HINT} onDismiss={() => batch.dismissNotice(notice.id)} />
         ))}
         <div className="iam-main">{body}</div>
       </div>
