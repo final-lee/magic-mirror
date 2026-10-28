@@ -17,6 +17,10 @@ import { useTransfers } from "./explorer/useTransfers";
 import { IamTab } from "./iam/IamTab";
 import { refreshIam, useIamOverview } from "./iam/queries";
 import type { S3Location } from "./lib/s3";
+import { PgTab } from "./pg/PgTab";
+import { closePg } from "./pg/queries";
+import { pgTabId } from "./pg/targets";
+import type { PgTarget } from "./pg/types";
 import { getVersion } from "@tauri-apps/api/app";
 import { VpcMapTab } from "./vpcmap/VpcMapTab";
 import { UpdateBanner } from "./components/UpdateBanner";
@@ -42,6 +46,8 @@ export default function App() {
   const [explorerTabs, setExplorerTabs] = useState<{ id: string; location: S3Location }[]>([]);
   const [diffTabs, setDiffTabs] = useState<{ id: string; left: FileRef; right: FileRef }[]>([]);
   const [vpcTabs, setVpcTabs] = useState<{ id: string; vpcId: string; name: string; region: string }[]>([]);
+  // 대상(프로필·리전·종류·식별자)마다 탭 하나. 탭을 닫거나 프로필을 바꾸면 그 대상의 DB 연결도 닫는다.
+  const [pgTabs, setPgTabs] = useState<{ id: string; target: PgTarget; title: string }[]>([]);
   // IAM 탭은 하나뿐이다(id "iam"). focus는 리소스 목록에서 넘어온 대상 ARN, nonce는 열 때마다 올라가 같은 대상도 다시 이동시킨다.
   const [iamTab, setIamTab] = useState<{ focus: string | null; nonce: number } | null>(null);
   const iamOverview = useIamOverview(iamTab ? profile : null);
@@ -136,6 +142,12 @@ export default function App() {
     setActiveTab(id);
     setFilter("");
   };
+  const openPg = (target: PgTarget, title: string) => {
+    const id = pgTabId(target);
+    setPgTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs : [...tabs, { id, target, title }]));
+    setActiveTab(id);
+    setFilter("");
+  };
   const openIam = (focus: string | null = null) => {
     setIamTab((t) => ({ focus, nonce: (t?.nonce ?? 0) + 1 }));
     setActiveTab("iam");
@@ -143,6 +155,9 @@ export default function App() {
   };
   const closeTab = (id: string) => {
     if (id === "iam") setIamTab(null);
+    const pg = pgTabs.find((t) => t.id === id);
+    if (pg) void closePg(qc, pg.target);
+    setPgTabs((tabs) => tabs.filter((t) => t.id !== id));
     setVpcTabs((tabs) => tabs.filter((t) => t.id !== id));
     setExplorerTabs((tabs) => tabs.filter((t) => t.id !== id));
     setDiffTabs((tabs) => tabs.filter((t) => t.id !== id));
@@ -161,6 +176,7 @@ export default function App() {
     ...(iamTab ? [{ id: "iam", title: iamOverview.data ? `🔐 IAM · ${iamOverview.data.accountId}` : "🔐 IAM", closable: true }] : []),
     ...explorerTabs.map((t) => ({ id: t.id, title: `S3: ${t.location.bucket}`, closable: true })),
     ...vpcTabs.map((t) => ({ id: t.id, title: `🗺 ${t.name}`, closable: true })),
+    ...pgTabs.map((t) => ({ id: t.id, title: t.title, closable: true })),
     ...diffTabs.map((t) => ({ id: t.id, title: diffTitle(t.left, t.right), closable: true })),
   ];
   const diffTool: DiffTool = settings.diffTool ?? "filemerge";
@@ -172,12 +188,14 @@ export default function App() {
     sso.rearm(name);
     setProfile(name);
     setRegion(nextRegion);
-    // 버킷과 IAM은 계정에 속하므로 버킷 탭, 비교 탭, IAM 탭을 모두 닫는다.
+    // 버킷과 IAM은 계정에 속하므로 버킷 탭, 비교 탭, IAM 탭을 모두 닫는다. DB 연결은 그 프로필의 자격 증명으로 열었으니 PostgreSQL 탭도 닫는다.
+    pgTabs.forEach((t) => void closePg(qc, t.target));
     setExplorerTabs([]);
     setDiffTabs([]);
     setVpcTabs([]);
+    setPgTabs([]);
     setIamTab(null);
-    if (activeTab.startsWith("s3:") || activeTab.startsWith("vpc:") || activeTab.startsWith("diff:") || activeTab === "iam") setActiveTab("resources");
+    if (activeTab.startsWith("s3:") || activeTab.startsWith("vpc:") || activeTab.startsWith("diff:") || activeTab.startsWith("pg:") || activeTab === "iam") setActiveTab("resources");
     update({ lastProfile: name, lastRegion: nextRegion });
   };
 
@@ -238,6 +256,7 @@ export default function App() {
             onOpenBucket={openExplorer}
             onOpenVpc={openVpc}
             onOpenIam={openIam}
+            onOpenPg={(target) => openPg(target, `🐘 ${target.id}`)}
             onRefresh={refresh}
             active={activeTab === "resources"}
           />
@@ -270,6 +289,11 @@ export default function App() {
               <VpcMapTab profile={profile} region={t.region} vpcId={t.vpcId} name={t.name} active={activeTab === t.id} />
             </div>
           ))}
+        {pgTabs.map((t) => (
+          <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
+            <PgTab target={t.target} title={t.title} active={activeTab === t.id} filter={activeTab === t.id ? filter : ""} />
+          </div>
+        ))}
         {diffTabs.map((t) => (
           <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
             <DiffTab

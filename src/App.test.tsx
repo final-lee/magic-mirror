@@ -4,6 +4,9 @@ import { api } from "./api/client";
 import { reportSsoExpired } from "./api/invoke";
 import { iamApi } from "./iam/api";
 import { ACCOUNT, alice, aliceView, bob, sampleFindings, sampleOverview } from "./iam/fixtures";
+import { pgApi } from "./pg/api";
+import { LOGIN_USER, sampleOverview as samplePgOverview } from "./pg/fixtures";
+import { pgKeys } from "./pg/queries";
 import { vpcApi } from "./vpcmap/api";
 import { sampleTopology } from "./vpcmap/fixtures";
 import { makeResource, renderWithClient, sampleServices } from "./test/utils";
@@ -32,6 +35,7 @@ vi.mock("./explorer/api", () => ({
   onMouseNav: vi.fn(async () => () => {}),
 }));
 vi.mock("./vpcmap/api", () => ({ vpcApi: { topology: vi.fn(), savePng: vi.fn() } }));
+vi.mock("./pg/api", () => ({ pgApi: { close: vi.fn(async () => null) } }));
 vi.mock("./iam/api", () => ({
   iamApi: { overview: vi.fn(), principal: vi.fn(), principalActions: vi.fn(), policy: vi.fn(), accessKeys: vi.fn(), findings: vi.fn() },
 }));
@@ -459,5 +463,170 @@ describe("IAM 작업 공간 탭", () => {
     fireEvent.click(within(screen.getByRole("navigation", { name: "IAM 메뉴" })).getByRole("button", { name: /사용자/ }));
     fireEvent.doubleClick(within(await screen.findByTestId("iam-list")).getByText(bob.name));
     expect(await screen.findByRole("heading", { name: "bob" })).toBeVisible();
+  });
+});
+
+describe("PostgreSQL 탭", () => {
+  const column = (key: string, label: string) => ({ key, label, kind: "text" as const });
+  const rdsService = {
+    id: "rds",
+    name: "RDS",
+    global: false,
+    types: [
+      { id: "db-instances", name: "DB Instances", columns: [column("name", "Identifier"), column("engine", "Engine")] },
+      { id: "db-clusters", name: "DB Clusters", columns: [column("name", "Identifier"), column("engine", "Engine")] },
+    ],
+  };
+  const dbRow = (id: string, engine: string, extra: Record<string, string> = {}) => makeResource(id, { name: id, engine, ...extra });
+  const target = (id: string, kind: "cluster" | "instance" = "cluster") => ({ profile: "prod", region: "ap-northeast-2", kind, id });
+  const pgTabs = () => screen.queryAllByRole("tab", { name: /🐘/ });
+  const closeButtonOf = (tab: HTMLElement) => within(tab.parentElement as HTMLElement).getByRole("button", { name: /닫기/ });
+
+  beforeEach(() => {
+    m.listServices.mockResolvedValue([...sampleServices, rdsService]);
+    m.getSettings.mockResolvedValue({ enabledServices: ["ec2", "rds"], favorites: [], lastProfile: "prod", lastRegion: null });
+    m.listResources.mockImplementation(async (_p, _r, _service, typeId) => ({
+      items:
+        typeId === "db-clusters"
+          ? [dbRow("orders-aurora", "aurora-postgresql"), dbRow("billing", "postgres"), dbRow("legacy", "aurora-mysql")]
+          : [dbRow("orders-aurora-1", "aurora-postgresql", { cluster: "orders-aurora" }), dbRow("reports-db", "postgres", { cluster: "" })],
+      truncated: false,
+    }));
+  });
+
+  const showClusters = async () => {
+    const view = renderWithClient(<App />);
+    fireEvent.click(await screen.findByText("RDS"));
+    fireEvent.click(screen.getByText("DB Clusters"));
+    await screen.findByText("orders-aurora");
+    return view;
+  };
+  const openCluster = async (name: string) => fireEvent.doubleClick(await screen.findByText(name));
+
+  test("double-clicking a PostgreSQL cluster opens an active 🐘 tab titled with its identifier", async () => {
+    await showClusters();
+    await openCluster("orders-aurora");
+    const tab = await screen.findByRole("tab", { name: "🐘 orders-aurora" });
+    expect(tab).toHaveAttribute("aria-selected", "true");
+    expect(pgTabs()).toHaveLength(1);
+  });
+
+  test("double-clicking an Aurora instance opens the tab of its cluster", async () => {
+    renderWithClient(<App />);
+    fireEvent.click(await screen.findByText("RDS"));
+    fireEvent.click(screen.getByText("DB Instances"));
+    fireEvent.doubleClick(await screen.findByText("orders-aurora-1"));
+    expect(await screen.findByRole("tab", { name: "🐘 orders-aurora" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("a PostgreSQL instance outside a cluster opens its own tab", async () => {
+    renderWithClient(<App />);
+    fireEvent.click(await screen.findByText("RDS"));
+    fireEvent.click(screen.getByText("DB Instances"));
+    fireEvent.doubleClick(await screen.findByText("reports-db"));
+    expect(await screen.findByRole("tab", { name: "🐘 reports-db" })).toBeInTheDocument();
+  });
+
+  test("opening the same target twice keeps one tab and activates it", async () => {
+    await showClusters();
+    await openCluster("orders-aurora");
+    await screen.findByRole("tab", { name: "🐘 orders-aurora" });
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    expect(screen.getByRole("tab", { name: "🐘 orders-aurora" })).toHaveAttribute("aria-selected", "false");
+    fireEvent.doubleClick(screen.getByText("orders-aurora"));
+    expect(pgTabs()).toHaveLength(1);
+    expect(screen.getByRole("tab", { name: "🐘 orders-aurora" })).toHaveAttribute("aria-selected", "true");
+    expect(pgApi.close).not.toHaveBeenCalled();
+  });
+
+  test("different targets get their own tabs, in the order they were opened", async () => {
+    await showClusters();
+    await openCluster("orders-aurora");
+    await screen.findByRole("tab", { name: "🐘 orders-aurora" });
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    fireEvent.doubleClick(screen.getByText("billing"));
+    await screen.findByRole("tab", { name: "🐘 billing" });
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["리소스", "🐘 orders-aurora", "🐘 billing"]);
+  });
+
+  test("a MySQL cluster shows the notice and opens no tab", async () => {
+    await showClusters();
+    await openCluster("legacy");
+    const notice = await screen.findByText("PostgreSQL 엔진만 열 수 있어요");
+    expect(notice.closest('[role="status"]')).not.toBeNull();
+    expect(pgTabs()).toHaveLength(0);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["리소스"]);
+  });
+
+  test("closing the tab calls pgApi.close with its target and returns to the resources tab", async () => {
+    await showClusters();
+    await openCluster("orders-aurora");
+    const tab = await screen.findByRole("tab", { name: "🐘 orders-aurora" });
+    fireEvent.click(closeButtonOf(tab));
+    expect(pgApi.close).toHaveBeenCalledTimes(1);
+    expect(pgApi.close).toHaveBeenCalledWith(target("orders-aurora"));
+    expect(pgTabs()).toHaveLength(0);
+    expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("closing a tab does not close the other PostgreSQL tabs", async () => {
+    await showClusters();
+    await openCluster("orders-aurora");
+    const first = await screen.findByRole("tab", { name: "🐘 orders-aurora" });
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    fireEvent.doubleClick(screen.getByText("billing"));
+    await screen.findByRole("tab", { name: "🐘 billing" });
+    fireEvent.click(closeButtonOf(first));
+    expect(pgApi.close).toHaveBeenCalledTimes(1);
+    expect(pgApi.close).toHaveBeenCalledWith(target("orders-aurora"));
+    expect(screen.getByRole("tab", { name: "🐘 billing" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("closing the tab drops that target's cached reads and no other target's, so reopening connects again", async () => {
+    const { qc } = await showClusters();
+    await openCluster("orders-aurora");
+    const tab = await screen.findByRole("tab", { name: "🐘 orders-aurora" });
+    const key = pgKeys.overview(target("orders-aurora"), LOGIN_USER);
+    qc.setQueryData(key, samplePgOverview());
+    qc.setQueryData(pgKeys.sessions(target("billing")), []);
+    fireEvent.click(closeButtonOf(tab));
+    expect(qc.getQueryData(key)).toBeUndefined();
+    expect(qc.getQueryData(pgKeys.sessions(target("billing")))).toEqual([]); // 다른 대상은 그대로
+  });
+
+  test("changing profile closes all PostgreSQL tabs and closes each target", async () => {
+    await showClusters();
+    await openCluster("orders-aurora");
+    await screen.findByRole("tab", { name: "🐘 orders-aurora" });
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    fireEvent.doubleClick(screen.getByText("billing"));
+    await screen.findByRole("tab", { name: "🐘 billing" });
+
+    fireEvent.change(screen.getByRole("combobox", { name: "프로필" }), { target: { value: "dev" } });
+    expect(pgTabs()).toHaveLength(0);
+    expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
+    expect(pgApi.close).toHaveBeenCalledTimes(2);
+    expect(pgApi.close).toHaveBeenCalledWith(target("orders-aurora"));
+    expect(pgApi.close).toHaveBeenCalledWith(target("billing"));
+  });
+
+  test("changing profile closes the PostgreSQL tabs even when the resources tab is the active one", async () => {
+    await showClusters();
+    await openCluster("orders-aurora");
+    await screen.findByRole("tab", { name: "🐘 orders-aurora" });
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "프로필" }), { target: { value: "dev" } });
+    expect(pgTabs()).toHaveLength(0);
+    expect(pgApi.close).toHaveBeenCalledWith(target("orders-aurora"));
+    expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("changing the region keeps the tab, like the other tabs that carry their own region", async () => {
+    await showClusters();
+    await openCluster("orders-aurora");
+    await screen.findByRole("tab", { name: "🐘 orders-aurora" });
+    fireEvent.change(screen.getByRole("combobox", { name: "리전" }), { target: { value: "us-east-1" } });
+    expect(pgTabs()).toHaveLength(1);
+    expect(pgApi.close).not.toHaveBeenCalled();
   });
 });

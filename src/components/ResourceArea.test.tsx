@@ -112,3 +112,121 @@ describe("IAM workspace entry", () => {
     expect(onOpenIam).not.toHaveBeenCalled();
   });
 });
+
+describe("PostgreSQL entry", () => {
+  const column = (key: string) => ({ key, label: key, kind: "text" as const });
+  const rdsService = {
+    id: "rds",
+    name: "RDS",
+    global: false,
+    types: ["db-instances", "db-clusters"].map((id) => ({ id, name: id, columns: [column("name"), column("engine")] })),
+  };
+  const typeOf = (id: string) => rdsService.types.find((t) => t.id === id)!;
+  const dbRow = (id: string, engine: string, extra: Record<string, string> = {}) => makeResource(id, { name: id, engine, ...extra });
+  const mockRows = (...items: ReturnType<typeof dbRow>[]) => vi.mocked(api.listResources).mockResolvedValue({ items, truncated: false });
+  const target = (kind: "cluster" | "instance", id: string) => ({ profile: "prod", region: "ap-northeast-2", kind, id });
+  const NOT_POSTGRES = "PostgreSQL 엔진만 열 수 있어요";
+
+  afterEach(() => vi.useRealTimers());
+
+  test.each(["aurora-postgresql", "postgres"])("double clicking a %s cluster opens it with the profile and region", async (engine) => {
+    mockRows(dbRow("orders-aurora", engine));
+    const onOpenPg = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenPg={onOpenPg} service={rdsService} type={typeOf("db-clusters")} />);
+    fireEvent.doubleClick(await screen.findByText("orders-aurora"));
+    expect(onOpenPg).toHaveBeenCalledTimes(1);
+    expect(onOpenPg).toHaveBeenCalledWith(target("cluster", "orders-aurora"));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  test("double clicking an Aurora instance opens the cluster it belongs to", async () => {
+    mockRows(dbRow("orders-aurora-1", "aurora-postgresql", { cluster: "orders-aurora" }));
+    const onOpenPg = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenPg={onOpenPg} service={rdsService} type={typeOf("db-instances")} />);
+    fireEvent.doubleClick(await screen.findByText("orders-aurora-1"));
+    expect(onOpenPg).toHaveBeenCalledWith(target("cluster", "orders-aurora"));
+  });
+
+  test("a PostgreSQL instance without a cluster opens as an instance", async () => {
+    mockRows(dbRow("billing-db", "postgres", { cluster: "" }));
+    const onOpenPg = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenPg={onOpenPg} service={rdsService} type={typeOf("db-instances")} />);
+    fireEvent.doubleClick(await screen.findByText("billing-db"));
+    expect(onOpenPg).toHaveBeenCalledWith(target("instance", "billing-db"));
+  });
+
+  test("Enter on the selected row opens it too", async () => {
+    mockRows(dbRow("orders-aurora", "aurora-postgresql"));
+    const onOpenPg = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenPg={onOpenPg} service={rdsService} type={typeOf("db-clusters")} />);
+    fireEvent.click(await screen.findByText("orders-aurora"));
+    fireEvent.keyDown(screen.getByTestId("resource-table"), { key: "Enter" });
+    expect(onOpenPg).toHaveBeenCalledWith(target("cluster", "orders-aurora"));
+  });
+
+  test("a PostgreSQL row opens nothing when the page gave no way to open tabs", async () => {
+    mockRows(dbRow("orders-aurora", "aurora-postgresql"));
+    renderWithClient(<ResourceArea {...props} service={rdsService} type={typeOf("db-clusters")} />);
+    fireEvent.doubleClick(await screen.findByText("orders-aurora"));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  test.each([
+    ["db-clusters", "aurora-mysql"],
+    ["db-instances", "mysql"],
+  ])("a %s row with the %s engine shows the notice instead of opening", async (typeId, engine) => {
+    mockRows(dbRow("legacy", engine));
+    const onOpenPg = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenPg={onOpenPg} service={rdsService} type={typeOf(typeId)} />);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    fireEvent.doubleClick(await screen.findByText("legacy"));
+    expect(screen.getByRole("status")).toHaveTextContent(NOT_POSTGRES);
+    expect(onOpenPg).not.toHaveBeenCalled();
+  });
+
+  test("the notice goes away after 5 seconds", async () => {
+    mockRows(dbRow("legacy", "aurora-mysql"));
+    renderWithClient(<ResourceArea {...props} onOpenPg={vi.fn()} service={rdsService} type={typeOf("db-clusters")} />);
+    const row = await screen.findByText("legacy");
+    vi.useFakeTimers();
+    fireEvent.doubleClick(row);
+    expect(screen.getByRole("status")).toHaveTextContent(NOT_POSTGRES);
+    act(() => {
+      vi.advanceTimersByTime(4_999);
+    });
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  test("showing the notice again restarts the 5 seconds", async () => {
+    mockRows(dbRow("legacy", "aurora-mysql"));
+    renderWithClient(<ResourceArea {...props} onOpenPg={vi.fn()} service={rdsService} type={typeOf("db-clusters")} />);
+    const row = await screen.findByText("legacy");
+    vi.useFakeTimers();
+    fireEvent.doubleClick(row);
+    act(() => {
+      vi.advanceTimersByTime(3_000);
+    });
+    fireEvent.doubleClick(row);
+    act(() => {
+      vi.advanceTimersByTime(3_000); // 처음부터는 6초, 두 번째부터는 3초
+    });
+    expect(screen.getByRole("status")).toHaveTextContent(NOT_POSTGRES);
+    act(() => {
+      vi.advanceTimersByTime(2_000);
+    });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  test("other services do not call it, whatever the engine value says", async () => {
+    mockRows(dbRow("web-1", "postgres", { cluster: "x" }));
+    const onOpenPg = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenPg={onOpenPg} service={ec2} type={ec2.types[0]} />);
+    fireEvent.doubleClick(await screen.findByText("web-1"));
+    expect(onOpenPg).not.toHaveBeenCalled();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+});
