@@ -1,12 +1,15 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type UIEvent } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type UIEvent } from "react";
 import { BadgeList } from "./Badges";
 import { isActual, isEditable, isShown, policyCell, rowKey, type AssignmentTab, type Column } from "./assignments";
+import { GridPopover } from "./GridPopover";
+import { parsePos, posKey, type Pos } from "./gridPos";
 import { KIND_LABEL } from "./labels";
 import { SCOPE_LABEL } from "./PolicyList";
 import { changeBlockReason } from "./protect";
 import { policyRoute, principalRoute, type IamRoute } from "./route";
 import type { IamOverview, PrincipalKind, PrincipalSummary } from "./types";
 import type { useAssignmentDraft } from "./useAssignmentDraft";
+import { takeFocus, usePaintDrag } from "./usePaintDrag";
 
 /** 데이터 행의 높이. 고정이라서 보이는 행만 그릴 수 있다 */
 export const ROW_H = 28;
@@ -21,7 +24,6 @@ const CELL_W = 144;
 const END_W = 136;
 /** 머리 행과 머리 열이 가리는 만큼을 CSS(scroll-padding)도 알아야 해서 같은 값을 변수로 넘긴다 */
 const SIZES = { "--asg-head": `${HEAD_H}px`, "--asg-name": `${NAME_W}px`, "--asg-end": `${END_W}px` } as CSSProperties;
-const POP_W = 300;
 
 const NO_ROWS = "보여줄 행이 없어요";
 const NO_COLUMNS: Record<AssignmentTab, string> = { policies: "붙은 정책이 없어요. 열 추가로 정책을 더해 보세요", members: "그룹이 없어요" };
@@ -39,24 +41,11 @@ export function visibleRange(scrollTop: number, viewport: number, rowHeight: num
 
 type Draft = Pick<ReturnType<typeof useAssignmentDraft>, "items" | "toggle" | "paint">;
 
-/** 표 안의 자리. r: 데이터 행(-1이면 열 머리 행), c: 열(-1이면 행 머리 열) */
-interface Pos {
-  r: number;
-  c: number;
-}
-const posKey = (r: number, c: number) => `${r}:${c}`;
-const parsePos = (key: string): Pos => {
-  const [r, c] = key.split(":").map(Number);
-  return { r, c };
-};
-
 /** 그려지는 줄: 종류 머리이거나 데이터 행(r은 rows의 번호) */
 type Line = { type: "head"; kind: PrincipalKind; count: number } | { type: "row"; r: number };
 
 /** 칸 위에 떠 있는 작은 창: 그룹으로 받은 칸의 안내이거나 행 메뉴. 행은 번호가 아니라 ARN으로 가리킨다 */
-type Pop =
-  | { type: "via"; at: string; groups: string[]; x: number; y: number; trigger: HTMLElement }
-  | { type: "menu"; arn: string; x: number; y: number; trigger: HTMLElement };
+type Pop = { type: "via"; at: string; groups: string[]; trigger: HTMLElement } | { type: "menu"; arn: string; trigger: HTMLElement };
 
 interface CellView {
   state: string;
@@ -99,13 +88,12 @@ interface Props {
 
 /**
  * 할당 표: 주체 × 관리형 정책(정책 탭), 사용자 × 그룹(그룹 구성원 탭).
- * - 칸을 누르면 담고, 누른 채 끌면 지나간 칸을 처음 칸의 결과대로 칠한다.
+ * - 칸을 누르면 담고, 누른 채 끌면 지나간 칸을 처음 칸의 결과대로 칠한다. 빨리 끌어도 사이 칸을 건너뛰지 않는다.
  * - 키보드: 화살표 이동, Space 토글, Shift+화살표 범위, Esc 범위 지우기. 초점은 한 칸만 탭이 닿는다(roving tabindex).
  * - 행은 보이는 부분만 그린다(고정 행 높이). 머리 행과 머리 열은 고정한다.
  */
 export function AssignmentGrid({ overview, tab, rows, columns, draft, grouped, onOpen, onMatch }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const popRef = useRef<HTMLDivElement>(null);
   const popId = useId();
   const [topRow, setTopRow] = useState(0);
   const [viewport, setViewport] = useState(0);
@@ -113,10 +101,6 @@ export function AssignmentGrid({ overview, tab, rows, columns, draft, grouped, o
   const [anchor, setAnchor] = useState<Pos | null>(null);
   const [pop, setPop] = useState<Pop | null>(null);
   const [focusReq, setFocusReq] = useState<{ pos: Pos; n: number } | null>(null);
-  /** 끌어서 칠하는 중이면 처음 칸이 만든 목표 상태 */
-  const painting = useRef<{ want: boolean } | null>(null);
-  /** 방금 눌러서 이미 처리한 칸. 이어서 오는 click은 한 번 건너뛴다 */
-  const handled = useRef<string | null>(null);
 
   const { lines, at } = useMemo(() => {
     const count: Record<PrincipalKind, number> = { user: 0, group: 0, role: 0 };
@@ -210,55 +194,7 @@ export function AssignmentGrid({ overview, tab, rows, columns, draft, grouped, o
     setPop(null);
   }, [rows]);
 
-  // 끌기는 창 어디서 놓아도, 포인터가 취소돼도, 창이 초점을 잃어도 끝난다
-  useEffect(() => {
-    const end = (e: Event) => {
-      painting.current = null;
-      if (e.type !== "pointerup") {
-        handled.current = null;
-        return;
-      }
-      // 누른 칸이 아닌 곳에서 놓았으면 click이 그 칸에 오지 않는다
-      const onCell = e.target instanceof Element ? e.target.closest<HTMLElement>("[data-pos]") : null;
-      if (onCell?.dataset.pos !== handled.current) handled.current = null;
-    };
-    window.addEventListener("pointerup", end);
-    window.addEventListener("pointercancel", end);
-    window.addEventListener("blur", end);
-    return () => {
-      window.removeEventListener("pointerup", end);
-      window.removeEventListener("pointercancel", end);
-      window.removeEventListener("blur", end);
-    };
-  }, []);
-
-  // 떠 있는 창: 열리면 안으로 초점을 주고, 바깥을 누르면 닫는다
-  useEffect(() => {
-    if (!pop) return;
-    const box = popRef.current;
-    (box?.querySelector<HTMLElement>("button:not(:disabled)") ?? box)?.focus();
-    const onDown = (e: globalThis.PointerEvent) => {
-      const target = e.target as Node;
-      if (!box?.contains(target) && !pop.trigger.contains(target)) setPop(null);
-    };
-    document.addEventListener("pointerdown", onDown, true);
-    return () => document.removeEventListener("pointerdown", onDown, true);
-  }, [pop]);
-  // 창 아래로 넘치면(맨 아래 행) 눌린 곳 위로 올린다. 레이아웃을 재야 해서 그린 직후에 한다
-  useLayoutEffect(() => {
-    const box = popRef.current;
-    if (!pop || !box) return;
-    const size = box.getBoundingClientRect();
-    if (size.bottom > window.innerHeight - 8) box.style.top = `${Math.max(8, pop.trigger.getBoundingClientRect().top - size.height - 4)}px`;
-  }, [pop]);
-  const closePop = (restoreFocus: boolean) => {
-    if (restoreFocus && pop?.trigger.isConnected) pop.trigger.focus();
-    setPop(null);
-  };
-  const anchorOf = (el: HTMLElement) => {
-    const box = el.getBoundingClientRect();
-    return { x: Math.min(box.left, Math.max(8, window.innerWidth - POP_W - 8)), y: box.bottom + 4 };
-  };
+  const closePop = useCallback(() => setPop(null), []);
 
   const openRow = (r: number) => onOpen(principalRoute(rows[r].kind, rows[r].arn));
   const openColumn = (c: number) => {
@@ -293,8 +229,9 @@ export function AssignmentGrid({ overview, tab, rows, columns, draft, grouped, o
     const groups = policyCell(overview, row, column).via;
     if (groups.length === 0) return;
     const at = posKey(r, c);
-    setPop((p) => (p?.type === "via" && p.at === at ? null : { type: "via", at, groups, ...anchorOf(trigger), trigger }));
+    setPop((p) => (p?.type === "via" && p.at === at ? null : { type: "via", at, groups, trigger }));
   };
+  const drag = usePaintDrag({ overview, tab, rows, columns, draft, press, onStart: () => setAnchor(null) });
 
   // 범위: 기준 칸과 지금 초점 칸이 이루는 사각형. 한 칸이면 범위가 아니다
   const range = useMemo(() => {
@@ -333,7 +270,7 @@ export function AssignmentGrid({ overview, tab, rows, columns, draft, grouped, o
     if (!el?.dataset.pos) return;
     const pos = parsePos(el.dataset.pos);
     const isCell = pos.r >= 0 && pos.c >= 0;
-    handled.current = null;
+    drag.forget();
     switch (e.key) {
       case "ArrowDown":
       case "ArrowUp":
@@ -368,36 +305,6 @@ export function AssignmentGrid({ overview, tab, rows, columns, draft, grouped, o
     }
   };
 
-  const onCellPointerDown = (e: PointerEvent<HTMLButtonElement>, r: number, c: number) => {
-    if (e.button !== 0 || e.ctrlKey) return;
-    setAnchor(null);
-    e.currentTarget.focus({ preventScroll: true }); // 누른 칸에서 키보드를 이어 쓰게 한다(WebKit은 눌러도 버튼에 초점을 주지 않는다)
-    const row = rows[r];
-    const column = columns[c].id;
-    if (!isEditable(overview, tab, row, column)) {
-      handled.current = null; // 그룹으로만 받은 칸은 click에서 안내를 연다
-      return;
-    }
-    // 처음 칸이 정한 목표를 끌고 가는 내내 쓴다. 칸마다 다시 정하면 이미 목표인 칸이 뒤집힌다
-    const want = !isShown(draft.items, overview, tab, row, column);
-    painting.current = { want };
-    handled.current = posKey(r, c);
-    draft.paint(tab, [{ row, column }], want);
-  };
-  const onCellPointerEnter = (e: PointerEvent<HTMLButtonElement>, r: number, c: number) => {
-    const current = painting.current;
-    if (!current) return;
-    if (e.pointerType === "mouse" && (e.buttons & 1) === 0) {
-      painting.current = null; // 창 밖에서 놓쳐 버린 경우
-      return;
-    }
-    draft.paint(tab, [{ row: rows[r], column: columns[c].id }], current.want);
-  };
-  const onCellClick = (e: MouseEvent<HTMLButtonElement>, r: number, c: number) => {
-    const done = handled.current === posKey(r, c);
-    handled.current = null;
-    if (!done) press(r, c, e.currentTarget);
-  };
   const onFocusAt = (r: number, c: number) => setActive((a) => (a && a.r === r && a.c === c ? a : { r, c }));
 
   const onScroll = (e: UIEvent<HTMLDivElement>) => {
@@ -451,7 +358,11 @@ export function AssignmentGrid({ overview, tab, rows, columns, draft, grouped, o
                   </div>
                 </th>
               ))}
-              {withEnd && <th role="presentation" aria-hidden="true" className="asg-end" />}
+              {withEnd && (
+                <th role="columnheader" scope="col" className="asg-end">
+                  <span className="asg-sr">인라인·경계</span>
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -487,9 +398,10 @@ export function AssignmentGrid({ overview, tab, rows, columns, draft, grouped, o
                         aria-haspopup="menu"
                         aria-expanded={pop?.type === "menu" && pop.arn === row.arn}
                         tabIndex={roving?.r === r ? 0 : -1}
+                        onPointerDown={takeFocus}
                         onClick={(e) => {
                           const trigger = e.currentTarget;
-                          setPop((p) => (p?.type === "menu" && p.arn === row.arn ? null : { type: "menu", arn: row.arn, ...anchorOf(trigger), trigger }));
+                          setPop((p) => (p?.type === "menu" && p.arn === row.arn ? null : { type: "menu", arn: row.arn, trigger }));
                         }}
                       >
                         ⋯
@@ -511,12 +423,13 @@ export function AssignmentGrid({ overview, tab, rows, columns, draft, grouped, o
                           className={`asg-cell asg-${v.tone}`}
                           data-pos={posKey(r, c)}
                           aria-label={`${row.name} · ${column.name}: ${v.state}`}
+                          title={v.state}
                           disabled={!!lock}
                           tabIndex={stop(r, c)}
                           onFocus={() => onFocusAt(r, c)}
-                          onPointerDown={(e) => onCellPointerDown(e, r, c)}
-                          onPointerEnter={(e) => onCellPointerEnter(e, r, c)}
-                          onClick={(e) => onCellClick(e, r, c)}
+                          onPointerDown={(e) => drag.down(e, r, c)}
+                          onPointerEnter={(e) => drag.enter(e, r, c)}
+                          onClick={(e) => drag.click(e, r, c)}
                         >
                           <span aria-hidden="true">{v.glyph}</span>
                           {v.overlay && (
@@ -548,23 +461,7 @@ export function AssignmentGrid({ overview, tab, rows, columns, draft, grouped, o
         {empty && <div className="empty small">{empty}</div>}
       </div>
       {pop?.type === "via" && (
-        <div
-          ref={popRef}
-          className="asg-pop"
-          role="dialog"
-          aria-label="받은 곳"
-          tabIndex={-1}
-          style={{ left: pop.x, top: pop.y }}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              e.stopPropagation();
-              closePop(true);
-            }
-          }}
-          onBlur={(e) => {
-            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) closePop(false);
-          }}
-        >
+        <GridPopover role="dialog" label="받은 곳" trigger={pop.trigger} onClose={closePop}>
           <ul>
             {pop.groups.map((group, i) => (
               <li key={group}>
@@ -575,26 +472,10 @@ export function AssignmentGrid({ overview, tab, rows, columns, draft, grouped, o
               </li>
             ))}
           </ul>
-        </div>
+        </GridPopover>
       )}
       {pop?.type === "menu" && menuRow && (
-        <div
-          ref={popRef}
-          className="asg-pop"
-          role="menu"
-          aria-label={`${menuRow.name} 행 메뉴`}
-          tabIndex={-1}
-          style={{ left: pop.x, top: pop.y }}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              e.stopPropagation();
-              closePop(true);
-            }
-          }}
-          onBlur={(e) => {
-            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) closePop(false);
-          }}
-        >
+        <GridPopover role="menu" label={`${menuRow.name} 행 메뉴`} trigger={pop.trigger} onClose={closePop}>
           <button
             type="button"
             role="menuitem"
@@ -608,7 +489,7 @@ export function AssignmentGrid({ overview, tab, rows, columns, draft, grouped, o
           >
             다른 주체와 같게
           </button>
-        </div>
+        </GridPopover>
       )}
     </div>
   );

@@ -2,7 +2,7 @@ import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithClient } from "../test/utils";
-import { AssignmentsHarness, cellOf, grid, rowHeads, rowOf, tray } from "../test/assignmentsHarness";
+import { AssignmentsHarness, cellOf, columnHeads, grid, rowHeads, rowOf, tray } from "../test/assignmentsHarness";
 import { iamApi } from "./api";
 import { adminPolicy, alice, appRole, BADGES, bob, ciBot, orphanPolicy, principal, readOnlyPolicy, sampleOverview } from "./fixtures";
 import type { IamOverview, PolicyRef, PolicySummary } from "./types";
@@ -127,7 +127,7 @@ describe("adding a column", () => {
     fireEvent.click(await screen.findByRole("option", { name: /legacy-unused/ }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    const heads = within(grid()).getAllByRole("columnheader").slice(1);
+    const heads = columnHeads();
     expect(heads.map((h) => within(h).getByRole("button").textContent)).toEqual(["AdministratorAccess", "ReadOnlyAccess", "app-deploy", "legacy-unused"]);
     expect(within(heads[3]).getByText("고객 관리형")).toBeInTheDocument();
     const column = within(grid()).getAllByRole("button", { name: /· legacy-unused: / });
@@ -142,7 +142,7 @@ describe("adding a column", () => {
     setup();
     fireEvent.click(screen.getByRole("button", { name: "열 추가" }));
     fireEvent.click(await screen.findByRole("option", { name: /AmazonS3FullAccess/ }));
-    const head = within(grid()).getAllByRole("columnheader").slice(1).pop() as HTMLElement;
+    const head = columnHeads().pop() as HTMLElement;
     expect(within(head).getByRole("button")).toHaveTextContent("AmazonS3FullAccess");
     expect(within(head).getByText("AWS 관리형")).toBeInTheDocument();
     expect(cellOf("bob", "AmazonS3FullAccess")).toHaveAccessibleName("bob · AmazonS3FullAccess: 없음");
@@ -161,15 +161,36 @@ describe("adding a column", () => {
     expect(cellOf("bob", "legacy-unused")).toBeInTheDocument();
   });
 
-  test("a policy in the tray stays a column after leaving the screen and coming back", async () => {
-    // 화면을 떠나면 열 목록은 사라진다. 그래도 장바구니에 담긴 붙이기가 표에서 안 보이면 안 된다
+  test("the columns that were added are still there after leaving the screen and coming back", async () => {
+    // 더한 열의 목록은 이 화면 밖(IamTab)에 있다. 다른 화면을 보고 돌아와도 같은 순서로 남는다
     setup();
     fireEvent.click(screen.getByRole("button", { name: "열 추가" }));
     fireEvent.click(await screen.findByRole("option", { name: /legacy-unused/ }));
-    fireEvent.click(cellOf("alice", "legacy-unused"));
+    fireEvent.click(screen.getByRole("button", { name: "열 추가" }));
+    fireEvent.click(await screen.findByRole("option", { name: /AmazonS3FullAccess/ }));
+    const names = () => columnHeads().map((h) => within(h).getByRole("button").textContent);
+    const all = ["AdministratorAccess", "ReadOnlyAccess", "app-deploy", "legacy-unused", "AmazonS3FullAccess"];
+    expect(names()).toEqual(all);
+
     fireEvent.click(screen.getByRole("button", { name: "화면 전환" }));
     expect(screen.queryByRole("grid")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "화면 전환" }));
+    expect(names()).toEqual(all);
+    expect(cellOf("alice", "legacy-unused")).toHaveAccessibleName("alice · legacy-unused: 없음");
+  });
+
+  test("a policy in the tray stays a column even when nobody has it any more", async () => {
+    // ci-bot만 legacy-unused를 갖고 있다. alice를 ci-bot과 같게 만들어 붙이기를 담은 뒤, 개요를 다시 불러오니 ci-bot에서도 떨어졌다.
+    // 열이 있을 이유가 사라져도 담긴 변경이 표에서 안 보이면 안 된다
+    const carrier = { ...ciBot, attached: [orphanPolicy.arn] };
+    const { update } = setup(sampleOverview({ users: [alice, bob, carrier] }));
+    openMenu("alice");
+    chooseMatch();
+    await pickSource(/ci-bot/);
+    fireEvent.click(within(matchDialog()).getByRole("button", { name: "담기" }));
+    expect(tray()).toBe("변경 1개 · legacy-unused 붙이기 · alice");
+
+    update(sampleOverview());
     expect(cellOf("alice", "legacy-unused")).toHaveAccessibleName("alice · legacy-unused: 붙일 예정");
     expect(cellOf("bob", "legacy-unused")).toHaveAccessibleName("bob · legacy-unused: 없음");
 
@@ -184,7 +205,7 @@ describe("adding a column", () => {
     await screen.findByRole("option", { name: /legacy-unused/ });
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(within(grid()).getAllByRole("columnheader")).toHaveLength(4); // 행 머리 열 + 정책 3개
+    expect(columnHeads()).toHaveLength(3); // 정책 3개 그대로
   });
 });
 
@@ -192,7 +213,7 @@ describe("the members tab", () => {
   test("toggles membership of a user in a group", () => {
     setup(sampleOverview(), { initialTab: "members" });
     expect(rowHeads()).toEqual(["alice", "bob", "ci-bot"]); // 사용자만, 종류 머리 없이
-    const heads = within(grid()).getAllByRole("columnheader").slice(1);
+    const heads = columnHeads();
     expect(heads.map((h) => within(h).getByRole("button").textContent)).toEqual(["admins", "dev-team"]); // 이름순
 
     expect(cellOf("alice", "dev-team")).toHaveAccessibleName("alice · dev-team: 속함");

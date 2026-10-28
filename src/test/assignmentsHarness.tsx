@@ -6,6 +6,7 @@ import type { AssignmentTab } from "../iam/assignments";
 import { Assignments } from "../iam/AssignmentsScreen";
 import type { IamRoute } from "../iam/route";
 import type { IamChange, IamOverview } from "../iam/types";
+import { useAddedColumns } from "../iam/useAddedColumns";
 import { useAssignmentDraft } from "../iam/useAssignmentDraft";
 
 interface Props {
@@ -19,15 +20,16 @@ interface Props {
 
 export function AssignmentsHarness({ overview, profile = "prod", initialTab = "policies", onOpen = () => {}, onPreview = () => {} }: Props) {
   const draft = useAssignmentDraft(profile, overview);
+  const added = useAddedColumns(profile);
   const [tab, setTab] = useState<AssignmentTab>(initialTab);
   const [filter, setFilter] = useState("");
-  // IAM 안의 다른 화면으로 갔다 돌아오는 일: 화면은 사라졌다 다시 생기고, 장바구니(draft)는 IamTab처럼 그대로다
+  // IAM 안의 다른 화면으로 갔다 돌아오는 일: 화면은 사라졌다 다시 생기고, 장바구니(draft)와 더한 열은 IamTab처럼 그대로다
   const [shown, setShown] = useState(true);
   return (
     <>
       <input aria-label="툴바 필터" value={filter} onChange={(e) => setFilter(e.target.value)} />
       <button onClick={() => setShown((s) => !s)}>화면 전환</button>
-      {shown && <Assignments key={profile} profile={profile} overview={overview} draft={draft} tab={tab} onTab={setTab} onOpen={onOpen} onPreview={onPreview} filter={filter} />}
+      {shown && <Assignments key={profile} profile={profile} overview={overview} draft={draft} extra={added.arns} onAddColumn={added.add} tab={tab} onTab={setTab} onOpen={onOpen} onPreview={onPreview} filter={filter} />}
     </>
   );
 }
@@ -40,5 +42,7 @@ export const grid = () => screen.getByRole("grid", { name: "할당 표" });
 export const tray = () => screen.queryByText(/^변경 \d+개 · /)?.textContent ?? null;
 /** 표의 행 머리를 위에서부터: 종류 머리는 "사용자 3"처럼, 주체는 이름으로 */
 export const rowHeads = () => within(grid()).getAllByRole("rowheader").map((h) => within(h).queryAllByRole("button")[0]?.textContent ?? h.textContent);
+/** 정책(그룹) 열의 머리: 행 머리 열의 이름과 맨 끝 열의 머리는 빼고, 이름 버튼이 있는 것만 */
+export const columnHeads = () => within(grid()).getAllByRole("columnheader").filter((h) => within(h).queryByRole("button"));
 /** 주체 한 명의 행 */
 export const rowOf = (name: string) => screen.getByRole("button", { name }).closest("tr") as HTMLElement;

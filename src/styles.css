@@ -469,7 +469,10 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .iam-asg .asg-table thead th { position: sticky; top: 0; z-index: 3; padding: 6px 8px 4px; vertical-align: top; background: var(--bg); color: var(--text); font-size: 12px; cursor: default; white-space: normal; }
 .iam-asg .asg-table thead .asg-corner { left: 0; z-index: 5; vertical-align: bottom; color: var(--dim); font-size: 11px; }
 .iam-asg .asg-table thead .asg-end { right: 0; z-index: 4; }
-.iam-asg .iam-badge, .iam-asg .iam-chip { padding: 0 5px; line-height: 14px; font-size: 10px; }
+/* 표 안의 배지와 칩만 작게 한다. 같은 화면의 선택 창(열 추가, 같게 만들기)은 다른 곳과 같은 크기를 쓴다 */
+.iam-asg .asg-table .iam-badge, .iam-asg .asg-table .iam-chip { padding: 0 5px; line-height: 14px; font-size: 10px; }
+/* 눈에는 안 보이고 읽어 주는 도구에만 읽히는 글: 맨 끝 열의 머리 */
+.iam-asg .asg-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .iam-asg .asg-colhead .asg-name { display: block; width: 100%; font-weight: 600; line-height: 14px; }
 .iam-asg .asg-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; word-break: break-all; }
 .iam-asg .asg-colmeta { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }

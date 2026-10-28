@@ -1,9 +1,9 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, createEvent, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithClient } from "../test/utils";
-import { AssignmentsHarness, cellOf, grid, rowHeads, tray } from "../test/assignmentsHarness";
+import { AssignmentsHarness, cellOf, columnHeads, grid, rowHeads, rowOf, tray } from "../test/assignmentsHarness";
 import { ROW_H, visibleRange } from "./AssignmentGrid";
-import { adminPolicy, admins, alice, appRole, bob, ciBot, deployPolicy, devTeam, principal, readOnlyPolicy, sampleOverview } from "./fixtures";
+import { adminPolicy, admins, alice, appRole, bob, ciBot, deployPolicy, devTeam, policyArn, principal, readOnlyPolicy, sampleOverview } from "./fixtures";
 import type { IamOverview } from "./types";
 
 vi.mock("./api", () => ({ iamApi: { listPolicies: vi.fn() } }));
@@ -61,7 +61,7 @@ describe("the policy table", () => {
     setup();
     expect(rowHeads()).toEqual(["사용자 3", "alice", "bob", "ci-bot", "그룹 2", "admins", "dev-team", "역할 3", "app-role", "AWSServiceRoleForSupport", "partner-access"]);
 
-    const heads = within(grid()).getAllByRole("columnheader").slice(1); // 첫 머리는 행 머리 열의 이름
+    const heads = columnHeads();
     expect(heads.map((h) => within(h).getByRole("button").textContent)).toEqual(["AdministratorAccess", "ReadOnlyAccess", "app-deploy"]);
     expect(within(heads[0]).getByText("관리자급")).toBeInTheDocument();
     expect(within(heads[0]).getAllByText("AWS 관리형")).toHaveLength(1); // 범위 칸이 알려 주는 AWS 관리형 배지는 되풀이하지 않는다
@@ -73,6 +73,27 @@ describe("the policy table", () => {
     expect(cellOf("alice", "app-deploy")).toHaveAccessibleName("alice · app-deploy: dev-team 그룹에서 받음");
     expect(cellOf("dev-team", "app-deploy")).toHaveAccessibleName("dev-team · app-deploy: 직접 붙음");
     expect(cellOf("app-role", "ReadOnlyAccess")).toHaveAccessibleName("app-role · ReadOnlyAccess: 직접 붙음");
+  });
+
+  test("the end column has a header of its own, so the header row and the body rows have the same cells", () => {
+    setup();
+    const count = Number(grid().getAttribute("aria-colcount"));
+    const headerRow = within(grid()).getAllByRole("row")[0];
+    expect(within(headerRow).getAllByRole("columnheader")).toHaveLength(count);
+    expect(within(headerRow).getByRole("columnheader", { name: "인라인·경계" })).toBeInTheDocument();
+    const body = rowOf("alice");
+    expect(within(body).queryAllByRole("rowheader").length + within(body).queryAllByRole("gridcell").length).toBe(count);
+  });
+
+  test("every cell has a hover text with its state, which names the group behind a ◐", () => {
+    const both = principal("user", "dana", { attached: [deployPolicy.arn], groups: ["dev-team"] });
+    setup(sampleOverview({ users: [alice, bob, ciBot, both] }));
+    expect(cellOf("alice", "app-deploy")).toHaveAttribute("title", "dev-team 그룹에서 받음");
+    expect(cellOf("dana", "app-deploy")).toHaveAttribute("title", "직접 붙음, dev-team 그룹에서도 받음");
+    expect(cellOf("alice", "ReadOnlyAccess")).toHaveAttribute("title", "직접 붙음");
+    expect(cellOf("bob", "ReadOnlyAccess")).toHaveAttribute("title", "없음");
+    fireEvent.click(cellOf("bob", "ReadOnlyAccess"));
+    expect(cellOf("bob", "ReadOnlyAccess")).toHaveAttribute("title", "붙일 예정");
   });
 
   test("a policy attached directly and through a group says both", () => {
@@ -121,6 +142,37 @@ describe("clicking a cell", () => {
     expect(tray()).toBe("변경 1개 · ReadOnlyAccess 붙이기 · bob");
     await userEvent.click(cellOf("bob", "ReadOnlyAccess"));
     expect(tray()).toBeNull();
+  });
+
+  test("a press takes the pointerdown over, so the browser does not move the focus off the cell or start selecting text", () => {
+    setup();
+    for (const [row, column] of [
+      ["bob", "ReadOnlyAccess"], // 칠할 수 있는 칸
+      ["alice", "app-deploy"], // 그룹으로만 받은 칸
+    ]) {
+      const cell = cellOf(row, column);
+      const down = createEvent.pointerDown(cell, { button: 0, buttons: 1 });
+      fireEvent(cell, down);
+      expect(down.defaultPrevented).toBe(true);
+      expect(cell).toHaveFocus();
+      fireEvent.pointerUp(window);
+    }
+    // 오른쪽 버튼은 브라우저의 메뉴에 맡긴다
+    const cell = cellOf("ci-bot", "ReadOnlyAccess");
+    const secondary = createEvent.pointerDown(cell, { button: 2, buttons: 2 });
+    fireEvent(cell, secondary);
+    expect(secondary.defaultPrevented).toBe(false);
+  });
+
+  test("after a press and a click the keyboard carries on from that cell", async () => {
+    setup();
+    await userEvent.click(cellOf("bob", "ReadOnlyAccess"));
+    expect(cellOf("bob", "ReadOnlyAccess")).toHaveFocus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(cellOf("ci-bot", "ReadOnlyAccess")).toHaveFocus();
+    await userEvent.click(cellOf("alice", "app-deploy"));
+    await userEvent.keyboard("{Escape}{ArrowLeft}");
+    expect(cellOf("alice", "ReadOnlyAccess")).toHaveFocus();
   });
 
   test("a group or a role can be attached to as well", () => {
@@ -174,10 +226,76 @@ describe("a cell that is only inherited", () => {
     expect(screen.queryByText("dev-team 그룹에서 받아요")).not.toBeInTheDocument();
   });
 
-  test("pressing the same cell again closes the note", () => {
+  test("pressing the same cell again closes the note", async () => {
     setup();
-    fireEvent.click(cellOf("alice", "app-deploy"));
-    fireEvent.click(cellOf("alice", "app-deploy"));
+    await userEvent.click(cellOf("alice", "app-deploy"));
+    expect(screen.getByText("dev-team 그룹에서 받아요")).toBeInTheDocument();
+    await userEvent.click(cellOf("alice", "app-deploy")); // 눌러서 초점이 옮겨 가도 그 칸이 연 창은 닫히지 않고 click이 닫는다
+    expect(screen.queryByText("dev-team 그룹에서 받아요")).not.toBeInTheDocument();
+    await userEvent.click(cellOf("alice", "app-deploy"));
+    expect(screen.getByText("dev-team 그룹에서 받아요")).toBeInTheDocument(); // 세 번째에는 다시 열린다
+  });
+
+  test("moving the focus away closes the note, but going back to the cell that opened it does not", async () => {
+    setup();
+    await userEvent.click(cellOf("alice", "app-deploy"));
+    await userEvent.tab({ shift: true });
+    expect(cellOf("alice", "app-deploy")).toHaveFocus();
+    expect(screen.getByText("dev-team 그룹에서 받아요")).toBeInTheDocument();
+    await userEvent.tab({ shift: true });
+    expect(screen.queryByText("dev-team 그룹에서 받아요")).not.toBeInTheDocument();
+  });
+
+  test("Escape on the cell that opened the note closes it and leaves the focus there", async () => {
+    setup();
+    await userEvent.click(cellOf("alice", "app-deploy"));
+    await userEvent.tab({ shift: true });
+    expect(cellOf("alice", "app-deploy")).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByText("dev-team 그룹에서 받아요")).not.toBeInTheDocument();
+    expect(cellOf("alice", "app-deploy")).toHaveFocus();
+  });
+
+  test("the Escape that closes a note is not handed on to anything else, from inside the note or from the cell", async () => {
+    setup();
+    const seen = vi.fn();
+    document.addEventListener("keydown", seen);
+    try {
+      await userEvent.click(cellOf("alice", "app-deploy"));
+      seen.mockClear();
+      await userEvent.keyboard("{Escape}"); // 초점이 창 안에 있다
+      expect(screen.queryByText("dev-team 그룹에서 받아요")).not.toBeInTheDocument();
+      expect(seen).not.toHaveBeenCalled();
+
+      await userEvent.click(cellOf("alice", "app-deploy"));
+      await userEvent.tab({ shift: true });
+      seen.mockClear();
+      await userEvent.keyboard("{Escape}"); // 초점이 창을 연 칸에 있다
+      expect(screen.queryByText("dev-team 그룹에서 받아요")).not.toBeInTheDocument();
+      expect(seen).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener("keydown", seen);
+    }
+  });
+
+  test("scrolling the table closes an open note and an open row menu", async () => {
+    setup();
+    const scroller = grid().closest(".asg-scroll") as HTMLElement;
+    await userEvent.click(cellOf("alice", "app-deploy"));
+    expect(screen.getByText("dev-team 그룹에서 받아요")).toBeInTheDocument();
+    fireEvent.scroll(scroller);
+    expect(screen.queryByText("dev-team 그룹에서 받아요")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "alice 행 메뉴" }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.scroll(scroller);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  test("Tab out of the note closes it", async () => {
+    setup();
+    await userEvent.click(cellOf("alice", "app-deploy"));
+    await userEvent.tab();
     expect(screen.queryByText("dev-team 그룹에서 받아요")).not.toBeInTheDocument();
   });
 
@@ -188,6 +306,30 @@ describe("a cell that is only inherited", () => {
     fireEvent.click(cellOf("alice", "app-deploy"));
     fireEvent.click(screen.getByRole("button", { name: "그룹 행으로 가기" }));
     expect(props.onOpen).toHaveBeenCalledWith({ view: "groups", id: devTeam.arn });
+  });
+});
+
+describe("the ⋯ button of a row", () => {
+  test("a second press closes the menu", async () => {
+    setup();
+    const more = screen.getByRole("button", { name: "alice 행 메뉴" });
+    await userEvent.click(more);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    await userEvent.click(more);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(more);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
+  test("a press takes the focus itself and keeps the browser from taking it somewhere else", () => {
+    setup();
+    const more = screen.getByRole("button", { name: "alice 행 메뉴" });
+    const down = createEvent.pointerDown(more, { button: 0, buttons: 1 });
+    fireEvent(more, down);
+    expect(down.defaultPrevented).toBe(true);
+    expect(more).toHaveFocus();
   });
 });
 
@@ -212,12 +354,12 @@ describe("a locked row", () => {
 
   test("painting over it queues nothing", () => {
     setup();
-    press(cellOf("bob", "ReadOnlyAccess"));
-    fireEvent.pointerEnter(cellOf("AWSServiceRoleForSupport", "ReadOnlyAccess"), { buttons: 1 });
-    fireEvent.pointerEnter(cellOf("partner-access", "ReadOnlyAccess"), { buttons: 1 });
+    press(cellOf("app-role", "AdministratorAccess"));
+    fireEvent.pointerEnter(cellOf("AWSServiceRoleForSupport", "AdministratorAccess"), { buttons: 1 });
+    fireEvent.pointerEnter(cellOf("partner-access", "AdministratorAccess"), { buttons: 1 });
     fireEvent.pointerUp(window);
-    expect(tray()).toBe("변경 2개 · ReadOnlyAccess 붙이기 · bob 외 1개");
-    expect(cellOf("AWSServiceRoleForSupport", "ReadOnlyAccess")).toHaveAccessibleName("AWSServiceRoleForSupport · ReadOnlyAccess: 없음");
+    expect(tray()).toBe("변경 2개 · AdministratorAccess 붙이기 · app-role 외 1개");
+    expect(cellOf("AWSServiceRoleForSupport", "AdministratorAccess")).toHaveAccessibleName("AWSServiceRoleForSupport · AdministratorAccess: 없음");
   });
 });
 
@@ -255,21 +397,141 @@ describe("dragging", () => {
     fireEvent.pointerEnter(cellOf("ci-bot", "ReadOnlyAccess"), { buttons: 1 });
     fireEvent.pointerUp(window);
     expect(tray()).toBe("변경 3개 · ReadOnlyAccess 붙이기 · ci-bot 외 2개");
-    // 붙은 칸에서 시작하면 목표는 "안 붙음"이라서 대기 중인 붙이기는 지워진다
+    // 붙은 칸에서 시작하면 목표는 "안 붙음"이라서 지나간 칸의 대기 중인 붙이기는 지워진다
     press(cellOf("alice", "ReadOnlyAccess"));
+    fireEvent.pointerEnter(cellOf("bob", "ReadOnlyAccess"), { buttons: 1 });
     fireEvent.pointerEnter(cellOf("ci-bot", "ReadOnlyAccess"), { buttons: 1 });
     fireEvent.pointerUp(window);
+    expect(cellOf("bob", "ReadOnlyAccess")).toHaveAccessibleName("bob · ReadOnlyAccess: 없음");
     expect(cellOf("ci-bot", "ReadOnlyAccess")).toHaveAccessibleName("ci-bot · ReadOnlyAccess: 없음");
-    expect(tray()).toBe("변경 3개 · ReadOnlyAccess 붙이기 · partner-access 외 2개");
+    expect(tray()).toBe("변경 2개 · ReadOnlyAccess 붙이기 · partner-access 외 1개"); // partner-access 붙이기와 alice 떼기
   });
 
   test("skips a cell that is only inherited without opening its note", () => {
     setup();
-    press(cellOf("bob", "AdministratorAccess"));
+    press(cellOf("ci-bot", "app-deploy"));
+    fireEvent.pointerEnter(cellOf("bob", "app-deploy"), { buttons: 1 });
     fireEvent.pointerEnter(cellOf("alice", "app-deploy"), { buttons: 1 });
     fireEvent.pointerUp(window);
-    expect(tray()).toBe("변경 1개 · AdministratorAccess 붙이기 · bob");
+    expect(tray()).toBe("변경 1개 · app-deploy 붙이기 · ci-bot");
     expect(screen.queryByText("dev-team 그룹에서 받아요")).not.toBeInTheDocument();
+  });
+
+  test("a mouse that comes in with no button held ends the paint", () => {
+    // jsdom의 PointerEvent 대용품에는 pointerType이 없어서, 이 시험에서만 마우스인 것처럼 꾸민다
+    Object.defineProperty(window.PointerEvent.prototype, "pointerType", { value: "mouse", configurable: true });
+    try {
+      setup();
+      press(cellOf("bob", "ReadOnlyAccess"));
+      fireEvent.pointerEnter(cellOf("ci-bot", "ReadOnlyAccess"), { buttons: 0 }); // 창 밖에서 놓은 것을 놓쳤다
+      fireEvent.pointerEnter(cellOf("admins", "ReadOnlyAccess"), { buttons: 1 }); // 이미 끝났으니 다시 눌린 것으로 쳐도 칠하지 않는다
+      expect(cellOf("ci-bot", "ReadOnlyAccess")).toHaveAccessibleName("ci-bot · ReadOnlyAccess: 없음");
+      expect(cellOf("admins", "ReadOnlyAccess")).toHaveAccessibleName("admins · ReadOnlyAccess: 없음");
+      expect(tray()).toBe("변경 1개 · ReadOnlyAccess 붙이기 · bob");
+      fireEvent.pointerUp(window);
+    } finally {
+      delete (window.PointerEvent.prototype as { pointerType?: string }).pointerType;
+    }
+  });
+
+  test("a key pressed in the middle of a press forgets the press, so the click that follows is a click of its own", async () => {
+    setup();
+    const cell = cellOf("bob", "ReadOnlyAccess");
+    press(cell); // 눌렀고, 아직 놓지 않았다
+    expect(cell).toHaveAccessibleName("bob · ReadOnlyAccess: 붙일 예정");
+    await userEvent.keyboard("{ArrowDown}");
+    fireEvent.click(cell);
+    expect(cell).toHaveAccessibleName("bob · ReadOnlyAccess: 없음");
+  });
+
+  test("a fast drag that jumps over rows still paints the ones in between", () => {
+    setup();
+    press(cellOf("bob", "ReadOnlyAccess"));
+    fireEvent.pointerEnter(cellOf("dev-team", "ReadOnlyAccess"), { buttons: 1 }); // ci-bot과 admins의 칸에는 들어온 적이 없다
+    fireEvent.pointerUp(window);
+    for (const row of ["bob", "ci-bot", "admins", "dev-team"]) expect(cellOf(row, "ReadOnlyAccess")).toHaveAccessibleName(`${row} · ReadOnlyAccess: 붙일 예정`);
+    expect(tray()).toBe("변경 4개 · ReadOnlyAccess 붙이기 · bob 외 3개");
+  });
+
+  describe("a jump over columns", () => {
+    // 네 정책이 모두 붙은 holder가 열을 만든다. 행은 이름순이라 a, b, c, holder
+    const wide = () => {
+      const holder = principal("user", "holder", { attached: ["P1", "P2", "P3", "P4"].map((name) => policyArn(name, true)) });
+      const users = ["a", "b", "c"].map((name) => principal("user", name));
+      setup(sampleOverview({ users: [holder, ...users], groups: [], roles: [], policies: [] }));
+    };
+
+    test("along a row paints the columns in between", () => {
+      wide();
+      press(cellOf("a", "P1"));
+      fireEvent.pointerEnter(cellOf("a", "P4"), { buttons: 1 });
+      fireEvent.pointerUp(window);
+      for (const column of ["P1", "P2", "P3", "P4"]) expect(cellOf("a", column)).toHaveAccessibleName(`a · ${column}: 붙일 예정`);
+      expect(cellOf("b", "P2")).toHaveAccessibleName("b · P2: 없음");
+      expect(tray()).toBe("변경 4개 · P1 붙이기 · a 외 3개");
+    });
+
+    test("a drag that turns a corner follows the pointer, not the line back to where it began", () => {
+      wide();
+      press(cellOf("a", "P1"));
+      fireEvent.pointerEnter(cellOf("a", "P4"), { buttons: 1 }); // 행을 따라 끝까지
+      fireEvent.pointerEnter(cellOf("c", "P4"), { buttons: 1 }); // 거기서 열을 따라 아래로. 지나는 칸은 b의 P4다
+      fireEvent.pointerUp(window);
+      expect(cellOf("b", "P4")).toHaveAccessibleName("b · P4: 붙일 예정");
+      expect(cellOf("c", "P4")).toHaveAccessibleName("c · P4: 붙일 예정");
+      // 처음 칸에서 c의 P4까지 곧게 그으면 지나게 될 칸이다
+      expect(cellOf("b", "P2")).toHaveAccessibleName("b · P2: 없음");
+      expect(cellOf("b", "P3")).toHaveAccessibleName("b · P3: 없음");
+      expect(tray()).toBe("변경 6개 · P1 붙이기 · a 외 5개");
+    });
+
+    test("along a diagonal paints the cells on the line and no others", () => {
+      wide();
+      press(cellOf("a", "P1"));
+      fireEvent.pointerEnter(cellOf("c", "P3"), { buttons: 1 }); // 사이에 b의 P2가 있다
+      fireEvent.pointerUp(window);
+      expect(cellOf("b", "P2")).toHaveAccessibleName("b · P2: 붙일 예정");
+      expect(cellOf("c", "P3")).toHaveAccessibleName("c · P3: 붙일 예정");
+      for (const [row, column] of [["a", "P2"], ["a", "P3"], ["b", "P1"], ["b", "P3"], ["c", "P1"], ["c", "P2"]]) expect(cellOf(row, column)).toHaveAccessibleName(`${row} · ${column}: 없음`);
+      expect(tray()).toBe("변경 3개 · P1 붙이기 · a 외 2개");
+    });
+  });
+
+  test("a drag goes on when the rows change under it, and leaves out the cells that are no longer there", () => {
+    setup();
+    press(cellOf("ci-bot", "ReadOnlyAccess")); // 세 번째 행
+    fireEvent.change(screen.getByRole("textbox", { name: "툴바 필터" }), { target: { value: "al" } }); // 이제 행은 alice뿐이다
+    fireEvent.pointerEnter(cellOf("alice", "AdministratorAccess"), { buttons: 1 }); // ci-bot에서 여기까지 사이의 행은 없다
+    fireEvent.pointerUp(window);
+    expect(cellOf("alice", "AdministratorAccess")).toHaveAccessibleName("alice · AdministratorAccess: 붙일 예정");
+    expect(tray()).toBe("변경 2개 · ReadOnlyAccess 붙이기 · ci-bot 외 1개");
+  });
+
+  test("rows that are not drawn are painted too", () => {
+    const users = Array.from({ length: 120 }, (_, i) => principal("user", `user-${String(i).padStart(3, "0")}`));
+    setup(sampleOverview({ users, groups: [], roles: [appRole] }));
+    press(cellOf("user-000", "ReadOnlyAccess"));
+    const scroller = grid().closest(".asg-scroll") as HTMLElement;
+    scroller.scrollTop = 30 * ROW_H;
+    fireEvent.scroll(scroller);
+    expect(screen.queryByRole("button", { name: /^user-010 · / })).not.toBeInTheDocument(); // 끌기 사이에 위쪽 행이 그려지지 않게 됐다
+    fireEvent.pointerEnter(cellOf("user-040", "ReadOnlyAccess"), { buttons: 1 });
+    fireEvent.pointerUp(window);
+    expect(tray()).toBe("변경 41개 · ReadOnlyAccess 붙이기 · user-000 외 40개");
+    expect(cellOf("user-040", "ReadOnlyAccess")).toHaveAccessibleName("user-040 · ReadOnlyAccess: 붙일 예정");
+    scroller.scrollTop = 0;
+    fireEvent.scroll(scroller);
+    expect(cellOf("user-010", "ReadOnlyAccess")).toHaveAccessibleName("user-010 · ReadOnlyAccess: 붙일 예정"); // 끌기 동안 그려진 적 없는 행이다
+  });
+
+  test("the cell the pointer comes back to is painted again without harm", () => {
+    setup();
+    press(cellOf("bob", "ReadOnlyAccess"));
+    fireEvent.pointerEnter(cellOf("admins", "ReadOnlyAccess"), { buttons: 1 });
+    fireEvent.pointerEnter(cellOf("bob", "ReadOnlyAccess"), { buttons: 1 });
+    fireEvent.pointerUp(window);
+    expect(tray()).toBe("변경 3개 · ReadOnlyAccess 붙이기 · bob 외 2개"); // bob, ci-bot, admins
+    expect(cellOf("bob", "ReadOnlyAccess")).toHaveAccessibleName("bob · ReadOnlyAccess: 붙일 예정");
   });
 
   test("stops when the button is let go", () => {
@@ -406,6 +668,15 @@ describe("the keyboard", () => {
     await userEvent.keyboard("{Shift>}{ArrowLeft}{/Shift}");
     expect(within(grid()).queryAllByRole("gridcell", { selected: true })).toHaveLength(2);
     await userEvent.keyboard("{ArrowLeft}");
+    expect(within(grid()).queryAllByRole("gridcell", { selected: true })).toHaveLength(0);
+  });
+
+  test("pressing a cell with the pointer clears the range", async () => {
+    setup();
+    focusCell(cellOf("bob", "ReadOnlyAccess"));
+    await userEvent.keyboard("{Shift>}{ArrowDown}{/Shift}");
+    expect(within(grid()).queryAllByRole("gridcell", { selected: true })).toHaveLength(2);
+    await userEvent.click(cellOf("alice", "ReadOnlyAccess"));
     expect(within(grid()).queryAllByRole("gridcell", { selected: true })).toHaveLength(0);
   });
 
