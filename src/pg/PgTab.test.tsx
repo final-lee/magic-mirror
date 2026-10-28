@@ -11,12 +11,18 @@ import {
   object,
   ordersTable,
   pgTarget,
+  removeBobFromWriters,
+  revokeAuditRead,
   sampleCellDetail,
+  sampleChangeLog,
   sampleDatabaseView,
   sampleFindings,
+  sampleLogEntry,
   sampleOverview,
+  samplePreview,
   sampleRoleView,
   sampleSessions,
+  sampleBatchPreview,
   sampleTargetInfo,
   sampleWhoCan,
 } from "./fixtures";
@@ -36,6 +42,14 @@ vi.mock("./api", () => ({
     sessions: vi.fn(),
     findings: vi.fn(),
     close: vi.fn(),
+    overview: vi.fn(),
+    preview: vi.fn(),
+    apply: vi.fn(),
+    previewBatch: vi.fn(),
+    applyBatch: vi.fn(),
+    changeLog: vi.fn(),
+    undo: vi.fn(),
+    undoBatch: vi.fn(),
   },
 }));
 vi.mock("../api/client", () => ({ api: { getSettings: vi.fn(), saveSettings: vi.fn(), ssoLogin: vi.fn() } }));
@@ -114,6 +128,7 @@ beforeEach(() => {
   m.objects.mockResolvedValue([ordersTable]);
   m.whoCan.mockResolvedValue(sampleWhoCan());
   m.close.mockResolvedValue(null);
+  m.changeLog.mockResolvedValue(sampleChangeLog());
 });
 
 describe("checking the target", () => {
@@ -614,7 +629,7 @@ describe("top bar", () => {
     expect(topBar().getByText("orders-aurora")).toBeInTheDocument();
     expect(topBar().getByText("aurora-postgresql 16.4")).toBeInTheDocument();
     expect(screen.getByText("alice")).toBeInTheDocument();
-    expect(menu().getAllByRole("button")).toHaveLength(6);
+    expect(menu().getAllByRole("button")).toHaveLength(7);
     fireEvent.click(within(banner.closest(".error-banner") as HTMLElement).getByRole("button", { name: "다시 시도" }));
     await waitFor(() => expect(screen.queryByText(VPN_TEXT)).not.toBeInTheDocument());
   });
@@ -668,10 +683,10 @@ describe("top bar", () => {
 });
 
 describe("menu", () => {
-  test("has the six items in order and opens on 역할", async () => {
+  test("has the seven items in order and opens on 역할", async () => {
     setup();
     await connected();
-    expect(menu().getAllByRole("button").map((b) => b.textContent?.replace(/[^가-힣 ]/gu, "").trim())).toEqual(["점검", "역할", "권한", "기본 권한", "누가 할 수 있나", "세션"]);
+    expect(menu().getAllByRole("button").map((b) => b.textContent?.replace(/[^가-힣 ]/gu, "").trim())).toEqual(["점검", "역할", "권한", "기본 권한", "누가 할 수 있나", "세션", "변경 기록"]);
     expect(menu().getByRole("button", { name: /역할/ })).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("table", { name: "역할 목록" })).toBeInTheDocument();
   });
@@ -802,6 +817,7 @@ describe("menu", () => {
       ["점검", () => screen.findByRole("heading", { name: /rds_superuser 멤버/ })],
       ["누가 할 수 있나", async () => screen.getByRole("search", { name: "누가 할 수 있나 검색" })],
       ["세션", () => screen.findByRole("table", { name: "세션 목록" })],
+      ["변경 기록", () => screen.findByRole("table", { name: "변경 기록" })],
     ];
     for (const [label, shown] of screens) {
       openMenu(label);
@@ -1446,6 +1462,166 @@ describe("history keys", () => {
     expect(screen.getByRole("heading", { name: "DB 사용자" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "취소" }));
     expect(await screen.findByRole("heading", { name: "alice" })).toBeInTheDocument();
+  });
+});
+
+describe("변경 기록", () => {
+  const AFTER = "2026-10-29T12:30:00Z";
+  const OTHER_ARN = "arn:aws:rds:ap-northeast-2:123456789012:cluster:reports-aurora";
+  const dialog = (name: string) => screen.findByRole("dialog", { name });
+  const rowsOf = () => within(screen.getByRole("table", { name: "변경 기록" })).getAllByRole("row").slice(1);
+
+  beforeEach(() => {
+    m.overview.mockResolvedValue(sampleOverview({ fetchedAt: AFTER }));
+    m.preview.mockImplementation(async (_t, change) => samplePreview({ change, summary: "그룹에서 빼기: bob → app_write", sql: ['REVOKE "app_write" FROM "bob"'], warnings: [] }));
+    m.apply.mockResolvedValue({ logId: "log-20", summary: "그룹에서 빼기: bob → app_write" });
+    m.previewBatch.mockImplementation(async (_t, database) => sampleBatchPreview({ database, warnings: [], items: sampleBatchPreview().items.map((i) => ({ ...i, warnings: [] })) }));
+    m.applyBatch.mockResolvedValue({ batchId: "b-2", logIds: ["b-2-1", "b-2-2"], summary: "변경 2개" });
+    m.undo.mockResolvedValue({ database: "orders", changes: [removeBobFromWriters], undoOf: ["b-1-2"] });
+    m.undoBatch.mockResolvedValue({ database: "orders", changes: [removeBobFromWriters, revokeAuditRead], undoOf: ["b-1-2", "b-1-1"] });
+  });
+
+  async function openLog() {
+    setup();
+    await connected();
+    openMenu("변경 기록");
+    await screen.findByRole("table", { name: "변경 기록" });
+  }
+
+  test("opens from the menu, names itself above, and lists this target's changes newest first", async () => {
+    await openLog();
+    expect(crumb().getByText("변경 기록")).toBeInTheDocument();
+    expect(menu().getByText("변경 기록").closest("button")).toHaveAttribute("aria-current", "page");
+    expect(m.changeLog).toHaveBeenCalledTimes(1);
+    expect(rowsOf()[0]).toHaveTextContent("비밀번호 재설정: alice");
+    expect(rowsOf()).toHaveLength(7);
+  });
+
+  test("shows only the entries of this target's ARN", async () => {
+    m.changeLog.mockResolvedValue([sampleLogEntry({ id: "theirs", summary: "다른 클러스터의 변경", targetArn: OTHER_ARN }), ...sampleChangeLog()]);
+    await openLog();
+    expect(screen.queryByText("다른 클러스터의 변경")).not.toBeInTheDocument();
+    expect(rowsOf()).toHaveLength(7);
+  });
+
+  test("되돌리기 of one change opens the undo preview in the tab; applying it announces the summary and reads the screens again", async () => {
+    await openLog();
+    const member = rowsOf().find((r) => r.textContent?.includes("그룹에 넣기: bob → app_write") && !r.className.includes("cl-batch"))!;
+    fireEvent.click(within(member).getByRole("button", { name: "되돌리기" }));
+    expect(await dialog("되돌리기 미리보기")).toBeInTheDocument();
+    expect(m.undo).toHaveBeenCalledWith("b-1-2");
+    expect(m.preview).toHaveBeenCalledWith(pgTarget, removeBobFromWriters);
+    expect(screen.getByText("적용할 DB 사용자: iam_admin")).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "적용" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(m.apply).toHaveBeenCalledWith(pgTarget, removeBobFromWriters, null, "b-1-2");
+
+    const notice = screen.getByRole("status");
+    expect(notice).toHaveTextContent("그룹에서 빼기: bob → app_write");
+    // 적용 뒤: pg_overview가 개요를 바꾸고, 변경 기록을 다시 읽고, 다시 연결하지는 않는다
+    await waitFor(() => expect(m.overview).toHaveBeenCalledWith(pgTarget));
+    await waitFor(() => expect(m.changeLog).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(topBar().getByText(`읽은 시각 ${new Date(AFTER).toLocaleTimeString("ko-KR")}`)).toBeInTheDocument());
+    expect(m.open).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(notice).getByRole("button", { name: "알림 닫기" }));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  test("묶음 되돌리기 opens the batch preview in the database of the undo, and applies it with the ids it undoes", async () => {
+    await openLog();
+    const head = screen.getByText(/^묶음 · 변경 2개 · /).closest("tr") as HTMLElement;
+    fireEvent.click(within(head).getByRole("button", { name: "묶음 되돌리기" }));
+    expect(await dialog("되돌리기 미리보기")).toBeInTheDocument();
+    expect(m.undoBatch).toHaveBeenCalledWith("b-1");
+    expect(m.previewBatch).toHaveBeenCalledWith(pgTarget, "orders", [removeBobFromWriters, revokeAuditRead]);
+
+    fireEvent.click(await screen.findByRole("button", { name: "적용" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(m.applyBatch).toHaveBeenCalledWith(pgTarget, "orders", [removeBobFromWriters, revokeAuditRead], null, ["b-1-2", "b-1-1"]);
+    expect(screen.getByRole("status")).toHaveTextContent("변경 2개");
+    await waitFor(() => expect(m.overview).toHaveBeenCalled());
+  });
+
+  test("a change that takes several changes to undo goes through the batch preview", async () => {
+    m.undo.mockResolvedValue({ database: "analytics", changes: [removeBobFromWriters, revokeAuditRead], undoOf: ["log-3"] });
+    await openLog();
+    const created = rowsOf().find((r) => r.textContent?.includes("역할 만들기: app_audit"))!;
+    fireEvent.click(within(created).getByRole("button", { name: "되돌리기" }));
+    expect(await dialog("되돌리기 미리보기")).toBeInTheDocument();
+    expect(m.previewBatch).toHaveBeenCalledWith(pgTarget, "analytics", [removeBobFromWriters, revokeAuditRead]);
+    expect(m.preview).not.toHaveBeenCalled();
+  });
+
+  test("Escape closes an undo preview without applying anything", async () => {
+    await openLog();
+    const member = rowsOf().find((r) => r.textContent?.includes("그룹에 넣기: bob → app_write") && !r.className.includes("cl-batch"))!;
+    fireEvent.click(within(member).getByRole("button", { name: "되돌리기" }));
+    await dialog("되돌리기 미리보기");
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(m.apply).not.toHaveBeenCalled();
+  });
+
+  test("a failed apply keeps the preview open with the reason, and nothing is announced", async () => {
+    m.apply.mockRejectedValue({ kind: "other", message: "미리보기 뒤에 바뀌었어요. 미리보기를 다시 받아 주세요" });
+    await openLog();
+    const member = rowsOf().find((r) => r.textContent?.includes("그룹에 넣기: bob → app_write") && !r.className.includes("cl-batch"))!;
+    fireEvent.click(within(member).getByRole("button", { name: "되돌리기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "적용" }));
+    expect(await screen.findByText("미리보기 뒤에 바뀌었어요. 미리보기를 다시 받아 주세요")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "되돌리기 미리보기" })).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  test("a notice with something to report stays until it is closed, and lists it", async () => {
+    m.apply.mockResolvedValue({ logId: "log-20", summary: "그룹에서 빼기: bob → app_write", notes: ["연결이 끊겼지만 적용된 것을 확인했어요"] });
+    await openLog();
+    const member = rowsOf().find((r) => r.textContent?.includes("그룹에 넣기: bob → app_write") && !r.className.includes("cl-batch"))!;
+    fireEvent.click(within(member).getByRole("button", { name: "되돌리기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "적용" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    const notes = within(screen.getByRole("status")).getByRole("list", { name: "함께 알릴 일" });
+    expect(notes).toHaveTextContent("연결이 끊겼지만 적용된 것을 확인했어요");
+  });
+
+  test("the notice does not mention the propagation delay IAM has: a commit shows at once", async () => {
+    await openLog();
+    const member = rowsOf().find((r) => r.textContent?.includes("그룹에 넣기: bob → app_write") && !r.className.includes("cl-batch"))!;
+    fireEvent.click(within(member).getByRole("button", { name: "되돌리기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "적용" }));
+    await waitFor(() => expect(screen.getByRole("status")).toBeInTheDocument());
+    expect(screen.queryByText(/반영까지/)).not.toBeInTheDocument();
+  });
+
+  test("the notice stays when the user moves to another screen", async () => {
+    await openLog();
+    const member = rowsOf().find((r) => r.textContent?.includes("그룹에 넣기: bob → app_write") && !r.className.includes("cl-batch"))!;
+    fireEvent.click(within(member).getByRole("button", { name: "되돌리기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "적용" }));
+    await waitFor(() => expect(screen.getByRole("status")).toBeInTheDocument());
+    openMenu("역할");
+    expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+
+  test("a failed read of the log shows the error through the target's error box, and 다시 시도 reads the log again", async () => {
+    m.changeLog.mockRejectedValueOnce({ kind: "other", message: "변경 기록을 읽지 못했어요" });
+    setup();
+    await connected();
+    openMenu("변경 기록");
+    expect(await screen.findByText("변경 기록을 읽지 못했어요")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(await screen.findByRole("table", { name: "변경 기록" })).toBeInTheDocument();
+    expect(m.open).toHaveBeenCalledTimes(1);
+  });
+
+  test("다시 읽기 re-opens the target as before and leaves the log alone", async () => {
+    await openLog();
+    fireEvent.click(topBar().getByRole("button", { name: "다시 읽기" }));
+    await waitFor(() => expect(m.open).toHaveBeenCalledTimes(2));
+    expect(m.changeLog).toHaveBeenCalledTimes(1);
+    expect(m.overview).not.toHaveBeenCalled();
   });
 });
 

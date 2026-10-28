@@ -8,6 +8,7 @@ import {
   ordersTable,
   pgTarget,
   sampleCellDetail,
+  sampleChangeLog,
   sampleDatabaseView,
   sampleFindings,
   sampleOverview,
@@ -20,8 +21,10 @@ import {
   closePg,
   pgKeys,
   refreshPg,
+  refreshPgAfterChange,
   refreshPgData,
   usePgCell,
+  usePgChangeLog,
   usePgDatabase,
   usePgFindings,
   usePgObjects,
@@ -45,6 +48,8 @@ vi.mock("./api", () => ({
     sessions: vi.fn(),
     findings: vi.fn(),
     close: vi.fn(),
+    overview: vi.fn(),
+    changeLog: vi.fn(),
   },
 }));
 
@@ -70,6 +75,8 @@ beforeEach(() => {
   m.sessions.mockResolvedValue(sampleSessions());
   m.findings.mockResolvedValue(sampleFindings());
   m.close.mockResolvedValue(null);
+  m.overview.mockResolvedValue(sampleOverview({ fetchedAt: "2026-10-29T12:30:00Z" }));
+  m.changeLog.mockResolvedValue(sampleChangeLog());
 });
 
 describe("query keys", () => {
@@ -647,5 +654,205 @@ describe("closePg", () => {
     expect(log).toHaveBeenCalledTimes(1);
     expect(log).toHaveBeenCalledWith(expect.any(String), { kind: "other", message: "boom" });
     log.mockRestore();
+  });
+});
+
+describe("the change log", () => {
+  test("is one list for every target, outside any target's keys", () => {
+    expect(pgKeys.changeLog).toEqual(["pg", "changeLog"]);
+    expect(pgKeys.root(t).slice(0, 2)).not.toEqual(pgKeys.changeLog);
+  });
+
+  test("usePgChangeLog reads the log and keeps it under its key", async () => {
+    const { qc, wrapper } = makeClient();
+    const { result } = renderHook(() => usePgChangeLog(), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(m.changeLog).toHaveBeenCalledTimes(1);
+    expect(m.changeLog).toHaveBeenCalledWith();
+    expect(result.current.data).toEqual(sampleChangeLog());
+    expect(qc.getQueryData(pgKeys.changeLog)).toEqual(sampleChangeLog());
+  });
+
+  test("is read again each time its screen opens, since another window or the change just made must show", async () => {
+    const { wrapper } = makeClient();
+    const first = renderHook(() => usePgChangeLog(), { wrapper });
+    await waitFor(() => expect(first.result.current.isSuccess).toBe(true));
+    first.unmount();
+    renderHook(() => usePgChangeLog(), { wrapper });
+    await waitFor(() => expect(m.changeLog).toHaveBeenCalledTimes(2));
+  });
+
+  test("a failed read is an error the screen can show, and is not retried on its own", async () => {
+    m.changeLog.mockRejectedValue({ kind: "other", message: "변경 기록을 읽지 못했어요" });
+    const { wrapper } = makeClient();
+    const { result } = renderHook(() => usePgChangeLog(), { wrapper });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error).toEqual({ kind: "other", message: "변경 기록을 읽지 못했어요" });
+    expect(m.changeLog).toHaveBeenCalledTimes(1);
+  });
+
+  test("neither 다시 읽기 nor closing the tab touches it: the log is not part of any target", async () => {
+    const { qc, wrapper } = makeClient();
+    const { result } = renderHook(() => ({ log: usePgChangeLog(), overview: usePgOverview(t, LOGIN_USER) }), { wrapper });
+    await waitFor(() => expect(result.current.log.isSuccess && result.current.overview.isSuccess).toBe(true));
+    m.changeLog.mockClear();
+    await refreshPg(qc, t);
+    expect(m.changeLog).not.toHaveBeenCalled();
+    await closePg(qc, t);
+    expect(qc.getQueryData(pgKeys.changeLog)).toEqual(sampleChangeLog());
+  });
+});
+
+describe("refreshPgAfterChange", () => {
+  const REREAD = "2026-10-29T12:30:00Z";
+
+  async function mounted(withAnalytics = false) {
+    const { qc, wrapper } = makeClient();
+    const hook = renderHook(
+      () => ({
+        overview: usePgOverview(t, LOGIN_USER),
+        orders: usePgDatabase(t, "orders"),
+        role: usePgRole(t, "alice"),
+        cell: usePgCell(t, "orders", "alice", "app"),
+        sessions: usePgSessions(t),
+        log: usePgChangeLog(),
+        analytics: usePgDatabase(t, withAnalytics ? "analytics" : null),
+      }),
+      { wrapper },
+    );
+    await waitFor(() => {
+      const { analytics, ...shown } = hook.result.current;
+      for (const q of Object.values(shown)) expect(q.isSuccess).toBe(true);
+      if (withAnalytics) expect(analytics.isSuccess).toBe(true);
+    });
+    vi.clearAllMocks();
+    return { qc, wrapper, hook };
+  }
+
+  test("pg_overview replaces the data of the overview query, and nothing connects again", async () => {
+    const { qc, hook } = await mounted();
+    // 화면이 개요를 쓰고 있다(react-query는 읽은 값이 바뀔 때만 다시 그린다)
+    expect(hook.result.current.overview.data?.fetchedAt).toBe("2026-10-28T12:00:00Z");
+    await refreshPgAfterChange(qc, t, "orders");
+    expect(m.overview).toHaveBeenCalledTimes(1);
+    expect(m.overview).toHaveBeenCalledWith(t);
+    expect(qc.getQueryData(pgKeys.overview(t, LOGIN_USER))).toEqual(sampleOverview({ fetchedAt: REREAD }));
+    await waitFor(() => expect(hook.result.current.overview.data?.fetchedAt).toBe(REREAD));
+    expect(m.open).not.toHaveBeenCalled();
+    expect(m.target).not.toHaveBeenCalled();
+    expect(m.close).not.toHaveBeenCalled();
+  });
+
+  test("the overview of a login nobody is connected as is not made up", async () => {
+    const { qc } = await mounted();
+    m.overview.mockResolvedValue(sampleOverview({ loginUser: "someone_else", fetchedAt: REREAD }));
+    await refreshPgAfterChange(qc, t, "orders");
+    expect(qc.getQueryState(pgKeys.overview(t, "someone_else"))).toBeUndefined();
+    expect(qc.getQueryData(pgKeys.overview(t, LOGIN_USER))).toEqual(sampleOverview());
+  });
+
+  test("an overview that was never read is not created", async () => {
+    const { qc } = makeClient();
+    await refreshPgAfterChange(qc, t, "orders");
+    expect(m.overview).toHaveBeenCalledTimes(1);
+    expect(qc.getQueryState(pgKeys.overview(t, LOGIN_USER))).toBeUndefined();
+  });
+
+  test("the execution database is read again with force, once", async () => {
+    const { qc } = await mounted();
+    await refreshPgAfterChange(qc, t, "orders");
+    expect(m.database).toHaveBeenCalledTimes(1);
+    expect(m.database).toHaveBeenCalledWith(t, "orders", true);
+  });
+
+  test("another database's view is read again but not forced, and the force does not stay behind", async () => {
+    const { qc } = await mounted(true);
+    await refreshPgAfterChange(qc, t, "analytics");
+    expect(m.database).toHaveBeenCalledWith(t, "analytics", true);
+    expect(m.database).toHaveBeenCalledWith(t, "orders", false);
+    expect(m.database).toHaveBeenCalledTimes(2);
+    await qc.invalidateQueries({ queryKey: pgKeys.database(t, "analytics") });
+    expect(m.database).toHaveBeenLastCalledWith(t, "analytics", false);
+  });
+
+  test("the role views, cells and sessions on screen are read again, and the change log too", async () => {
+    const { qc } = await mounted();
+    await refreshPgAfterChange(qc, t, "orders");
+    expect(m.role).toHaveBeenCalledTimes(1);
+    expect(m.cell).toHaveBeenCalledTimes(1);
+    expect(m.sessions).toHaveBeenCalledTimes(1);
+    expect(m.changeLog).toHaveBeenCalledTimes(1);
+  });
+
+  test("what nobody is showing is marked stale, so it is read when it is shown again", async () => {
+    const { qc } = await mounted();
+    const keys = [pgKeys.findings(t), pgKeys.whoCan(t, "orders", ordersTable, "SELECT"), pgKeys.objects(t, "orders", "ord"), pgKeys.role(t, "bob"), pgKeys.database(t, "legacy_archive")];
+    for (const key of keys) qc.setQueryData(key, { any: "thing" });
+    await refreshPgAfterChange(qc, t, "orders");
+    for (const key of keys) expect(qc.getQueryState(key)?.isInvalidated, String(key)).toBe(true);
+  });
+
+  test("a database nobody is showing that was read before is read with force when it is shown again, and one that was never read is not forced", async () => {
+    const { qc, wrapper } = await mounted();
+    qc.setQueryData(pgKeys.database(t, "analytics"), sampleDatabaseView({ database: "analytics" }));
+    await refreshPgAfterChange(qc, t, "analytics");
+    expect(m.database).not.toHaveBeenCalledWith(t, "analytics", expect.anything());
+    renderHook(() => usePgDatabase(t, "analytics"), { wrapper });
+    await waitFor(() => expect(m.database).toHaveBeenCalledWith(t, "analytics", true));
+
+    m.database.mockClear();
+    await refreshPgAfterChange(qc, t, "postgres");
+    renderHook(() => usePgDatabase(t, "postgres"), { wrapper });
+    await waitFor(() => expect(m.database).toHaveBeenCalledWith(t, "postgres", false));
+  });
+
+  test("reads the execution database before the screens that are built from it", async () => {
+    const { qc } = await mounted();
+    const order: string[] = [];
+    m.database.mockImplementation(async (_t, database, force) => {
+      order.push(`database:${database}:${force}`);
+      return sampleDatabaseView({ database });
+    });
+    m.role.mockImplementation(async () => {
+      order.push("role");
+      return roleView;
+    });
+    m.cell.mockImplementation(async () => {
+      order.push("cell");
+      return sampleCellDetail();
+    });
+    await refreshPgAfterChange(qc, t, "orders");
+    expect(order[0]).toBe("database:orders:true");
+    expect(order.slice(1).sort()).toEqual(["cell", "role"]);
+  });
+
+  test("leaves other targets alone", async () => {
+    const { qc } = await mounted();
+    const other: PgTarget = { ...t, id: "reports-aurora" };
+    qc.setQueryData(pgKeys.role(other, "alice"), roleView);
+    qc.setQueryData(pgKeys.database(other, "orders"), sampleDatabaseView());
+    await refreshPgAfterChange(qc, t, "orders");
+    expect(qc.getQueryState(pgKeys.role(other, "alice"))?.isInvalidated).toBe(false);
+    expect(qc.getQueryState(pgKeys.database(other, "orders"))?.isInvalidated).toBe(false);
+  });
+
+  test("when pg_overview fails, the overview query reads itself through pg_open instead of staying old", async () => {
+    const { qc } = await mounted();
+    m.overview.mockRejectedValue({ kind: "other", message: "먼저 연결해 주세요" });
+    await refreshPgAfterChange(qc, t, "orders");
+    expect(m.open).toHaveBeenCalledTimes(1);
+    expect(m.open).toHaveBeenCalledWith(t, LOGIN_USER);
+    // 나머지는 그대로 돈다
+    expect(m.database).toHaveBeenCalledWith(t, "orders", true);
+    expect(m.changeLog).toHaveBeenCalledTimes(1);
+  });
+
+  test("never rejects, whatever fails: it is fire and forget for the flows", async () => {
+    const { qc } = await mounted();
+    m.overview.mockRejectedValue(new Error("x"));
+    m.database.mockRejectedValue({ kind: "network", message: "timeout" });
+    m.role.mockRejectedValue({ kind: "network", message: "timeout" });
+    m.open.mockRejectedValue({ kind: "network", message: "timeout" });
+    await expect(refreshPgAfterChange(qc, t, "orders")).resolves.toBeUndefined();
   });
 });

@@ -1,6 +1,6 @@
 import { PG_VIEW_LABEL, type PgView } from "./route";
 
-// gap: 앞 항목과 묶음이 갈리는 곳에 여백을 둔다(점검 / 읽는 화면들 / 찾는 화면들). 모양은 IAM 메뉴(.iam-nav)를 그대로 쓴다.
+// gap: 앞 항목과 묶음이 갈리는 곳에 여백을 둔다(점검 / 읽는 화면들 / 찾는 화면들과 변경 기록). 모양은 IAM 메뉴(.iam-nav)를 그대로 쓴다.
 const ITEMS: { view: PgView; icon: string; gap?: boolean }[] = [
   { view: "findings", icon: "🛡" },
   { view: "roles", icon: "👥", gap: true },
@@ -8,6 +8,7 @@ const ITEMS: { view: PgView; icon: string; gap?: boolean }[] = [
   { view: "defaults", icon: "📜" },
   { view: "whoCan", icon: "🔎", gap: true },
   { view: "sessions", icon: "🔌" },
+  { view: "changes", icon: "🕘" },
 ];
 
 /** 항목 옆에 건수를 보여 줄 화면. 나머지는 건수가 없다. */

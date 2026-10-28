@@ -37,13 +37,23 @@ export interface PgOverview {
 export type PgCoverage = "all" | "some" | "none";
 export type PgSourceKind = "owner" | "direct" | "group" | "public" | "predefined" | "superuser";
 export interface PgSource { kind: PgSourceKind; via: string[]; grantor: string | null }  // via: 역할에서 권한을 받은 역할까지의 경로(자기 자신 제외)
+/** 칸의 사용·만들기·읽기·쓰기를 출처 한 가지로만 계산한 값(PgSchemaCell.direct, owned) */
+export interface PgSchemaAspects { usage: boolean; create: boolean; read: PgCoverage; write: PgCoverage }
 export interface PgSchemaCell {
   role: string; schema: string;
   usage: boolean; create: boolean; read: PgCoverage; write: PgCoverage;
   inheritedOnly: boolean;          // 보이는 권한의 출처가 group/public/predefined뿐
   unusable: string | null;         // "CONNECT 없음" | "USAGE 없음" | null. 이 칸에 잃을 것(usage·create·read·write 가운데 하나)이 있을 때만 채운다
+  direct: PgSchemaAspects;         // 위 네 값을 Direct 출처만으로 계산한 것. 편집 표가 켜고 끄는 값이다. 소유자 출처는 빠져서 소유자 자신의 칸은 켜고 끌 수 없다
+  owned: PgSchemaAspects;          // 위 네 값을 Owner 출처만으로 계산한 것
 }
-export interface PgDbPrivilegeRow { role: string; connect: boolean; create: boolean; temp: boolean }
+/** 데이터베이스 권한 행의 CONNECT·CREATE·TEMP를 출처 한 가지로만 계산한 값(PgDbPrivilegeRow.direct, owned) */
+export interface PgDbAspects { connect: boolean; create: boolean; temp: boolean }
+export interface PgDbPrivilegeRow {
+  role: string; connect: boolean; create: boolean; temp: boolean;
+  direct: PgDbAspects;             // Direct 출처만으로 계산한 값(PgSchemaCell.direct와 같은 규칙)
+  owned: PgDbAspects;              // Owner 출처만으로 계산한 값
+}
 export interface PgSchemaInfo { name: string; owner: string; tableCount: number }
 export type PgDefaultObjectType = "tables" | "sequences" | "functions" | "types" | "schemas";
 export interface PgDefaultAclRow {
@@ -81,3 +91,79 @@ export type PgFindingKind = "publicSchemaCreate" | "publicObjectGrant" | "rdsSup
 export interface PgFinding { database: string | null; role: string | null; object: PgObjectRef | null; detail: string }
 export interface PgFindingGroup { kind: PgFindingKind; title: string; level: "high" | "medium" | "low"; items: PgFinding[] }
 export interface PgFindings { groups: PgFindingGroup[]; skipped: { database: string; reason: string }[]; truncated: string[]; fetchedAt: string }  // truncated: 객체가 많아 일부만 읽고 점검한 데이터베이스(이름순)
+
+// ───────────────────────── 2단계: 변경 ─────────────────────────
+// 계약(.superpowers/sdd/p8/global-constraints.md "Contract (phase-2 additions)")과 1:1이다. 백엔드(src-tauri/src/pg/change/)와 같이 고정이다.
+
+export type PgGrantTarget =
+  | { kind: "database"; name: string }
+  | { kind: "schema"; name: string }
+  | { kind: "relation"; schema: string; name: string }          // 테이블, 뷰, 구체화 뷰, 파티션 테이블, 외부 테이블
+  | { kind: "sequence"; schema: string; name: string }
+  | { kind: "function"; schema: string; name: string; signature: string }
+  | { kind: "allTables"; schema: string }
+  | { kind: "allSequences"; schema: string };
+export interface PgGrantItem { target: PgGrantTarget; privileges: string[] }   // aclexplode 이름, 예: "SELECT", "TEMPORARY"
+export type PgPresetKind = "readOnly" | "readWrite" | "owner" | "admin";
+export interface PgPresetChoice {
+  preset: PgPresetKind;
+  database: string | null;     // 관리자만 null
+  schemas: string[];           // 관리자만 비어 있다
+  creators: string[];          // 읽기 전용·읽기·쓰기: 새로 만드는 테이블과 시퀀스에 기본 권한을 줄 역할
+  group: string | null;        // 권한을 받는 그룹. null이면 새 역할 자신이거나 관리자
+  createGroup: boolean;        // true면 같은 트랜잭션에서 group을 만든다
+}
+export interface PgAttributesSet {
+  login: boolean; createDb: boolean; createRole: boolean; inherit: boolean;
+  connectionLimit: number;     // -1 = 제한 없음
+  validUntil: string | null;   // ISO 8601 UTC, null = 없음
+}
+export type PgChange =
+  | { kind: "createRole"; name: string; login: boolean; groups: string[]; connectionLimit: number; validUntil: string | null; preset: PgPresetChoice | null }
+  | { kind: "membership"; group: string; member: string; add: boolean; admin: boolean }
+  | { kind: "attributes"; role: string; set: PgAttributesSet }     // 바라는 값 전체
+  | { kind: "password"; role: string }
+  | { kind: "grant"; database: string; grantee: string; add: boolean; items: PgGrantItem[] }   // grantee "PUBLIC" = 모든 역할
+  | { kind: "defaultPrivilege"; database: string; creator: string; schema: string | null; objectType: PgDefaultObjectType; grantee: string; privileges: string[]; add: boolean }
+  | { kind: "dropRole"; role: string }                               // 역할 만들기를 되돌릴 때만
+  | { kind: "terminate"; pid: number; role: string; backendStart: string | null };   // 확인용: pid와 역할, 알면 시작 시각(초)까지
+
+export type PgWarnLevel = "block" | "confirm" | "warn";
+export interface PgWarning { level: PgWarnLevel; message: string; add: PgChange[] }   // add: [기본 권한도 담기]가 장바구니에 담는 변경. 대개 비어 있다
+export interface PgPrivDelta { database: string; schema: string | null; objectKind: PgObjectKind; privilege: string; count: number; sample: string[] }
+export interface PgImpact { role: string; gained: PgPrivDelta[]; lost: PgPrivDelta[] }
+export interface PgDefaultDelta { before: PgDefaultAclRow | null; after: PgDefaultAclRow | null }   // 기본 권한 기록 하나의 전과 후
+export interface PgRoleDelta {
+  role: string; created: boolean; dropped: boolean;
+  attributes: { name: string; before: string; after: string }[];
+  groupsAdded: string[]; groupsRemoved: string[];
+}
+export interface PgPreview {
+  change: PgChange; database: string; summary: string; loginUser: string;   // loginUser: 이 변경을 실행할 DB 사용자
+  sql: string[];               // 실행 순서. 비밀번호는 가려져 있다
+  impacts: PgImpact[]; impactsOmitted: number; roles: PgRoleDelta[]; defaults: PgDefaultDelta[];
+  warnings: PgWarning[];       // 막힘, 확인, 주의 순서
+  confirmText: string | null; reversible: boolean;
+}
+export interface PgBatchItem { change: PgChange; summary: string; sql: string[]; warnings: PgWarning[] }
+export interface PgBatchPreview {
+  database: string; loginUser: string; items: PgBatchItem[]; sql: string[];
+  impacts: PgImpact[]; impactsOmitted: number; roles: PgRoleDelta[]; defaults: PgDefaultDelta[];
+  warnings: PgWarning[]; confirmText: string | null; reversible: boolean;
+}
+export interface PgApplyResult { logId: string; summary: string; password?: string; notes?: string[] }
+export interface PgBatchResult { batchId: string; logIds: string[]; summary: string; notes?: string[] }
+export interface PgChangeLogEntry {
+  id: string; at: string; profile: string; targetArn: string; database: string; loginUser: string;
+  change: PgChange; summary: string; sql: string[]; ok: boolean; error: string | null;
+  inverse: PgChange[] | null;  // null = 되돌릴 수 없어요
+  undoOf: string | null; undone: boolean; batchId?: string;   // batchId는 없을 때 빠진다(IAM과 같다)
+}
+export interface PgUndo { database: string; changes: PgChange[]; undoOf: string[] }
+export interface PgPresetSuggestion { matching: string[]; proposedName: string; creators: string[]; blockedCreators: { role: string; reason: string }[] }   // blockedCreators: 로그인한 역할이 기본 권한을 바꿀 수 없는 만드는 역할과 그 막힘 문구
+export interface PgDropStep { database: string | null; sql: string[]; owned: number; privileges: number; defaults: number }  // database null = 기본 데이터베이스
+export interface PgDropPlan {
+  role: string; reassignTo: string; steps: PgDropStep[]; warnings: PgWarning[]; confirmText: string; sessions: number;
+  grantedMemberships: { member: string; group: string; lost: boolean }[];   // 160000부터: 이 역할이 준 구성원 관계(DROP OWNED가 지운다). lost = 다른 부여가 없다
+}
+export interface PgDropResult { logId: string; total: number; done: number; stopped: string | null }   // stopped = 삭제 결과 문구

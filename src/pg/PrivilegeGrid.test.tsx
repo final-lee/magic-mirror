@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { StrictMode, useState } from "react";
 import { renderWithClient } from "../test/utils";
 import { pgApi } from "./api";
-import { ROLES, attributes, pgTarget, role, sampleCellDetail, sampleDatabaseView, sampleOverview } from "./fixtures";
+import { ROLES, attributes, dbAspects, pgTarget, role, sampleCellDetail, sampleDatabaseView, sampleOverview, schemaAspects } from "./fixtures";
 import { HEAD_H, PrivilegeGrid, ROW_H } from "./PrivilegeGrid";
 import { pgKeys } from "./queries";
 import { DEFAULT_KINDS, type RoleKindsValue } from "./RoleKinds";
@@ -81,8 +81,10 @@ const emptyCell = (roleName: string, schema: string): PgSchemaCell => ({
   write: "none",
   inheritedOnly: false,
   unusable: null,
+  direct: schemaAspects(),
+  owned: schemaAspects(),
 });
-const dbRow = (roleName: string): PgDbPrivilegeRow => ({ role: roleName, connect: true, create: false, temp: true });
+const dbRow = (roleName: string): PgDbPrivilegeRow => ({ role: roleName, connect: true, create: false, temp: true, direct: dbAspects(), owned: dbAspects() });
 
 /** 역할 목록과 스키마 이름에서 만든 데이터베이스 보기: 모든 칸이 비어 있다 */
 function viewOf(roles: PgRoleSummary[], schemas: string[], extra: Partial<PgDatabaseView> = {}): PgDatabaseView {

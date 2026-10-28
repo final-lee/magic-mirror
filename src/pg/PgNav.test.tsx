@@ -1,11 +1,11 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { PgNav } from "./PgNav";
 
-test("lists the six menu items in order", () => {
+test("lists the seven menu items in order, with 변경 기록 after 세션", () => {
   render(<PgNav view="roles" counts={{}} onSelect={vi.fn()} />);
   expect(screen.getByRole("navigation", { name: "PostgreSQL 메뉴" })).toBeInTheDocument();
   const items = screen.getAllByRole("button");
-  const labels = ["점검", "역할", "권한", "기본 권한", "누가 할 수 있나", "세션"];
+  const labels = ["점검", "역할", "권한", "기본 권한", "누가 할 수 있나", "세션", "변경 기록"];
   expect(items).toHaveLength(labels.length);
   labels.forEach((label, i) => expect(within(items[i]).getByText(label)).toBeInTheDocument());
 });
@@ -43,10 +43,19 @@ test("clicking an item selects its view", () => {
     ["기본 권한", "defaults"],
     ["누가 할 수 있나", "whoCan"],
     ["세션", "sessions"],
+    ["변경 기록", "changes"],
   ] as const;
   for (const [label, view] of views) {
     fireEvent.click(within(screen.getByRole("navigation")).getByText(label).closest("button")!);
     expect(onSelect).toHaveBeenLastCalledWith(view);
   }
-  expect(onSelect).toHaveBeenCalledTimes(6);
+  expect(onSelect).toHaveBeenCalledTimes(7);
+});
+
+test("the change log has no count and no gap before it: it belongs to the tools after 누가 할 수 있나", () => {
+  render(<PgNav view="roles" counts={{ findings: 3 }} onSelect={vi.fn()} />);
+  const log = screen.getByRole("button", { name: /변경 기록/ });
+  expect(within(log).queryByTestId("nav-count")).not.toBeInTheDocument();
+  expect(log).not.toHaveClass("gap");
+  expect(screen.getByRole("button", { name: /세션/ })).not.toHaveClass("gap");
 });

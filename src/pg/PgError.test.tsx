@@ -58,3 +58,36 @@ test("the compact look is the banner under a bar", () => {
   const { container } = renderWithClient(<PgError error={network} target={pgTarget} compact />);
   expect(container.querySelector(".error-banner")).not.toBeNull();
 });
+
+// 대상 전체를 다시 읽는 것이 맞지 않는 화면(변경 기록: 로컬 파일을 읽는다)은 자기 다시 시도를 넘긴다.
+describe("a retry given by the screen", () => {
+  test("다시 시도 does that instead of reading the whole target again", () => {
+    const onRetry = vi.fn();
+    renderWithClient(<PgError error={network} target={pgTarget} onRetry={onRetry} />);
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(refreshPg).not.toHaveBeenCalled();
+  });
+
+  test("so does a login that finishes through the app's login manager, once", () => {
+    const onRetry = vi.fn();
+    const sso = ssoLoginStub();
+    const qc = newQueryClient();
+    const box = (value: SsoLogin) => withClientAndSso(<PgError error={{ kind: "ssoExpired" }} target={pgTarget} onRetry={onRetry} />, qc, value);
+    const view = render(box(sso));
+    expect(onRetry).not.toHaveBeenCalled();
+    view.rerender(box({ ...sso, lastSuccessAt: () => Date.now() + 1000 }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(refreshPg).not.toHaveBeenCalled();
+  });
+
+  test("and so does the login button when there is no login manager", async () => {
+    const onRetry = vi.fn();
+    renderWithClient(<PgError error={{ kind: "ssoExpired" }} target={pgTarget} onRetry={onRetry} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+    });
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(refreshPg).not.toHaveBeenCalled();
+  });
+});

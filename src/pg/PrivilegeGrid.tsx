@@ -45,7 +45,18 @@ type FocusReq = CellKey & { n: number; open?: boolean };
 /** 그려지는 줄: 종류 머리이거나 데이터 행(r은 rows의 번호) */
 type Line = { type: "head"; kind: PgRoleKind; count: number } | { type: "row"; r: number };
 
-const emptyCell = (role: string, schema: string): PgSchemaCell => ({ role, schema, usage: false, create: false, read: "none", write: "none", inheritedOnly: false, unusable: null });
+const emptyCell = (role: string, schema: string): PgSchemaCell => ({
+  role,
+  schema,
+  usage: false,
+  create: false,
+  read: "none",
+  write: "none",
+  inheritedOnly: false,
+  unusable: null,
+  direct: { usage: false, create: false, read: "none", write: "none" },
+  owned: { usage: false, create: false, read: "none", write: "none" },
+});
 
 /** 표의 행: 사용자 먼저, 그다음 그룹. 종류 안에서는 이름순. 거르는 규칙은 역할 목록과 같다. */
 function shownRows(roles: PgRoleSummary[], kinds: RoleKindsValue, filter: string): PgRoleSummary[] {
@@ -83,7 +94,8 @@ function indexOf(view: PgDatabaseView): ViewIndex {
   return {
     schemas: view.schemas.map((s) => s.name).sort(collate),
     cell: (role, schema) => cells.get(role)?.get(schema) ?? emptyCell(role, schema),
-    database: (role) => databases.get(role) ?? { role, connect: false, create: false, temp: false },
+    database: (role) =>
+      databases.get(role) ?? { role, connect: false, create: false, temp: false, direct: { connect: false, create: false, temp: false }, owned: { connect: false, create: false, temp: false } },
   };
 }
 

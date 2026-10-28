@@ -7,24 +7,35 @@
 //   alice ← app_write ← app_read는 그룹으로 받고, bob은 NOINHERIT라 app_read를 상속하지 않는다.
 // - bob은 app.orders SELECT를 직접 받았지만 CONNECT가 없어서 못 쓴다(권한 표의 유일한 "못 쓰는 칸").
 // - iam_admin은 pg_read_all_data 멤버라 모든 테이블을 읽는다(출처 predefined).
+// - 칸의 direct는 Direct 출처만, owned는 Owner 출처만으로 계산한 값이다. 그룹·PUBLIC·미리 정의된 역할에서 받은 것은 어느 쪽에도 없다.
+//   app_read는 app의 USAGE와 모든 테이블 SELECT를 직접 받았고, app_write는 쓰기를, bob은 app.orders SELECT를 직접 받았다. app_owner는 소유자다.
 import type {
   PgAttributes,
   PgBadge,
   PgBadgeKind,
+  PgBatchPreview,
   PgCellDetail,
+  PgChange,
+  PgChangeLogEntry,
   PgCellObject,
   PgDatabaseView,
+  PgDbAspects,
   PgDefaultAclRow,
+  PgDropPlan,
   PgFinding,
   PgFindingGroup,
   PgFindings,
   PgMembership,
   PgObjectRef,
   PgOverview,
+  PgPresetSuggestion,
+  PgPreview,
+  PgPrivDelta,
   PgPrivilegeGrant,
   PgRoleDatabase,
   PgRoleSummary,
   PgRoleView,
+  PgSchemaAspects,
   PgSchemaCell,
   PgSession,
   PgSource,
@@ -184,7 +195,13 @@ export const touchOrderFn = object("function", "app", "touch_order", "order_id i
 
 // ── 권한 표 ──
 const SCHEMAS = ["app", "audit"];
-const cell = (roleName: string, schema: string, extra: Partial<PgSchemaCell> = {}): PgSchemaCell => ({
+/** 출처 한 가지로 계산한 칸의 값(direct, owned): 모두 비어 있다 */
+export const schemaAspects = (extra: Partial<PgSchemaAspects> = {}): PgSchemaAspects => ({ usage: false, create: false, read: "none", write: "none", ...extra });
+/** 출처 한 가지로 계산한 데이터베이스 권한 행의 값(direct, owned): 모두 꺼져 있다 */
+export const dbAspects = (extra: Partial<PgDbAspects> = {}): PgDbAspects => ({ connect: false, create: false, temp: false, ...extra });
+
+type CellSpec = Partial<Omit<PgSchemaCell, "role" | "schema" | "direct" | "owned">> & { direct?: Partial<PgSchemaAspects>; owned?: Partial<PgSchemaAspects> };
+const cell = (roleName: string, schema: string, { direct, owned, ...extra }: CellSpec = {}): PgSchemaCell => ({
   role: roleName,
   schema,
   usage: false,
@@ -193,22 +210,27 @@ const cell = (roleName: string, schema: string, extra: Partial<PgSchemaCell> = {
   write: "none",
   inheritedOnly: false,
   unusable: null,
+  direct: schemaAspects(direct),
+  owned: schemaAspects(owned),
   ...extra,
 });
+const OWNER_ALL: Partial<PgSchemaAspects> = { usage: true, create: true, read: "all", write: "all" };
 // 권한이 있는 칸만 적는다. 나머지는 모두 비어 있다. 못 쓰는 칸(unusable)은 권한이 있는 칸에만 붙는다.
-const CELLS: Record<string, Partial<PgSchemaCell>> = {
+const CELLS: Record<string, CellSpec> = {
   "alice/app": { usage: true, read: "all", write: "some", inheritedOnly: true }, // app_write ← app_read에서 받음
-  "app_owner/app": { usage: true, create: true, read: "all", write: "all" },
-  "app_owner/audit": { usage: true, create: true, read: "all", write: "all" },
-  "app_read/app": { usage: true, read: "all" },
-  "app_write/app": { usage: true, read: "all", write: "some" }, // 쓰기는 직접 받았으므로 흐리지 않는다
-  "bob/app": { read: "some", unusable: "CONNECT 없음" }, // app.orders SELECT만 직접 받았고 CONNECT가 없다
+  "app_owner/app": { usage: true, create: true, read: "all", write: "all", owned: OWNER_ALL },
+  "app_owner/audit": { usage: true, create: true, read: "all", write: "all", owned: OWNER_ALL },
+  "app_read/app": { usage: true, read: "all", direct: { usage: true, read: "all" } },
+  "app_write/app": { usage: true, read: "all", write: "some", direct: { write: "some" } }, // 쓰기는 직접 받았으므로 흐리지 않는다. 사용·읽기는 app_read에서 받았다
+  "bob/app": { read: "some", unusable: "CONNECT 없음", direct: { read: "some" } }, // app.orders SELECT만 직접 받았고 CONNECT가 없다
   "iam_admin/app": { usage: true, read: "all", inheritedOnly: true }, // pg_read_all_data
   "iam_admin/audit": { usage: true, read: "all", inheritedOnly: true },
   "pg_read_all_data/app": { usage: true, read: "all", inheritedOnly: true },
   "pg_read_all_data/audit": { usage: true, read: "all", inheritedOnly: true },
 };
 const CONNECT = new Set(["alice", "app_owner", "app_read", "app_write", "iam_admin", "pg_read_all_data", "postgres", "rds_superuser"]);
+/** CONNECT를 데이터베이스의 ACL에서 직접 받은 역할. 나머지는 그룹을 거쳐 받는다. 소유자는 owned다. */
+const CONNECT_DIRECT = new Set(["app_read", "pg_read_all_data", "rds_superuser"]);
 
 export function sampleDatabaseView(extra: Partial<PgDatabaseView> = {}): PgDatabaseView {
   return {
@@ -216,7 +238,14 @@ export function sampleDatabaseView(extra: Partial<PgDatabaseView> = {}): PgDatab
     fetchedAt: FETCHED_AT,
     truncated: false,
     // PUBLIC은 TEMP만 남았다(CONNECT 회수). CREATE는 소유자뿐이다.
-    dbPrivileges: ROLE_NAMES.map((name) => ({ role: name, connect: CONNECT.has(name), create: name === "app_owner", temp: true })),
+    dbPrivileges: ROLE_NAMES.map((name) => ({
+      role: name,
+      connect: CONNECT.has(name),
+      create: name === "app_owner",
+      temp: true,
+      direct: dbAspects({ connect: CONNECT_DIRECT.has(name) }),
+      owned: name === "app_owner" ? dbAspects({ connect: true, create: true, temp: true }) : dbAspects(),
+    })),
     schemas: [
       { name: "app", owner: "app_owner", tableCount: 3 },
       { name: "audit", owner: "app_owner", tableCount: 1 },
@@ -420,6 +449,192 @@ export function sampleFindings(extra: Partial<PgFindings> = {}): PgFindings {
     skipped: [{ database: "analytics", reason: 'analytics에 연결하지 못했어요: permission denied for database "analytics"' }],
     truncated: [],
     fetchedAt: "2026-10-28T12:01:00Z",
+    ...extra,
+  };
+}
+
+// ── 변경 (2단계) ──
+// 변경 픽스처는 위 시나리오의 역할과 스키마를 쓴다. 미리보기·기록 픽스처는 같은 변경을 가리키고, 요약과 SQL은 백엔드가 만드는 글과 같다.
+// audit 스키마에는 기본 권한이 없다: 그 스키마의 모든 테이블에 권한을 주면 "새로 만드는 테이블에는 적용되지 않아요"가 따라붙는다.
+
+type Variant<K extends PgChange["kind"]> = Extract<PgChange, { kind: K }>;
+
+/** orders의 audit 스키마 모든 테이블 SELECT를 app_read에 준다. */
+export const grantAuditRead: Variant<"grant"> = {
+  kind: "grant",
+  database: "orders",
+  grantee: "app_read",
+  add: true,
+  items: [{ target: { kind: "allTables", schema: "audit" }, privileges: ["SELECT"] }],
+};
+export const revokeAuditRead: Variant<"grant"> = { ...grantAuditRead, add: false };
+/** [기본 권한도 담기]가 담는 변경: app_owner가 audit에 새 테이블을 만들면 app_read가 SELECT를 받는다. */
+export const defaultAuditRead: Variant<"defaultPrivilege"> = {
+  kind: "defaultPrivilege",
+  database: "orders",
+  creator: "app_owner",
+  schema: "audit",
+  objectType: "tables",
+  grantee: "app_read",
+  privileges: ["SELECT"],
+  add: true,
+};
+export const addBobToWriters: Variant<"membership"> = { kind: "membership", group: "app_write", member: "bob", add: true, admin: false };
+export const removeBobFromWriters: Variant<"membership"> = { ...addBobToWriters, add: false };
+/** 아무것도 소유하지 않는 그룹 하나를 만든다. */
+export const createAppAudit: Variant<"createRole"> = { kind: "createRole", name: "app_audit", login: false, groups: [], connectionLimit: -1, validUntil: null, preset: null };
+/** 로그인하는 사용자를 만든다: 적용하면 새 비밀번호를 한 번 받는다. */
+export const createCarol: Variant<"createRole"> = { kind: "createRole", name: "carol", login: true, groups: ["app_read"], connectionLimit: -1, validUntil: null, preset: null };
+export const resetAlicePassword: Variant<"password"> = { kind: "password", role: "alice" };
+export const dropAppAudit: Variant<"dropRole"> = { kind: "dropRole", role: "app_audit" };
+
+const delta = (schema: string | null, objectKind: PgPrivDelta["objectKind"], privilege: string, count: number, sample: string[]): PgPrivDelta => ({
+  database: "orders",
+  schema,
+  objectKind,
+  privilege,
+  count,
+  sample,
+});
+
+/** 변경 하나의 미리보기: grantAuditRead. app_read와 그 그룹 사슬(app_write, alice)이 audit.events를 읽게 된다. bob은 NOINHERIT라서 빠진다. */
+export function samplePreview(extra: Partial<PgPreview> = {}): PgPreview {
+  const gained = [delta("audit", "table", "SELECT", 1, ["audit.events"])];
+  return {
+    change: grantAuditRead,
+    database: "orders",
+    summary: "권한 주기: app_read · audit 스키마의 모든 테이블 SELECT",
+    loginUser: LOGIN_USER,
+    sql: ['GRANT SELECT ON ALL TABLES IN SCHEMA "audit" TO "app_read"'],
+    impacts: [
+      { role: "alice", gained, lost: [] },
+      { role: "app_read", gained, lost: [] },
+      { role: "app_write", gained, lost: [] },
+    ],
+    impactsOmitted: 0,
+    roles: [],
+    defaults: [],
+    warnings: [{ level: "warn", message: "새로 만드는 테이블에는 적용되지 않아요", add: [defaultAuditRead] }],
+    confirmText: null,
+    reversible: true,
+    ...extra,
+  };
+}
+
+/** 묶음 미리보기: grantAuditRead와 addBobToWriters를 orders에서 한 트랜잭션으로 적용한다. */
+export function sampleBatchPreview(extra: Partial<PgBatchPreview> = {}): PgBatchPreview {
+  const grant = samplePreview();
+  const membershipSql = ['GRANT "app_write" TO "bob"'];
+  return {
+    database: "orders",
+    loginUser: LOGIN_USER,
+    items: [
+      { change: grant.change, summary: grant.summary, sql: grant.sql, warnings: grant.warnings },
+      { change: addBobToWriters, summary: "그룹에 넣기: bob → app_write", sql: membershipSql, warnings: [] },
+    ],
+    sql: [...grant.sql, ...membershipSql],
+    impacts: grant.impacts,
+    impactsOmitted: 0,
+    // bob은 NOINHERIT라서 권한이 늘지 않는다: 구성원만 바뀐다
+    roles: [{ role: "bob", created: false, dropped: false, attributes: [], groupsAdded: ["app_write"], groupsRemoved: [] }],
+    defaults: [],
+    warnings: [],
+    confirmText: null,
+    reversible: true,
+    ...extra,
+  };
+}
+
+/** 변경 기록 한 줄: 성공한 grantAuditRead. 되돌리면 같은 권한을 뺀다. */
+export function sampleLogEntry(extra: Partial<PgChangeLogEntry> = {}): PgChangeLogEntry {
+  return {
+    id: "log-1",
+    at: "2026-10-29T12:00:00Z",
+    profile: pgTarget.profile,
+    targetArn: sampleTargetInfo().arn,
+    database: "orders",
+    loginUser: LOGIN_USER,
+    change: grantAuditRead,
+    summary: "권한 주기: app_read · audit 스키마의 모든 테이블 SELECT",
+    sql: ['GRANT SELECT ON ALL TABLES IN SCHEMA "audit" TO "app_read"'],
+    ok: true,
+    error: null,
+    inverse: [revokeAuditRead],
+    undoOf: null,
+    undone: false,
+    ...extra,
+  };
+}
+
+/**
+ * 변경 기록(최신순). 이 대상의 기록만 있다.
+ * 비밀번호 재설정(되돌릴 수 없음), 두 변경의 묶음 b-1, 만든 그룹, 이미 되돌린 권한 주기, 실패한 권한 주기.
+ */
+export function sampleChangeLog(): PgChangeLogEntry[] {
+  const at = (hhmm: string) => `2026-10-29T${hhmm}:00Z`;
+  return [
+    sampleLogEntry({
+      id: "log-5",
+      at: at("12:50"),
+      database: "orders",
+      change: resetAlicePassword,
+      summary: "비밀번호 재설정: alice",
+      sql: ['ALTER ROLE "alice" PASSWORD \'••••••••\''],
+      inverse: null,
+    }),
+    sampleLogEntry({
+      id: "b-1-2",
+      at: at("12:40"),
+      batchId: "b-1",
+      change: addBobToWriters,
+      summary: "그룹에 넣기: bob → app_write",
+      sql: ['GRANT "app_write" TO "bob"'],
+      inverse: [removeBobFromWriters],
+    }),
+    sampleLogEntry({ id: "b-1-1", at: at("12:40"), batchId: "b-1", inverse: [revokeAuditRead] }),
+    sampleLogEntry({
+      id: "log-3",
+      at: at("12:30"),
+      change: createAppAudit,
+      summary: "역할 만들기: app_audit",
+      sql: ['CREATE ROLE "app_audit" NOLOGIN'],
+      inverse: [dropAppAudit],
+    }),
+    sampleLogEntry({ id: "log-2", at: at("12:20"), undone: true }),
+    sampleLogEntry({ id: "log-1", at: at("12:10"), ok: false, error: "적용하지 못했어요: permission denied for table events", inverse: null }),
+  ];
+}
+
+/** 읽기 전용 프리셋을 audit 스키마에 쓸 때의 제안: 같은 권한을 가진 그룹이 이미 있고, 기본 권한을 줄 역할 하나는 로그인한 역할이 바꿀 수 없다. */
+export function samplePresetSuggestion(extra: Partial<PgPresetSuggestion> = {}): PgPresetSuggestion {
+  return {
+    matching: ["app_read"],
+    proposedName: "audit_read",
+    creators: ["app_owner"],
+    blockedCreators: [{ role: "postgres", reason: "postgres 역할의 기본 권한을 바꿀 수 없어요. 로그인한 역할이 postgres 역할의 권한을 물려받아야 해요" }],
+    ...extra,
+  };
+}
+
+/**
+ * alice를 지우는 계획: 연결할 수 있는 데이터베이스(analytics, orders, postgres)마다 소유권을 넘기고 권한을 거둔 뒤, 기본 데이터베이스(orders)에서 역할을 지운다.
+ * database가 null인 단계는 기본 데이터베이스에서 돈다.
+ */
+export function sampleDropPlan(extra: Partial<PgDropPlan> = {}): PgDropPlan {
+  const clean = ['REASSIGN OWNED BY "alice" TO "iam_admin"', 'DROP OWNED BY "alice"'];
+  return {
+    role: "alice",
+    reassignTo: LOGIN_USER,
+    steps: [
+      { database: "analytics", sql: clean, owned: 0, privileges: 1, defaults: 0 },
+      { database: null, sql: clean, owned: 0, privileges: 2, defaults: 0 },
+      { database: "postgres", sql: clean, owned: 0, privileges: 0, defaults: 0 },
+      { database: null, sql: ['DROP ROLE "alice"'], owned: 0, privileges: 0, defaults: 0 },
+    ],
+    warnings: [{ level: "warn", message: "이 역할로 접속한 세션 1개는 끊기지 않아요", add: [] }],
+    confirmText: "alice",
+    sessions: 1,
+    grantedMemberships: [],
     ...extra,
   };
 }

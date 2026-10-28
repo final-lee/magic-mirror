@@ -3,7 +3,7 @@ import { StrictMode } from "react";
 import { formatDateTime } from "../iam/format";
 import { renderWithClient } from "../test/utils";
 import { pgApi } from "./api";
-import { pgTarget, sampleDatabaseView, sampleRoleView } from "./fixtures";
+import { pgTarget, sampleDatabaseView, sampleRoleView, schemaAspects } from "./fixtures";
 import { pgKeys, refreshPg } from "./queries";
 import { RoleDetail } from "./RoleDetail";
 import type { PgObjectRef, PgRoleDatabase, PgRoleView, PgSchemaCell } from "./types";
@@ -88,6 +88,8 @@ const cell = (extra: Partial<PgSchemaCell>): PgSchemaCell => ({
   write: "none",
   inheritedOnly: false,
   unusable: null,
+  direct: schemaAspects(),
+  owned: schemaAspects(),
   ...extra,
 });
 

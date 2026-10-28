@@ -1,5 +1,5 @@
 // 변경 미리보기 창(하나짜리, 묶음)이 함께 쓰는 조각: 초점 규칙, 경고, 호출, 영향받는 주체, 확인 문구 입력, 오류 안내.
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { KIND_LABEL, LEVEL_LABEL } from "./labels";
 import type { Impact, PermDelta, PreviewWarning } from "./types";
 import { useModal } from "./useModal";
@@ -49,8 +49,11 @@ export function useSheetFocus(phase: string, onCancel: () => void) {
   return { sheetRef, trapTab, cancelRef, retryRef };
 }
 
-/** 경고를 막힘 → 확인 → 주의 순서로 묶어서 보여 준다. 경고가 없으면 아무것도 그리지 않는다 */
-export function WarningList({ warnings }: { warnings: PreviewWarning[] }) {
+/**
+ * 경고를 막힘 → 확인 → 주의 순서로 묶어서 보여 준다. 경고가 없으면 아무것도 그리지 않는다.
+ * action을 주면 경고마다 그 글 바로 뒤에 조치(PostgreSQL 미리보기의 [기본 권한도 담기] 같은 버튼)를 붙인다. IAM은 주지 않는다.
+ */
+export function WarningList<W extends PreviewWarning = PreviewWarning>({ warnings, action }: { warnings: W[]; action?: (warning: W) => ReactNode }) {
   return (
     <>
       {WARN_LEVELS.map((level) => {
@@ -61,7 +64,10 @@ export function WarningList({ warnings }: { warnings: PreviewWarning[] }) {
             <div className="cp-warn-title">{WARN_TITLE[level]}</div>
             <ul>
               {items.map((w, i) => (
-                <li key={i}>{w.message}</li>
+                <li key={i}>
+                  {w.message}
+                  {action?.(w)}
+                </li>
               ))}
             </ul>
           </div>
