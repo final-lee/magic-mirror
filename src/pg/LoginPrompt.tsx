@@ -18,7 +18,8 @@ export function LoginPrompt({ initial = "", onSubmit, onCancel }: Props) {
   const [name, setName] = useState(initial);
   const messageId = useId();
   const trimmed = name.trim();
-  const problem = loginNameError(trimmed);
+  // 빈 이름도 백엔드는 거절하지만, 입력하기 전에는 문구를 보이지 않는다. 그때는 [연결]만 막는다.
+  const problem = trimmed === "" ? null : loginNameError(trimmed);
   const ready = trimmed !== "" && problem === null;
   return (
     <form

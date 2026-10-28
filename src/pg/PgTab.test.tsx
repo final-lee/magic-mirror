@@ -1,4 +1,4 @@
-import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { api } from "../api/client";
@@ -707,9 +707,10 @@ describe("menu", () => {
   });
 
   describe("while there is no connection", () => {
-    afterEach(() => focusManager.setFocused(undefined));
+    // 앱은 창에 초점이 돌아와도 다시 읽지 않게 해 두었다(refetchOnWindowFocus: false). 켜 둔 쪽은 네트워크가 다시 이어질 때(refetchOnReconnect)다
+    afterEach(() => onlineManager.setOnline(true));
 
-    test("no findings are read, not even when the window gets its focus back", async () => {
+    test("no findings are read, not even when the network comes back", async () => {
       m.findings.mockRejectedValue({ kind: "other", message: "점검을 읽지 못했어요" });
       setup();
       await connected();
@@ -722,7 +723,10 @@ describe("menu", () => {
       await user.click(screen.getByRole("button", { name: "연결" }));
       await screen.findByText("연결하는 중이에요");
       m.findings.mockClear();
-      act(() => focusManager.setFocused(true));
+      await act(async () => {
+        onlineManager.setOnline(false);
+        onlineManager.setOnline(true);
+      });
       await act(async () => {});
       expect(m.findings).not.toHaveBeenCalled();
     });
@@ -870,6 +874,27 @@ describe("roles", () => {
     expect(await screen.findByRole("heading", { name: "rds_superuser" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
     expect(rowOf("rds_superuser")).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("a role opened after 점검 was visited reads no database view until 불러오기 is pressed", async () => {
+    // 점검을 열면 백엔드는 연결할 수 있는 데이터베이스를 읽는다. 그 뒤 역할은 analytics만 빼고 읽은 것으로 답한다
+    m.role.mockImplementation(async (_t, role) => {
+      const view = sampleRoleView(role);
+      return { ...view, databases: view.databases.map((d) => ({ ...d, loaded: d.database !== "analytics" })) };
+    });
+    setup();
+    await connected();
+    openMenu("점검");
+    await waitFor(() => expect(m.findings).toHaveBeenCalledTimes(1));
+    openMenu("역할");
+    await openRole("alice");
+    fireEvent.click(screen.getByRole("tab", { name: "권한" }));
+    await within(screen.getByRole("region", { name: "orders" })).findByRole("table");
+    await act(async () => {});
+    expect(m.database).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole("region", { name: "analytics" })).getByRole("button", { name: "불러오기" }));
+    await waitFor(() => expect(m.database).toHaveBeenCalledTimes(1));
+    expect(m.database).toHaveBeenCalledWith(pgTarget, "analytics", false);
   });
 
   test("a group in the detail opens that role, and back restores the sub-tab that was open", async () => {

@@ -459,6 +459,40 @@ describe("refreshPg", () => {
     await waitFor(() => expect(m.database).toHaveBeenCalledWith(t, "analytics", false));
   });
 
+  test("a findings query that was never read is not marked: its first read after a refresh is not forced", async () => {
+    const { qc, wrapper } = makeClient();
+    const hook = renderHook(({ on }) => usePgFindings(t, on), { wrapper, initialProps: { on: false } });
+    await refreshPg(qc, t);
+    expect(m.findings).not.toHaveBeenCalled();
+    hook.rerender({ on: true });
+    await waitFor(() => expect(m.findings).toHaveBeenCalledWith(t, false));
+    expect(m.findings).toHaveBeenCalledTimes(1);
+  });
+
+  test("a database whose first read failed has nothing to refresh: the next read is not forced", async () => {
+    const { qc, wrapper } = makeClient();
+    m.database.mockRejectedValueOnce({ kind: "other", message: "못 읽었어요" });
+    const hook = renderHook(() => usePgDatabase(t, "analytics"), { wrapper });
+    await waitFor(() => expect(hook.result.current.isError).toBe(true));
+    await refreshPg(qc, t);
+    expect(m.database).toHaveBeenCalledTimes(2);
+    expect(m.database).toHaveBeenLastCalledWith(t, "analytics", false);
+    await waitFor(() => expect(hook.result.current.isSuccess).toBe(true));
+  });
+
+  test("a snapshot that was read once is marked, even when its last read failed", async () => {
+    const { qc, wrapper } = makeClient();
+    const hook = renderHook(() => usePgDatabase(t, "orders"), { wrapper });
+    await waitFor(() => expect(hook.result.current.isSuccess).toBe(true));
+    m.database.mockRejectedValueOnce({ kind: "other", message: "끊겼어요" });
+    await act(async () => {
+      await qc.invalidateQueries({ queryKey: pgKeys.database(t, "orders") });
+    });
+    await waitFor(() => expect(hook.result.current.isError).toBe(true));
+    await refreshPg(qc, t);
+    expect(m.database).toHaveBeenLastCalledWith(t, "orders", true); // 읽어 둔 값이 있으니 낡은 것을 새로 읽는다
+  });
+
   test("marks left over in one client do not reach another", async () => {
     const first = makeClient();
     const hook = renderHook(() => usePgDatabase(t, "orders"), { wrapper: first.wrapper });
