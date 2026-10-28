@@ -292,7 +292,7 @@ Commands (all take `target` first and need `pg_open`, except `pg_change_log`, `p
 | `pg_apply_drop` | `target, role, reassignTo, confirmText` | `PgDropResult` |
 | `pg_change_log` | (none) | `PgChangeLogEntry[]`, newest first |
 | `pg_undo` | `logId` | `PgUndo` for that entry |
-| `pg_undo_batch` | `batchId` | `PgUndo` for every entry of the batch, last applied first |
+| `pg_undo_batch` | `batchId` | `PgUndo` for the batch's undoable entries, last applied first (failed, undone and not-undoable entries are skipped, as in IAM) |
 
 The spec lists `pg_undo` as returning `PgChange`. The undo of a created role needs several changes in one transaction, so it returns `PgUndo` instead, and `pg_undo_batch` is added as IAM has it. The spec's line is updated in the same commit as this plan.
 
