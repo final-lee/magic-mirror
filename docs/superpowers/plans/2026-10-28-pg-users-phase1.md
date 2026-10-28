@@ -192,9 +192,10 @@ Settings: `Settings.pgLogins: Record<string, string>` maps a target ARN to its D
 **Interfaces:**
 - Produces:
   - `pg::target::{PgTarget, TargetKind, PgTargetInfo, info_of_cluster(&DbCluster) -> Result<PgTargetInfo, AppError>, info_of_instance(&DbInstance) -> Result<PgTargetInfo, AppError>, resolve(cfg: &SdkConfig, target: &PgTarget) -> Result<PgTargetInfo, AppError>}`
-  - `pg::connect::{ConnFailure, describe_failure(&ConnFailure, &ConnCtx) -> AppError, ConnCtx { host, port, user, database, kind }, rds_roots() -> Result<rustls::RootCertStore, AppError>, auth_token(cfg: &SdkConfig, host, port, user) -> Result<String, AppError>, connect(cfg: &SdkConfig, info: &PgTargetInfo, user: &str, database: &str) -> Result<Connected, AppError>}`
+  - `pg::connect::{ConnFailure, describe_failure(&ConnFailure, &ConnCtx) -> AppError, ConnCtx { host, port, user, database }, rds_roots() -> Result<rustls::RootCertStore, AppError>, auth_token(cfg: &SdkConfig, host, port, user) -> Result<String, AppError>, connect(cfg: &SdkConfig, info: &PgTargetInfo, user: &str, database: &str) -> Result<Connected, AppError>}`
   - `Connected { client: tokio_postgres::Client, backend_pid: i32 }`. The connection future is spawned inside `connect`.
   - `pg::pool::{Pool, ConnKey { target: PgTarget, user: String, database: String }}`, with:
+    - As built (K1): `Connected` has a `broken` flag set when a read misses its 90 s deadline. The pool treats broken or closed clients as gone, expires idle entries by wall clock as well as by `Instant` (which stops while a Mac sleeps), and has `close_user(target, user)` for a login switch.
     - `Pool::get_or_connect(&self, key, f) -> Result<Arc<tokio::sync::Mutex<Connected>>, AppError>`. As built, the commands read the target's epoch once per command and call `get_or_connect_at_epoch`, so a close during a walk refuses every later connect.
     - `Pool::close_target(&self, &PgTarget)`
     - `Pool::sweep(&self, now: Instant)`
