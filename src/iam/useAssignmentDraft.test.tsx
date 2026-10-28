@@ -1,4 +1,5 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, render, renderHook } from "@testing-library/react";
+import { StrictMode } from "react";
 import { MAX_DRAFT, type DraftItem } from "./assignments";
 import {
   adminPolicy,
@@ -195,6 +196,59 @@ describe("when the overview is loaded again", () => {
     rerender({ profile: "prod", ov: sampleOverview({ users: [alice, ciBot] }) });
     expect(result.current.items).toEqual([]);
     expect(result.current.notices).toEqual(["찾을 수 없어서 뺐어요: ReadOnlyAccess 붙이기 · bob"]);
+  });
+
+  test("a pending attach of a customer policy the new overview no longer lists is dropped as not found", () => {
+    const { result, rerender } = setup();
+    act(() => result.current.toggle("policies", ciBot, deployPolicy.arn));
+    expect(labels(result.current.items)).toEqual(["app-deploy 붙이기 · ci-bot"]);
+    rerender({ profile: "prod", ov: sampleOverview({ policies: ov.policies.filter((p) => p.arn !== deployPolicy.arn) }) });
+    expect(result.current.items).toEqual([]);
+    expect(result.current.notices).toEqual(["찾을 수 없어서 뺐어요: app-deploy 붙이기 · ci-bot"]);
+  });
+
+  test("children never see a change the new overview made redundant, not even for one render", () => {
+    const seen: string[][] = [];
+    let latest!: ReturnType<typeof useAssignmentDraft>;
+    function Consumer({ items }: { items: DraftItem[] }) {
+      seen.push(labels(items));
+      return null;
+    }
+    function Harness(p: Props) {
+      latest = useAssignmentDraft(p.profile, p.ov);
+      return <Consumer items={latest.items} />;
+    }
+    const { rerender } = render(<Harness profile="prod" ov={ov} />);
+    act(() => latest.toggle("policies", bob, READ));
+    expect(seen[seen.length - 1]).toEqual(["ReadOnlyAccess 붙이기 · bob"]);
+
+    seen.length = 0;
+    rerender(<Harness profile="prod" ov={reloaded(bob, { attached: [READ] })} />);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((items) => items.length === 0)).toBe(true);
+    expect(latest.notices).toEqual(["이미 붙어 있어서 뺐어요: ReadOnlyAccess 붙이기 · bob"]);
+  });
+
+  test("changes made after the cleanup build on the cleaned tray, not on the dropped item", () => {
+    const { result, rerender } = setup();
+    act(() => result.current.toggle("policies", bob, READ));
+    rerender({ profile: "prod", ov: reloaded(bob, { attached: [READ] }) });
+    act(() => result.current.toggle("policies", ciBot, READ));
+    expect(labels(result.current.items)).toEqual(["ReadOnlyAccess 붙이기 · ci-bot"]);
+  });
+
+  test("a new overview is applied once when React renders twice (StrictMode)", () => {
+    const { result, rerender } = renderHook((p: Props) => useAssignmentDraft(p.profile, p.ov), {
+      initialProps: { profile: "prod", ov } as Props,
+      wrapper: StrictMode,
+    });
+    act(() => {
+      result.current.toggle("policies", bob, READ);
+      result.current.toggle("policies", ciBot, READ);
+    });
+    rerender({ profile: "prod", ov: reloaded(bob, { attached: [READ] }) });
+    expect(labels(result.current.items)).toEqual(["ReadOnlyAccess 붙이기 · ci-bot"]);
+    expect(result.current.notices).toEqual(["이미 붙어 있어서 뺐어요: ReadOnlyAccess 붙이기 · bob"]);
   });
 
   test("an overview that changes nothing for the tray leaves it untouched", () => {

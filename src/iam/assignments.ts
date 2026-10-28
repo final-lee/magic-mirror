@@ -32,6 +32,9 @@ export function rowKey(tab: AssignmentTab, row: PrincipalSummary, column: string
 
 const lastSegment = (arn: string) => arn.slice(arn.lastIndexOf("/") + 1);
 
+/** AWS 관리형 정책의 ARN인지(arn:aws:iam::aws:policy/…). 고객 관리형은 그 자리에 계정 번호가 들어간다 */
+const isAwsManaged = (arn: string) => arn.includes(":aws:policy/");
+
 export function policyName(ov: IamOverview, arn: string): string {
   return ov.policies.find((p) => p.arn === arn)?.name ?? lastSegment(arn);
 }
@@ -42,7 +45,7 @@ export function policyColumns(ov: IamOverview, extra: string[]): Column[] {
   const byArn = new Map(ov.policies.map((p) => [p.arn, p]));
   const column = (arn: string): Column => {
     const p = byArn.get(arn);
-    return p ? { id: arn, name: p.name, scope: p.scope, badges: p.badges } : { id: arn, name: lastSegment(arn), scope: arn.includes(":aws:policy/") ? "aws" : "local", badges: [] };
+    return p ? { id: arn, name: p.name, scope: p.scope, badges: p.badges } : { id: arn, name: lastSegment(arn), scope: isAwsManaged(arn) ? "aws" : "local", badges: [] };
   };
   const used = [...count.keys()].sort((a, b) => count.get(b)! - count.get(a)! || column(a).name.localeCompare(column(b).name));
   const added = extra.filter((arn, i) => !count.has(arn) && extra.indexOf(arn) === i);
@@ -126,11 +129,12 @@ export function paintCells(draft: DraftItem[], ov: IamOverview, tab: AssignmentT
   return { draft: next, full };
 }
 
-/** "다른 주체와 같게": 원본에만 있는 것(add)과 대상에만 있는 것(extra). 그룹으로 받은 것은 보지 않는다 */
-export function matchPrincipal(tab: AssignmentTab, source: PrincipalSummary, target: PrincipalSummary): { add: string[]; extra: string[] } {
+/** "다른 주체와 같게": 원본에만 있는 것(add)과 대상에만 있는 것(extra). 그룹으로 받은 것은 보지 않고, 대상에서 바꿀 수 없는 칸(잠긴 대상, 그룹으로만 받는 정책)은 내놓지 않는다 */
+export function matchPrincipal(ov: IamOverview, tab: AssignmentTab, source: PrincipalSummary, target: PrincipalSummary): { add: string[]; extra: string[] } {
   const of = (p: PrincipalSummary) => (tab === "policies" ? p.attached ?? [] : p.groups ?? []);
   const [s, t] = [of(source), of(target)];
-  return { add: s.filter((x) => !t.includes(x)), extra: t.filter((x) => !s.includes(x)) };
+  const editable = (column: string) => isEditable(ov, tab, target, column);
+  return { add: s.filter((x) => !t.includes(x) && editable(x)), extra: t.filter((x) => !s.includes(x) && editable(x)) };
 }
 
 export function matchChanges(draft: DraftItem[], ov: IamOverview, tab: AssignmentTab, target: PrincipalSummary, add: string[], remove: string[]) {
@@ -145,6 +149,11 @@ function rowOf(ov: IamOverview, c: IamChange): PrincipalSummary | undefined {
   return undefined;
 }
 
+/** 붙이려는 고객 관리형 정책이 개요에 없으면 지워진 것이다(개요는 고객 관리형을 모두 담는다). AWS 관리형은 어디에도 안 붙은 것이 목록에 없을 수 있어서 보지 않는다 */
+function policyGone(ov: IamOverview, c: IamChange): boolean {
+  return c.op === "attachPolicy" && !isAwsManaged(c.policyArn) && !ov.policies.some((p) => p.arn === c.policyArn);
+}
+
 const DONE: Record<string, string> = {
   attachPolicy: "이미 붙어 있어서 뺐어요",
   detachPolicy: "이미 떨어져 있어서 뺐어요",
@@ -152,12 +161,12 @@ const DONE: Record<string, string> = {
   removeFromGroup: "이미 그룹에 없어서 뺐어요",
 };
 
-/** 개요를 다시 불러온 뒤 장바구니 정리: 이미 그 상태가 된 변경과 대상이 없어진 변경을 빼고 알린다. 바뀐 것이 없으면 같은 배열을 돌려준다 */
+/** 개요를 다시 불러온 뒤 장바구니 정리: 이미 그 상태가 된 변경과 대상(주체·그룹·붙일 정책)이 없어진 변경을 빼고 알린다. 바뀐 것이 없으면 같은 배열을 돌려준다 */
 export function normalizeDraft(ov: IamOverview, draft: DraftItem[]): { draft: DraftItem[]; notices: string[] } {
   const notices: string[] = [];
   const kept = draft.filter((d) => {
     const row = rowOf(ov, d.change);
-    if (!row) {
+    if (!row || policyGone(ov, d.change)) {
       notices.push(`찾을 수 없어서 뺐어요: ${d.label}`);
       return false;
     }
