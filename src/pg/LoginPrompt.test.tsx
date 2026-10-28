@@ -44,6 +44,13 @@ test("does not submit an empty name, not even with Enter", async () => {
   expect(onSubmit).not.toHaveBeenCalled();
 });
 
+test("does not submit an empty name when the form is submitted without going through the button", () => {
+  const { onSubmit, input } = setup();
+  fireEvent.change(input, { target: { value: "   " } });
+  fireEvent.submit(input.closest("form") as HTMLFormElement);
+  expect(onSubmit).not.toHaveBeenCalled();
+});
+
 test("opens with the name it is given, and 취소 only exists when there is something to go back to", async () => {
   const user = userEvent.setup();
   const onCancel = vi.fn();
