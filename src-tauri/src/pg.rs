@@ -7,14 +7,18 @@
 //! - `pool`: (대상, DB 사용자, 데이터베이스)마다 연결 하나를 보관하고 10분 동안 안 쓰면 닫는다
 //! - `model`: 카탈로그 스냅숏의 레코드(역할, 구성원 관계, 데이터베이스, 스키마, 관계, 함수, 기본 권한, 세션)
 //! - `catalog`: 카탈로그를 읽어 스냅숏을 만든다. 질의를 보내고 트랜잭션을 여는 유일한 곳이다.
+//! - `eval`: 스냅숏만으로 실효 권한을 계산한다(순수 함수). 역할이 객체에 권한을 어디서 받는지, 실제로 쓸 수 있는지, 스키마별 요약, 누가 할 수 있나.
 
 pub mod catalog;
 pub mod connect;
+pub mod eval;
 pub mod model;
 pub mod pool;
 pub mod target;
 
 #[cfg(test)]
 mod fake_server;
+#[cfg(test)]
+mod fixtures;
 #[cfg(test)]
 mod live_tests;

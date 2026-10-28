@@ -3,7 +3,7 @@
 # 성공하든 실패하든(Ctrl-C 포함) 끝날 때 이 실행이 띄운 컨테이너와 그 익명 볼륨을 지운다.
 #
 # 필요한 것: 켜져 있는 Docker, 이미지 postgres:14·postgres:16(없으면 받는다).
-# 쓰는 포트: 127.0.0.1의 55414(14), 55416(16). 같은 컴퓨터의 다른 곳에서는 닿지 않는다. 시험은 superuser(postgres)로 붙어
+# 쓰는 포트: 127.0.0.1의 55414(14), 55416(16). 다른 컴퓨터에서는 닿지 않는다. 시험은 superuser(postgres)로 붙어
 # 시험마다 새 데이터베이스를 만든다. 컨테이너 이름에 이 실행의 프로세스 번호가 붙어서, 이 스크립트가 겹쳐 돌아도 서로의 서버를 지우지 않는다
 # (포트가 같아서 나중 실행은 포트가 쓰이고 있다는 메시지로 멈춘다).
 set -euo pipefail
@@ -30,13 +30,29 @@ port_in_use() {
   (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
 }
 
+# 포트가 쓰이고 있다고 알린다. 모든 실행의 컨테이너를 한꺼번에 지우라고 하지 않는다: 지금 돌고 있는 시험의 서버를 지울 수 있다.
+# 대신 이름과 상태를 보여 준다. 이름 끝의 숫자는 그 실행의 프로세스 번호라서, 그 프로세스가 더는 돌지 않는 컨테이너만 남은 것이다.
+report_busy_port() {
+  local port=$1 listed line
+  listed=$(docker ps -a --filter name=magic-mirror-pg-live --format '{{.Names}}  {{.Status}}' 2>/dev/null || true)
+  {
+    echo "포트 $port 를 이미 쓰고 있어요. 다른 live 시험이 돌고 있거나, 이전 실행이 남긴 컨테이너일 수 있어요."
+    if [ -n "$listed" ]; then
+      echo "  live 시험 컨테이너(이름  상태):"
+      while IFS= read -r line; do
+        echo "    $line"
+      done <<<"$listed"
+      echo "  이름 끝의 숫자는 그 시험을 돌린 프로세스 번호예요. 그 프로세스가 더는 돌지 않으면(kill -0 <번호>가 실패하면) 이전 실행이 남긴 컨테이너예요."
+      echo "  그런 컨테이너만 하나씩 지우세요: docker rm -fv <이름>. 프로세스가 돌고 있는 시험의 컨테이너는 지우지 마세요."
+    else
+      echo "  live 시험 컨테이너는 없어요. 다른 프로그램이 이 포트를 쓰고 있어요."
+    fi
+  } >&2
+}
+
 for port in "${ports[@]}"; do
   if port_in_use "$port"; then
-    {
-      echo "포트 $port 를 이미 쓰고 있어요. 다른 live 시험이 돌고 있거나, 이전 실행이 남긴 컨테이너일 수 있어요."
-      echo "  남은 컨테이너 보기: docker ps -a --filter name=magic-mirror-pg-live"
-      echo "  지우기: docker rm -fv \$(docker ps -aq --filter name=magic-mirror-pg-live)"
-    } >&2
+    report_busy_port "$port"
     exit 1
   fi
 done

@@ -84,11 +84,15 @@ pub struct RoleRec {
     pub superuser: bool,
     /// -1은 제한 없음
     pub conn_limit: i32,
-    /// ISO 8601 UTC. 없거나 `infinity`면 None. `-infinity`(그 역할은 로그인할 수 없다)는 만료로 보이도록 가장 오래된 시각
+    /// ISO 8601 UTC. 없거나 `infinity`면 None. `-infinity`(그 역할은 비밀번호로는 로그인할 수 없다)는 만료로 보이도록 가장 오래된 시각
     /// `1970-01-01T00:00:00Z`로 읽는다
     pub valid_until: Option<String>,
     pub comment: Option<String>,
 }
+
+/// 구성원 관계마다 INHERIT·SET 옵션이 있는 첫 서버 버전(`server_version_num`). 카탈로그는 이 버전부터 두 옵션을 함께 읽는 질의를 고르고,
+/// `eval`은 이 버전부터 구성원 역할의 `rolinherit` 대신 관계의 INHERIT 옵션으로 상속을 가른다.
+pub const MEMBERSHIP_OPTIONS_SINCE: i32 = 160_000;
 
 /// 역할 구성원 관계 하나: `member`가 `group`의 구성원이다. 쌍마다 하나다(PG16에서 부여자가 여럿이어도 하나로 합친다).
 #[derive(Debug, Clone, PartialEq, Eq)]
