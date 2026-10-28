@@ -29,9 +29,9 @@ struct Entry {
     pid: i32,
 }
 
-/// 연결하는 사이에 대상이 닫혔을 때 새 연결을 보관하지 않고 돌려주는 오류.
-/// 명령이 아직 열리지 않은 대상에 내는 문구와 같다: 닫은 대상은 다시 연결해야 한다
-const CLOSED_WHILE_CONNECTING: &str = "먼저 연결해 주세요";
+/// 아직 열리지 않았거나 닫힌 대상에 명령이 내는 문구. 연결하는 사이에 대상이 닫혀서 새 연결을 보관하지 않고 돌려주는 오류도 같은 문구다:
+/// 닫은 대상은 다시 연결해야 한다
+pub const NOT_OPENED: &str = "먼저 연결해 주세요";
 
 #[derive(Default)]
 struct State {
@@ -72,9 +72,26 @@ fn is_closed(conn: &Mutex<Connected>) -> bool {
 }
 
 impl Pool {
+    /// 이 대상이 `close_target`으로 닫힌 횟수. 명령이 시작할 때 읽어 두었다가 `get_or_connect_at_epoch`에 넘긴다.
+    pub fn epoch(&self, target: &PgTarget) -> u64 {
+        lock(&self.state).epoch(target)
+    }
+
     /// 열쇠의 연결을 돌려준다. 없거나 닫혔으면 `connect`로 새로 연결해 보관한다. 연결에 실패하면 아무것도 보관하지 않는다.
-    /// 연결하는 사이에 `close_target`이 불린 대상이면 새 연결은 보관하지 않고 버리며 "먼저 연결해 주세요" 오류를 돌려준다.
-    pub async fn get_or_connect<F, Fut>(&self, key: ConnKey, connect: F) -> Result<Arc<Mutex<Connected>>, AppError>
+    /// `epoch`는 명령이 시작할 때 읽어 둔 값(`epoch`)이다. 그 뒤 `close_target`이 불렸으면 연결을 시도하지도 않고,
+    /// 연결하는 사이에 불렸으면 새 연결은 보관하지 않고 버린다. 어느 쪽이든 `NOT_OPENED` 오류를 돌려준다.
+    /// 명령 하나가 여러 연결을 잇따라 여는 동안(점검이 데이터베이스를 차례로 읽는다) 탭이 닫히면 거기서 멈추게 하려는 것이다.
+    pub async fn get_or_connect_at_epoch<F, Fut>(&self, key: ConnKey, epoch: u64, connect: F) -> Result<Arc<Mutex<Connected>>, AppError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<Connected, AppError>>,
+    {
+        self.connect_in(key, Instant::now(), Some(epoch), connect).await
+    }
+
+    /// `get_or_connect_at_epoch`에서 epoch를 지금 읽는 꼴: 시작할 때의 epoch를 따로 쥐지 않는 시험이 쓴다
+    #[cfg(test)]
+    async fn get_or_connect<F, Fut>(&self, key: ConnKey, connect: F) -> Result<Arc<Mutex<Connected>>, AppError>
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<Connected, AppError>>,
@@ -83,24 +100,38 @@ impl Pool {
     }
 
     /// `get_or_connect`의 시각을 주입하는 꼴: 테스트가 10분을 기다리지 않고 유휴 시간을 만든다
+    #[cfg(test)]
     async fn get_or_connect_at<F, Fut>(&self, key: ConnKey, now: Instant, connect: F) -> Result<Arc<Mutex<Connected>>, AppError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<Connected, AppError>>,
+    {
+        self.connect_in(key, now, None, connect).await
+    }
+
+    /// 연결 보관의 알맹이. `pinned`가 Some이면 대상의 epoch가 그 값 그대로일 때만 연결한다.
+    async fn connect_in<F, Fut>(&self, key: ConnKey, now: Instant, pinned: Option<u64>, connect: F) -> Result<Arc<Mutex<Connected>>, AppError>
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<Connected, AppError>>,
     {
         let epoch = {
             let mut state = lock(&self.state);
+            let epoch = state.epoch(&key.target);
+            if pinned.is_some_and(|pinned| pinned != epoch) {
+                return Err(AppError::other(NOT_OPENED));
+            }
             if let Some(conn) = reuse_in(&mut state.entries, &key, now) {
                 return Ok(conn);
             }
-            state.epoch(&key.target)
+            epoch
         };
         // 연결하는 동안에는 잠금을 쥐지 않는다. 그 사이 대상이 닫혔으면 방금 만든 연결을 버리고,
         // 같은 열쇠로 먼저 보관한 호출이 있으면 그 연결을 쓰고 방금 만든 연결은 버린다
         let connected = connect().await?;
         let mut state = lock(&self.state);
         if state.epoch(&key.target) != epoch {
-            return Err(AppError::other(CLOSED_WHILE_CONNECTING));
+            return Err(AppError::other(NOT_OPENED));
         }
         if let Some(conn) = reuse_in(&mut state.entries, &key, now) {
             return Ok(conn);

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -21,6 +22,8 @@ pub struct Settings {
     pub explorer_local_path: Option<String>,
     pub diff_tool: Option<String>,
     pub diff_tool_command: Option<String>,
+    /// PostgreSQL 탭의 로그인 사용자: 대상(클러스터·인스턴스) ARN → DB 사용자 이름
+    pub pg_logins: BTreeMap<String, String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -33,6 +36,7 @@ struct RawSettings {
     explorer_local_path: Option<String>,
     diff_tool: Option<String>,
     diff_tool_command: Option<String>,
+    pg_logins: BTreeMap<String, String>,
 }
 
 fn defaults(all_services: &[&str]) -> Settings {
@@ -57,6 +61,7 @@ pub fn load(path: &Path, all_services: &[&str]) -> Settings {
                 explorer_local_path: raw.explorer_local_path,
                 diff_tool: raw.diff_tool,
                 diff_tool_command: raw.diff_tool_command,
+                pg_logins: raw.pg_logins,
             },
             Err(_) => defaults(all_services),
         },
@@ -137,6 +142,48 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(json["favorites"][0]["type"], "instances");
         assert_eq!(json["lastProfile"], "prod");
+    }
+
+    const ARN: &str = "arn:aws:rds:ap-northeast-2:123456789012:cluster:orders-aurora";
+
+    #[test]
+    fn pg_logins_roundtrip_and_an_old_file_without_them_still_loads() {
+        // PostgreSQL 탭이 생기기 전에 저장한 파일에는 `pgLogins`가 없다
+        let old = load_text(r#"{"enabledServices":["ec2"],"lastProfile":"p"}"#);
+        assert!(old.pg_logins.is_empty());
+        assert_eq!(old.last_profile.as_deref(), Some("p"));
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let s = Settings { pg_logins: BTreeMap::from([(ARN.to_string(), "iam_admin".to_string())]), ..old };
+        save(&path, &s).unwrap();
+        assert_eq!(load(&path, &["ec2", "s3"]), s);
+        let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(json["pgLogins"][ARN], "iam_admin");
+    }
+
+    #[test]
+    fn a_file_with_pg_logins_keeps_them_through_a_load_and_a_save() {
+        // 프런트엔드가 `save_settings`로 보낸 모양 그대로다: 대상 ARN → DB 사용자
+        let text = format!(r#"{{"enabledServices":["ec2"],"pgLogins":{{"{ARN}":"iam_admin","arn:aws:rds:us-east-1:123456789012:db:legacy":"reader"}}}}"#);
+        let loaded = load_text(&text);
+        assert_eq!(loaded.pg_logins.len(), 2);
+        assert_eq!(loaded.pg_logins.get(ARN).map(String::as_str), Some("iam_admin"));
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        save(&path, &loaded).unwrap();
+        let again = load(&path, &["ec2", "s3"]);
+        assert_eq!(again.pg_logins, loaded.pg_logins);
+        // 설정 화면의 다른 값을 바꿔 저장해도 로그인 사용자는 남는다
+        let changed = Settings { last_profile: Some("prod".into()), ..again };
+        save(&path, &changed).unwrap();
+        assert_eq!(load(&path, &["ec2", "s3"]).pg_logins, loaded.pg_logins);
+    }
+
+    #[test]
+    fn pg_logins_of_the_wrong_shape_make_the_file_corrupt_like_any_other_wrong_field() {
+        assert!(load_text(r#"{"pgLogins":["iam_admin"]}"#).pg_logins.is_empty());
     }
 
     #[test]

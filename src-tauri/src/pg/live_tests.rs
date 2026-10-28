@@ -30,6 +30,9 @@ use crate::iam::clock;
 #[cfg(test)]
 mod comparison;
 use comparison::{a_noinherit_database_owner_matches_postgres, effective_privileges_match_postgres};
+#[cfg(test)]
+mod views;
+use views::{a_statement_timeout_reads_as_the_read_timeout_text, the_builders_read_the_seeded_database};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Server {
@@ -276,6 +279,8 @@ on_both_servers!(
     the_catalog_is_readable_without_special_privileges,
     effective_privileges_match_postgres,
     a_noinherit_database_owner_matches_postgres,
+    the_builders_read_the_seeded_database,
+    a_statement_timeout_reads_as_the_read_timeout_text,
 );
 
 async fn cluster_snapshot_reads_the_seeded_roles_and_memberships(server: Server) {

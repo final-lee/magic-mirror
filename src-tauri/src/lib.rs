@@ -8,10 +8,8 @@ mod iam;
 mod iam_commands;
 mod model;
 mod mouse_nav;
-// PostgreSQL 탭의 명령(`pg_commands`)이 쓰기 전까지는 쓰는 곳이 없어 안 쓰는 코드 경고가 나니 테스트에서만 빌드한다.
-// 명령을 붙일 때(PB4) 이 `cfg(test)`를 뺀다
-#[cfg(test)]
 mod pg;
+mod pg_commands;
 mod settings;
 mod topology;
 mod topology_commands;
@@ -38,6 +36,8 @@ pub fn run() {
             });
             app.manage(explorer_commands::ExplorerState::default());
             app.manage(iam_commands::IamState::new(dir.join("iam-changes.jsonl")));
+            app.manage(pg_commands::PgState::default());
+            pg_commands::spawn_sweeper(app.handle().clone());
             std::thread::spawn(explorer::external::sweep_stale);
             mouse_nav::install(app.handle().clone());
             Ok(())
@@ -85,6 +85,16 @@ pub fn run() {
             iam_commands::iam_preview_batch,
             iam_commands::iam_apply_batch,
             iam_commands::iam_undo_batch,
+            pg_commands::pg_target,
+            pg_commands::pg_open,
+            pg_commands::pg_database,
+            pg_commands::pg_cell,
+            pg_commands::pg_objects,
+            pg_commands::pg_role,
+            pg_commands::pg_who_can,
+            pg_commands::pg_sessions,
+            pg_commands::pg_findings,
+            pg_commands::pg_close,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

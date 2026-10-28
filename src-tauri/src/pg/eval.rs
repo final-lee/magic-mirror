@@ -15,10 +15,10 @@
 //!   PG17부터 `pg_maintain`이 모든 관계의 MAINTAIN을 준다.
 //! - 스키마에 만드는 데는 CREATE만 있으면 되고 USAGE는 필요 없다(서버가 그 스키마의 이름으로 만드는 것을 허락한다). 데이터베이스에 붙는 CONNECT는 그대로 필요하다.
 //!
-//! 구성: 공개된 것은 `Eval`(한 명령이 한 번 만들어 쓰는 계산기)과 그것이 역할마다 돌려주는 `RoleView`, 그 위의 `Ctx` 메서드
-//! (부를 때마다 `Eval`을 새로 만드는 한 줄 포장), `schema_cells`(역할 × 스키마), `who_can`(한 객체에 권한이 있는 역할들)이다.
+//! 구성: 공개된 것은 `Eval`(한 명령이 한 번 만들어 쓰는 계산기)과 그것이 역할마다 돌려주는 `RoleView`, `schema_cells`(역할 × 스키마),
+//! `who_can`(한 객체에 권한이 있는 역할들)이다. 시험에는 `Ctx`의 메서드도 있다(부를 때마다 `Eval`을 새로 만드는 한 줄 포장).
 //! `Eval`이 `Ctx`에서 역할 그래프를 한 번 만들고, `RoleView`가 역할마다 상속하는 역할의 집합을 한 번 구해 둔다.
-//! `schema_cells`와 `who_can`은 명령 하나에 `Eval` 하나를 쓴다.
+//! `schema_cells`와 `who_can`은 명령 하나에 `Eval` 하나를 쓴다. 데이터베이스 스냅숏 없이 클러스터 스냅숏만 있을 때는 `Eval::for_cluster`다.
 
 use std::cell::OnceCell;
 use std::collections::HashMap;
@@ -203,8 +203,9 @@ struct Reach<'x> {
 }
 
 impl<'a> Graph<'a> {
-    fn new(ctx: &Ctx<'a>) -> Graph<'a> {
-        let cluster = ctx.cluster;
+    /// `database_owner`는 이 그래프가 다루는 데이터베이스의 소유자다. 데이터베이스 스냅숏 없이 만들면 None이고, 그때는 소유자 → `pg_database_owner`
+    /// 관계(데이터베이스마다 다르다)가 빠진다
+    fn new(cluster: &'a ClusterSnapshot, database_owner: Option<&'a str>) -> Graph<'a> {
         let version = cluster.version_num;
         let roles: HashMap<&str, &RoleRec> = cluster.roles.iter().map(|r| (r.name.as_str(), r)).collect();
         // 스냅숏에 없는 역할은 서버 기본값(INHERIT)으로 본다
@@ -218,9 +219,8 @@ impl<'a> Graph<'a> {
                 if version >= MEMBERSHIP_OPTIONS_SINCE { (m.inherit.unwrap_or(attribute), m.set.unwrap_or(true)) } else { (attribute, true) };
             edges.entry(&m.member).or_default().push(Edge { group: &m.group, inherits, can_set });
         }
-        if version >= PREDEFINED_ROLES_SINCE {
+        if let Some(owner) = database_owner.filter(|_| version >= PREDEFINED_ROLES_SINCE) {
             // 소유자 → pg_database_owner. 실제 관계들 뒤에 둔다. PG16은 늘 상속하고, PG15 이하는 소유자의 속성을 따른다
-            let owner = ctx.db.owner.as_str();
             let inherits = version >= MEMBERSHIP_OPTIONS_SINCE || inherit_attribute(owner);
             edges.entry(owner).or_default().push(Edge { group: DATABASE_OWNER, inherits, can_set: true });
         }
@@ -313,7 +313,20 @@ impl<'a> Eval<'a> {
     pub fn new(ctx: &Ctx<'a>) -> Eval<'a> {
         let database = ctx.cluster.databases.iter().find(|d| d.name == ctx.db.database);
         let schemas = ctx.db.schemas.iter().map(|s| (s.name.as_str(), s)).collect();
-        Eval { graph: Graph::new(ctx), database, schemas }
+        Eval { graph: Graph::new(ctx.cluster, Some(ctx.db.owner.as_str())), database, schemas }
+    }
+
+    /// 데이터베이스 스냅숏 없이 클러스터 스냅숏만으로 만든다. 역할 사이의 관계(`inherited`, `set_role_only`, `membership_inherits`)와
+    /// 클러스터가 가진 객체(데이터베이스)의 `sources`를 묻는 데 쓴다. 데이터베이스마다 다른 것은 모른다: 소유자 → `pg_database_owner` 관계가 없고,
+    /// 스키마를 모르니 `unusable`은 아무것도 판단하지 못한다.
+    pub fn for_cluster(cluster: &'a ClusterSnapshot) -> Eval<'a> {
+        Eval { graph: Graph::new(cluster, None), database: None, schemas: HashMap::new() }
+    }
+
+    /// `member`가 `group`의 구성원이고 그 관계로 `group`의 권한을 쓰는가. PG16부터는 관계마다의 INHERIT 옵션(비어 있으면 구성원의 `rolinherit`)이,
+    /// 그 전에는 구성원의 `rolinherit`가 정한다. 구성원 관계가 아니면 false다.
+    pub fn membership_inherits(&self, member: &str, group: &str) -> bool {
+        self.graph.edges.get(member).is_some_and(|edges| edges.iter().any(|e| e.group == group && e.inherits))
     }
 
     /// 역할 하나의 계산. 스냅숏에 없는 역할도 자기 자신과 PUBLIC이 주는 것은 갖는다
@@ -360,7 +373,9 @@ impl RoleView<'_> {
         sources
     }
 
-    /// 권한이 있어도 못 쓰는 이유: 이 데이터베이스의 CONNECT가 없으면 "CONNECT 없음", 있으면서 `schema`의 USAGE가 없으면 "USAGE 없음"
+    /// 권한이 있어도 못 쓰는 이유: 이 데이터베이스의 CONNECT가 없으면 "CONNECT 없음", 있으면서 `schema`의 USAGE가 없으면 "USAGE 없음".
+    /// 칸과 누가 할 수 있나는 같은 판단을 안에서 하고(`cell`, `who_can`), 이 메서드는 그 판단을 시험이 직접 묻는 길이다.
+    #[cfg(test)]
     pub fn unusable(&self, schema: &str) -> Option<&'static str> {
         self.unusable_in(self.eval.database, self.eval.schemas.get(schema).copied())
     }
@@ -468,6 +483,8 @@ impl RoleView<'_> {
     }
 }
 
+/// 부를 때마다 `Eval`을 새로 만드는 한 줄 포장. 명령은 쓰지 않고(`Eval` 하나로 묻는다) 시험이 짧게 묻는 데 쓴다.
+#[cfg(test)]
 impl Ctx<'_> {
     /// 역할 자신(경로 없음)과 상속하는 모든 역할을 너비 우선 순서로
     pub fn inherited(&self, role: &str) -> Vec<Inherited> {

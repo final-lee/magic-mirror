@@ -984,6 +984,59 @@ fn who_can_on_a_database_object_reports_a_missing_connect_on_that_database_only(
     assert!(rows.iter().filter(|r| r.role != "app_owner").all(|r| r.unusable == Some("CONNECT 없음")), "{rows:?}");
 }
 
+// ───────────────────────── 클러스터만으로 만든 계산기 ─────────────────────────
+
+#[test]
+fn a_cluster_only_handle_answers_the_role_questions_without_a_database() {
+    let scene = app_scene(PG16);
+    let eval = Eval::for_cluster(&scene.cluster);
+
+    assert_eq!(eval.role("alice").inherited(), [inh("alice", &[]), inh("app_write", &["app_write"]), inh("app_read", &["app_write", "app_read"])]);
+    assert_eq!(eval.role("bob").inherited(), [inh("bob", &[])]);
+    assert_eq!(eval.role("bob").set_role_only(), ["app_read"]);
+    // 클러스터에는 데이터베이스마다 다른 암묵적 구성원 관계(소유자 → pg_database_owner)가 없다. 그것은 데이터베이스 스냅숏이 있어야 생긴다
+    assert_eq!(eval.role("app_owner").inherited(), [inh("app_owner", &[])]);
+    assert_eq!(Eval::new(&scene.ctx()).role("app_owner").inherited(), [inh("app_owner", &[]), inh("pg_database_owner", &["pg_database_owner"])]);
+}
+
+#[test]
+fn a_cluster_only_handle_answers_for_the_objects_the_cluster_has() {
+    // 데이터베이스의 ACL은 클러스터 스냅숏에 있다. CONNECT를 어디서 받는지 데이터베이스 스냅숏 없이 묻는다
+    let scene = app_scene(PG16);
+    let eval = Eval::for_cluster(&scene.cluster);
+    let appdb = Obj::Database(scene.database());
+
+    assert_eq!(kinds(&eval.role("alice").sources(appdb, Connect)), [Group]);
+    assert_eq!(kinds(&eval.role("app_owner").sources(appdb, Connect)), [Owner]);
+    assert!(eval.role("bob").sources(appdb, Connect).is_empty());
+    // 스키마를 모르니 "USAGE 없음"은 판단하지 않고, 데이터베이스도 몰라서 "CONNECT 없음"도 판단하지 않는다
+    assert_eq!(eval.role("bob").unusable("app"), None);
+}
+
+#[test]
+fn membership_inherits_follows_the_pg16_option_and_before_that_the_attribute_of_the_member() {
+    // PG15 이하: bob은 NOINHERIT라서 app_read를 상속하지 않는다. alice → app_write는 상속한다
+    let scene = app_scene(PG15);
+    let eval = Eval::for_cluster(&scene.cluster);
+    assert!(eval.membership_inherits("alice", "app_write"));
+    assert!(!eval.membership_inherits("bob", "app_read"));
+    // 구성원 관계가 아니면 거짓이다(방향도 맞아야 한다)
+    assert!(!eval.membership_inherits("alice", "app_read"));
+    assert!(!eval.membership_inherits("app_write", "alice"));
+    assert!(!eval.membership_inherits("nobody", "app_read"));
+
+    // PG16: 관계마다의 INHERIT 옵션이 정한다. 속성과 반대로 줄 수도 있다
+    let mut scene = app_scene(PG16);
+    scene.member_mut("alice", "app_write").inherit = Some(false);
+    scene.member_mut("bob", "app_read").inherit = Some(true);
+    let eval = Eval::for_cluster(&scene.cluster);
+    assert!(!eval.membership_inherits("alice", "app_write"));
+    assert!(eval.membership_inherits("bob", "app_read"));
+    // 옵션이 비어 있으면 구성원의 속성이다
+    scene.member_mut("bob", "app_read").inherit = None;
+    assert!(!Eval::for_cluster(&scene.cluster).membership_inherits("bob", "app_read"));
+}
+
 // ───────────────────────── 계약 ─────────────────────────
 
 #[test]
