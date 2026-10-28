@@ -1118,6 +1118,36 @@ fn membership_inherits_follows_the_pg16_option_and_before_that_the_attribute_of_
     assert!(!Eval::for_cluster(&scene.cluster).membership_inherits("bob", "app_read"));
 }
 
+#[test]
+fn membership_can_set_follows_the_pg16_option_and_is_always_true_before() {
+    // PG15 이하에는 SET 옵션이 없다: 구성원이면 언제나 SET ROLE을 할 수 있다. 상속하지 않는 bob도 그렇다
+    let scene = app_scene(PG15);
+    let eval = Eval::for_cluster(&scene.cluster);
+    assert!(eval.membership_can_set("alice", "app_write"));
+    assert!(eval.membership_can_set("bob", "app_read"));
+    // 구성원 관계가 아니면 거짓이다(방향도 맞아야 한다)
+    assert!(!eval.membership_can_set("alice", "app_read"));
+    assert!(!eval.membership_can_set("app_write", "alice"));
+    assert!(!eval.membership_can_set("nobody", "app_read"));
+
+    // PG16: 관계마다의 SET 옵션이 정한다. INHERIT과는 따로다
+    let mut scene = app_scene(PG16);
+    scene.member_mut("alice", "app_write").set = Some(false);
+    scene.member_mut("bob", "app_read").inherit = Some(true);
+    scene.member_mut("bob", "app_read").set = Some(false);
+    let eval = Eval::for_cluster(&scene.cluster);
+    assert!(!eval.membership_can_set("alice", "app_write"));
+    assert!(eval.membership_inherits("alice", "app_write"), "SET이 꺼져도 상속은 그대로예요");
+    assert!(!eval.membership_can_set("bob", "app_read"));
+    // 옵션이 비어 있으면 허용이다(상속과 달리 구성원의 속성을 따르지 않는다)
+    scene.member_mut("alice", "app_write").set = None;
+    assert!(Eval::for_cluster(&scene.cluster).membership_can_set("alice", "app_write"));
+    // 서버가 SET을 켠 관계는 상속하지 않아도 SET ROLE을 할 수 있다
+    let scene = app_scene(PG16);
+    let eval = Eval::for_cluster(&scene.cluster);
+    assert!(!eval.membership_inherits("bob", "app_read") && eval.membership_can_set("bob", "app_read"));
+}
+
 // ───────────────────────── 계약 ─────────────────────────
 
 #[test]

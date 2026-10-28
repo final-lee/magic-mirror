@@ -301,6 +301,27 @@ fn member_of_lists_the_direct_memberships_with_their_inherit_and_admin_flags() {
     assert_eq!(by_name(&all, "carol").member_of.iter().map(|m| m.group.as_str()).collect::<Vec<_>>(), ["pg_read_all_data"]);
 }
 
+#[test]
+fn member_of_says_whether_each_membership_allows_set_role() {
+    let sets = |all: &[PgRoleSummary], name: &str| -> Vec<(String, bool, bool)> {
+        by_name(all, name).member_of.iter().map(|m| (m.group.clone(), m.inherit, m.set)).collect()
+    };
+
+    // PG16: 관계마다 SET 옵션이 있고 INHERIT과는 따로다. CREATEROLE 사용자가 만든 역할의 자동 부여는 INHERIT도 SET도 없다
+    let mut scene = app_scene(PG16);
+    scene.cluster.members.extend([member_with("alice", "app_read", false, false), member_with("carol", "app_write", false, true)]);
+    let all = summaries(&scene);
+    assert_eq!(sets(&all, "alice"), [("app_read".to_string(), false, false), ("app_write".to_string(), true, true)], "상속도 SET도 없는 관계");
+    assert_eq!(sets(&all, "carol"), [("app_write".to_string(), false, true), ("pg_read_all_data".to_string(), true, true)], "상속하지 않아도 SET은 되는 관계");
+    assert_eq!(sets(&all, "bob"), [("app_read".to_string(), false, true)], "NOINHERIT 구성원의 부여는 SET이 켜져 있다");
+
+    // PG15 이하: SET 옵션이 없고 구성원이면 언제나 SET ROLE을 할 수 있다. 상속하지 않는 bob도 그렇다
+    let all = summaries(&app_scene(PG15));
+    assert_eq!(sets(&all, "bob"), [("app_read".to_string(), false, true)]);
+    assert_eq!(sets(&all, "alice"), [("app_write".to_string(), true, true)]);
+    assert_eq!(sets(&all, "carol"), [("pg_read_all_data".to_string(), true, true)]);
+}
+
 // ───────────────────────── 개요 ─────────────────────────
 
 fn info() -> PgTargetInfo {

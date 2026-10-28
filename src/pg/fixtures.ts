@@ -83,7 +83,7 @@ export const attributes = (extra: Partial<PgAttributes> = {}): PgAttributes => (
   validUntil: null,
   ...extra,
 });
-export const membership = (group: string, extra: Partial<PgMembership> = {}): PgMembership => ({ group, inherit: true, admin: false, ...extra });
+export const membership = (group: string, extra: Partial<PgMembership> = {}): PgMembership => ({ group, inherit: true, set: true, admin: false, ...extra });
 
 const SYSTEM_NAMES = ["rdsadmin", "rdstopmgr", "rdsrepladmin"];
 /** kind와 system은 속성과 이름에서 정한다(백엔드와 같은 규칙). */
@@ -353,7 +353,7 @@ export function sampleRoleView(name = "alice", extra: Partial<PgRoleView> = {}):
   return {
     summary: { ...summary },
     settings: (ROLE_SETTINGS[name] ?? []).map((setting) => ({ ...setting })),
-    members: ROLES.flatMap((r) => r.memberOf.filter((m) => m.group === name).map((m) => ({ role: r.name, inherit: m.inherit, admin: m.admin }))),
+    members: ROLES.flatMap((r) => r.memberOf.filter((m) => m.group === name).map((m) => ({ role: r.name, inherit: m.inherit, set: m.set, admin: m.admin }))),
     databases: sampleOverview()
       .databases.filter((d) => d.allowConn)
       .map(

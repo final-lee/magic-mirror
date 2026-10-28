@@ -117,7 +117,12 @@ impl<'a> Index<'a> {
 
         let mut member_of: Vec<PgMembership> = direct
             .iter()
-            .map(|m| PgMembership { group: m.group.clone(), inherit: self.eval.membership_inherits(&m.member, &m.group), admin: m.admin })
+            .map(|m| PgMembership {
+                group: m.group.clone(),
+                inherit: self.eval.membership_inherits(&m.member, &m.group),
+                set: self.eval.membership_can_set(&m.member, &m.group),
+                admin: m.admin,
+            })
             .collect();
         member_of.sort_by(|a, b| a.group.cmp(&b.group));
 
@@ -476,7 +481,12 @@ pub fn role_view(cluster: &ClusterSnapshot, loaded: &[&DbSnapshot], role: &str, 
         .members
         .iter()
         .filter(|m| m.group == role)
-        .map(|m| PgRoleMember { role: m.member.clone(), inherit: index.eval.membership_inherits(&m.member, &m.group), admin: m.admin })
+        .map(|m| PgRoleMember {
+            role: m.member.clone(),
+            inherit: index.eval.membership_inherits(&m.member, &m.group),
+            set: index.eval.membership_can_set(&m.member, &m.group),
+            admin: m.admin,
+        })
         .collect();
     members.sort_by(|a, b| a.role.cmp(&b.role));
 

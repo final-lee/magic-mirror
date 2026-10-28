@@ -317,7 +317,7 @@ impl<'a> Eval<'a> {
         Eval { graph: Graph::new(ctx.cluster, Some(ctx.db.owner.as_str())), database, schemas }
     }
 
-    /// 데이터베이스 스냅숏 없이 클러스터 스냅숏만으로 만든다. 역할 사이의 관계(`inherited`, `set_role_only`, `membership_inherits`)와
+    /// 데이터베이스 스냅숏 없이 클러스터 스냅숏만으로 만든다. 역할 사이의 관계(`inherited`, `set_role_only`, `membership_inherits`, `membership_can_set`)와
     /// 클러스터가 가진 객체(데이터베이스)의 `sources`를 묻는 데 쓴다. 데이터베이스마다 다른 것은 모른다: 소유자 → `pg_database_owner` 관계가 없고,
     /// 스키마를 모르니 `unusable`은 아무것도 판단하지 못한다.
     pub fn for_cluster(cluster: &'a ClusterSnapshot) -> Eval<'a> {
@@ -328,6 +328,13 @@ impl<'a> Eval<'a> {
     /// 그 전에는 구성원의 `rolinherit`가 정한다. 구성원 관계가 아니면 false다.
     pub fn membership_inherits(&self, member: &str, group: &str) -> bool {
         self.graph.edges.get(member).is_some_and(|edges| edges.iter().any(|e| e.group == group && e.inherits))
+    }
+
+    /// `member`가 `group`의 구성원이고 그 관계로 `group`에 `SET ROLE`을 할 수 있는가. PG16부터는 관계마다의 SET 옵션이(비어 있으면 허용),
+    /// 그 전에는 구성원이기만 하면 된다. 상속과는 따로다: 상속하지 않아도 SET ROLE은 되고, 상속해도 SET ROLE은 안 될 수 있다.
+    /// 구성원 관계가 아니면 false다.
+    pub fn membership_can_set(&self, member: &str, group: &str) -> bool {
+        self.graph.edges.get(member).is_some_and(|edges| edges.iter().any(|e| e.group == group && e.can_set))
     }
 
     /// 역할 하나의 계산. 스냅숏에 없는 역할도 자기 자신과 PUBLIC이 주는 것은 갖는다

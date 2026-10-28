@@ -144,19 +144,22 @@ function Overview({ view }: { view: PgRoleView }) {
   );
 }
 
-/** 구성원 관계 하나의 표시: 상속하는지(아니면 SET ROLE로만 쓸 수 있다)와 ADMIN OPTION */
-function Marks({ inherit, admin }: { inherit: boolean; admin: boolean }) {
+/**
+ * 구성원 관계 하나의 표시: 상속하는지, 상속하지 않으면 SET ROLE로 쓸 수 있는지(PG16부터는 관계마다 SET 옵션이 있어서 둘 다 없을 수 있다)와 ADMIN OPTION.
+ * 상속하면 SET 옵션이 있든 없든 권한은 쓰므로 "상속"이다.
+ */
+function Marks({ inherit, set, admin }: { inherit: boolean; set: boolean; admin: boolean }) {
   return (
     <>
-      <span className={`iam-chip${inherit ? "" : " conditional"}`}>{inherit ? "상속" : "SET ROLE로만 쓸 수 있음"}</span>
+      <span className={`iam-chip${inherit ? "" : " conditional"}`}>{inherit ? "상속" : set ? "SET ROLE로만 쓸 수 있음" : "상속·SET ROLE 없음"}</span>
       {admin && <span className="iam-chip">ADMIN OPTION</span>}
     </>
   );
 }
 
 function Members({ view, onOpen }: { view: PgRoleView; onOpen: (route: PgRoute) => void }) {
-  const groups = view.summary.memberOf.map((m) => ({ name: m.group, inherit: m.inherit, admin: m.admin }));
-  const members = view.members.map((m) => ({ name: m.role, inherit: m.inherit, admin: m.admin }));
+  const groups = view.summary.memberOf.map((m) => ({ name: m.group, inherit: m.inherit, set: m.set, admin: m.admin }));
+  const members = view.members.map((m) => ({ name: m.role, inherit: m.inherit, set: m.set, admin: m.admin }));
   const list = (label: string, items: typeof groups, empty: string) =>
     items.length === 0 ? (
       <div className="empty small">{empty}</div>
@@ -167,7 +170,7 @@ function Members({ view, onOpen }: { view: PgRoleView; onOpen: (route: PgRoute) 
             <button className="link" onClick={() => onOpen(roleRoute(m.name))}>
               {m.name}
             </button>
-            <Marks inherit={m.inherit} admin={m.admin} />
+            <Marks inherit={m.inherit} set={m.set} admin={m.admin} />
           </li>
         ))}
       </ul>
