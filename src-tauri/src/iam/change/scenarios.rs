@@ -77,9 +77,14 @@ fn doc(statements: Value) -> String {
     policy(statements).to_string()
 }
 
+/// 모든 리소스에 주어진 작업을 허용하는 정책 문장들.
+pub(super) fn allowing(actions: &[&str]) -> Value {
+    json!([{ "Effect": "Allow", "Action": actions, "Resource": "*" }])
+}
+
 /// 모든 리소스에 주어진 작업을 허용하는 문서.
 fn allow(actions: &[&str]) -> String {
-    doc(json!([{ "Effect": "Allow", "Action": actions, "Resource": "*" }]))
+    doc(allowing(actions))
 }
 
 pub(super) fn account_arn(resource: &str) -> String {

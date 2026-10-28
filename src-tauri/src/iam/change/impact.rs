@@ -95,13 +95,13 @@ pub(super) struct Analysis {
 
 /// 순서를 지키면서 중복 없이 ARN을 모은다.
 #[derive(Default)]
-struct Ordered {
-    list: Vec<String>,
+pub(super) struct Ordered {
+    pub(super) list: Vec<String>,
     seen: HashSet<String>,
 }
 
 impl Ordered {
-    fn push(&mut self, arn: &str) {
+    pub(super) fn push(&mut self, arn: &str) {
         if self.seen.insert(arn.to_string()) {
             self.list.push(arn.to_string());
         }

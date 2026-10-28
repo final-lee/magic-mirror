@@ -64,7 +64,7 @@ fn warn(message: impl Into<String>) -> Warning {
 }
 
 /// 변경이 바꾸는 사용자·그룹·역할(ARN). 정책 변경은 `target`, 그룹 구성원·액세스 키 변경은 사용자다. 관리형 정책 편집은 주체가 아니다.
-fn principal_arn(s: &Snapshot, c: &IamChange) -> Option<String> {
+pub(super) fn principal_arn(s: &Snapshot, c: &IamChange) -> Option<String> {
     match c {
         IamChange::AttachPolicy { target, .. }
         | IamChange::DetachPolicy { target, .. }
