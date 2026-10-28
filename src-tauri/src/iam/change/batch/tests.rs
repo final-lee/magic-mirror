@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 use super::*;
 use crate::iam::catalog::AccessLevel;
-use crate::iam::change::impact::PermDelta;
+use crate::iam::change::impact::{PermDelta, MAX_AFFECTED};
 use crate::iam::change::preview as preview_one;
 use crate::iam::change::scenarios::{account_arn, add_policy, add_to_group, allowing, attach, detach, group_rec, remove_from_group, set_status};
 // 묶음을 쓰는 쪽이 보는 경로(`change`가 다시 내보내는 이름)로 가져온다
@@ -488,8 +488,13 @@ fn the_caller_reached_only_through_a_group_does_not_push_the_last_target_out() {
 
     let p = preview_batch(&s, &changes, &[]);
 
-    // 계산 한도(50명)를 넘어서 앱이 쓰는 alice를 앞으로 옮긴다. 그래도 마지막 대상 bob이 빠지면 안 된다
-    assert!(p.warnings.iter().any(|w| w.message.contains("처음 50개만 계산했어요")), "{:?}", p.warnings);
+    // 영향받는 주체는 직접 바꾸는 50명과, admins를 거쳐서만 영향받는 앱의 alice까지 51명이다: 계산 한도(50명)보다 하나 많다.
+    // alice를 앞으로 옮겨 계산해도 마지막 대상 bob이 빠지면 안 된다
+    let targets: BTreeSet<&str> = changes.iter().filter_map(|c| if let IamChange::AttachPolicy { target, .. } = c { Some(target.as_str()) } else { None }).collect();
+    assert_eq!(targets.len(), MAX_AFFECTED);
+    assert!(!targets.contains(ALICE));
+    assert_eq!(s.caller_principal_arn.as_deref(), Some(ALICE));
+    assert_eq!(s.user("alice").map(|alice| alice.groups.clone()), Some(vec!["admins".to_string()]));
     assert_eq!(messages(&p.warnings, WarnLevel::Confirm), vec![NEW_ADMIN_BOB]);
     assert_eq!(p.confirm_text.as_deref(), Some("변경 50개 적용"));
     // 달라지는 주체는 새 사용자 48명과 bob이다(alice와 admins는 이미 관리자라 reader가 더하는 것이 없다)

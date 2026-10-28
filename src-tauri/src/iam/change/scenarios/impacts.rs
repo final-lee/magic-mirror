@@ -283,6 +283,45 @@ fn a_caller_inside_the_limit_takes_no_extra_slot() {
     assert_eq!(p.impacts[0].principal.name, "u03");
 }
 
+/// 구성원이 `members`명인 그룹 `many`(정책 reader)를 두고, 앱이 쓰는 주체 `zed`를 구성원 목록의 맨 끝에 둔 스냅숏. 영향받는 주체는 그룹과 구성원 `members + 1`명이다.
+fn many_with_the_caller_last(members: usize) -> (Snapshot, IamChange) {
+    let mut s = snapshot();
+    let reader = add_policy(&mut s, "reader", json!([{ "Effect": "Allow", "Action": "sqs:ReceiveMessage", "Resource": "*" }]));
+    s.groups.push(group_rec("many", &[&reader]));
+    for i in 0..members - 1 {
+        s.users.push(member_of(&format!("u{i:02}"), "many"));
+    }
+    let zed = member_of("zed", "many");
+    s.caller_principal_arn = Some(zed.arn.clone());
+    s.users.push(zed);
+    (s, detach(&account_arn("group/many"), &reader))
+}
+
+#[test]
+fn the_cap_warning_shows_only_when_the_cut_leaves_someone_out() {
+    // 영향받는 주체가 51명이고 앱이 쓰는 주체가 마지막이다: 그 주체가 한 자리를 더 받아 모두 계산하니 빠지는 사람이 없다
+    let (s, change) = many_with_the_caller_last(MAX_AFFECTED);
+    assert_eq!(affected(&s, &change).len(), MAX_AFFECTED + 1);
+    let p = preview(&s, &change, None);
+    assert_eq!(p.impacts.len() + p.impacts_omitted, MAX_AFFECTED + 1);
+    assert_eq!(p.impacts[0].principal.name, "zed");
+    assert!(!messages(&p, WarnLevel::Warn).iter().any(|m| m.contains("처음 50개")), "{:?}", p.warnings);
+
+    // 한 명 더 있으면 51명을 계산하고 한 명은 빠진다: 이때는 알린다
+    let (s, change) = many_with_the_caller_last(MAX_AFFECTED + 1);
+    assert_eq!(affected(&s, &change).len(), MAX_AFFECTED + 2);
+    let p = preview(&s, &change, None);
+    assert_eq!(p.impacts.len() + p.impacts_omitted, MAX_AFFECTED + 1);
+    assert_eq!(messages(&p, WarnLevel::Warn).iter().filter(|m| **m == "영향받는 대상이 많아 처음 50개만 계산했어요").count(), 1);
+
+    // 앱이 쓰는 주체가 한도 안에 있으면 51명 가운데 한 명이 빠진다
+    let (mut s, change) = many_with_the_caller_last(MAX_AFFECTED);
+    s.caller_principal_arn = Some(account_arn("user/u03"));
+    let p = preview(&s, &change, None);
+    assert_eq!(p.impacts.len() + p.impacts_omitted, MAX_AFFECTED);
+    assert_eq!(messages(&p, WarnLevel::Warn).iter().filter(|m| **m == "영향받는 대상이 많아 처음 50개만 계산했어요").count(), 1);
+}
+
 #[test]
 fn exactly_fifty_principals_are_not_truncated() {
     let mut s = snapshot();
