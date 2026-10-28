@@ -5,7 +5,7 @@ import { reportSsoExpired } from "./api/invoke";
 import { iamApi } from "./iam/api";
 import { ACCOUNT, alice, aliceView, bob, sampleFindings, sampleOverview } from "./iam/fixtures";
 import { pgApi } from "./pg/api";
-import { LOGIN_USER, sampleOverview as samplePgOverview } from "./pg/fixtures";
+import { LOGIN_USER, sampleFindings as samplePgFindings, sampleOverview as samplePgOverview, sampleTargetInfo } from "./pg/fixtures";
 import { pgKeys } from "./pg/queries";
 import { vpcApi } from "./vpcmap/api";
 import { sampleTopology } from "./vpcmap/fixtures";
@@ -35,7 +35,20 @@ vi.mock("./explorer/api", () => ({
   onMouseNav: vi.fn(async () => () => {}),
 }));
 vi.mock("./vpcmap/api", () => ({ vpcApi: { topology: vi.fn(), savePng: vi.fn() } }));
-vi.mock("./pg/api", () => ({ pgApi: { close: vi.fn(async () => null) } }));
+vi.mock("./pg/api", () => ({
+  pgApi: {
+    target: vi.fn(),
+    open: vi.fn(),
+    database: vi.fn(),
+    cell: vi.fn(),
+    objects: vi.fn(),
+    role: vi.fn(),
+    whoCan: vi.fn(),
+    sessions: vi.fn(),
+    findings: vi.fn(),
+    close: vi.fn(async () => null),
+  },
+}));
 vi.mock("./iam/api", () => ({
   iamApi: { overview: vi.fn(), principal: vi.fn(), principalActions: vi.fn(), policy: vi.fn(), accessKeys: vi.fn(), findings: vi.fn() },
 }));
@@ -468,10 +481,15 @@ describe("IAM 작업 공간 탭", () => {
 
 describe("PostgreSQL 탭", () => {
   const target = (id: string, kind: "cluster" | "instance" = "cluster") => ({ profile: "prod", region: "ap-northeast-2", kind, id });
+  const arnOf = (id: string) => `arn:aws:rds:ap-northeast-2:123456789012:cluster:${id}`;
   const pgTabs = () => screen.queryAllByRole("tab", { name: /🐘/ });
   const closeButtonOf = (tab: HTMLElement) => within(tab.parentElement as HTMLElement).getByRole("button", { name: /닫기/ });
 
   beforeEach(() => {
+    // 탭은 진짜 PgTab을 그린다. 대상 확인 → 연결 → 점검 순으로 읽으니 그 명령들이 답한다.
+    vi.mocked(pgApi.target).mockImplementation(async (t) => sampleTargetInfo({ identifier: t.id, arn: arnOf(t.id) }));
+    vi.mocked(pgApi.open).mockResolvedValue(samplePgOverview());
+    vi.mocked(pgApi.findings).mockResolvedValue(samplePgFindings());
     m.listServices.mockResolvedValue([...sampleServices, rdsService]);
     m.getSettings.mockResolvedValue({ enabledServices: ["ec2", "rds"], favorites: [], lastProfile: "prod", lastRegion: null });
     m.listResources.mockImplementation(async (_p, _r, _service, typeId) => ({
@@ -522,7 +540,8 @@ describe("PostgreSQL 탭", () => {
     await screen.findByRole("tab", { name: "🐘 orders-aurora" });
     fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
     expect(screen.getByRole("tab", { name: "🐘 orders-aurora" })).toHaveAttribute("aria-selected", "false");
-    fireEvent.doubleClick(screen.getByText("orders-aurora"));
+    // 열린 🐘 탭의 위쪽 줄에도 같은 이름이 있으니 보이는 리소스 표 안에서 찾는다
+    fireEvent.doubleClick(within(screen.getByRole("table")).getByText("orders-aurora"));
     expect(pgTabs()).toHaveLength(1);
     expect(screen.getByRole("tab", { name: "🐘 orders-aurora" })).toHaveAttribute("aria-selected", "true");
     expect(pgApi.close).not.toHaveBeenCalled();
@@ -617,5 +636,92 @@ describe("PostgreSQL 탭", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "리전" }), { target: { value: "us-east-1" } });
     expect(pgTabs()).toHaveLength(1);
     expect(pgApi.close).not.toHaveBeenCalled();
+  });
+
+  describe("refreshing (⌘R and the toolbar button)", () => {
+    /** 두 대상 모두 DB 사용자가 기억돼 있어서 탭을 열면 바로 연결한다 */
+    const rememberBoth = () =>
+      m.getSettings.mockResolvedValue({
+        enabledServices: ["ec2", "rds"],
+        favorites: [],
+        lastProfile: "prod",
+        lastRegion: null,
+        pgLogins: { [arnOf("orders-aurora")]: LOGIN_USER, [arnOf("billing")]: LOGIN_USER },
+      });
+    const opensOf = (id: string) => vi.mocked(pgApi.open).mock.calls.filter(([t]) => t.id === id).length;
+    const targetsOf = (id: string) => vi.mocked(pgApi.target).mock.calls.filter(([t]) => t.id === id).length;
+    const cmdR = () => fireEvent.keyDown(window, { key: "r", metaKey: true });
+    /** orders-aurora 탭을 열어 연결이 끝나고 점검 건수가 보일 때까지 기다린다 */
+    const openConnected = async (id = "orders-aurora") => {
+      await openCluster(id);
+      await screen.findByRole("tab", { name: `🐘 ${id}` });
+      await screen.findByRole("navigation", { name: "PostgreSQL 메뉴" });
+      await waitFor(() => expect(pgApi.findings).toHaveBeenCalled());
+    };
+
+    test("⌘R with a PostgreSQL tab showing reads that target again, from the connection on", async () => {
+      rememberBoth();
+      await showClusters();
+      await openConnected();
+      expect(opensOf("orders-aurora")).toBe(1);
+      cmdR();
+      await waitFor(() => expect(opensOf("orders-aurora")).toBe(2));
+      expect(pgApi.open).toHaveBeenLastCalledWith(target("orders-aurora"), LOGIN_USER);
+      expect(targetsOf("orders-aurora")).toBe(2);
+      await waitFor(() => expect(pgApi.findings).toHaveBeenLastCalledWith(target("orders-aurora"), true));
+    });
+
+    test("the toolbar refresh button does the same", async () => {
+      rememberBoth();
+      await showClusters();
+      await openConnected();
+      fireEvent.click(screen.getByRole("button", { name: "새로고침" }));
+      await waitFor(() => expect(opensOf("orders-aurora")).toBe(2));
+    });
+
+    test("it is the tab that is showing that is read, not the other PostgreSQL tabs", async () => {
+      rememberBoth();
+      await showClusters();
+      await openConnected("orders-aurora");
+      fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+      fireEvent.doubleClick(screen.getByText("billing"));
+      await screen.findByRole("tab", { name: "🐘 billing" });
+      await waitFor(() => expect(opensOf("billing")).toBe(1));
+      cmdR();
+      await waitFor(() => expect(opensOf("billing")).toBe(2));
+      await act(async () => {});
+      expect(opensOf("orders-aurora")).toBe(1);
+    });
+
+    test("with the resources tab showing, no PostgreSQL tab is read again", async () => {
+      rememberBoth();
+      await showClusters();
+      await openConnected();
+      fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+      cmdR();
+      await act(async () => {});
+      await waitFor(() => expect(m.listResources.mock.calls.length).toBeGreaterThan(2)); // 리소스 목록은 다시 읽는다
+      expect(opensOf("orders-aurora")).toBe(1);
+      expect(targetsOf("orders-aurora")).toBe(1);
+    });
+
+    test("the rest of the refresh still happens when a PostgreSQL tab is showing", async () => {
+      rememberBoth();
+      await showClusters();
+      await openConnected();
+      const reads = m.listResources.mock.calls.length;
+      cmdR();
+      await waitFor(() => expect(m.listResources.mock.calls.length).toBeGreaterThan(reads));
+    });
+
+    test("a PostgreSQL tab that is not connected yet is read through the same refresh", async () => {
+      // DB 사용자를 기억하지 않아 연결 전(로그인 창)이다. 새로 고침은 대상 확인부터 다시 읽을 뿐 연결을 시도하지 않는다.
+      await showClusters();
+      await openCluster("orders-aurora");
+      await screen.findByRole("heading", { name: "DB 사용자" });
+      cmdR();
+      await waitFor(() => expect(targetsOf("orders-aurora")).toBe(2));
+      expect(pgApi.open).not.toHaveBeenCalled();
+    });
   });
 });

@@ -18,7 +18,7 @@ import { IamTab } from "./iam/IamTab";
 import { refreshIam, useIamOverview } from "./iam/queries";
 import type { S3Location } from "./lib/s3";
 import { PgTab } from "./pg/PgTab";
-import { closePg } from "./pg/queries";
+import { closePg, refreshPg } from "./pg/queries";
 import { pgTabId } from "./pg/targets";
 import type { PgTarget } from "./pg/types";
 import { getVersion } from "@tauri-apps/api/app";
@@ -85,7 +85,10 @@ export default function App() {
     void qc.invalidateQueries({ queryKey: ["diff", profile] });
     void qc.invalidateQueries({ queryKey: ["vpc-topology", profile] });
     void refreshIam(qc, profile);
-  }, [qc, profile]);
+    // 보고 있는 PostgreSQL 탭은 연결부터 다시 읽는다. 보이지 않는 PostgreSQL 탭은 DB 연결을 열어 둔 채로 그대로 둔다.
+    const pg = pgTabs.find((t) => t.id === activeTab);
+    if (pg) void refreshPg(qc, pg.target);
+  }, [qc, profile, pgTabs, activeTab]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

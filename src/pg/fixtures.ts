@@ -22,7 +22,9 @@ import type {
   PgObjectRef,
   PgOverview,
   PgPrivilegeGrant,
+  PgRoleDatabase,
   PgRoleSummary,
+  PgRoleView,
   PgSchemaCell,
   PgSession,
   PgSource,
@@ -321,6 +323,49 @@ export function sampleSessions(): PgSession[] {
     { ...base, pid: 3101, role: "iam_admin", database: "orders", clientAddr: "172.16.4.9", applicationName: "magic-mirror", own: true },
     { ...base, pid: 3102, role: "iam_admin", database: "analytics", clientAddr: "172.16.4.9", applicationName: "magic-mirror", own: true },
   ];
+}
+
+// ── 역할 상세 ──
+/** 역할별 설정(pg_db_role_setting). app_owner만 있다. database가 null이면 모든 데이터베이스에 적용된다. */
+const ROLE_SETTINGS: Record<string, PgRoleView["settings"]> = {
+  app_owner: [
+    { database: null, setting: "search_path=app, public" },
+    { database: "orders", setting: "work_mem=64MB" },
+  ],
+};
+/** 소유 객체. app_owner가 orders의 스키마와 그 안의 객체를 모두 소유한다(위 권한 표·칸 상세와 같다). 다른 역할은 아무것도 소유하지 않는다. */
+const OWNED: Record<string, PgObjectRef[]> = {
+  app_owner: [object("schema", null, "app"), object("schema", null, "audit"), customersTable, orderItemsTable, ordersTable, eventsTable, ordersIdSeq, touchOrderFn],
+};
+/** 상속하지 않는 구성원 관계로만 닿는 역할: bob이 app_read에 닿는 길뿐이다. */
+const SET_ROLE_ONLY: Record<string, string[]> = { bob: ["app_read"] };
+
+const hasSomething = (c: PgSchemaCell) => c.usage || c.create || c.read !== "none" || c.write !== "none";
+
+/**
+ * 역할 하나의 상세(pg_role). 데이터베이스는 연결할 수 있는 것마다 하나씩 있고, 권한 표 픽스처의 orders만 읽혀 있다.
+ * 읽힌 데이터베이스의 칸은 이 역할에게 권한이 하나라도 있는 것만 담는다(백엔드와 같다).
+ */
+export function sampleRoleView(name = "alice", extra: Partial<PgRoleView> = {}): PgRoleView {
+  const summary = ROLES.find((r) => r.name === name);
+  if (!summary) throw new Error(`unknown role: ${name}`);
+  const read = sampleDatabaseView();
+  return {
+    summary: { ...summary },
+    settings: (ROLE_SETTINGS[name] ?? []).map((setting) => ({ ...setting })),
+    members: ROLES.flatMap((r) => r.memberOf.filter((m) => m.group === name).map((m) => ({ role: r.name, inherit: m.inherit, admin: m.admin }))),
+    databases: sampleOverview()
+      .databases.filter((d) => d.allowConn)
+      .map(
+        (d): PgRoleDatabase =>
+          d.name === read.database
+            ? { database: d.name, loaded: true, cells: read.cells.filter((c) => c.role === name && hasSomething(c)), owned: [...(OWNED[name] ?? [])], ownedOmitted: 0 }
+            : { database: d.name, loaded: false, cells: [], owned: [], ownedOmitted: 0 },
+      ),
+    sessions: sampleSessions().filter((s) => s.role === name),
+    setRoleOnly: [...(SET_ROLE_ONLY[name] ?? [])],
+    ...extra,
+  };
 }
 
 // ── 점검 ──
