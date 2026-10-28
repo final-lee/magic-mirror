@@ -195,16 +195,16 @@ fn group_acl_does_not_invent_an_entry_from_a_half_filled_row() {
 
 // ───────────────────────── 구성원 관계 합치기 ─────────────────────────
 
-fn member(member: &str, group: &str, admin: bool, inherit: Option<bool>) -> MemberRec {
-    MemberRec { member: member.into(), group: group.into(), admin, inherit }
+fn member(member: &str, group: &str, admin: bool, inherit: Option<bool>, set: Option<bool>) -> MemberRec {
+    MemberRec { member: member.into(), group: group.into(), admin, inherit, set }
 }
 
 #[test]
 fn members_without_duplicates_are_left_alone() {
     let rows = vec![
-        member("alice", "app_read", false, Some(true)),
-        member("alice", "app_write", true, Some(false)),
-        member("bob", "app_read", false, None),
+        member("alice", "app_read", false, Some(true), Some(true)),
+        member("alice", "app_write", true, Some(false), Some(false)),
+        member("bob", "app_read", false, None, None),
     ];
     assert_eq!(merge_members(rows.clone()), rows);
 }
@@ -213,36 +213,68 @@ fn members_without_duplicates_are_left_alone() {
 fn several_grantors_of_one_membership_become_one_pair() {
     // PG16: 부여자마다 한 줄. 하나라도 허용하면 허용이다
     let merged = merge_members(vec![
-        member("alice", "app_read", false, Some(false)),
-        member("alice", "app_read", true, Some(true)),
-        member("bob", "app_read", false, Some(false)),
-        member("bob", "app_read", false, Some(false)),
+        member("alice", "app_read", false, Some(false), Some(false)),
+        member("alice", "app_read", true, Some(true), Some(true)),
+        member("bob", "app_read", false, Some(false), Some(false)),
+        member("bob", "app_read", false, Some(false), Some(false)),
     ]);
-    assert_eq!(merged, vec![member("alice", "app_read", true, Some(true)), member("bob", "app_read", false, Some(false))]);
+    assert_eq!(
+        merged,
+        vec![member("alice", "app_read", true, Some(true), Some(true)), member("bob", "app_read", false, Some(false), Some(false))]
+    );
 }
 
 #[test]
-fn the_option_of_a_merged_pair_does_not_depend_on_the_order_of_the_rows() {
-    let first = merge_members(vec![member("a", "g", true, Some(true)), member("a", "g", false, Some(false))]);
-    let second = merge_members(vec![member("a", "g", false, Some(false)), member("a", "g", true, Some(true))]);
-    assert_eq!(first, second);
-    assert_eq!(first, vec![member("a", "g", true, Some(true))]);
+fn each_option_of_a_merged_pair_comes_from_any_grant_that_allows_it() {
+    // 옵션마다 허용한 부여가 서로 다르다: INHERIT은 첫째, ADMIN은 둘째, SET은 셋째 부여만 허용한다
+    let merged = merge_members(vec![
+        member("a", "g", false, Some(true), Some(false)),
+        member("a", "g", true, Some(false), Some(false)),
+        member("a", "g", false, Some(false), Some(true)),
+    ]);
+    assert_eq!(merged, vec![member("a", "g", true, Some(true), Some(true))]);
 }
 
 #[test]
-fn memberships_before_pg16_keep_a_missing_inherit_option() {
-    // 옵션이 없는 서버에서는 합쳐도 없는 채로다. "없음"을 "허용 안 함"으로 바꾸면 안 된다
-    assert_eq!(merge_members(vec![member("a", "g", false, None), member("a", "g", false, None)]), vec![member("a", "g", false, None)]);
+fn the_options_of_a_merged_pair_do_not_depend_on_the_order_of_the_rows() {
+    let rows = [
+        member("a", "g", false, Some(true), Some(false)),
+        member("a", "g", true, Some(false), Some(false)),
+        member("a", "g", false, Some(false), Some(true)),
+    ];
+    for order in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
+        let merged = merge_members(order.iter().map(|&i| rows[i].clone()).collect());
+        assert_eq!(merged, vec![member("a", "g", true, Some(true), Some(true))], "{order:?}");
+    }
+}
+
+#[test]
+fn a_pair_cannot_set_role_only_when_every_grant_says_so() {
+    // PG16에서 CREATEROLE 사용자가 만든 역할의 자동 부여(ADMIN만 있고 INHERIT도 SET도 없다)가 부여자만 달리 두 줄이어도 SET은 false로 남는다
+    let auto_grant = member("creator", "created", true, Some(false), Some(false));
+    assert_eq!(merge_members(vec![auto_grant.clone(), auto_grant.clone()]), vec![auto_grant]);
+}
+
+#[test]
+fn memberships_before_pg16_keep_missing_options() {
+    // 옵션이 없는 서버에서는 합쳐도 없는 채로다. "없음"을 "허용 안 함"으로 바꾸면 안 된다(INHERIT도 SET도)
+    assert_eq!(
+        merge_members(vec![member("a", "g", false, None, None), member("a", "g", false, None, None)]),
+        vec![member("a", "g", false, None, None)]
+    );
     // 한쪽만 값이 있으면 그 값이 쓰인다
-    assert_eq!(merge_members(vec![member("a", "g", false, None), member("a", "g", false, Some(false))]), vec![member("a", "g", false, Some(false))]);
+    assert_eq!(
+        merge_members(vec![member("a", "g", false, None, None), member("a", "g", false, Some(false), Some(false))]),
+        vec![member("a", "g", false, Some(false), Some(false))]
+    );
 }
 
 #[test]
 fn only_the_same_pair_is_merged() {
     let rows = vec![
-        member("alice", "app_read", false, Some(true)),
-        member("alice", "app_write", false, Some(true)),
-        member("bob", "app_write", false, Some(true)),
+        member("alice", "app_read", false, Some(true), Some(true)),
+        member("alice", "app_write", false, Some(true), Some(true)),
+        member("bob", "app_write", false, Some(true), Some(true)),
     ];
     assert_eq!(merge_members(rows.clone()), rows);
 }
@@ -400,6 +432,26 @@ fn relations_and_functions_are_limited_and_partitions_are_left_out() {
 #[test]
 fn templates_and_rdsadmin_are_left_out_of_the_databases() {
     assert!(DATABASES_SQL.contains("NOT d.datistemplate") && DATABASES_SQL.contains("d.datname <> 'rdsadmin'"));
+}
+
+#[test]
+fn the_pg16_members_query_reads_the_set_option_and_the_older_one_has_none() {
+    // 열 순서는 `read_members`가 읽는 순서다: 구성원, 그룹, ADMIN, INHERIT, SET
+    assert!(MEMBERS_SQL_16.contains("SELECT m.rolname, g.rolname, am.admin_option, am.inherit_option, am.set_option"), "{MEMBERS_SQL_16}");
+    assert!(MEMBERS_SQL_OLD.contains("SELECT m.rolname, g.rolname, am.admin_option, NULL::bool, NULL::bool"), "{MEMBERS_SQL_OLD}");
+}
+
+#[test]
+fn the_sessions_query_also_keeps_the_rows_of_other_roles_that_the_server_blanks() {
+    // 권한이 없는 로그인 사용자에게는 다른 역할의 세션에서 `backend_type`이 비어 온다. 역할과 데이터베이스가 있는 줄은 세션이다
+    assert!(SESSIONS_SQL.contains("backend_type = 'client backend'"));
+    assert!(SESSIONS_SQL.contains("(backend_type IS NULL AND usename IS NOT NULL AND datname IS NOT NULL)"), "{SESSIONS_SQL}");
+}
+
+#[test]
+fn a_role_that_expired_forever_reads_as_the_oldest_time() {
+    // `to_char`는 -infinity에 NULL을 주므로 따로 받지 않으면 "만료 없음"으로 읽힌다
+    assert!(ROLES_SQL.contains("WHEN r.rolvaliduntil = '-infinity' THEN '1970-01-01T00:00:00Z'"), "{ROLES_SQL}");
 }
 
 #[test]

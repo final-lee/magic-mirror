@@ -84,7 +84,8 @@ pub struct RoleRec {
     pub superuser: bool,
     /// -1은 제한 없음
     pub conn_limit: i32,
-    /// ISO 8601 UTC. 없거나 `infinity`면 None
+    /// ISO 8601 UTC. 없거나 `infinity`면 None. `-infinity`(그 역할은 로그인할 수 없다)는 만료로 보이도록 가장 오래된 시각
+    /// `1970-01-01T00:00:00Z`로 읽는다
     pub valid_until: Option<String>,
     pub comment: Option<String>,
 }
@@ -97,6 +98,9 @@ pub struct MemberRec {
     pub admin: bool,
     /// PG16부터 부여마다 있는 INHERIT 옵션. 그 전 버전에는 없어서 None이다(그때는 구성원의 `inherit` 속성이 정한다).
     pub inherit: Option<bool>,
+    /// PG16부터 부여마다 있는 SET 옵션(`SET ROLE`을 허용하는지). 그 전 버전에는 없어서 None이다(그때는 구성원이면 언제나 `SET ROLE`을 할 수 있다).
+    /// PG16에서 CREATEROLE 사용자가 만든 역할은 그 사용자에게 `admin: true, inherit: Some(false), set: Some(false)`로 부여된다.
+    pub set: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,7 +121,8 @@ pub struct RoleSettingRec {
 }
 
 /// 접속 중인 세션 하나(`pg_stat_activity`의 클라이언트 백엔드). 값이 없는 칸은 None이다.
-/// `pg_read_all_stats`나 superuser가 아닌 로그인 사용자에게는 다른 사용자의 세션이 오지 않는다(`catalog::sessions` 참고).
+/// 로그인 사용자가 superuser도 `pg_read_all_stats` 멤버도 아니면 다른 역할의 세션은 역할·데이터베이스·응용 이름만 오고
+/// 나머지(`state`, `client_addr`, `backend_start`, `query_start`, `wait_event`)는 None이다(`catalog::sessions` 참고).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionRec {
     pub pid: i32,

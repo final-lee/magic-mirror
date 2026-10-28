@@ -47,8 +47,8 @@ impl Server {
         std::env::var(var).unwrap_or_else(|_| panic!("환경 변수 {var}가 없어요. scripts/pg-live-test.sh로 돌리세요"))
     }
 
-    /// 구성원 관계마다 INHERIT 옵션이 있는 것은 PG16부터다
-    fn has_inherit_option(self) -> bool {
+    /// 구성원 관계마다 INHERIT·SET 옵션이 있는 것은 PG16부터다
+    fn has_membership_options(self) -> bool {
         self == Server::Pg16
     }
 }
@@ -255,6 +255,8 @@ macro_rules! on_both_servers {
 on_both_servers!(
     cluster_snapshot_reads_the_seeded_roles_and_memberships,
     one_membership_granted_by_several_roles_is_one_pair,
+    the_set_option_of_a_membership_is_read,
+    valid_until_is_read_as_utc_and_minus_infinity_as_expired,
     db_snapshot_reads_schemas_relations_functions_and_default_acls,
     the_object_cap_cuts_the_snapshot,
     read_refuses_to_write,
@@ -301,18 +303,18 @@ async fn cluster_snapshot_reads_the_seeded_roles_and_memberships(server: Server)
     assert!(postgres.superuser && postgres.create_role && postgres.create_db && postgres.replication && postgres.bypass_rls);
     assert!(!role("pg_read_all_data").login, "미리 정의된 역할도 읽혀요");
 
-    // 구성원 관계: 쌍마다 하나. INHERIT 옵션은 PG16부터 있고, bob의 것은 false다
+    // 구성원 관계: 쌍마다 하나. INHERIT·SET 옵션은 PG16부터 있고, bob의 INHERIT은 false다(SET은 모두 기본값 true)
     assert!(
         snap.members.windows(2).all(|pair| (&pair[0].member, &pair[0].group) < (&pair[1].member, &pair[1].group)),
         "구성원 관계는 (구성원, 그룹) 순이고 쌍마다 하나여야 해요"
     );
-    let expected_inherit = |inherit: bool| server.has_inherit_option().then_some(inherit);
+    let expected_option = |value: bool| server.has_membership_options().then_some(value);
     for (member, group, inherit) in
         [("app_write", "app_read", true), ("alice", "app_write", true), ("bob", "app_read", false), ("carol", "pg_read_all_data", true)]
     {
         let found: Vec<&MemberRec> = snap.members.iter().filter(|m| m.member == member && m.group == group).collect();
         assert_eq!(found.len(), 1, "{member} → {group}: {found:?}");
-        assert_eq!((found[0].admin, found[0].inherit), (false, expected_inherit(inherit)), "{member} → {group}");
+        assert_eq!((found[0].admin, found[0].inherit, found[0].set), (false, expected_option(inherit), expected_option(true)), "{member} → {group}");
     }
     assert_eq!(snap.members.iter().filter(|m| m.member == "alice").count(), 1, "alice는 app_write 하나에만 속해요");
 
@@ -346,45 +348,121 @@ async fn cluster_snapshot_reads_the_seeded_roles_and_memberships(server: Server)
     assert!(snap.sessions.iter().any(|s| s.pid == conn.backend_pid), "이 연결의 세션이 없어요");
 }
 
-/// PG16부터 같은 구성원 관계를 부여자마다 따로 둘 수 있다. 앱은 한 쌍으로 합쳐 읽는다
+/// PG16부터 같은 구성원 관계를 부여자마다 따로 둘 수 있다. 앱은 한 쌍으로 합쳐 읽는다.
+/// 서버가 같은 쌍의 줄을 어떤 순서로 주는지는 정해져 있지 않다. 그래서 옵션마다 허용한 부여가 서로 반대인 쌍을 둘 두어,
+/// 어느 순서로 와도 합치지 않는 구현은 둘 중 하나에서 드러나게 한다
 async fn one_membership_granted_by_several_roles_is_one_pair(server: Server) {
     let scene = seed(server).await;
     let mut conn = scene.connect().await;
-    let drop_roles = "DROP ROLE IF EXISTS mm_dup_member; DROP ROLE IF EXISTS mm_dup_admin; DROP ROLE IF EXISTS mm_dup_group;";
+    let drop_roles = "DROP ROLE IF EXISTS mm_dup_x; DROP ROLE IF EXISTS mm_dup_y; DROP ROLE IF EXISTS mm_dup_admin; DROP ROLE IF EXISTS mm_dup_group;";
     conn.client.batch_execute(drop_roles).await.expect("지난 시험의 역할을 지우지 못했어요");
     conn.client
         .batch_execute(
-            "CREATE ROLE mm_dup_group NOLOGIN; CREATE ROLE mm_dup_member NOLOGIN; CREATE ROLE mm_dup_admin NOLOGIN;
-             GRANT mm_dup_group TO mm_dup_admin WITH ADMIN OPTION;
-             GRANT mm_dup_group TO mm_dup_member;",
+            "CREATE ROLE mm_dup_group NOLOGIN; CREATE ROLE mm_dup_x NOLOGIN; CREATE ROLE mm_dup_y NOLOGIN; CREATE ROLE mm_dup_admin NOLOGIN;
+             GRANT mm_dup_group TO mm_dup_admin WITH ADMIN OPTION;",
         )
         .await
         .expect("역할을 만들지 못했어요");
-    if server.has_inherit_option() {
-        // 두 번째 부여: 다른 부여자, 관리 옵션은 있고 INHERIT는 없다
-        conn.client
-            .batch_execute("GRANT mm_dup_group TO mm_dup_member WITH ADMIN OPTION, INHERIT FALSE GRANTED BY mm_dup_admin;")
-            .await
-            .expect("두 번째 부여를 하지 못했어요");
-    }
+    let grants = if server.has_membership_options() {
+        // x: 먼저 superuser가 INHERIT만, 나중에 mm_dup_admin이 ADMIN과 SET을 준다. y: 먼저 superuser가 ADMIN과 SET을, 나중에 mm_dup_admin이 INHERIT만 준다
+        "GRANT mm_dup_group TO mm_dup_x WITH INHERIT TRUE, SET FALSE;
+         GRANT mm_dup_group TO mm_dup_x WITH ADMIN OPTION, INHERIT FALSE, SET TRUE GRANTED BY mm_dup_admin;
+         GRANT mm_dup_group TO mm_dup_y WITH ADMIN OPTION, INHERIT FALSE, SET TRUE;
+         GRANT mm_dup_group TO mm_dup_y WITH INHERIT TRUE, SET FALSE GRANTED BY mm_dup_admin;"
+    } else {
+        "GRANT mm_dup_group TO mm_dup_x; GRANT mm_dup_group TO mm_dup_y;"
+    };
+    conn.client.batch_execute(grants).await.expect("부여하지 못했어요");
     let raw_rows: i64 = conn
         .client
         .query_one(
             "SELECT count(*) FROM pg_auth_members am JOIN pg_roles m ON m.oid = am.member JOIN pg_roles g ON g.oid = am.roleid
-             WHERE m.rolname = 'mm_dup_member' AND g.rolname = 'mm_dup_group'",
+             WHERE m.rolname IN ('mm_dup_x', 'mm_dup_y') AND g.rolname = 'mm_dup_group'",
             &[],
         )
         .await
         .expect("부여를 세지 못했어요")
         .get(0);
-    assert_eq!(raw_rows, if server.has_inherit_option() { 2 } else { 1 }, "서버에는 부여자마다 한 줄이 있어요");
+    assert_eq!(raw_rows, if server.has_membership_options() { 4 } else { 2 }, "서버에는 부여자마다 한 줄이 있어요");
 
     let snap = cluster_snapshot(&mut conn, "iam_admin").await.expect("클러스터 스냅숏을 읽지 못했어요");
-    let pair: Vec<&MemberRec> = snap.members.iter().filter(|m| m.member == "mm_dup_member" && m.group == "mm_dup_group").collect();
-    assert_eq!(pair.len(), 1, "한 쌍으로 합쳐야 해요: {pair:?}");
-    // 하나라도 허용하면 허용이다: 첫 부여는 INHERIT, 두 번째 부여는 ADMIN
-    let expected = if server.has_inherit_option() { (true, Some(true)) } else { (false, None) };
-    assert_eq!((pair[0].admin, pair[0].inherit), expected);
+    // 하나라도 허용하면 허용이다: INHERIT·ADMIN·SET 모두, 어느 부여가 허용했든
+    let expected = if server.has_membership_options() { (true, Some(true), Some(true)) } else { (false, None, None) };
+    for member in ["mm_dup_x", "mm_dup_y"] {
+        let pair: Vec<&MemberRec> = snap.members.iter().filter(|m| m.member == member && m.group == "mm_dup_group").collect();
+        assert_eq!(pair.len(), 1, "{member}: 한 쌍으로 합쳐야 해요: {pair:?}");
+        assert_eq!((pair[0].admin, pair[0].inherit, pair[0].set), expected, "{member}");
+    }
+
+    conn.client.batch_execute(drop_roles).await.expect("시험 역할을 지우지 못했어요");
+}
+
+/// PG16의 SET 옵션(`SET ROLE`을 허용하는지)은 부여마다 읽는다. PG16에서 CREATEROLE 사용자가 만든 역할은
+/// ADMIN만 있고 INHERIT도 SET도 없이 그 사용자에게 부여되어, 만든 사용자라도 그 역할로 `SET ROLE`을 할 수 없다
+async fn the_set_option_of_a_membership_is_read(server: Server) {
+    let scene = seed(server).await;
+    let mut conn = scene.connect().await;
+    let drop_roles = "DROP ROLE IF EXISTS mm_set_created; DROP ROLE IF EXISTS mm_set_creator; DROP ROLE IF EXISTS mm_set_member;
+                      DROP ROLE IF EXISTS mm_set_plain; DROP ROLE IF EXISTS mm_set_group;";
+    conn.client.batch_execute(drop_roles).await.expect("지난 시험의 역할을 지우지 못했어요");
+    conn.client
+        .batch_execute(
+            "CREATE ROLE mm_set_group NOLOGIN; CREATE ROLE mm_set_member NOLOGIN; CREATE ROLE mm_set_plain NOLOGIN;
+             CREATE ROLE mm_set_creator NOLOGIN CREATEROLE;
+             GRANT mm_set_group TO mm_set_plain;
+             SET ROLE mm_set_creator; CREATE ROLE mm_set_created NOLOGIN; RESET ROLE;",
+        )
+        .await
+        .expect("역할을 만들지 못했어요");
+    // 일부러 INHERIT과 SET을 끈 부여. PG16 전에는 이런 옵션이 없어서 평범한 부여다
+    let restricted = if server.has_membership_options() {
+        "GRANT mm_set_group TO mm_set_member WITH INHERIT FALSE, SET FALSE"
+    } else {
+        "GRANT mm_set_group TO mm_set_member"
+    };
+    conn.client.batch_execute(restricted).await.expect("부여하지 못했어요");
+
+    let snap = cluster_snapshot(&mut conn, "iam_admin").await.expect("클러스터 스냅숏을 읽지 못했어요");
+    let options = |member: &str, group: &str| -> Option<(bool, Option<bool>, Option<bool>)> {
+        snap.members.iter().find(|m| m.member == member && m.group == group).map(|m| (m.admin, m.inherit, m.set))
+    };
+    if server.has_membership_options() {
+        assert_eq!(options("mm_set_member", "mm_set_group"), Some((false, Some(false), Some(false))));
+        assert_eq!(options("mm_set_plain", "mm_set_group"), Some((false, Some(true), Some(true))), "옵션을 안 쓰면 기본값은 둘 다 true예요");
+        assert_eq!(options("mm_set_creator", "mm_set_created"), Some((true, Some(false), Some(false))), "만든 사용자는 ADMIN만 받아요");
+    } else {
+        assert_eq!(options("mm_set_member", "mm_set_group"), Some((false, None, None)));
+        assert_eq!(options("mm_set_plain", "mm_set_group"), Some((false, None, None)));
+        assert_eq!(options("mm_set_creator", "mm_set_created"), None, "PG15 이하는 만든 사용자에게 아무것도 부여하지 않아요");
+    }
+
+    conn.client.batch_execute(drop_roles).await.expect("시험 역할을 지우지 못했어요");
+}
+
+/// `VALID UNTIL`은 UTC ISO 8601로 읽는다. `infinity`와 설정 없음은 None이고, `-infinity`(로그인할 수 없다)는 만료로 보이는 가장 오래된 시각이다
+async fn valid_until_is_read_as_utc_and_minus_infinity_as_expired(server: Server) {
+    let scene = seed(server).await;
+    let mut conn = scene.connect().await;
+    let drop_roles = "DROP ROLE IF EXISTS mm_valid_dead; DROP ROLE IF EXISTS mm_valid_offset; DROP ROLE IF EXISTS mm_valid_open; DROP ROLE IF EXISTS mm_valid_unset;";
+    conn.client.batch_execute(drop_roles).await.expect("지난 시험의 역할을 지우지 못했어요");
+    conn.client
+        .batch_execute(
+            "CREATE ROLE mm_valid_dead NOLOGIN VALID UNTIL '-infinity';
+             CREATE ROLE mm_valid_offset NOLOGIN VALID UNTIL '2031-01-01 09:00:00+09';
+             CREATE ROLE mm_valid_open NOLOGIN VALID UNTIL 'infinity';
+             CREATE ROLE mm_valid_unset NOLOGIN;",
+        )
+        .await
+        .expect("역할을 만들지 못했어요");
+
+    let snap = cluster_snapshot(&mut conn, "iam_admin").await.expect("클러스터 스냅숏을 읽지 못했어요");
+    let valid_until = |name: &str| snap.roles.iter().find(|r| r.name == name).unwrap_or_else(|| panic!("역할 {name}가 없어요")).valid_until.clone();
+    let dead = valid_until("mm_valid_dead");
+    assert_eq!(dead.as_deref(), Some("1970-01-01T00:00:00Z"), "-infinity는 만료로 보여야 해요");
+    assert_eq!(dead.as_deref().and_then(clock::parse_iso), Some(0));
+    assert_eq!(valid_until("mm_valid_offset").as_deref(), Some("2031-01-01T00:00:00Z"), "UTC로 바꿔 읽어요");
+    assert_eq!(valid_until("mm_valid_open"), None);
+    assert_eq!(valid_until("mm_valid_unset"), None);
 
     conn.client.batch_execute(drop_roles).await.expect("시험 역할을 지우지 못했어요");
 }
@@ -671,11 +749,16 @@ async fn the_catalog_is_readable_without_special_privileges(server: Server) {
         (&admin_cluster.roles, &admin_cluster.members, &admin_cluster.databases, &admin_cluster.settings)
     );
     assert_eq!((alice_cluster.version_num, &alice_cluster.version), (admin_cluster.version_num, &admin_cluster.version));
-    // 알려진 한계: `pg_read_all_stats`가 없으면 다른 사용자의 세션은 `backend_type`이 비어 와서(`backend_type = 'client backend'` 조건에 걸려)
-    // 목록에서 빠진다. 자기 세션만 읽힌다(`pg_read_all_stats` 멤버는 다음 시험에서 본다)
-    assert!(alice_cluster.sessions.iter().any(|s| s.pid == alice.backend_pid && s.state.as_deref() == Some("active")));
-    assert!(alice_cluster.sessions.iter().all(|s| s.role.as_deref() == Some("alice")), "{:?}", alice_cluster.sessions);
-    assert!(admin_cluster.sessions.iter().any(|s| s.pid == admin.backend_pid), "superuser는 모든 세션을 봐요");
+    // `pg_read_all_stats`가 없으면 서버는 다른 역할의 세션에서 `backend_type`, `state`, `client_addr`, `backend_start`, `query_start`, `wait_event`를
+    // 비워 준다. 그래도 역할·데이터베이스·응용 이름이 있는 줄은 세션으로 읽는다(`pg_read_all_stats` 멤버가 보는 전체는 다음 시험에서 본다)
+    let own = alice_cluster.sessions.iter().find(|s| s.pid == alice.backend_pid).expect("alice 자신의 세션이 없어요");
+    assert_eq!((own.role.as_deref(), own.state.as_deref()), (Some("alice"), Some("active")));
+    let seen = alice_cluster.sessions.iter().find(|s| s.pid == admin.backend_pid).expect("superuser의 세션도 목록에 있어야 해요");
+    assert_eq!((seen.role.as_deref(), seen.database.as_deref(), seen.application_name.as_str()), (Some("postgres"), Some(scene.database.as_str()), "mm-live"));
+    assert_eq!((&seen.state, &seen.client_addr, &seen.backend_start, &seen.query_start, &seen.wait_event), (&None, &None, &None, &None, &None));
+    // 서버의 백그라운드 프로세스는 역할이나 데이터베이스가 없어 여전히 세션이 아니다
+    assert!(alice_cluster.sessions.iter().all(|s| s.role.is_some() && s.database.is_some()), "{:?}", alice_cluster.sessions);
+    assert!(admin_cluster.sessions.iter().any(|s| s.pid == admin.backend_pid), "superuser는 모든 세션을 모든 칸과 함께 봐요");
 
     let admin_db = db_snapshot(&mut admin, &scene.database).await.expect("superuser의 데이터베이스 스냅숏");
     let alice_db = db_snapshot(&mut alice, &scene.database).await.expect("alice의 데이터베이스 스냅숏");
