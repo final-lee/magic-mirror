@@ -276,7 +276,7 @@ pub enum Privilege { Select, Insert, Update, Delete, Truncate, References, Trigg
 // from_pg("SELECT") etc. and as_str() -> "SELECT"
 pub struct AclEntry { pub grantor: String, pub grantee: Option<String>, pub privilege: Privilege, pub grantable: bool } // grantee None = PUBLIC
 pub struct RoleRec { pub name: String, pub login: bool, pub inherit: bool, pub create_role: bool, pub create_db: bool, pub replication: bool, pub bypass_rls: bool, pub superuser: bool, pub conn_limit: i32, pub valid_until: Option<String>, pub comment: Option<String> }
-pub struct MemberRec { pub member: String, pub group: String, pub admin: bool, pub inherit: Option<bool> } // inherit: PG16+ per-grant option, None before
+pub struct MemberRec { pub member: String, pub group: String, pub admin: bool, pub inherit: Option<bool>, pub set: Option<bool> } // inherit/set: PG16+ per-grant options (OR across grantors), None before
 pub struct DatabaseRec { pub name: String, pub owner: String, pub allow_conn: bool, pub acl: Vec<AclEntry> }
 pub struct RoleSettingRec { pub role: Option<String>, pub database: Option<String>, pub setting: String }
 pub struct SessionRec { pub pid: i32, pub role: Option<String>, pub database: Option<String>, pub client_addr: Option<String>, pub application_name: String, pub state: Option<String>, pub backend_start: Option<String>, pub query_start: Option<String>, pub wait_event: Option<String> }
@@ -397,7 +397,7 @@ pub struct Ctx<'a> { pub cluster: &'a ClusterSnapshot, pub db: &'a DbSnapshot }
 pub enum Obj<'a> { Database(&'a DatabaseRec), Schema(&'a SchemaRec), Relation(&'a RelationRec), Function(&'a FunctionRec) }
 impl Ctx<'_> {
     pub fn inherited(&self, role: &str) -> Vec<Inherited>;         // the role itself first (empty path), then BFS order
-    pub fn set_role_only(&self, role: &str) -> Vec<String>;         // reachable only through non-inheriting memberships
+    pub fn set_role_only(&self, role: &str) -> Vec<String>;         // reachable only through non-inheriting memberships that allow SET ROLE (skip edges with set == Some(false), PG16+)
     pub fn sources(&self, role: &str, obj: Obj, p: Privilege) -> Vec<Source>;
     pub fn unusable(&self, role: &str, schema: &str) -> Option<&'static str>;  // "CONNECT 없음" first, then "USAGE 없음"
 }
