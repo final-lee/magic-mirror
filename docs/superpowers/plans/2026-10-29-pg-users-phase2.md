@@ -175,6 +175,8 @@
     - `PUBLIC` reads as "모든 역할(PUBLIC)" in summaries.
   - **Owner-held aspect** (not toggleable in 바꾸기 mode): title "소유자라서 가진 권한이에요"
   - **Preview header:** `적용할 DB 사용자: ${loginUser}`
+  - **Confirm field label:** `확인하려면 입력하세요: ${confirmText}`
+  - **Refresh after apply failed:** "적용은 됐지만 목록을 다시 읽지 못했어요. [다시 읽기]를 눌러 주세요"
   - **Password result:**
     - Title "새 비밀번호"
     - Note "이 창을 닫으면 다시 볼 수 없어요"
@@ -922,14 +924,14 @@ where X: FnOnce(Vec<Step>) -> XF, XF: Future<Output = Result<(), ExecError>>,
      - IAM's log tests still pass unchanged after the move to `jsonl`.
   6. **Undo:**
      - `pg_undo(logId)` gives `PgUndo { database, changes: entry.inverse, undoOf: [logId] }`.
-     - `pg_undo_batch(batchId)` gives every entry of the batch, last first: the changes are their inverses concatenated, and `undoOf` is their ids. Entries whose inverse is empty are skipped. It fails with not-undoable when any inverse is null or no entry is left.
+     - `pg_undo_batch(batchId)` gives the batch's undoable entries, last first: the changes are their inverses concatenated, and `undoOf` is their ids. Like IAM's `undo_batch_of`, it skips entries that failed, are already undone, or have a null or empty inverse. It fails with not-undoable only when no entry is left.
      - Errors: not found, not undoable (`inverse` null or empty, or not `ok`), already undone.
   7. **Commands:**
      - `pg_preview` and `pg_preview_batch` remember the plan under `(targetKey, change)` or `(targetKey, (database, changes))`.
      - `pg_apply` and `pg_apply_batch` take it once.
      - The heavy work runs in `spawn_blocking`.
      - Every command except `pg_change_log`, `pg_undo` and `pg_undo_batch` needs `pg_open`.
-     - A new read command `pg_overview(target) -> PgOverview` builds the overview from the stored cluster snapshot. It makes no RDS call and keeps the database snapshots. The post-apply refresh uses it.
+     - A new read command `pg_overview(target) -> PgOverview` reads the cluster snapshot fresh through the pool, stores it with `keep_cluster`, and returns the overview. It makes no RDS call and keeps the database snapshots. The post-apply refresh uses it, so a failed re-read in commit step 8 can't leave the screen on the old state unnoticed.
      - `pg_preview`, `pg_preview_batch`, `pg_apply` and `pg_apply_batch` check the execution database against the cluster snapshot before connecting. A database that isn't in it, isn't connectable, or is a template or `rdsadmin` gives the execution-database text as the error.
   8. **Hygiene** (extend PB4's test):
      - `.query(`, `.query_one(`, `.query_opt(`, `.execute(`, `batch_execute(`, `simple_query(`, `build_transaction(` and `.transaction(` appear only in `pg/catalog.rs` and `pg/exec.rs`.
