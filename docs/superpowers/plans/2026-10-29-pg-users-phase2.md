@@ -873,6 +873,7 @@ where X: FnOnce(Vec<Step>) -> XF, XF: Future<Output = Result<(), ExecError>>,
      - A closed connection:
        - seen before the COMMIT call gives `Failed` with the before-COMMIT text, since the server aborts an open transaction when its client leaves;
        - from the COMMIT call itself gives `CommitUnknown`.
+     - Each run has the read deadline from K1 (90 s for the whole run). When it elapses, the connection is marked `broken`. Before COMMIT that is `Failed` with the before-COMMIT text, and during COMMIT it is `CommitUnknown`.
   3. **commit, single change.** The flow, in order:
      1. The `dropRole` guard, whether or not `undoOf` is set:
         - A change list with `dropRole` is rejected with "되돌릴 수 없는 변경이에요" unless `undoOf` is set and every undone entry's change is a `createRole` whose name or created group is that role.
@@ -893,7 +894,7 @@ where X: FnOnce(Vec<Step>) -> XF, XF: Future<Output = Result<(), ExecError>>,
           - equal to the snapshot before: log the failure and return the before-COMMIT text;
           - otherwise, or when `reread` fails: log `ok: false` with the unknown text.
      7. Append the log entry (with `ok` false and `error` on failure), and `mark_undone` the `undoOf` entries on success.
-     8. On success, re-read and store the cluster snapshot and the execution database snapshot. Failures there are ignored, because the frontend reads again anyway.
+     8. On success, re-read the cluster snapshot and the execution database snapshot and store them: the cluster through a new `PgState::keep_cluster(target, epoch, cluster)`, which checks the epoch as `keep_db` does and leaves the other databases' snapshots alone. Failures are ignored, because the frontend reads again anyway.
      9. Return `PgApplyResult`, with `password` only when step 5 ran.
      - Tests use fake exec and reread closures, as IAM's commit tests do. Check:
        - the order;
@@ -923,6 +924,7 @@ where X: FnOnce(Vec<Step>) -> XF, XF: Future<Output = Result<(), ExecError>>,
      - `pg_apply` and `pg_apply_batch` take it once.
      - The heavy work runs in `spawn_blocking`.
      - Every command except `pg_change_log`, `pg_undo` and `pg_undo_batch` needs `pg_open`.
+     - A new read command `pg_overview(target) -> PgOverview` builds the overview from the stored cluster snapshot. It makes no RDS call and keeps the database snapshots. The post-apply refresh uses it.
      - `pg_preview`, `pg_preview_batch`, `pg_apply` and `pg_apply_batch` check the execution database against the cluster snapshot before connecting. A database that isn't in it, isn't connectable, or is a template or `rdsadmin` gives the execution-database text as the error.
   8. **Hygiene** (extend PB4's test):
      - `.query(`, `.query_one(`, `.query_opt(`, `.execute(`, `batch_execute(`, `simple_query(`, `build_transaction(` and `.transaction(` appear only in `pg/catalog.rs` and `pg/exec.rs`.
@@ -1113,7 +1115,7 @@ export function usePgBatch(target: PgTarget): {
      - `start` calls `pg_preview` and opens the dialog.
      - `apply` is refused by `applyGate`, as in IAM.
      - On success:
-       - `refreshPg(qc, target)` runs at once, with no IAM-style delay;
+       - the post-apply refresh runs at once, with no IAM-style delay: `pg_overview` replaces the overview query's data, and the execution database's view and the affected role views are refetched. `refreshPg`, which re-opens the target, stays for 다시 읽기;
        - the change log query is invalidated;
        - a notice shows the summary and any notes.
      - On failure the dialog stays open with `PreviewAlerts`. `stale` turns on, and "미리보기 다시 받기" fetches the preview again.
@@ -1279,7 +1281,7 @@ export function usePgDraft(target: PgTarget, ov: PgOverview | undefined): {
        - The button "담기".
      - Choosing the object type "스키마" fixes the schema to "모든 스키마".
   3. **RoleDetail in 바꾸기 mode:**
-     - **구성원 tab:** a checkbox per non-system group and per allowed system group, with the pending markers, giving membership changes. Existing memberships also get an "ADMIN OPTION" checkbox, giving a membership change with `admin: true`.
+     - **구성원 tab:** a checkbox per non-system group and per allowed system group, with the pending markers, giving membership changes. The phase-1 chips stay, now with the `set` field from K1. Existing memberships also get an "ADMIN OPTION" checkbox, giving a membership change with `admin: true`.
      - **개요 tab:** a form with LOGIN, CREATEDB, CREATEROLE and INHERIT, "연결 수 제한" (a number, or "제한 없음") and "만료일" (a date, or "없음"). The button "담기" adds or replaces the attributes item. REPLICATION and BYPASSRLS stay read-only.
   4. Every new item goes through the draft, so the 50-item limit and the database rule apply as in QF2a.
 - [ ] **Step 2: Implement.**

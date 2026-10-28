@@ -38,6 +38,12 @@
   - Unusable cell: "권한은 있지만 실제로는 못 써요", with reasons "CONNECT 없음" and "USAGE 없음"
   - RLS: "행 수준 보안 켜짐"
   - SET ROLE only: "SET ROLE로만 쓸 수 있음"
+  - Membership chips: "상속" (inherits), "SET ROLE로만 쓸 수 있음" (no inherit, SET allowed), "상속·SET ROLE 없음" (neither), plus "ADMIN OPTION"
+  - Manage reason when the login reaches rds_superuser only directly without inheriting or through SET ROLE: "이 사용자는 SET ROLE로만 rds_superuser 권한을 쓸 수 있어서 바꿀 수 없어요"
+  - Owner source reached through inheritance (cell panel chip): `소유자 역할(${via joined with " ← "})을 물려받음`
+  - Settings row that applies to every role: "모든 역할"
+  - Default-privilege grant with grant option: the privileges text is followed by " (GRANT OPTION 포함)"
+  - Not found: `역할을 찾을 수 없어요: ${role}`, `스키마를 찾을 수 없어요: ${schema}`, `객체를 찾을 수 없어요: ${object}`
   - Findings footnote: "역할별 비밀번호 해시 방식과 마지막 로그인은 RDS에서 볼 수 없어 점검하지 않아요"
   - rds_superuser finding for a role that reaches it only through SET ROLE: "SET ROLE로 rds_superuser 권한을 쓸 수 있어요"
   - Manage reason: "이 사용자는 rds_superuser 멤버가 아니고 CREATEROLE도 없어서 바꿀 수 없어요"
@@ -186,10 +192,10 @@ Settings: `Settings.pgLogins: Record<string, string>` maps a target ARN to its D
 **Interfaces:**
 - Produces:
   - `pg::target::{PgTarget, TargetKind, PgTargetInfo, info_of_cluster(&DbCluster) -> Result<PgTargetInfo, AppError>, info_of_instance(&DbInstance) -> Result<PgTargetInfo, AppError>, resolve(cfg: &SdkConfig, target: &PgTarget) -> Result<PgTargetInfo, AppError>}`
-  - `pg::connect::{ConnFailure, describe_failure(&ConnFailure, &ConnCtx) -> AppError, ConnCtx { host, port, user, database, kind }, rds_roots() -> rustls::RootCertStore, auth_token(cfg: &SdkConfig, host, port, user) -> Result<String, AppError>, connect(cfg: &SdkConfig, info: &PgTargetInfo, user: &str, database: &str) -> Result<Connected, AppError>}`
+  - `pg::connect::{ConnFailure, describe_failure(&ConnFailure, &ConnCtx) -> AppError, ConnCtx { host, port, user, database, kind }, rds_roots() -> Result<rustls::RootCertStore, AppError>, auth_token(cfg: &SdkConfig, host, port, user) -> Result<String, AppError>, connect(cfg: &SdkConfig, info: &PgTargetInfo, user: &str, database: &str) -> Result<Connected, AppError>}`
   - `Connected { client: tokio_postgres::Client, backend_pid: i32 }`. The connection future is spawned inside `connect`.
   - `pg::pool::{Pool, ConnKey { target: PgTarget, user: String, database: String }}`, with:
-    - `Pool::get_or_connect(&self, key, f) -> Result<Arc<tokio::sync::Mutex<Connected>>, AppError>`
+    - `Pool::get_or_connect(&self, key, f) -> Result<Arc<tokio::sync::Mutex<Connected>>, AppError>`. As built, the commands read the target's epoch once per command and call `get_or_connect_at_epoch`, so a close during a walk refuses every later connect.
     - `Pool::close_target(&self, &PgTarget)`
     - `Pool::sweep(&self, now: Instant)`
     - `Pool::backend_pids(&self, &PgTarget) -> Vec<i32>`
@@ -410,7 +416,9 @@ impl Ctx<'_> {
 // questions on the per-role view. The `Ctx` methods are one-line wrappers over it.
 pub enum Coverage { All, Some, None }
 pub struct SchemaCell { pub role: String, pub schema: String, pub usage: bool, pub create: bool, pub read: Coverage, pub write: Coverage, pub inherited_only: bool, pub unusable: Option<&'static str> }
-pub fn schema_cells(ctx: &Ctx, roles: &[&str]) -> Vec<SchemaCell>;   // roles × schemas, in schema-name order inside role order
+pub fn schema_cells(eval: &Eval, ctx: &Ctx, roles: &[&str]) -> Vec<SchemaCell>;   // roles × schemas, in schema-name order inside role order (as built: one Eval per command)
+// As built, `Eval::new(&ctx)` and `eval.role(name) -> RoleView` hold the role graph, and RoleView adds `usable_after_set_role()`.
+// The `Ctx` methods above are thin wrappers kept for tests.
 pub struct WhoCanRow { pub role: String, pub sources: Vec<Source>, pub unusable: Option<&'static str> }
 pub fn who_can(ctx: &Ctx, obj: Obj, p: Privilege) -> Vec<WhoCanRow>; // roles with at least one source, in role-name order
 ```
@@ -495,7 +503,7 @@ pub fn who_can(ctx: &Ctx, obj: Obj, p: Privilege) -> Vec<WhoCanRow>; // roles wi
     - `rdsSuperuser`: direct and inherited members of `rds_superuser`, excluding system roles. "high".
     - `createRole`: non-system roles with CREATEROLE. "medium". The detail adds "PG15 이하에서는 거의 관리자급이에요" when `version_num < 160000`.
     - `bypassRls`: non-system roles with BYPASSRLS. "medium".
-    - `expiringLogin`: login roles whose `valid_until` is in the past or within 30 days. "low".
+    - `expiringLogin`: non-system login roles whose `valid_until` is in the past or within 30 days. "low". (As built, system roles such as `rdsadmin`, which AWS manages, are left out.)
     - `emptyLogin`: a non-system login role that is a member of no role except `rds_iam`, has no ACL entry naming it in any loaded database, and owns nothing. "low".
     - `defaultPrivilegeGap`: role R has SELECT on every table in schema S through Direct or Group sources. There is a creator C (the owner of at least one table in S) such that R is not C and does not inherit C. No default ACL of C (schema S or global) grants SELECT on tables to R, to a role R inherits, or to PUBLIC. Detail: `${R} 역할은 ${S}의 지금 테이블은 읽지만 ${C} 역할이 새로 만드는 테이블은 못 읽어요`. "medium".
     - `securityDefinerPath`: functions with `security_definer && !search_path_set`. "high".
@@ -515,10 +523,10 @@ pub fn who_can(ctx: &Ctx, obj: Obj, p: Privilege) -> Vec<WhoCanRow>; // roles wi
     - `clusters: Mutex<HashMap<PgTarget, Arc<ClusterSnapshot>>>`
     - `dbs: Mutex<HashMap<(PgTarget, String), Arc<DbSnapshot>>>`
   - **Commands:**
-    - Every command resolves the SDK config with `state.ctx.config(&target.profile, &target.region)`.
-    - `pg_open` runs `resolve`, then `connect_check`, stores the login, and then `cluster_snapshot` through the pool. It clears that target's `dbs` cache.
+    - The commands resolve the SDK config with `state.ctx.config(&target.profile, &target.region)` where AWS is needed (the RDS lookup and token signing). As built, commands that only read cached state don't resolve it.
+    - `pg_open` runs `check_login_name`, `resolve`, `connect_check`, then `cluster_snapshot` through the pool, and stores the login with the snapshot. It clears that target's `dbs` cache. Database names not in the cluster list are refused before connecting.
     - The other commands take the stored login or fail with "먼저 연결해 주세요".
-    - `pg_findings` loads each connectable database (`allow_conn`). A connect or read failure for one database goes into `skipped` with the error text and does not fail the call.
+    - `pg_findings` loads each connectable database (`allow_conn`). A connect or read failure for one database goes into `skipped` with the error text and does not fail the call. Credential errors (SSO expired, access denied, throttled) end the call instead, so the app's SSO re-login can take over. After the first network error, the remaining uncached databases are skipped with the same reason (K1).
     - Session `own` is true when the pid is in `pool.backend_pids(target)`.
     - Heavy builders run in `spawn_blocking`.
   - **Registration:** add every command to `lib.rs`. Spawn the sweeper once in `setup`: a tokio interval of 60 s calling `pool.sweep(Instant::now())`.
