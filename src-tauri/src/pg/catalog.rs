@@ -14,7 +14,7 @@ use tokio_postgres::{Client, Error, IsolationLevel, Row, Transaction};
 use super::connect::Connected;
 use super::model::{
     AclEntry, ClusterSnapshot, DatabaseRec, DbSnapshot, DefaultAclRec, DefaultObjType, FunctionRec, MemberRec, Privilege, RelKind, RelationRec,
-    RoleRec, RoleSettingRec, SchemaRec, SessionRec,
+    RoleRec, RoleSettingRec, SchemaRec, SessionRec, MEMBERSHIP_OPTIONS_SINCE,
 };
 use crate::error::AppError;
 use crate::iam::clock;
@@ -273,9 +273,6 @@ fn default_acl_key(creator: String, schema: Option<String>, obj_type: &str) -> O
 
 // ───────────────────────── 스냅숏 ─────────────────────────
 
-/// PG16부터 구성원 관계마다 INHERIT 옵션이 있다
-const INHERIT_OPTION_SINCE: i32 = 160_000;
-
 fn now_iso() -> String {
     clock::iso(clock::now_secs())
 }
@@ -371,7 +368,7 @@ async fn read_roles(tx: &Transaction<'_>) -> Result<Vec<RoleRec>, Error> {
 }
 
 async fn read_members(tx: &Transaction<'_>, version_num: i32) -> Result<Vec<MemberRec>, Error> {
-    let sql = if version_num >= INHERIT_OPTION_SINCE { MEMBERS_SQL_16 } else { MEMBERS_SQL_OLD };
+    let sql = if version_num >= MEMBERSHIP_OPTIONS_SINCE { MEMBERS_SQL_16 } else { MEMBERS_SQL_OLD };
     let rows = tx.query(sql, &[]).await?;
     let members = rows
         .iter()
