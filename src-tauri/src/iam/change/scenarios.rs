@@ -36,23 +36,23 @@ fn inverse(s: &Snapshot, c: &IamChange, key_status: Option<&str>) -> Option<IamC
     super::inverse(s, c, &Facts::with_key_status(key_status))
 }
 
-fn attach(target: &str, policy: &str) -> IamChange {
+pub(super) fn attach(target: &str, policy: &str) -> IamChange {
     IamChange::AttachPolicy { target: target.into(), policy_arn: policy.into() }
 }
 
-fn detach(target: &str, policy: &str) -> IamChange {
+pub(super) fn detach(target: &str, policy: &str) -> IamChange {
     IamChange::DetachPolicy { target: target.into(), policy_arn: policy.into() }
 }
 
-fn add_to_group(user: &str, group: &str) -> IamChange {
+pub(super) fn add_to_group(user: &str, group: &str) -> IamChange {
     IamChange::AddToGroup { user_name: user.into(), group_name: group.into() }
 }
 
-fn remove_from_group(user: &str, group: &str) -> IamChange {
+pub(super) fn remove_from_group(user: &str, group: &str) -> IamChange {
     IamChange::RemoveFromGroup { user_name: user.into(), group_name: group.into() }
 }
 
-fn set_status(user: &str, key: &str, status: &str) -> IamChange {
+pub(super) fn set_status(user: &str, key: &str, status: &str) -> IamChange {
     IamChange::SetAccessKeyStatus { user_name: user.into(), access_key_id: key.into(), status: status.into() }
 }
 
@@ -82,12 +82,12 @@ fn allow(actions: &[&str]) -> String {
     doc(json!([{ "Effect": "Allow", "Action": actions, "Resource": "*" }]))
 }
 
-fn account_arn(resource: &str) -> String {
+pub(super) fn account_arn(resource: &str) -> String {
     format!("arn:aws:iam::{ACCOUNT}:{resource}")
 }
 
 /// 고객 관리형 정책을 스냅숏에 넣고 ARN을 돌려준다(붙은 곳은 없다).
-fn add_policy(s: &mut Snapshot, name: &str, statements: Value) -> String {
+pub(super) fn add_policy(s: &mut Snapshot, name: &str, statements: Value) -> String {
     let arn = account_arn(&format!("policy/{name}"));
     s.policies.insert(arn.clone(), managed(&arn, Scope::Local, 0, policy(statements)));
     arn
@@ -127,7 +127,7 @@ fn versions(ids: &[&str], default: &str) -> Vec<VersionRec> {
 }
 
 /// 붙은 관리형 정책이 `attached`인 그룹.
-fn group_rec(name: &str, attached: &[&str]) -> GroupRec {
+pub(super) fn group_rec(name: &str, attached: &[&str]) -> GroupRec {
     GroupRec { arn: account_arn(&format!("group/{name}")), name: name.into(), path: "/".into(), attached: attached.iter().map(|a| a.to_string()).collect(), ..Default::default() }
 }
 
