@@ -160,24 +160,36 @@ fn noted(text: String, notes: &[String]) -> String {
     }
 }
 
+/// `record`의 결과: 기록을 파일에 덧붙였는지, 그리고 하지 못한 일을 알리는 문구.
+struct Recorded {
+    /// 기록이 파일에 덧붙었다. 되돌림 표시를 하지 못한 것은 여기에 영향을 주지 않는다(문구로만 알린다)
+    appended: bool,
+    notes: Vec<String>,
+}
+
 /// 기록을 덧붙이고, 되돌리기에 성공했으면(`undone` = 되돌린 기록의 id) 그 기록에 표시한다. 하지 못한 일을 문구로 돌려준다.
-async fn record(path: PathBuf, entry: ChangeLogEntry, undone: Option<String>) -> Vec<String> {
+/// 기록을 덧붙였는지는 따로 알린다: 묶음은 기록할 수 없게 되면 더 쓰지 않고 멈춘다.
+async fn record(path: PathBuf, entry: ChangeLogEntry, undone: Option<String>) -> Recorded {
     let saved = tokio::task::spawn_blocking(move || {
         let mut notes = Vec::new();
         match log::append(&path, &entry) {
-            Err(e) => notes.push(format!("변경 기록을 저장하지 못했어요: {e}")),
+            Err(e) => {
+                notes.push(format!("변경 기록을 저장하지 못했어요: {e}"));
+                Recorded { appended: false, notes }
+            }
             Ok(()) => {
                 if let Some(original) = undone {
                     if let Err(e) = log::mark_undone(&path, &original) {
                         notes.push(format!("이전 기록에 '되돌림' 표시를 하지 못했어요: {e}"));
                     }
                 }
+                Recorded { appended: true, notes }
             }
         }
-        notes
     })
     .await;
-    saved.unwrap_or_else(|e| vec![format!("변경 기록을 저장하지 못했어요: {e}")])
+    // 기록하던 작업이 끝까지 가지 못했으면 덧붙였는지 알 수 없다: 덧붙이지 못한 것으로 본다
+    saved.unwrap_or_else(|e| Recorded { appended: false, notes: vec![format!("변경 기록을 저장하지 못했어요: {e}")] })
 }
 
 /// 쓰기 결과를 기록에 남기고 호출자에게 돌려줄 값을 만든다. 기록의 `calls`는 실제로 성공한 호출이다.
@@ -214,7 +226,7 @@ async fn finish(req: Request, checked: ChangePreview, undo: Option<IamChange>, a
         undone: false,
         batch_id: None,
     };
-    let notes = record(req.log_path, entry, if ok { req.undo_of } else { None }).await;
+    let notes = record(req.log_path, entry, if ok { req.undo_of } else { None }).await.notes;
     let result = match outcome {
         Ok(()) => Ok(ApplyResult { log_id: req.log_id, summary, notes }),
         Err((e, _)) if deleted.is_none() && notes.is_empty() => Err(e),

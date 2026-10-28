@@ -70,6 +70,27 @@ fn writer(written: &Written, fail_at: Option<usize>) -> impl FnMut(Vec<ApiCall>)
     }
 }
 
+/// `writer`와 같되, `break_on`번째(1부터) 호출이 IAM을 바꾼 직후에 변경 기록을 쓸 수 없게 만든다: 기록 파일 자리에 폴더를 두고,
+/// 그 전에 쌓인 기록은 `.bak`으로 옮겨 둔다(읽어서 확인할 수 있게).
+fn writer_breaking_the_log(written: &Written, log: &Path, break_on: usize) -> impl FnMut(Vec<ApiCall>) -> Ready<Applied> {
+    let (written, log) = (written.clone(), log.to_path_buf());
+    move |plan| {
+        let mut all = written.lock().unwrap();
+        all.push(plan.clone());
+        if all.len() == break_on {
+            if log.exists() {
+                fs::rename(&log, saved_log(&log)).unwrap();
+            }
+            fs::create_dir(&log).unwrap();
+        }
+        ready(Applied { done: plan, result: Ok(()) })
+    }
+}
+
+fn saved_log(log: &Path) -> std::path::PathBuf {
+    log.with_extension("jsonl.bak")
+}
+
 fn refusal(committed: &BatchCommitted) -> String {
     match &committed.result {
         Err(AppError::Other { message }) => message.clone(),
@@ -163,21 +184,67 @@ async fn a_failure_on_the_first_change_applies_and_logs_only_that_one() {
 }
 
 #[tokio::test]
-async fn a_log_that_cannot_be_saved_is_reported_in_the_notes_and_does_not_stop_the_batch() {
+async fn stops_before_the_next_change_when_the_log_stops_saving() {
     let dir = tempfile::tempdir().unwrap();
     let written = Written::default();
-    // 기록 파일의 폴더 자리에 파일이 있어서 기록을 저장할 수 없다
-    fs::write(dir.path().join("blocker"), "").unwrap();
-    let req = BatchRequest { log_path: dir.path().join("blocker").join("iam-changes.jsonl"), ..request(dir.path(), snapshot(), vec![attach(BOB, S3_FULL), attach(CAROL, UNUSED_POLICY)]) };
+    let req = request(dir.path(), snapshot(), vec![attach(BOB, S3_FULL), attach(BOB, UNUSED_POLICY), attach(CAROL, UNUSED_POLICY)]);
+    let (log, planned) = (req.log_path.clone(), req.seen.clone().unwrap());
 
-    let committed = commit_batch(req, writer(&written, None)).await;
+    // 첫 변경은 IAM에 적용됐지만 그 기록을 파일에 덧붙이지 못한다
+    let committed = commit_batch(req, writer_breaking_the_log(&written, &log, 1)).await;
 
     assert!(committed.wrote);
     let result = committed.result.unwrap();
-    assert_eq!((result.log_ids, result.failed), (vec!["b1-1".to_string(), "b1-2".to_string()], None));
-    assert_eq!(written.lock().unwrap().len(), 2, "기록을 못 해도 나머지 변경은 적용해요");
-    assert_eq!(result.notes.len(), 2, "{:?}", result.notes);
-    assert!(result.notes.iter().all(|note| note.starts_with("변경 기록을 저장하지 못했어요")), "{:?}", result.notes);
+    assert_eq!(written.lock().unwrap().len(), 1, "기록할 수 없는 쓰기는 더 하지 않아요");
+    assert!(result.log_ids.is_empty(), "파일에 없는 기록 id는 알리지 않아요: {:?}", result.log_ids);
+    // 멈춘 곳은 적용하지 않은 다음 변경이다
+    let stopped = BatchFailure { index: 1, summary: planned.items[1].0.clone(), message: "변경 기록을 저장하지 못해서 멈췄어요".into() };
+    assert_eq!(result.failed, Some(stopped));
+    assert_eq!(result.notes.len(), 1, "{:?}", result.notes);
+    assert!(result.notes[0].starts_with("변경 기록을 저장하지 못했어요"), "{:?}", result.notes);
+    assert!(!saved_log(&log).exists(), "저장된 기록은 없어요");
+}
+
+#[tokio::test]
+async fn a_log_that_stops_saving_midway_keeps_the_ids_saved_before_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let written = Written::default();
+    let req = request(dir.path(), snapshot(), vec![attach(BOB, S3_FULL), attach(BOB, UNUSED_POLICY), attach(CAROL, UNUSED_POLICY)]);
+    let (log, planned) = (req.log_path.clone(), req.seen.clone().unwrap());
+
+    // 둘째 변경을 적용한 직후부터 기록을 저장하지 못한다
+    let committed = commit_batch(req, writer_breaking_the_log(&written, &log, 2)).await;
+
+    assert!(committed.wrote);
+    let result = committed.result.unwrap();
+    assert_eq!(written.lock().unwrap().len(), 2, "셋째 변경은 쓰지 않아요");
+    assert_eq!(result.log_ids, vec!["b1-1".to_string()], "둘째 변경의 기록 id는 파일에 없어요");
+    let stopped = BatchFailure { index: 2, summary: planned.items[2].0.clone(), message: "변경 기록을 저장하지 못해서 멈췄어요".into() };
+    assert_eq!(result.failed, Some(stopped));
+    assert_eq!(result.notes.len(), 1, "{:?}", result.notes);
+    let saved: Vec<String> = read_all(&saved_log(&log)).into_iter().map(|e| e.id).collect();
+    assert_eq!(saved, vec!["b1-1"], "앞 변경의 기록은 파일에 남아요");
+}
+
+#[tokio::test]
+async fn a_log_that_stops_saving_at_the_last_change_is_only_a_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let written = Written::default();
+    let req = request(dir.path(), snapshot(), vec![attach(BOB, S3_FULL), attach(CAROL, UNUSED_POLICY)]);
+    let log = req.log_path.clone();
+
+    // 마지막 변경을 적용한 직후부터 기록을 저장하지 못한다: 멈출 다음 변경이 없다
+    let committed = commit_batch(req, writer_breaking_the_log(&written, &log, 2)).await;
+
+    assert!(committed.wrote);
+    let result = committed.result.unwrap();
+    assert_eq!(written.lock().unwrap().len(), 2, "두 변경 모두 적용됐어요");
+    assert_eq!(result.log_ids, vec!["b1-1".to_string()], "마지막 변경의 기록 id는 파일에 없어요");
+    assert_eq!(result.failed, None);
+    assert_eq!(result.notes.len(), 1, "{:?}", result.notes);
+    assert!(result.notes[0].starts_with("변경 기록을 저장하지 못했어요"), "{:?}", result.notes);
+    let saved: Vec<String> = read_all(&saved_log(&log)).into_iter().map(|e| e.id).collect();
+    assert_eq!(saved, vec!["b1-1"]);
 }
 
 // ── 거부 ────────────────────────────────────────────────────────────────
@@ -362,6 +429,30 @@ async fn a_failed_undo_marks_only_the_entries_it_undid() {
     let view: Vec<(&str, bool, bool)> = entries.iter().map(|e| (e.id.as_str(), e.undone, e.ok)).collect();
     assert_eq!(view, vec![("b1-1", false, true), ("b1-2", true, true), ("b2-1", false, true), ("b2-2", false, false)]);
     assert_eq!(entries[3].undo_of.as_deref(), Some("b1-1"), "실패한 기록도 무엇을 되돌리려 했는지 남아요");
+}
+
+#[tokio::test]
+async fn a_failed_undone_mark_is_only_a_note_and_does_not_stop_the_undo() {
+    let dir = tempfile::tempdir().unwrap();
+    let written = Written::default();
+    let now = applied_batch(dir.path());
+    // 되돌림 표시는 임시 파일에 쓴 뒤 바꿔치기한다: 그 자리에 폴더가 있으면 표시만 못 한다(새 기록은 덧붙인다)
+    fs::create_dir(dir.path().join("iam-changes.jsonl.tmp")).unwrap();
+    let mut req = request(dir.path(), now, vec![attach(BOB, UNUSED_POLICY), detach(BOB, S3_FULL)]);
+    req.undo_of = Some(vec!["b1-2".into(), "b1-1".into()]);
+    req.batch_id = "b2".into();
+    let log = req.log_path.clone();
+
+    let committed = commit_batch(req, writer(&written, None)).await;
+
+    let result = committed.result.unwrap();
+    assert_eq!(written.lock().unwrap().len(), 2, "표시를 못 해도 나머지 변경은 적용해요");
+    assert_eq!((result.log_ids, result.failed), (vec!["b2-1".to_string(), "b2-2".to_string()], None));
+    assert_eq!(result.notes.len(), 2, "{:?}", result.notes);
+    assert!(result.notes.iter().all(|note| note.starts_with("이전 기록에 '되돌림' 표시를 하지 못했어요")), "{:?}", result.notes);
+    let entries = read_all(&log);
+    let view: Vec<(&str, bool)> = entries.iter().map(|e| (e.id.as_str(), e.undone)).collect();
+    assert_eq!(view, vec![("b1-1", false), ("b1-2", false), ("b2-1", false), ("b2-2", false)]);
 }
 
 #[tokio::test]

@@ -147,15 +147,26 @@ mod hygiene {
         }
     }
 
+    /// `iam_commands.rs`에서 `write_calls(`가 나오는 곳: 정의 하나, `iam_apply`와 `iam_apply_batch`의 쓰기 클로저 둘,
+    /// `a_batch_sends_the_previewed_requests_in_application_order` 테스트 하나.
+    const WRITE_CALLS_SITES: usize = 4;
+
     #[test]
     fn only_the_apply_command_reaches_the_writer() {
-        // 쓰기는 항상 `commit`·`commit_batch`의 관문(막힘·확인 문구 재검증)을 거쳐야 하므로 `write::apply`를 부르는 곳은 `iam_commands.rs`의
-        // `write_calls` 하나이고, `iam_apply`와 `iam_apply_batch`가 그것을 함께 쓴다
+        // 쓰기는 항상 `commit`·`commit_batch`의 관문(막힘·확인 문구 재검증)을 거쳐야 해서 두 가지를 센다.
+        // - `write::apply(`: `iam_commands.rs`의 `write_calls` 하나에서만 부른다(IAM 쓰기로 가는 유일한 길).
+        // - `write_calls(`: 그 길을 여는 함수다. 누가 부르는지도 세지 않으면 관문 없이 쓰는 새 호출이 `write_calls` 뒤에 숨는다.
+        //   부르는 곳은 정의, 명령 둘(`iam_apply`, `iam_apply_batch`)의 쓰기 클로저, 테스트 하나로 정해 두었다. 새로 부르려면 관문을 거치는지 보고 이 숫자를 고쳐야 한다
         let call = ["write", "apply("].join("::");
         for path in all_sources() {
             let text = fs::read_to_string(&path).unwrap();
             if path.ends_with("src/iam_commands.rs") {
                 assert_eq!(text.matches(&call).count(), 1, "iam_commands.rs에서 {call}는 한 번만 불러야 해요");
+                let sites = text.matches("write_calls(").count();
+                assert_eq!(
+                    sites, WRITE_CALLS_SITES,
+                    "iam_commands.rs에서 write_calls(가 나오는 곳이 {sites}곳이에요. 새로 부른다면 `commit`·`commit_batch`의 관문을 거치는지 확인하고 WRITE_CALLS_SITES를 고쳐 주세요"
+                );
             } else if !path.starts_with(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/iam/write")) && !is_this_file(&path) {
                 assert!(!text.contains(&call), "{}에서 쓰기를 직접 불러요", path.display());
             }

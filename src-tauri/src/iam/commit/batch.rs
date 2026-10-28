@@ -1,5 +1,6 @@
 //! 묶음 적용: 다시 계산한 묶음 미리보기를 사용자가 본 계획과 견주고 관문을 지난 뒤, 적용 순서대로 변경마다 쓰고 기록한다.
 //! 실패하면 거기서 멈춘다: 이미 적용된 변경은 그대로 두고(자동 되돌리기 없음) 결과에 실패한 위치를 알린다.
+//! 변경 기록을 저장하지 못할 때도 멈춘다: 기록할 수 없는 쓰기는 더 하지 않는다(그 변경은 이미 적용됐으니 알림으로만 알리고, 다음 변경을 멈춘 곳으로 알린다).
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -14,6 +15,9 @@ use crate::iam::change::{application_order, preview_batch, ApiCall, BatchPreview
 use crate::iam::log::ChangeLogEntry;
 use crate::iam::model::Snapshot;
 use crate::iam::write::Applied;
+
+/// 변경 기록을 저장하지 못해서 다음 변경을 적용하지 않고 멈출 때 그 변경의 실패 이유
+pub const LOG_NOT_SAVED: &str = "변경 기록을 저장하지 못해서 멈췄어요";
 
 pub struct BatchRequest {
     pub profile: String,
@@ -45,6 +49,7 @@ pub struct BatchFailure {
 #[serde(rename_all = "camelCase")]
 pub struct BatchResult {
     pub batch_id: String,
+    /// 변경 기록 파일에 남은 변경의 기록 id, 적용 순서. 적용했어도 기록을 남기지 못한 변경은 없다(`notes`로 알린다)
     pub log_ids: Vec<String>,
     pub failed: Option<BatchFailure>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -106,9 +111,14 @@ where
         Err(refused) => return BatchCommitted { result: Err(refused), wrote: false },
         Ok(checked) => checked,
     };
+    // 미리보기는 같은 `application_order`로 변경마다 항목 하나를 만든다: k번째 항목은 받은 순서의 `order[k]`번째 변경이다(되돌리기 짝을 옮기는 근거)
+    let order = application_order(&req.changes);
+    for (k, item) in checked.changes.iter().enumerate() {
+        debug_assert_eq!(item.change, req.changes[order[k]]);
+    }
     // 받은 순서의 되돌리기 짝을 적용 순서로 옮긴다
     let undo_of: Vec<Option<String>> = match &req.undo_of {
-        Some(ids) => application_order(&req.changes).into_iter().map(|i| Some(ids[i].clone())).collect(),
+        Some(ids) => order.iter().map(|&i| Some(ids[i].clone())).collect(),
         None => vec![None; checked.changes.len()],
     };
     let (mut log_ids, mut notes, mut failed) = (Vec::new(), Vec::new(), None);
@@ -132,9 +142,16 @@ where
             undone: false,
             batch_id: Some(req.batch_id.clone()),
         };
-        notes.extend(record(req.log_path.clone(), entry, if ok { undo_of[index].clone() } else { None }).await);
+        let recorded = record(req.log_path.clone(), entry, if ok { undo_of[index].clone() } else { None }).await;
+        notes.extend(recorded.notes);
         match result {
-            Ok(()) => log_ids.push(id),
+            Ok(()) if recorded.appended => log_ids.push(id),
+            Ok(()) => {
+                // IAM은 바꿨는데 기록이 파일에 없다(그 id는 알리지 않는다). 기록할 수 없는 쓰기는 더 하지 않는다:
+                // 적용하지 않은 다음 변경을 멈춘 곳으로 알리고, 마지막 변경이었으면 알림(notes)만 남는다
+                failed = checked.changes.get(index + 1).map(|next| BatchFailure { index: index + 1, summary: next.summary.clone(), message: LOG_NOT_SAVED.to_string() });
+                break;
+            }
             Err(e) => {
                 failed = Some(BatchFailure { index, summary: item.summary.clone(), message: e.to_string() });
                 break;

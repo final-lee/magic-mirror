@@ -16,7 +16,7 @@ use crate::aws::context::GLOBAL_REGION;
 use crate::commands::AppState;
 use crate::error::AppError;
 use crate::iam::catalog::{catalog, AccessLevel};
-use crate::iam::change::{deletes_policy_version, ordered, preview, preview_batch, ApiCall, BatchPreview, ChangePreview, Facts, IamChange, PolicyCheck, MAX_BATCH};
+use crate::iam::change::{deletes_policy_version, missing_policy, ordered, preview, preview_batch, ApiCall, BatchPreview, ChangePreview, Facts, IamChange, PolicyCheck, MAX_BATCH};
 use crate::iam::clock::{now_secs, parse_iso};
 use crate::iam::commit::batch::{commit_batch, undo_batch_of, BatchRequest, BatchResult, UndoBatch};
 use crate::iam::commit::plan::BatchPlan;
@@ -448,7 +448,8 @@ async fn preview_and_remember(iam: &IamState, profile: &str, s: Arc<Snapshot>, c
 }
 
 /// 확인을 마친 호출 목록을 IAM에 쓴다. 이 파일에서 IAM 쓰기를 부르는 곳은 여기 하나다: 하나짜리 적용(`iam_apply`)과 묶음 적용(`iam_apply_batch`)이
-/// 같은 길을 쓴다(`write`의 `only_the_apply_command_reaches_the_writer`가 `write::apply` 호출이 이 파일에 한 번뿐인지 본다).
+/// 같은 길을 쓴다. `write`의 `only_the_apply_command_reaches_the_writer`가 쓰기 호출이 이 파일에 한 번뿐인지, 이 함수를 부르는 곳이
+/// 정해 둔 수(정의, 명령 둘, 테스트 하나)인지 센다: 관문을 거치지 않는 새 호출은 그 테스트의 숫자를 고쳐야 들어온다.
 async fn write_calls(client: &aws_sdk_iam::Client, plan: &[ApiCall]) -> write::Applied {
     write::apply(client, plan).await
 }
@@ -517,12 +518,23 @@ pub async fn iam_apply(
 }
 
 /// 붙일 정책이 스냅숏에 없으면 변경마다 읽어 넣고(앞 변경에서 읽은 정책은 다시 읽지 않는다), 변경마다의 재료를 `changes`와 같은 순서로 만든다.
+/// 읽고도 문서를 얻지 못한 정책(읽지 못했거나 해석하지 못했다)은 그 이유와 함께 기억해 두고, 같은 정책을 붙이는 다음 변경은 다시 읽지 않고 같은 이유를 쓴다.
 /// 50개를 넘는 묶음은 미리보기가 막으니 앞의 50개까지만 읽고 나머지에는 기본 재료를 둔다.
 async fn read_missing_policies(client: &aws_sdk_iam::Client, mut s: Arc<Snapshot>, changes: &[IamChange]) -> Result<(Arc<Snapshot>, Vec<Facts>), AppError> {
     let mut facts = Vec::with_capacity(changes.len());
+    let mut still_missing: HashMap<String, Option<String>> = HashMap::new();
     for c in changes.iter().take(MAX_BATCH) {
-        let (next, policy_error) = ensure_policy(client, s, c).await?;
-        s = next;
+        let policy_error = match missing_policy(&s, c).and_then(|arn| still_missing.get(arn)) {
+            Some(known) => known.clone(),
+            None => {
+                let (next, policy_error) = ensure_policy(client, s, c).await?;
+                s = next;
+                if let Some(arn) = missing_policy(&s, c) {
+                    still_missing.insert(arn.to_string(), policy_error.clone());
+                }
+                policy_error
+            }
+        };
         facts.push(Facts { policy_error, ..Facts::default() });
     }
     facts.resize(changes.len(), Facts::default());
@@ -596,7 +608,8 @@ pub async fn iam_preview_batch(state: State<'_, AppState>, iam: State<'_, IamSta
 }
 
 /// 묶음 적용. 최신 스냅숏으로 묶음 미리보기를 다시 계산해, 사용자가 본 계획과 같고 막힘·확인 문구를 통과할 때만 적용 순서대로 변경마다 IAM을 바꾸고
-/// 변경마다 기록을 남긴다. 변경 하나가 실패하면 거기서 멈추고(앞 변경은 그대로) 실패한 위치를 결과로 알린다. 미리보기 하나로는 한 번만 적용한다.
+/// 변경마다 기록을 남긴다. 변경 하나가 실패하면 거기서 멈추고(앞 변경은 그대로) 실패한 위치를 결과로 알린다. 변경 기록을 저장하지 못하면
+/// 그 변경은 적용된 채로 알림(notes)에 남기고 다음 변경에서 멈춘다. 미리보기 하나로는 한 번만 적용한다.
 #[tauri::command]
 pub async fn iam_apply_batch(
     state: State<'_, AppState>,
@@ -1343,6 +1356,26 @@ mod tests {
         assert_eq!(reasons, [None, Some("권한 없음 (iam:GetPolicy)"), None, None]);
         assert!(s.policies[readable].document.is_some() && !s.policies.contains_key(hidden));
         assert!(!original.policies.contains_key(readable), "캐시된 스냅숏은 그대로예요");
+    }
+
+    #[tokio::test]
+    async fn a_policy_that_cannot_be_read_is_asked_for_once_for_the_whole_batch() {
+        use crate::iam::fixtures::{ALICE, BOB, CAROL};
+        let (readable, hidden) = ("arn:aws:iam::aws:policy/Readable", "arn:aws:iam::aws:policy/Hidden");
+        let recorder = serving_policies(hidden);
+        let attach = |target: &str, policy: &str| IamChange::AttachPolicy { target: target.into(), policy_arn: policy.into() };
+        // 읽지 못하는 정책을 세 주체에게 붙이는데, 사이에 읽을 수 있는 정책을 붙이는 변경이 끼어 있다
+        let changes = vec![attach(BOB, hidden), attach(CAROL, readable), attach(CAROL, hidden), attach(ALICE, hidden)];
+
+        let (s, facts) = read_missing_policies(&recorder.client(), Arc::new(crate::iam::fixtures::snapshot()), &changes).await.unwrap();
+
+        // 읽지 못한 정책은 한 번만 묻고, 이유는 그 정책을 붙이는 변경마다 그대로 붙는다
+        let reads: Vec<String> = recorder.sent().into_iter().map(|sent| format!("{} {}", sent.action, sent.params["PolicyArn"])).collect();
+        assert_eq!(reads, [format!("GetPolicy {hidden}"), format!("GetPolicy {readable}"), format!("GetPolicyVersion {readable}")]);
+        let reasons: Vec<Option<&str>> = facts.iter().map(|f| f.policy_error.as_deref()).collect();
+        let denied = Some("권한 없음 (iam:GetPolicy)");
+        assert_eq!(reasons, [denied, None, denied, denied]);
+        assert!(s.policies[readable].document.is_some() && !s.policies.contains_key(hidden));
     }
 
     #[tokio::test]

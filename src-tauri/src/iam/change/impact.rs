@@ -308,15 +308,18 @@ fn impact(principal: PrincipalSummary, d: Deltas) -> Impact {
 
 /// `affected` 주체마다 `before`와 `after`의 권한을 비교한다. 앱이 쓰는 주체(`caller`)는 한도를 넘어도 반드시 계산한다:
 /// 한도 밖에 있던 그 주체를 앞으로 옮길 때는 한 자리를 더 줘서 앞선 주체를 밀어내지 않는다(한도 + 1명까지 계산한다).
+/// `truncated`는 자르고도 계산에서 빠진 주체가 있을 때만 켠다(한 자리를 더 받아 모두 계산했으면 켜지 않는다).
 pub(super) fn analyze(before: &Snapshot, after: &Snapshot, mut affected: Vec<String>, caller: Option<&str>) -> Analysis {
-    let truncated = affected.len() > MAX_AFFECTED;
-    if truncated {
+    let mut truncated = false;
+    if affected.len() > MAX_AFFECTED {
         let at = caller.and_then(|c| affected.iter().position(|a| a == c));
         if let Some(at) = at {
             let first = affected.remove(at);
             affected.insert(0, first);
         }
-        affected.truncate(MAX_AFFECTED + usize::from(at.is_some_and(|at| at >= MAX_AFFECTED)));
+        let keep = MAX_AFFECTED + usize::from(at.is_some_and(|at| at >= MAX_AFFECTED));
+        truncated = affected.len() > keep;
+        affected.truncate(keep);
     }
 
     let mut out = Analysis { truncated, ..Default::default() };
