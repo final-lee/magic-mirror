@@ -1,5 +1,5 @@
 import { memo, useId, type ReactNode } from "react";
-import { ReversibleNote, WarningList } from "../iam/previewParts";
+import { DELTA, ReversibleNote, WarningList } from "../iam/previewParts";
 import { OBJECT_KIND_LABEL } from "./labels";
 import { defaultPrivilegeSentence, noGrantSentence } from "./sentences";
 import type { PgBatchItem, PgChange, PgDefaultAclRow, PgDefaultDelta, PgImpact, PgPreview, PgPrivDelta, PgRoleDelta, PgWarning } from "./types";
@@ -111,11 +111,6 @@ function Effects({ preview }: { preview: PreviewParts }) {
   );
 }
 
-const DELTA = {
-  gained: { className: "cp-gain", label: "얻는 권한", sign: "＋" },
-  lost: { className: "cp-lose", label: "잃는 권한", sign: "－" },
-} as const;
-
 function ImpactItem({ impact }: { impact: PgImpact }) {
   return (
     <li data-testid={`impact-${impact.role}`}>
@@ -132,7 +127,7 @@ function ImpactItem({ impact }: { impact: PgImpact }) {
  * 한 방향의 증감 줄: `스키마(없으면 데이터베이스) · 객체 종류 N개 권한`과 그 뒤에 이름 몇 개(백엔드가 5개까지 보낸다).
  * 보낸 이름보다 객체가 많으면 몇 개가 더 있는지 적는다.
  */
-function Deltas({ kind, deltas }: { kind: keyof typeof DELTA; deltas: PgPrivDelta[] }) {
+function Deltas({ kind, deltas }: { kind: "gained" | "lost"; deltas: PgPrivDelta[] }) {
   const { className, label, sign } = DELTA[kind];
   const caption = useId();
   return (

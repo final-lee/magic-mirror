@@ -1623,6 +1623,80 @@ describe("변경 기록", () => {
     expect(m.changeLog).toHaveBeenCalledTimes(1);
     expect(m.overview).not.toHaveBeenCalled();
   });
+
+  describe("when changes are blocked", () => {
+    const undoButtons = () => screen.getAllByRole("button", { name: /되돌리기/ });
+
+    test("a read replica turns every 되돌리기 off, with the reason as its title and description", async () => {
+      m.open.mockResolvedValue(sampleOverview({ target: sampleTargetInfo({ readReplica: true }) }));
+      await openLog();
+      expect(undoButtons().length).toBeGreaterThan(0);
+      for (const button of undoButtons()) {
+        expect(button).toBeDisabled();
+        expect(button).toHaveAttribute("title", "읽기 전용 복제본이라 바꿀 수 없어요");
+        expect(button).toHaveAccessibleDescription("읽기 전용 복제본이라 바꿀 수 없어요");
+      }
+      fireEvent.click(undoButtons()[0]);
+      expect(m.undo).not.toHaveBeenCalled();
+      expect(m.undoBatch).not.toHaveBeenCalled();
+    });
+
+    test("a login that cannot manage roles gets the reason the first stage gave", async () => {
+      m.open.mockResolvedValue(sampleOverview({ canManage: false, manageReason: MANAGE_REASON }));
+      await openLog();
+      for (const button of undoButtons()) {
+        expect(button).toBeDisabled();
+        expect(button).toHaveAttribute("title", MANAGE_REASON);
+      }
+    });
+
+    test("a login that can manage roles on a primary leaves them on", async () => {
+      await openLog();
+      for (const button of undoButtons()) expect(button).toBeEnabled();
+    });
+  });
+
+  describe("when the list cannot be read again after an apply", () => {
+    const REFRESH_FAILED = "적용은 됐지만 목록을 다시 읽지 못했어요. [다시 읽기]를 눌러 주세요";
+
+    async function applyAnUndo() {
+      await openLog();
+      const member = rowsOf().find((r) => r.textContent?.includes("그룹에 넣기: bob → app_write") && !r.className.includes("cl-batch"))!;
+      fireEvent.click(within(member).getByRole("button", { name: "되돌리기" }));
+      fireEvent.click(await screen.findByRole("button", { name: "적용" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    }
+
+    test("the notice that says what was applied also tells the user to press 다시 읽기, and stays until it is closed", async () => {
+      m.overview.mockRejectedValue({ kind: "other", message: "먼저 연결해 주세요" });
+      await applyAnUndo();
+      const notice = await screen.findByRole("status");
+      await waitFor(() => expect(within(notice).getByRole("list", { name: "함께 알릴 일" })).toHaveTextContent(REFRESH_FAILED));
+      expect(notice).toHaveTextContent("그룹에서 빼기: bob → app_write");
+      // 개요는 낡은 그대로이고, 사용자가 누를 [다시 읽기]가 화면에 있다
+      expect(topBar().getByRole("button", { name: "다시 읽기" })).toBeEnabled();
+      expect(m.open).toHaveBeenCalledTimes(1);
+      fireEvent.click(within(notice).getByRole("button", { name: "알림 닫기" }));
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+
+    test("pressing 다시 읽기 then reads the list through the target again", async () => {
+      m.overview.mockRejectedValue({ kind: "other", message: "먼저 연결해 주세요" });
+      await applyAnUndo();
+      await screen.findByText(REFRESH_FAILED);
+      fireEvent.click(topBar().getByRole("button", { name: "다시 읽기" }));
+      await waitFor(() => expect(m.open).toHaveBeenCalledTimes(2));
+    });
+
+    test("when the list is read there is no such note", async () => {
+      await applyAnUndo();
+      const notice = await screen.findByRole("status");
+      await waitFor(() => expect(m.overview).toHaveBeenCalled());
+      await act(async () => {});
+      expect(notice).not.toHaveTextContent(REFRESH_FAILED);
+      expect(within(notice).queryByRole("list", { name: "함께 알릴 일" })).not.toBeInTheDocument();
+    });
+  });
 });
 
 describe("one tab per target", () => {

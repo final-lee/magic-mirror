@@ -1,4 +1,4 @@
-import { COVERAGE_LABEL, DASH, INHERITED_ONLY_TEXT, OBJECT_KIND_LABEL, ROLE_KIND_LABEL, collate, objectName, unusableText } from "./labels";
+import { COVERAGE_LABEL, DASH, INHERITED_ONLY_TEXT, OBJECT_KIND_LABEL, ROLE_KIND_LABEL, collate, confirmLabel, objectName, unusableText } from "./labels";
 import { customersTable, object, ordersIdSeq, touchOrderFn } from "./fixtures";
 
 test("role kinds read as 사용자 and 그룹", () => {
@@ -26,6 +26,12 @@ test("table coverage reads as 모든 테이블, 일부 테이블 or 없음", () 
 test("an unusable privilege says why it cannot be used", () => {
   expect(unusableText("CONNECT 없음")).toBe("권한은 있지만 실제로는 못 써요 (CONNECT 없음)");
   expect(unusableText("USAGE 없음")).toBe("권한은 있지만 실제로는 못 써요 (USAGE 없음)");
+});
+
+test("the confirm field asks with the text after a colon, whatever the text ends in", () => {
+  expect(confirmLabel("app_read")).toBe("확인하려면 입력하세요: app_read");
+  expect(confirmLabel("bob")).toBe("확인하려면 입력하세요: bob");
+  expect(confirmLabel("변경 2개 적용")).toBe("확인하려면 입력하세요: 변경 2개 적용");
 });
 
 test("what inherited-only means is told in one place for the role detail and the grid", () => {

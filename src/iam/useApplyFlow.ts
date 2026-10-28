@@ -33,14 +33,19 @@ export function useApplyNotices() {
     setNotices((all) => all.filter((n) => n.id !== id));
   }, []);
 
-  /** 안내를 띄운다. 알릴 일이 남은 안내는 그대로 두고, 그렇지 않은 이전 안내만 새 안내로 바꾼다 */
-  const announce = useCallback((summary: string, notes: string[]) => {
+  /**
+   * 안내를 띄우고 그 id를 돌려준다. 알릴 일이 남은 안내는 그대로 두고, 그렇지 않은 이전 안내만 새 안내로 바꾼다.
+   * replaces에 앞서 띄운 안내의 id를 주면 그 안내도(알릴 일이 있어도) 이 안내로 바꾼다. 안내를 띄운 뒤에 알릴 일이 생겼을 때(적용은 했는데
+   * 화면을 다시 읽지 못함 등) 같은 안내에 그 일을 더해 다시 띄우는 데 쓴다. 그 안내가 이미 사라졌어도(저절로, 또는 닫혀서) 새 안내를 띄운다.
+   */
+  const announce = useCallback((summary: string, notes: string[], replaces?: number): number => {
     const id = ++seq.current;
     clearTimeout(timer.current);
-    setNotices((all) => [...all.filter((n) => n.notes.length > 0), { id, summary, notes }]);
+    setNotices((all) => [...all.filter((n) => n.id !== replaces && n.notes.length > 0), { id, summary, notes }]);
     if (notes.length === 0) {
       timer.current = setTimeout(() => setNotices((all) => all.filter((n) => n.id !== id)), NOTICE_MS);
     }
+    return id;
   }, []);
 
   return { notices, announce, dismissNotice };
@@ -87,6 +92,8 @@ export function useIamRefresh() {
 /**
  * 열려 있는 흐름 하나(변경 또는 묶음)를 들고 있는 뼈대. P는 phase를 가진 그 흐름의 상태이고, Done은 적용에 성공했을 때 부르는 콜백이다.
  * - pending과 같은 값을 ref에도 바로 반영한다(commit): 여러 이벤트가 같은 렌더 안에서 연달아 와도 판단이 맞게.
+ * - 탭이 닫힌 뒤에는 commit이 아무것도 하지 않는다: 늦게 온 응답이 닫힌 탭의 상태를 바꾸지 못한다. 응답을 받은 쪽은 alive로 탭이 아직 열려 있는지 묻고,
+ *   안내를 띄우고 장바구니를 비우고 화면을 다시 읽는 일은 열려 있을 때만 한다.
  * - cancel은 적용 중이 아닐 때만 흐름을 닫는다. 이미 보낸 요청은 되돌릴 수 없다.
  * - 프로필이 바뀌면 열려 있던 흐름을 버린다: 다른 계정에 낡은 미리보기를 적용하면 안 된다. 적용 중인 요청은 거둘 수 없어서 그대로 둔다.
  * 요청을 만드는 쪽(load, start, apply)은 각 훅이 맡는다. seq는 미리보기를 받을 때마다 오르는 번호이고, inFlight는 적용 요청이 나가 있는 동안 켜 둔다.
@@ -100,8 +107,16 @@ export function usePendingFlow<P extends { phase: string }, Done>(profile: strin
   const seq = useRef(0);
   const inFlight = useRef(false);
   const onApplied: MutableRefObject<Done | undefined> = useRef<Done | undefined>(undefined);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
   const commit = useCallback((next: P | null) => {
+    if (!alive.current) return;
     pendingRef.current = next;
     setPending(next);
   }, []);
@@ -119,5 +134,5 @@ export function usePendingFlow<P extends { phase: string }, Done>(profile: strin
     if (pendingRef.current?.phase !== "applying") commit(null);
   }, [profile, commit]);
 
-  return { pending, pendingRef, profileRef, seq, inFlight, onApplied, commit, cancel };
+  return { pending, pendingRef, profileRef, seq, inFlight, onApplied, alive, commit, cancel };
 }

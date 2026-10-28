@@ -40,7 +40,8 @@ const confirmBatch = (extra: Partial<PgBatchPreview> = {}) =>
   clean({ warnings: [{ level: "confirm", message: "모든 역할(PUBLIC)에 권한을 줘요", add: [] }], confirmText: BATCH_CONFIRM, ...extra });
 const applyButton = () => screen.getByRole("button", { name: /^적용/ });
 const cancelButton = () => screen.getByRole("button", { name: "취소" });
-const confirmInput = () => screen.getByLabelText(`확인하려면 ${BATCH_CONFIRM}을 입력하세요`);
+// 확인 문구 앞뒤에 조사를 붙이지 않는다: 문구는 쌍점 뒤에 둔다
+const confirmInput = () => screen.getByLabelText(`확인하려면 입력하세요: ${BATCH_CONFIRM}`);
 
 describe("content", () => {
   test("the title counts the changes, and the DB user is named right under it", () => {

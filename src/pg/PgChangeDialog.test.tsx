@@ -46,7 +46,8 @@ function setup(preview: PgPreview | null, extra: Partial<PendingPgChange> = {}, 
 const clean = (extra: Partial<PgPreview> = {}) => samplePreview({ warnings: [], ...extra });
 const applyButton = () => screen.getByRole("button", { name: /^적용/ });
 const cancelButton = () => screen.getByRole("button", { name: "취소" });
-const confirmInput = (name: string) => screen.getByLabelText(`확인하려면 ${name}를 입력하세요`);
+// 이름 뒤에는 조사를 붙이지 않는다: 이름은 쌍점 뒤에 둔다
+const confirmInput = (name: string) => screen.getByLabelText(`확인하려면 입력하세요: ${name}`);
 const confirmPreview = (extra: Partial<PgPreview> = {}) =>
   samplePreview({ warnings: [{ level: "confirm", message: "모든 역할(PUBLIC)에 권한을 줘요", add: [] }], confirmText: "app_read", ...extra });
 
@@ -93,6 +94,21 @@ describe("content", () => {
     ];
     for (let i = 1; i < marks.length; i++) {
       expect(marks[i - 1].compareDocumentPosition(marks[i]) & Node.DOCUMENT_POSITION_FOLLOWING, `${i}`).toBeTruthy();
+    }
+  });
+
+  test("the confirm field asks with the text after a colon, so no particle ever follows a role name", () => {
+    setup(confirmPreview());
+    expect(screen.getByText("확인하려면 입력하세요: app_read")).toBeInTheDocument();
+    expect(confirmInput("app_read")).toBeInTheDocument();
+    expect(screen.queryByText(/app_read를|app_read을/)).not.toBeInTheDocument();
+  });
+
+  test("whatever the name ends in, the question is the same shape", () => {
+    for (const name of ["bob", "carol2", "각", "app_audit"]) {
+      const { unmount } = setup(confirmPreview({ confirmText: name }));
+      expect(screen.getByText(`확인하려면 입력하세요: ${name}`)).toBeInTheDocument();
+      unmount();
     }
   });
 
@@ -434,12 +450,17 @@ describe("the password phase", () => {
     expect(screen.getByText("역할 만들기: carol")).toBeInTheDocument();
   });
 
-  test("닫기 closes the flow, and so does Escape: there is no way back to the password", async () => {
+  test("닫기 closes the flow: there is no way back to the password", () => {
     const { props } = withPassword();
     fireEvent.click(screen.getByRole("button", { name: "닫기" }));
     expect(props.onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  test("Escape does not close it: a slip of the key must not throw the only copy of the password away", async () => {
+    const { props } = withPassword();
     await userEvent.keyboard("{Escape}");
-    expect(props.onCancel).toHaveBeenCalledTimes(2);
+    expect(props.onCancel).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue(NEW_PASSWORD)).toBeInTheDocument();
   });
 
   test("the focus lands on 복사, not on the button that throws the password away", () => {
