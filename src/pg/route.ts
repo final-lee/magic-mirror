@@ -1,4 +1,4 @@
-export type PgView = "findings" | "roles" | "privileges" | "defaults" | "whoCan" | "sessions";
+export type PgView = "findings" | "roles" | "privileges" | "defaults" | "whoCan" | "sessions" | "changes";
 
 /**
  * PostgreSQL 탭 안의 위치. 정체성은 view와 id뿐이고, tab은 "그 화면에서 보던 상태"다.
@@ -29,6 +29,7 @@ export const PG_VIEW_LABEL: Record<PgView, string> = {
   defaults: "기본 권한",
   whoCan: "누가 할 수 있나",
   sessions: "세션",
+  changes: "변경 기록",
 };
 
 /** 같은 화면인지(하위 탭은 보지 않는다). useRouteHistory에 넘기는 함수라 모듈 밖에 둔다. */

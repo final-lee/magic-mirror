@@ -1,20 +1,36 @@
+import { changeSummary } from "./changeText";
 import {
   BADGES,
   FETCHED_AT,
   LOGIN_USER,
   ROLES,
   ROLE_NAMES,
+  addBobToWriters,
+  createAppAudit,
+  createCarol,
+  defaultAuditRead,
+  dropAppAudit,
+  grantAuditRead,
   pgTarget,
+  removeBobFromWriters,
+  resetAlicePassword,
+  revokeAuditRead,
+  sampleBatchPreview,
   sampleCellDetail,
+  sampleChangeLog,
   sampleDatabaseView,
+  sampleDropPlan,
   sampleFindings,
+  sampleLogEntry,
   sampleOverview,
+  samplePresetSuggestion,
+  samplePreview,
   sampleRoleView,
   sampleSessions,
   sampleTargetInfo,
   sampleWhoCan,
 } from "./fixtures";
-import type { PgSchemaCell } from "./types";
+import type { PgCoverage, PgSchemaCell } from "./types";
 
 // 이후 화면 테스트가 기대는 값이 서로 어긋나지 않는지 확인한다.
 const roleOf = (name: string) => ROLES.find((r) => r.name === name)!;
@@ -177,6 +193,84 @@ describe("database view", () => {
   test("is not truncated by default and can be overridden", () => {
     expect(view.truncated).toBe(false);
     expect(sampleDatabaseView({ truncated: true }).truncated).toBe(true);
+  });
+});
+
+describe("direct and owned", () => {
+  const view = sampleDatabaseView();
+  const rank: Record<PgCoverage, number> = { none: 0, some: 1, all: 2 };
+  const none = { usage: false, create: false, read: "none", write: "none" };
+
+  test("every cell and database row carries both", () => {
+    for (const c of view.cells) {
+      expect(Object.keys(c.direct).sort(), `${c.role}/${c.schema}`).toEqual(["create", "read", "usage", "write"]);
+      expect(Object.keys(c.owned).sort()).toEqual(["create", "read", "usage", "write"]);
+    }
+    for (const p of view.dbPrivileges) {
+      expect(Object.keys(p.direct).sort(), p.role).toEqual(["connect", "create", "temp"]);
+      expect(Object.keys(p.owned).sort()).toEqual(["connect", "create", "temp"]);
+    }
+  });
+
+  test("a source can only give what the cell shows: nothing direct or owned exceeds the effective value", () => {
+    for (const c of view.cells) {
+      for (const part of [c.direct, c.owned]) {
+        const label = `${c.role}/${c.schema}`;
+        if (part.usage) expect(c.usage, label).toBe(true);
+        if (part.create) expect(c.create, label).toBe(true);
+        expect(rank[part.read], label).toBeLessThanOrEqual(rank[c.read]);
+        expect(rank[part.write], label).toBeLessThanOrEqual(rank[c.write]);
+      }
+    }
+    for (const p of view.dbPrivileges) {
+      for (const part of [p.direct, p.owned]) {
+        if (part.connect) expect(p.connect, p.role).toBe(true);
+        if (part.create) expect(p.create, p.role).toBe(true);
+        if (part.temp) expect(p.temp, p.role).toBe(true);
+      }
+    }
+  });
+
+  test("the grid toggles direct: the roles that hold schema privileges directly are app_read, app_write and bob", () => {
+    const direct = view.cells.filter((c) => JSON.stringify(c.direct) !== JSON.stringify(none));
+    expect(direct.map((c) => `${c.role}/${c.schema}`)).toEqual(["app_read/app", "app_write/app", "bob/app"]);
+    const at = (role: string) => view.cells.find((c) => c.role === role && c.schema === "app")!;
+    expect(at("app_read").direct).toEqual({ usage: true, create: false, read: "all", write: "none" });
+    expect(at("app_write").direct).toEqual({ usage: false, create: false, read: "none", write: "some" });
+    expect(at("bob").direct).toEqual({ usage: false, create: false, read: "some", write: "none" });
+  });
+
+  test("only the owner owns, and it owns what it shows in both schemas, so it is never toggled", () => {
+    const owned = view.cells.filter((c) => JSON.stringify(c.owned) !== JSON.stringify(none));
+    expect(owned.map((c) => `${c.role}/${c.schema}`)).toEqual(["app_owner/app", "app_owner/audit"]);
+    for (const c of owned) {
+      expect(c.owned).toEqual({ usage: c.usage, create: c.create, read: c.read, write: c.write });
+      expect(c.direct).toEqual(none);
+    }
+  });
+
+  test("a cell whose visible privileges all come from groups, PUBLIC or predefined roles has nothing direct or owned", () => {
+    for (const c of view.cells.filter((c) => c.inheritedOnly)) {
+      expect(c.direct, `${c.role}/${c.schema}`).toEqual(none);
+      expect(c.owned, `${c.role}/${c.schema}`).toEqual(none);
+    }
+  });
+
+  test("the database row: CONNECT is direct for app_read, pg_read_all_data and rds_superuser, the owner owns all three, and TEMP comes from PUBLIC", () => {
+    const direct = view.dbPrivileges.filter((p) => p.direct.connect).map((p) => p.role);
+    expect(direct).toEqual(["app_read", "pg_read_all_data", "rds_superuser"]);
+    const owner = view.dbPrivileges.find((p) => p.role === "app_owner")!;
+    expect(owner.owned).toEqual({ connect: true, create: true, temp: true });
+    expect(owner.direct).toEqual({ connect: false, create: false, temp: false });
+    expect(view.dbPrivileges.filter((p) => p.owned.connect || p.owned.create || p.owned.temp).map((p) => p.role)).toEqual(["app_owner"]);
+    expect(view.dbPrivileges.some((p) => p.direct.temp)).toBe(false);
+    expect(view.dbPrivileges.every((p) => p.temp)).toBe(true);
+  });
+
+  test("a role view carries them in the cells it lists", () => {
+    const orders = sampleRoleView("app_read").databases.find((d) => d.loaded)!;
+    expect(orders.cells[0].direct).toEqual({ usage: true, create: false, read: "all", write: "none" });
+    expect(orders.cells[0].owned).toEqual(none);
   });
 });
 
@@ -403,6 +497,131 @@ describe("role view", () => {
   });
 });
 
+describe("changes", () => {
+  const roleNames = new Set(ROLE_NAMES);
+  const databases = sampleOverview().databases;
+
+  test("the change fixtures are the ones the previews and the log talk about", () => {
+    expect(revokeAuditRead).toEqual({ ...grantAuditRead, add: false });
+    expect(removeBobFromWriters).toEqual({ ...addBobToWriters, add: false });
+    expect(createCarol).toMatchObject({ kind: "createRole", login: true });
+    expect(createAppAudit).toMatchObject({ kind: "createRole", login: false });
+    expect(dropAppAudit).toEqual({ kind: "dropRole", role: "app_audit" });
+    expect(resetAlicePassword).toEqual({ kind: "password", role: "alice" });
+    for (const c of [grantAuditRead, defaultAuditRead]) expect(databases.map((d) => d.name)).toContain(c.database);
+    for (const name of [grantAuditRead.grantee, defaultAuditRead.creator, addBobToWriters.member, addBobToWriters.group]) expect(roleNames).toContain(name);
+  });
+
+  test("a preview is for a change of the scenario, in a database it lists, run as the login user, with the summary the backend would write", () => {
+    const preview = samplePreview();
+    expect(preview.change).toBe(grantAuditRead);
+    expect(preview.summary).toBe(changeSummary(preview.change));
+    expect(databases.find((d) => d.name === preview.database)?.allowConn).toBe(true);
+    expect(preview.loginUser).toBe(LOGIN_USER);
+    expect(preview.sql).toEqual(['GRANT SELECT ON ALL TABLES IN SCHEMA "audit" TO "app_read"']);
+  });
+
+  test("its impact is who reads audit.events after the grant: the group chain of app_read, and not bob, who does not inherit", () => {
+    const preview = samplePreview();
+    expect(preview.impacts.map((i) => i.role)).toEqual(["alice", "app_read", "app_write"]);
+    for (const impact of preview.impacts) {
+      expect(roleNames).toContain(impact.role);
+      expect(impact.lost).toEqual([]);
+      expect(impact.gained).toEqual([{ database: "orders", schema: "audit", objectKind: "table", privilege: "SELECT", count: 1, sample: ["audit.events"] }]);
+    }
+    expect(preview.impacts.map((i) => i.role)).not.toContain("bob");
+    expect(preview.impactsOmitted).toBe(0);
+  });
+
+  test("its warning is the one the app offers a button for, and that button adds the default privilege of the same schema and group", () => {
+    const [warning] = samplePreview().warnings;
+    expect(warning).toEqual({ level: "warn", message: "새로 만드는 테이블에는 적용되지 않아요", add: [defaultAuditRead] });
+    expect(defaultAuditRead).toMatchObject({ schema: "audit", objectType: "tables", grantee: "app_read", creator: "app_owner" });
+    // audit에는 기본 권한이 아직 없다
+    expect(sampleDatabaseView().defaultPrivileges.some((r) => r.schema === "audit")).toBe(false);
+  });
+
+  test("a batch preview is its changes run one after the other in one database", () => {
+    const batch = sampleBatchPreview();
+    expect(batch.items.map((i) => i.change)).toEqual([grantAuditRead, addBobToWriters]);
+    expect(batch.items.map((i) => i.summary)).toEqual(batch.items.map((i) => changeSummary(i.change)));
+    expect(batch.sql).toEqual(batch.items.flatMap((i) => i.sql));
+    expect(batch.database).toBe("orders");
+    expect(batch.loginUser).toBe(LOGIN_USER);
+    expect(batch.roles).toEqual([{ role: "bob", created: false, dropped: false, attributes: [], groupsAdded: ["app_write"], groupsRemoved: [] }]);
+    expect(batch.impacts.map((i) => i.role)).not.toContain("bob");
+  });
+
+  test("a log entry is one the app wrote for this target, and undoing it is the revoke", () => {
+    const entry = sampleLogEntry();
+    expect(entry.targetArn).toBe(sampleTargetInfo().arn);
+    expect(entry.profile).toBe(pgTarget.profile);
+    expect(entry.loginUser).toBe(LOGIN_USER);
+    expect(entry.summary).toBe(changeSummary(entry.change));
+    expect(entry.inverse).toEqual([{ ...grantAuditRead, add: false }]);
+    expect(entry.ok).toBe(true);
+    expect(entry.error).toBeNull();
+    expect("batchId" in entry).toBe(false); // 없을 때는 빠진다
+  });
+
+  test("the sample log is newest first, all of this target, and every summary matches its change", () => {
+    const log = sampleChangeLog();
+    const times = log.map((e) => e.at);
+    expect(times).toEqual([...times].sort().reverse());
+    expect(new Set(log.map((e) => e.targetArn))).toEqual(new Set([sampleTargetInfo().arn]));
+    expect(new Set(log.map((e) => e.id)).size).toBe(log.length);
+    for (const e of log) expect(e.summary, e.id).toBe(changeSummary(e.change));
+  });
+
+  test("the sample log has what the screen shows: a batch of two, one not undoable, one undone, one failed, a created role", () => {
+    const log = sampleChangeLog();
+    expect(log.filter((e) => e.batchId === "b-1").map((e) => e.id)).toEqual(["b-1-2", "b-1-1"]);
+    expect(log.filter((e) => !e.batchId)).toHaveLength(4);
+    expect(log.find((e) => e.change.kind === "password")?.inverse).toBeNull();
+    expect(log.filter((e) => e.undone)).toHaveLength(1);
+    const failed = log.filter((e) => !e.ok);
+    expect(failed).toHaveLength(1);
+    expect(failed[0].inverse).toBeNull();
+    expect(failed[0].error).toMatch(/^적용하지 못했어요: /);
+    expect(log.find((e) => e.change.kind === "createRole")?.inverse).toEqual([dropAppAudit]);
+  });
+
+  test("no log line carries a password: the password reset shows the mask", () => {
+    const reset = sampleChangeLog().find((e) => e.change.kind === "password")!;
+    expect(reset.sql).toEqual([`ALTER ROLE "alice" PASSWORD '••••••••'`]);
+  });
+
+  test("a preset suggestion names roles that exist: groups that match, creators, and one creator the login cannot set defaults for", () => {
+    const suggestion = samplePresetSuggestion();
+    for (const name of suggestion.matching) expect(ROLES.find((r) => r.name === name)?.kind).toBe("group");
+    for (const name of [...suggestion.creators, ...suggestion.blockedCreators.map((b) => b.role)]) expect(roleNames).toContain(name);
+    expect(suggestion.blockedCreators[0].reason).toMatch(/^postgres 역할의 기본 권한을 바꿀 수 없어요\. /);
+    expect(suggestion.proposedName).not.toBe("");
+    expect(roleNames).not.toContain(suggestion.proposedName);
+  });
+
+  test("a drop plan reassigns to an existing role, goes through the databases one by one and ends with DROP ROLE in the default database", () => {
+    const plan = sampleDropPlan();
+    expect(roleNames).toContain(plan.role);
+    expect(roleNames).toContain(plan.reassignTo);
+    expect(plan.confirmText).toBe(plan.role);
+    const last = plan.steps[plan.steps.length - 1];
+    expect(last).toMatchObject({ database: null, sql: ['DROP ROLE "alice"'] });
+    const named = plan.steps.slice(0, -1).map((s) => s.database).filter((d): d is string => d !== null);
+    for (const d of named) expect(databases.find((x) => x.name === d)?.allowConn, d).toBe(true);
+    expect(plan.sessions).toBe(sampleSessions().filter((s) => s.role === plan.role).length);
+    expect(plan.grantedMemberships).toEqual([]);
+  });
+
+  test("overrides replace single fields", () => {
+    expect(samplePreview({ confirmText: "app_read" }).confirmText).toBe("app_read");
+    expect(sampleBatchPreview({ reversible: false }).reversible).toBe(false);
+    expect(sampleLogEntry({ id: "x" }).id).toBe("x");
+    expect(samplePresetSuggestion({ matching: [] }).matching).toEqual([]);
+    expect(sampleDropPlan({ sessions: 0 }).sessions).toBe(0);
+  });
+});
+
 test("every sample is plain JSON, as the backend sends it", () => {
   const all = [
     sampleTargetInfo(),
@@ -413,6 +632,11 @@ test("every sample is plain JSON, as the backend sends it", () => {
     sampleSessions(),
     sampleFindings(),
     sampleRoleView("app_owner"),
+    samplePreview(),
+    sampleBatchPreview(),
+    sampleChangeLog(),
+    samplePresetSuggestion(),
+    sampleDropPlan(),
   ];
   for (const sample of all) expect(JSON.parse(JSON.stringify(sample))).toStrictEqual(sample);
 });
@@ -424,4 +648,8 @@ test("each call returns new top-level objects, so a test can change one without 
   expect(sampleFindings().groups).not.toBe(sampleFindings().groups);
   expect(sampleRoleView().databases).not.toBe(sampleRoleView().databases);
   expect(sampleRoleView().summary).not.toBe(sampleRoleView().summary);
+  expect(samplePreview().impacts).not.toBe(samplePreview().impacts);
+  expect(sampleBatchPreview().items).not.toBe(sampleBatchPreview().items);
+  expect(sampleChangeLog()).not.toBe(sampleChangeLog());
+  expect(sampleDropPlan().steps).not.toBe(sampleDropPlan().steps);
 });

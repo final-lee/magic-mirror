@@ -1,8 +1,8 @@
 import { PG_VIEW_LABEL, roleRoute, samePgRoute, type PgRoute, type PgView } from "./route";
 
-test("the six views have the labels of the menu", () => {
-  const views: PgView[] = ["findings", "roles", "privileges", "defaults", "whoCan", "sessions"];
-  expect(views.map((v) => PG_VIEW_LABEL[v])).toEqual(["점검", "역할", "권한", "기본 권한", "누가 할 수 있나", "세션"]);
+test("the seven views have the labels of the menu", () => {
+  const views: PgView[] = ["findings", "roles", "privileges", "defaults", "whoCan", "sessions", "changes"];
+  expect(views.map((v) => PG_VIEW_LABEL[v])).toEqual(["점검", "역할", "권한", "기본 권한", "누가 할 수 있나", "세션", "변경 기록"]);
   expect(Object.keys(PG_VIEW_LABEL).sort()).toEqual([...views].sort());
 });
 

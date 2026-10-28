@@ -4,6 +4,7 @@ import { pgApi } from "./api";
 import { targetKey } from "./targets";
 import type {
   PgCellDetail,
+  PgChangeLogEntry,
   PgDatabaseView,
   PgFindings,
   PgObjectRef,
@@ -37,6 +38,11 @@ export const pgKeys = {
     ["pg", targetKey(t), "whoCan", database, object, privilege] as const,
   sessions: (t: PgTarget) => ["pg", targetKey(t), "sessions"] as const,
   findings: (t: PgTarget) => ["pg", targetKey(t), "findings"] as const,
+  /**
+   * 변경 기록은 대상마다 있는 것이 아니라 앱이 쓰는 파일 하나다(IAM의 iamKeys.changeLog와 같다). 그래서 대상의 키 밖에 둔다:
+   * 다시 읽기(refreshPg)와 탭 닫기(closePg)는 대상의 쿼리만 건드리고, 이 목록은 적용이 끝날 때마다 refreshPgAfterChange가 무효화한다.
+   */
+  changeLog: ["pg", "changeLog"] as const,
 };
 
 /**
@@ -171,6 +177,16 @@ export function usePgFindings(target: PgTarget, enabled: boolean) {
   });
 }
 
+/** 변경 기록(최신순). 화면을 열 때마다 다시 읽는다: 방금 한 변경이나 다른 창이 남긴 기록이 바로 보여야 해서 캐시를 믿지 않는다. */
+export function usePgChangeLog() {
+  return useQuery<PgChangeLogEntry[], AppError>({
+    queryKey: pgKeys.changeLog,
+    queryFn: () => pgApi.changeLog(),
+    staleTime: 0,
+    retry: false,
+  });
+}
+
 const kindOf = (q: Pick<Query, "queryKey">) => String(q.queryKey[2]);
 /** 대상 정보와 클러스터 스냅숏(pg_open이 새로 읽고, 데이터베이스 스냅숏 캐시를 비운다) */
 const BASE = new Set(["target", "overview"]);
@@ -234,4 +250,47 @@ export async function closePg(qc: QueryClient, target: PgTarget): Promise<void> 
   } catch (e) {
     console.error("PostgreSQL 연결을 닫지 못했어요", e);
   }
+}
+
+/**
+ * 저장된 클러스터 스냅숏으로 만든 개요(pg_overview)를 개요 쿼리의 값으로 바꾼다. 다시 연결하지 않는다.
+ * - 이미 읽어 둔 개요만 바꾼다. 그 로그인 사용자의 개요 쿼리가 없으면 만들지 않는다: 이 쿼리는 연결과 짝이라 남은 값이 낡은 값이 되기 쉽다(usePgOverview).
+ * - 개요를 만들지 못하면 개요 쿼리가 스스로 다시 읽게 한다(pg_open). 느리지만 낡은 개요를 남기지도, 오류를 숨기지도 않는다.
+ */
+async function replaceOverview(qc: QueryClient, target: PgTarget): Promise<void> {
+  try {
+    const overview = await pgApi.overview(target);
+    const key = pgKeys.overview(target, overview.loginUser);
+    if (qc.getQueryData(key) !== undefined) qc.setQueryData(key, overview);
+  } catch {
+    await qc.invalidateQueries({ queryKey: [...pgKeys.root(target), "overview"] });
+  }
+}
+
+/**
+ * 변경을 적용한 뒤 화면을 다시 읽는다. 적용이 성공했을 때도, 실패했을 때도 부른다: 실패한 시도도 변경 기록에 남고,
+ * 백엔드가 계획을 다시 비교하느라 클러스터와 실행한 데이터베이스를 새로 읽었으며, COMMIT 중에 연결이 끊겼다면 적용됐을 수도 있다.
+ * refreshPg(다시 읽기)와 달리 다시 연결하지 않고, IAM처럼 기다리지도 않는다. PostgreSQL은 커밋하면 바로 보이고,
+ * 백엔드는 적용 뒤에 클러스터 스냅숏과 실행한 데이터베이스의 스냅숏을 새로 읽어 담아 둔다.
+ * 1) 변경 기록은 곧바로 무효화한다.
+ * 2) 개요: pg_overview로 바꾼다.
+ * 3) 실행한 데이터베이스의 보기: force로 다시 읽는다. 백엔드가 적용 뒤에 읽은 것이 실패했어도 낡은 값을 보이지 않게 한다.
+ *    읽은 적 없는 데이터베이스는 표시하지 않는다(refreshPg와 같다): 새로 읽을 사본이 없고, 첫 읽기는 force가 아니다.
+ * 4) 그 위에서 만드는 나머지(다른 데이터베이스의 보기, 점검, 역할, 칸, 검색, 누가 할 수 있나, 세션)는 3)이 끝난 뒤에 무효화한다.
+ *    구성원과 속성의 변경은 모든 데이터베이스의 실효 권한을 바꾸기 때문에 실행한 데이터베이스만 고르지 않는다.
+ *    켜진 쿼리는 바로 다시 불리고, 나머지는 무효화만 되어 다시 열릴 때 읽는다.
+ * 어떤 단계가 실패해도 거부하지 않는다. 쿼리의 오류는 그 쿼리의 화면이 보인다.
+ */
+export async function refreshPgAfterChange(qc: QueryClient, target: PgTarget, database: string): Promise<void> {
+  const log = qc.invalidateQueries({ queryKey: pgKeys.changeLog });
+  await replaceOverview(qc, target);
+
+  const executed = pgKeys.database(target, database);
+  const query = qc.getQueryCache().find({ queryKey: executed, exact: true });
+  if (query && query.state.data !== undefined) markForce(qc, query.queryHash);
+  await qc.invalidateQueries({ queryKey: executed, exact: true });
+
+  const executedHash = hashKey(executed);
+  await qc.invalidateQueries({ queryKey: pgKeys.root(target), predicate: (q) => !BASE.has(kindOf(q)) && q.queryHash !== executedHash });
+  await log;
 }

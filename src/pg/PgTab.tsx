@@ -1,11 +1,15 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useSettings } from "../api/queries";
+import type { ApplyNotice } from "../iam/useApplyFlow";
 import { useHistoryKeys } from "../lib/useHistoryKeys";
 import { useRouteHistory } from "../lib/useRouteHistory";
+import { ChangeLog } from "./ChangeLog";
 import { DefaultPrivileges } from "./DefaultPrivileges";
 import { Findings } from "./Findings";
 import { LoginPrompt } from "./LoginPrompt";
+import { PgBatchDialog } from "./PgBatchDialog";
+import { PgChangeDialog } from "./PgChangeDialog";
 import { PgError } from "./PgError";
 import { PgNav } from "./PgNav";
 import { PrivilegeGrid } from "./PrivilegeGrid";
@@ -16,6 +20,8 @@ import { RoleList } from "./RoleList";
 import { PG_VIEW_LABEL, roleRoute, samePgRoute, type PgRoute, type SchemaFocus } from "./route";
 import { Sessions } from "./Sessions";
 import type { PgOverview, PgTarget, PgTargetInfo, PgTargetKind } from "./types";
+import { usePgBatch } from "./usePgBatch";
+import { usePgChange } from "./usePgChange";
 import { WhoCan } from "./WhoCan";
 
 interface Props {
@@ -94,6 +100,27 @@ function TopBar({ info, loginUser, connection, fetchedAt, reading, canChange, on
   );
 }
 
+/** 적용을 마친 뒤의 안내 한 줄. 함께 알릴 일(notes)이 있으면 사용자가 닫을 때까지 남는다. IAM과 달리 반영이 늦어진다는 말은 없다: 커밋하면 바로 보인다. */
+function DoneNotice({ notice, onDismiss }: { notice: ApplyNotice; onDismiss: () => void }) {
+  return (
+    <div className="iam-done" role="status">
+      <span aria-hidden="true">✓</span> <span>{notice.summary}</span>
+      <button className="icon" aria-label="알림 닫기" onClick={onDismiss}>
+        ✕
+      </button>
+      {/* 바꾸기는 했지만 하지 못한 일(변경 기록 저장 등). 이 안내는 닫을 때까지 남는다 */}
+      {notice.notes.length > 0 && (
+        <ul className="iam-done-notes" aria-label="함께 알릴 일">
+          {/* 같은 안내가 여러 번 올 수 있고 목록은 순서가 바뀌지 않아서, 글이 아니라 순서를 키로 쓴다 */}
+          {notice.notes.map((note, i) => (
+            <li key={i}>{note}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function PgTab({ target, active, filter }: Props) {
   const qc = useQueryClient();
   const info = usePgTarget(target);
@@ -110,6 +137,10 @@ export function PgTab({ target, active, filter }: Props) {
   // 점검이 보이지 않는 동안의 새로 고침은, 이미 읽은 점검이면 표시와 무효화만 해 두었다가 다시 열 때 force로 읽는다(refreshPg). 한 번도 열지 않았으면 아무것도 하지 않는다.
   const findings = usePgFindings(target, !!ov && route.view === "findings");
   const [changing, setChanging] = useState(false);
+  // 모든 변경(변경 기록의 되돌리기 …)이 지나는 길: 미리보기 → 확인 → 적용. 하나짜리 변경과 묶음(변경 여럿이 한 트랜잭션)을 섞지 않는다.
+  // 이 탭이 들고 있어서 PostgreSQL 안의 다른 화면을 보고 돌아와도 열린 창과 안내가 남는다.
+  const change = usePgChange(target);
+  const batch = usePgBatch(target);
   // 역할 목록, 권한 표, 누가 할 수 있나가 함께 쓰는 칩과 시스템 역할 토글, 역할 목록에서 고른 행. 상세를 보고 돌아와도 남는다.
   const [kinds, setKinds] = useState(DEFAULT_KINDS);
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
@@ -211,6 +242,8 @@ export function PgTab({ target, active, filter }: Props) {
             <WhoCan target={target} overview={o} database={database} onDatabase={setDatabase} kinds={kinds} onKinds={setKinds} />
           ) : route.view === "sessions" ? (
             <Sessions target={target} />
+          ) : route.view === "changes" ? (
+            <ChangeLog target={target} targetArn={o.target.arn} onStart={change.start} onStartBatch={batch.start} />
           ) : (
             <Findings target={target} overview={o} onOpenRole={(name) => go(roleRoute(name))} onOpenSchema={openSchema} />
           )}
@@ -258,7 +291,15 @@ export function PgTab({ target, active, filter }: Props) {
       {ov && overview.isError && <PgError compact error={overview.error} target={target} />}
       {/* 대상 정보를 다시 읽다 실패해도 이전 정보는 화면에 남는다. 연결도 실패했으면 그 쪽이 이유를 이미 보이니 한 번만 알린다. */}
       {targetInfo && info.isError && !overview.isError && <PgError compact error={info.error} target={target} />}
+      {change.notices.map((notice) => (
+        <DoneNotice key={`change-${notice.id}`} notice={notice} onDismiss={() => change.dismissNotice(notice.id)} />
+      ))}
+      {batch.notices.map((notice) => (
+        <DoneNotice key={`batch-${notice.id}`} notice={notice} onDismiss={() => batch.dismissNotice(notice.id)} />
+      ))}
       <div className="pg-main">{content}</div>
+      {change.pending && <PgChangeDialog pending={change.pending} onApply={change.apply} onRetry={change.retryPreview} onCancel={change.cancel} />}
+      {batch.pending && <PgBatchDialog pending={batch.pending} onApply={batch.apply} onRetry={batch.retryPreview} onCancel={batch.cancel} />}
     </div>
   );
 }
