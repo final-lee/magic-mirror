@@ -31,6 +31,7 @@ const TABLE: [(PgFindingKind, &str, PgFindingLevel); 10] = [
 
 const PUBLIC_SCHEMA_CREATE: &str = "모든 역할(PUBLIC)이 이 스키마에 객체를 만들 수 있어요";
 const RDS_SUPERUSER_DIRECT: &str = "rds_superuser의 직접 구성원이에요";
+const RDS_SUPERUSER_SET_ROLE: &str = "SET ROLE로 rds_superuser 권한을 쓸 수 있어요";
 const CREATE_ROLE: &str = "역할을 만들고 바꿀 수 있어요";
 /// PG15 이하에서는 CREATEROLE이 다른 역할(관리자급 포함)의 속성과 구성원 관계까지 바꿀 수 있다
 const CREATE_ROLE_BEFORE_PG16: &str = " PG15 이하에서는 거의 관리자급이에요";
@@ -86,8 +87,9 @@ pub fn findings(cluster: &ClusterSnapshot, dbs: &[&DbSnapshot], skipped: Vec<PgS
 
 // ───────────────────────── 클러스터 전체 ─────────────────────────
 
-/// 시스템 역할이 아닌 `rds_superuser`의 직접 구성원, 그리고 상속하는 구성원 관계로 그 권한을 받는 역할.
-/// 직접 구성원이면 상속 여부와 상관없이 직접 구성원이라고 쓴다(SET ROLE로 쓸 수 있다). 아니면 거치는 역할들을 보인다.
+/// 시스템 역할이 아닌, `rds_superuser`의 권한을 쓸 수 있는 역할: 직접 구성원, 상속하는 구성원 관계로 그 권한을 받는 역할,
+/// 상속하지는 않지만 `SET ROLE`로 닿는 역할(PG16부터는 사슬의 모든 관계에 SET 옵션이 있어야 한다).
+/// 직접 구성원이면 상속 여부와 상관없이 직접 구성원이라고 쓴다. 상속해서 받으면 거치는 역할들을 보이고, 그렇지 않고 SET ROLE로만 닿으면 그렇게 쓴다.
 fn rds_superuser(cluster: &ClusterSnapshot, roles: &[&RoleRec], eval: &Eval) -> Vec<PgFinding> {
     let direct: HashSet<&str> = cluster.members.iter().filter(|m| m.group == RDS_SUPERUSER).map(|m| m.member.as_str()).collect();
     roles
@@ -97,11 +99,13 @@ fn rds_superuser(cluster: &ClusterSnapshot, roles: &[&RoleRec], eval: &Eval) -> 
             if direct.contains(role.name.as_str()) {
                 return Some(role_finding(role, RDS_SUPERUSER_DIRECT));
             }
-            let inherited = eval.role(&role.name).inherited();
-            let reach = inherited.iter().find(|i| i.role == RDS_SUPERUSER)?;
-            // 경로는 이 역할을 뺀 사슬이고 `rds_superuser`로 끝난다: 거치는 역할은 그 앞까지다
-            let (_, via) = reach.path.split_last()?;
-            Some(role_finding(role, format!("{} 역할을 거쳐 rds_superuser 권한을 받아요", via.join(" → "))))
+            let view = eval.role(&role.name);
+            if let Some(reach) = view.inherited().iter().find(|i| i.role == RDS_SUPERUSER) {
+                // 경로는 이 역할을 뺀 사슬이고 `rds_superuser`로 끝난다: 거치는 역할은 그 앞까지다
+                let (_, via) = reach.path.split_last()?;
+                return Some(role_finding(role, format!("{} 역할을 거쳐 rds_superuser 권한을 받아요", via.join(" → "))));
+            }
+            view.set_role_only().iter().any(|reached| reached == RDS_SUPERUSER).then(|| role_finding(role, RDS_SUPERUSER_SET_ROLE))
         })
         .collect()
 }
@@ -247,6 +251,7 @@ fn selects_by_default(defaults: &HashMap<(&str, Option<&str>), Vec<Option<&str>>
 /// 기본 권한의 빈틈. 스키마 S의 모든 테이블(테이블과 파티션 테이블)을 직접 또는 그룹으로 읽는 역할 R이 있는데,
 /// S의 테이블을 소유한 역할 C가 새로 만드는 테이블은 R이 못 읽는 경우다. C가 R이거나 R이 C를 상속하면 R은 새 테이블도 읽으니 빼고,
 /// C의 기본 권한(S의 것이나 모든 스키마의 것)이 R, R이 상속하는 역할, PUBLIC 가운데 하나에게 SELECT를 주면 빈틈이 아니다.
+/// 모든 테이블의 SELECT가 미리 정의된 역할(`pg_read_all_data`)이나 superuser 속성으로도 오면 그 역할이 새 테이블도 읽게 하니 빈틈이 아니다.
 /// 항목은 (R, S, C)마다 하나고 역할, 스키마, 만드는 역할의 이름순이다.
 fn default_privilege_gap(cluster: &ClusterSnapshot, db: &DbSnapshot, roles: &[&RoleRec]) -> Vec<PgFinding> {
     let mut tables: BTreeMap<&str, Vec<&RelationRec>> = BTreeMap::new();
@@ -273,9 +278,18 @@ fn default_privilege_gap(cluster: &ClusterSnapshot, db: &DbSnapshot, roles: &[&R
         let inherited = view.inherited();
         let reach: HashSet<&str> = inherited.iter().map(|i| i.role.as_str()).collect();
         for (schema, rels) in &tables {
-            // 모든 테이블을 직접 또는 그룹으로 읽는가. 하나라도 못 읽으면 바로 멈춘다
-            let reads_all = rels.iter().all(|rel| view.sources(Obj::Relation(rel), Privilege::Select).iter().any(|s| matches!(s.kind, SourceKind::Direct | SourceKind::Group)));
-            if !reads_all {
+            // 모든 테이블을 직접 또는 그룹으로 읽는가. 하나라도 못 읽으면 바로 멈춘다.
+            // 그러면서 모든 테이블에서 미리 정의된 역할이나 superuser로도 읽는다면, 그 힘이 새 테이블에도 닿으니 빈틈이 아니다
+            let (mut reads_all, mut reads_new_too) = (true, true);
+            for rel in rels {
+                let sources = view.sources(Obj::Relation(rel), Privilege::Select);
+                if !sources.iter().any(|s| matches!(s.kind, SourceKind::Direct | SourceKind::Group)) {
+                    reads_all = false;
+                    break;
+                }
+                reads_new_too &= sources.iter().any(|s| matches!(s.kind, SourceKind::Predefined | SourceKind::Superuser));
+            }
+            if !reads_all || reads_new_too {
                 continue;
             }
             for creator in &creators[schema] {

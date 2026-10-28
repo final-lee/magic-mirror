@@ -11,23 +11,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// `catalog.rs` 말고는 쓰면 안 되는 호출. 앞의 여덟은 설계가 정한 것이고, 나머지는 같은 일을 하는 드라이버의 다른 이름이다
-const FORBIDDEN: [&str; 14] = [
-    ".query(",
-    ".query_one(",
-    ".query_opt(",
-    ".execute(",
-    "batch_execute(",
-    "simple_query(",
-    "build_transaction(",
-    ".transaction(",
-    ".query_raw(",
-    ".query_typed(",
-    ".query_typed_raw(",
-    ".execute_raw(",
-    ".copy_in(",
-    ".copy_out(",
-];
+/// 이름이 이 토막으로 시작하는 메서드는 문장을 보낸다. tokio-postgres 0.7.18의 `Client`와 `Transaction`이 가진 이름들의 앞토막이다
+/// (`query`, `query_one`, `query_typed_one`, `execute_typed`, `simple_query_raw`, `bind_raw`, `query_portal`, `savepoint` …).
+/// 이름을 하나씩 적으면 드라이버가 새 이름을 더할 때마다 구멍이 나서 토막으로 읽는다. 드라이버의 이름이 아니어도 이 토막으로 시작하는 메서드를
+/// 부르면 걸린다(이름을 바꾼다). `copy_`는 표준 라이브러리의 `copy_from_slice`와 겹치지 않게 `copy_in`·`copy_out`으로 적었다.
+const SQL_STEMS: [&str; 8] = ["query", "execute", "simple_query", "batch_execute", "bind", "copy_in", "copy_out", "savepoint"];
+
+/// 이름에 이 토막이 들어 있는 메서드는 트랜잭션을 연다(`transaction`, `build_transaction`)
+const TRANSACTION_STEM: &str = "transaction";
+
+/// `Client::query(&client, …)`처럼 형의 이름으로 부르는 꼴도 같은 호출이다. 그 앞에 경로가 붙어도(`tokio_postgres::Client::…`) 마지막 토막으로 읽는다
+const DRIVER_TYPES: [&str; 3] = ["Client", "Transaction", "GenericClient"];
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
@@ -161,12 +155,64 @@ fn code_of(text: &str) -> String {
     text.lines().filter(|line| !line.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n")
 }
 
-/// 코드에서 `FORBIDDEN` 호출들(나온 것만, 정렬)
-fn forbidden_calls(text: &str) -> Vec<&'static str> {
+fn is_sql_method(name: &str) -> bool {
+    SQL_STEMS.iter().any(|stem| name.starts_with(stem)) || name.contains(TRANSACTION_STEM)
+}
+
+fn is_identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+/// 이름 바로 뒤의 터보피시(`::<i32, _>`)를 건너뛴 나머지. 없으면 그대로다
+fn skip_turbofish(text: &str) -> &str {
+    let Some(rest) = text.strip_prefix("::").map(str::trim_start).filter(|rest| rest.starts_with('<')) else { return text };
+    let mut depth = 0;
+    for (at, c) in rest.char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' => {
+                depth -= 1;
+                if depth == 0 {
+                    return &rest[at + 1..];
+                }
+            }
+            _ => {}
+        }
+    }
+    text
+}
+
+/// 코드에서 문장을 보내는 호출들(나온 것만, 정렬): `.이름(`(줄이 바뀌어도, 터보피시가 끼어도)과 `Client::이름(`·`Transaction::이름(`·`GenericClient::이름(`.
+/// 정의(`fn query(`)와 점이나 형 이름 없이 부르는 함수(`queryable()`)는 호출이 아니다.
+fn forbidden_calls(text: &str) -> Vec<String> {
     let code = code_of(text);
-    let mut found: Vec<&'static str> = FORBIDDEN.iter().copied().filter(|call| code.contains(call)).collect();
-    found.sort_unstable();
-    found
+    let bytes = code.as_bytes();
+    let mut found = BTreeSet::new();
+    let mut at = 0;
+    while at < bytes.len() {
+        if !is_identifier_byte(bytes[at]) {
+            at += 1;
+            continue;
+        }
+        let start = at;
+        while at < bytes.len() && is_identifier_byte(bytes[at]) {
+            at += 1;
+        }
+        let name = &code[start..at];
+        if !is_sql_method(name) || !skip_turbofish(code[at..].trim_start()).trim_start().starts_with('(') {
+            continue;
+        }
+        let before = code[..start].trim_end();
+        if before.ends_with('.') {
+            found.insert(format!(".{name}("));
+        } else if let Some(path) = before.strip_suffix("::") {
+            let ty = path.rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).next().unwrap_or("");
+            if DRIVER_TYPES.contains(&ty) {
+                found.insert(format!("{ty}::{name}("));
+            }
+        }
+    }
+    found.into_iter().collect()
 }
 
 /// `build_transaction(` 뒤가 바로 `).read_only(true)`인 자리의 수와 전체 수
@@ -227,16 +273,89 @@ mod last;
     );
 }
 
+/// tokio-postgres 0.7.18의 `Client`와 `Transaction`(그리고 둘이 구현하는 `GenericClient`)에서 문장을 보내는 메서드들. 소스의 `pub async fn`을 옮겼다.
+/// 문장을 돌리지 않는 `prepare`, `prepare_typed`, `commit`, `rollback`, `cancel_query`, `check_connection`은 넣지 않았다.
+const DRIVER_SQL_METHODS: [&str; 26] = [
+    "query",
+    "query_one",
+    "query_opt",
+    "query_scalar",
+    "query_one_scalar",
+    "query_opt_scalar",
+    "query_raw",
+    "query_typed",
+    "query_typed_one",
+    "query_typed_opt",
+    "query_typed_raw",
+    "query_portal",
+    "query_portal_raw",
+    "execute",
+    "execute_typed",
+    "execute_raw",
+    "simple_query",
+    "simple_query_raw",
+    "batch_execute",
+    "bind",
+    "bind_raw",
+    "copy_in",
+    "copy_out",
+    "savepoint",
+    "transaction",
+    "build_transaction",
+];
+
+#[test]
+fn every_sql_running_method_of_the_driver_is_found_however_it_is_called() {
+    for method in DRIVER_SQL_METHODS {
+        let wanted = [format!(".{method}(")];
+        assert_eq!(forbidden_calls(&format!("let rows = client.{method}(sql, &[]).await?;")), wanted, "{method}");
+        // 줄을 바꿔 이어 붙인 호출과 터보피시
+        assert_eq!(forbidden_calls(&format!("conn.client\n    .{method}(sql)\n    .await?")), wanted, "{method} on its own line");
+        assert_eq!(forbidden_calls(&format!("client.{method}::<i32, _>(sql)")), wanted, "{method} with a turbofish");
+        // 형의 이름으로 부르는 꼴
+        for ty in ["Client", "Transaction", "GenericClient"] {
+            assert_eq!(forbidden_calls(&format!("{ty}::{method}(&c, sql)")), [format!("{ty}::{method}(")], "{ty}::{method}");
+        }
+        assert_eq!(forbidden_calls(&format!("tokio_postgres::Client::{method}(&c, sql).await")), [format!("Client::{method}(")], "full path {method}");
+    }
+}
+
+#[test]
+fn a_method_is_found_by_the_stem_of_its_name_so_a_name_the_driver_adds_later_is_found_too() {
+    for call in ["c.query_typed_two(x)", "c.execute_streaming(x)", "c.simple_query_buffered(x)", "t.bind_typed(x)", "c.copy_in_binary(x)", "t.savepoint_named(x)", "c.start_transaction(x)"] {
+        assert_eq!(forbidden_calls(call).len(), 1, "{call}");
+    }
+}
+
 #[test]
 fn forbidden_calls_are_found_in_code_and_not_in_comment_lines() {
     assert_eq!(forbidden_calls("let rows = client.query(sql, &[]).await?;"), [".query("]);
-    assert_eq!(forbidden_calls("tx.batch_execute(\"SET x\").await?;\nlet t = c.build_transaction().start();"), ["batch_execute(", "build_transaction("]);
+    assert_eq!(forbidden_calls("tx.batch_execute(\"SET x\").await?;\nlet t = c.build_transaction().start();"), [".batch_execute(", ".build_transaction("]);
     assert_eq!(forbidden_calls("conn.client.transaction().await?"), [".transaction("]);
-    assert_eq!(forbidden_calls("let s = c.simple_query(\"x\");"), ["simple_query("]);
+    assert_eq!(forbidden_calls("let s = c.simple_query(\"x\");"), [".simple_query("]);
+    // 한 호출은 한 번만 적힌다
+    assert_eq!(forbidden_calls("a.query(x); b.query(y); c.query(z);"), [".query("]);
     // 주석만 있는 줄은 코드가 아니다. 줄 끝 주석에 가려진 코드는 놓치지 않는다
     assert!(forbidden_calls("/// 예: client.query(sql)\n//! batch_execute(\n    // .execute(").is_empty());
     assert_eq!(forbidden_calls("run(); client.execute(sql, &[]); // 비밀"), [".execute("]);
-    assert!(forbidden_calls("let query = 1; queryable(); execute_plan();").is_empty());
+}
+
+#[test]
+fn names_that_only_look_alike_are_not_calls_of_the_driver() {
+    for code in [
+        // 점이나 형 이름 없이 부르는 함수, 정의, 이름 중간에만 든 토막
+        "let query = 1; queryable(); execute_plan(); bound(); rebind_all();",
+        "fn query(&self) {}\npub async fn execute(&self) {}\nfn transaction_count() {}",
+        "let on_query_done = 1; x.requery_later(); x.subquery_count();",
+        // 다른 형의 연관 함수, 표준 라이브러리의 메서드
+        "let client = aws_sdk_rds::Client::new(&cfg);",
+        "let listener = TcpListener::bind(addr).await?;",
+        "buf.copy_from_slice(&other); buf.copy_within(1..3, 0);",
+        // 문장을 돌리지 않는 메서드
+        "c.prepare(sql).await?; c.prepare_typed(sql, &[]).await?; t.commit().await?; t.rollback().await?; c.cancel_query(tls).await?; c.check_connection().await?;",
+    ] {
+        assert!(forbidden_calls(code).is_empty(), "{code}: {:?}", forbidden_calls(code));
+    }
 }
 
 #[test]
@@ -340,5 +459,5 @@ fn pg_only_the_catalog_runs_queries() {
     // catalog.rs의 트랜잭션은 하나고, 읽기 전용으로 연다. 읽기 전용이 아닌 `transaction()`은 쓰지 않는다
     let text = fs::read_to_string(&catalog).expect("catalog.rs");
     assert_eq!(read_only_transactions(&text), (1, 1), "build_transaction()은 한 번, 바로 뒤에 .read_only(true)와 함께 나와야 해요");
-    assert!(!forbidden_calls(&text).contains(&".transaction("), "catalog.rs도 읽기 전용이 아닌 transaction()은 열 수 없어요");
+    assert!(!forbidden_calls(&text).contains(&".transaction(".to_string()), "catalog.rs도 읽기 전용이 아닌 transaction()은 열 수 없어요");
 }

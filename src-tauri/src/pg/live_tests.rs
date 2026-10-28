@@ -32,7 +32,7 @@ mod comparison;
 use comparison::{a_noinherit_database_owner_matches_postgres, effective_privileges_match_postgres};
 #[cfg(test)]
 mod views;
-use views::{a_statement_timeout_reads_as_the_read_timeout_text, the_builders_read_the_seeded_database};
+use views::{a_statement_timeout_reads_as_the_read_timeout_text, the_builders_read_the_seeded_database, the_sessions_command_marks_the_connection_the_app_holds};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Server {
@@ -281,6 +281,7 @@ on_both_servers!(
     a_noinherit_database_owner_matches_postgres,
     the_builders_read_the_seeded_database,
     a_statement_timeout_reads_as_the_read_timeout_text,
+    the_sessions_command_marks_the_connection_the_app_holds,
 );
 
 async fn cluster_snapshot_reads_the_seeded_roles_and_memberships(server: Server) {

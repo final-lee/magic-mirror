@@ -75,7 +75,7 @@ impl PgState {
 
     /// 열기가 끝났다: 로그인, 접속 정보, 클러스터 스냅숏을 담고 이 대상의 데이터베이스 스냅숏을 버린다.
     /// 열기를 시작한 뒤(`epoch`를 읽은 뒤) 탭이 닫혔으면 아무것도 담지 않고 "먼저 연결해 주세요"다.
-    fn finish_open(&self, target: &PgTarget, epoch: u64, login: String, info: PgTargetInfo, cluster: Arc<ClusterSnapshot>) -> Result<(), AppError> {
+    pub(crate) fn finish_open(&self, target: &PgTarget, epoch: u64, login: String, info: PgTargetInfo, cluster: Arc<ClusterSnapshot>) -> Result<(), AppError> {
         let mut clusters = locked(&self.clusters);
         if self.pool.epoch(target) != epoch {
             return Err(not_opened());
@@ -268,7 +268,7 @@ impl PgState {
     }
 
     /// 지금 접속해 있는 세션들. 매번 기본 데이터베이스의 연결로 새로 읽는다.
-    async fn sessions(&self, app: &AppState, target: &PgTarget) -> Result<Vec<PgSession>, AppError> {
+    pub(crate) async fn sessions(&self, app: &AppState, target: &PgTarget) -> Result<Vec<PgSession>, AppError> {
         let opened = self.opened(target)?;
         let conn = connection(app, self, target, &opened, &opened.info.default_database).await?;
         let records = catalog::sessions(&mut *conn.lock().await).await?;

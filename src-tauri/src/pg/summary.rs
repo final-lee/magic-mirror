@@ -100,11 +100,19 @@ impl<'a> Index<'a> {
     }
 
     fn summary(&self, role: &RoleRec, now: i64) -> PgRoleSummary {
+        self.summary_of(role, &self.eval.role(&role.name), now)
+    }
+
+    /// `view`는 이 역할의 계산이다. 역할 상세는 같은 계산을 `setRoleOnly`에도 써서 역할 하나에 한 번만 만든다
+    fn summary_of(&self, role: &RoleRec, view: &RoleView, now: i64) -> PgRoleSummary {
         let name = role.name.as_str();
         let direct: &[&MemberRec] = self.groups_of.get(name).map_or(&[][..], Vec::as_slice);
-        // 직접 구성원이거나(상속 여부와 상관없이 SET ROLE로 쓸 수 있다), 상속하는 구성원 관계로 닿는 구성원이다. 자기 자신은 구성원이 아니다
-        let inherited = self.eval.role(name).inherited();
+        // 직접 구성원이거나(상속 여부와 상관없이), 상속하는 구성원 관계로 닿는 구성원이다. 자기 자신은 구성원이 아니다
+        let inherited = view.inherited();
         let is_member = |group: &str| direct.iter().any(|m| m.group == group) || inherited.iter().any(|i| i.role == group && !i.path.is_empty());
+        // 상속하지 않아도 `SET ROLE`로 쓸 수 있으면 그 그룹의 권한을 쓰는 것이다. PG16부터는 사슬의 모든 관계에 SET 옵션이 있어야 한다
+        let settable = view.set_role_only();
+        let can_use = |group: &str| is_member(group) || settable.iter().any(|reached| reached == group);
 
         let mut member_of: Vec<PgMembership> = direct
             .iter()
@@ -129,7 +137,7 @@ impl<'a> Index<'a> {
             member_of,
             member_count: self.member_counts.get(name).copied().unwrap_or(0),
             session_count: self.session_counts.get(name).copied().unwrap_or(0),
-            badges: badges(role, is_member(RDS_SUPERUSER), is_member(RDS_IAM), &self.cluster.login_user, now),
+            badges: badges(role, can_use(RDS_SUPERUSER), is_member(RDS_IAM), &self.cluster.login_user, now),
             comment: role.comment.clone(),
         }
     }
@@ -179,17 +187,26 @@ fn badges(role: &RoleRec, admin: bool, iam: bool, login_user: &str, now: i64) ->
     badges
 }
 
+impl Index<'_> {
+    /// 모든 역할의 요약. 스냅숏의 순서를 지킨다
+    fn summaries(&self, now: i64) -> Vec<PgRoleSummary> {
+        self.cluster.roles.iter().map(|role| self.summary(role, now)).collect()
+    }
+}
+
 /// 모든 역할의 요약. 스냅숏의 순서(이름순)를 지킨다. `now`는 유닉스 초다.
+/// 명령은 `overview`가 같은 색인(`Index`)을 나눠 쓰고, 이 한 줄 포장은 시험이 역할 요약만 물을 때 쓴다.
+#[cfg(test)]
 pub fn role_summaries(cluster: &ClusterSnapshot, now: i64) -> Vec<PgRoleSummary> {
-    let index = Index::new(cluster);
-    cluster.roles.iter().map(|role| index.summary(role, now)).collect()
+    Index::new(cluster).summaries(now)
 }
 
 /// 탭을 열 때 한 번 받는 개요. 로그인 사용자가 `rds_superuser`의 권한을 상속하거나 CREATEROLE이 있거나 superuser면 관리할 수 있다.
 pub fn overview(info: &PgTargetInfo, cluster: &ClusterSnapshot, now: i64) -> PgOverview {
-    let eval = Eval::for_cluster(cluster);
+    // 역할 요약과 같은 `Eval`을 쓴다
+    let index = Index::new(cluster);
     let login = cluster.roles.iter().find(|r| r.name == cluster.login_user);
-    let inherits_admin = eval.role(&cluster.login_user).inherited().iter().any(|i| i.role == RDS_SUPERUSER);
+    let inherits_admin = index.eval.role(&cluster.login_user).inherited().iter().any(|i| i.role == RDS_SUPERUSER);
     let can_manage = inherits_admin || login.is_some_and(|r| r.create_role || r.superuser);
     PgOverview {
         target: info.clone(),
@@ -198,7 +215,7 @@ pub fn overview(info: &PgTargetInfo, cluster: &ClusterSnapshot, now: i64) -> PgO
         server_version_num: cluster.version_num,
         password_encryption: cluster.password_encryption.clone(),
         fetched_at: cluster.fetched_at.clone(),
-        roles: role_summaries(cluster, now),
+        roles: index.summaries(now),
         databases: cluster.databases.iter().map(|d| PgDatabaseInfo { name: d.name.clone(), owner: d.owner.clone(), allow_conn: d.allow_conn }).collect(),
         can_manage,
         manage_reason: (!can_manage).then(|| MANAGE_REASON.to_string()),
@@ -285,7 +302,7 @@ pub fn database_view(cluster: &ClusterSnapshot, db: &DbSnapshot) -> PgDatabaseVi
         truncated: db.truncated,
         db_privileges,
         schemas,
-        cells: schema_cells(&ctx, &names).into_iter().map(Into::into).collect(),
+        cells: schema_cells(&eval, &ctx, &names).into_iter().map(Into::into).collect(),
         default_privileges: default_rows(&db.default_acls),
     }
 }
@@ -432,7 +449,8 @@ fn owned_objects(db: &DbSnapshot, role: &str) -> (Vec<PgObjectRef>, usize) {
 }
 
 fn role_database(cluster: &ClusterSnapshot, db: &DbSnapshot, role: &str) -> PgRoleDatabase {
-    let cells = schema_cells(&Ctx { cluster, db }, &[role]).into_iter().filter(shows_something).map(Into::into).collect();
+    let ctx = Ctx { cluster, db };
+    let cells = schema_cells(&Eval::new(&ctx), &ctx, &[role]).into_iter().filter(shows_something).map(Into::into).collect();
     let (owned, owned_omitted) = owned_objects(db, role);
     PgRoleDatabase { database: db.database.clone(), loaded: true, cells, owned, owned_omitted }
 }
@@ -442,6 +460,8 @@ fn role_database(cluster: &ClusterSnapshot, db: &DbSnapshot, role: &str) -> PgRo
 pub fn role_view(cluster: &ClusterSnapshot, loaded: &[&DbSnapshot], role: &str, now: i64, own_pids: &[i32]) -> Result<PgRoleView, AppError> {
     let index = Index::new(cluster);
     let rec = cluster.roles.iter().find(|r| r.name == role).ok_or_else(|| unknown_role(role))?;
+    // 이 역할의 계산은 한 번만 만들어 요약과 `setRoleOnly`가 나눠 쓴다
+    let view = index.eval.role(role);
 
     let mut settings: Vec<PgRoleSetting> = cluster
         .settings
@@ -470,12 +490,12 @@ pub fn role_view(cluster: &ClusterSnapshot, loaded: &[&DbSnapshot], role: &str, 
         .collect();
 
     Ok(PgRoleView {
-        summary: index.summary(rec, now),
+        summary: index.summary_of(rec, &view, now),
         settings,
         members,
         databases,
         sessions: cluster.sessions.iter().filter(|s| s.role.as_deref() == Some(role)).map(|s| session_view(s, own_pids)).collect(),
-        set_role_only: index.eval.role(role).set_role_only(),
+        set_role_only: view.set_role_only(),
     })
 }
 
