@@ -31,6 +31,9 @@
   - TLS: "서버 인증서를 확인하지 못했어요"
   - Database connect: `${database}에 연결하지 못했어요: ${reason}`
   - Not opened yet: "먼저 연결해 주세요"
+  - Read timeout (SQLSTATE 57014): "질의가 30초 안에 끝나지 않았어요. 잠시 뒤 다시 읽어 주세요"
+  - Connection closed during a read (network kind): "데이터베이스 연결이 끊겼어요. 다시 읽으면 새로 연결해요"
+  - Sessions footnote, shown when another user's session has its details hidden: "빈 칸은 이 DB 사용자에게 보이지 않는 정보예요. 다른 사용자의 세션을 자세히 보려면 pg_read_all_stats 권한이 필요해요"
   - Truncated: "객체가 많아 일부만 읽었어요"
   - Unusable cell: "권한은 있지만 실제로는 못 써요", with reasons "CONNECT 없음" and "USAGE 없음"
   - RLS: "행 수준 보안 켜짐"
