@@ -14,6 +14,7 @@ import { PrincipalList } from "./PrincipalList";
 import { refreshIam, useIamOverview } from "./queries";
 import { policyNameFromId, policyRoute, principalRoute, routeForFocus, VIEW_LABEL, type IamRoute, type IamView } from "./route";
 import type { IamOverview, PrincipalKind } from "./types";
+import { useAddedColumns } from "./useAddedColumns";
 import { useAssignmentDraft } from "./useAssignmentDraft";
 import { useIamChange } from "./useIamChange";
 import { useIamHistory } from "./useIamHistory";
@@ -68,6 +69,8 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
   // 할당 표의 장바구니. 이 탭이 들고 있어서 IAM 안의 다른 화면을 보고 돌아와도 남고, 프로필을 바꾸면 비워진다.
   // 개요가 아직 없는 동안에도 부르므로 아래 early return보다 앞에 둔다.
   const draft = useAssignmentDraft(profile, ov);
+  // 열 추가로 더한 정책도 같다: 이 탭이 프로필마다 들고 있어서, 머리를 눌러 상세를 보고 뒤로 와도 열이 남는다.
+  const added = useAddedColumns(profile);
   // 목록마다 마지막으로 고른 행. 상세를 보고 돌아와도 그대로 남는다.
   const [selected, setSelected] = useState<Partial<Record<IamView, string>>>({});
 
@@ -195,13 +198,15 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
       </section>
     );
   } else if (route.view === "assignments") {
-    // key: 열 추가로 더한 정책은 프로필마다 새로 시작한다
+    // key: 프로필이 바뀌면 종류 칩 같은 화면 안의 상태도 새로 시작한다
     body = (
       <Assignments
         key={profile}
         profile={profile}
         overview={ov}
         draft={draft}
+        extra={added.arns}
+        onAddColumn={added.add}
         tab={route.tab === "members" ? "members" : "policies"}
         onTab={(tab) => remember({ tab })}
         onOpen={navigate}

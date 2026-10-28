@@ -15,6 +15,9 @@ interface Props {
   overview: IamOverview;
   /** 장바구니. IAM 탭이 들고 있어서 이 화면을 떠났다 돌아와도 남는다 */
   draft: Draft;
+  /** 열 추가로 더한 정책의 ARN. 장바구니처럼 IAM 탭이 프로필마다 들고 있어서 이 화면을 떠났다 돌아와도 남는다 */
+  extra: string[];
+  onAddColumn: (arn: string) => void;
   tab: AssignmentTab;
   onTab: (tab: AssignmentTab) => void;
   onOpen: (route: IamRoute) => void;
@@ -46,10 +49,8 @@ const summaryOf = (items: DraftItem[]) => (items.length === 1 ? `변경 1개 · 
  * 파일 이름이 Assignments.tsx가 아닌 이유: assignments.ts(순수 로직)와 대소문자만 다르면, 대소문자를 가리지 않는
  * 파일 시스템(macOS)에서 "./Assignments"가 그 파일로 풀려 버린다.
  */
-export function Assignments({ profile, overview, draft, tab, onTab, onOpen, onPreview, filter }: Props) {
+export function Assignments({ profile, overview, draft, extra, onAddColumn, tab, onTab, onOpen, onPreview, filter }: Props) {
   const [kinds, setKinds] = useState<Record<PrincipalKind, boolean>>({ user: true, group: true, role: true });
-  // 열 추가로 더한 정책. 이 화면이 사라지면 함께 사라진다(IamTab이 프로필마다 새로 만든다)
-  const [extra, setExtra] = useState<string[]>([]);
   const [adding, setAdding] = useState(false);
   const [matching, setMatching] = useState<PrincipalSummary | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -60,7 +61,7 @@ export function Assignments({ profile, overview, draft, tab, onTab, onOpen, onPr
     return pool.filter((p) => (tab === "members" || kinds[p.kind]) && (!f || p.name.toLowerCase().includes(f)));
   }, [pool, tab, kinds, filter]);
 
-  // 장바구니에 붙이기가 담긴 정책은 열로 더한 적이 없어도 표에 보인다(화면을 떠났다 돌아온 경우에도 담긴 변경이 안 보이면 안 된다)
+  // 장바구니에 붙이기가 담긴 정책은 열로 더한 적이 없어도 표에 보인다(개요를 다시 읽어 그 정책을 가진 주체가 없어져도 담긴 변경이 안 보이면 안 된다)
   const queued = useMemo(() => draft.items.flatMap((d) => (d.change.op === "attachPolicy" ? [d.change.policyArn] : [])), [draft.items]);
   const columns = useMemo(() => (tab === "policies" ? policyColumns(overview, [...extra, ...queued]) : groupColumns(overview)), [overview, tab, extra, queued]);
   const shown = useMemo(() => columns.map((c) => c.id), [columns]);
@@ -139,7 +140,7 @@ export function Assignments({ profile, overview, draft, tab, onTab, onOpen, onPr
           disabledReason="이미 열에 있어요"
           onClose={() => setAdding(false)}
           onPick={(policy) => {
-            setExtra((list) => (list.includes(policy.arn) ? list : [...list, policy.arn]));
+            onAddColumn(policy.arn);
             setAdding(false);
           }}
         />

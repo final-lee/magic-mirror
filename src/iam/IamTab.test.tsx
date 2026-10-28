@@ -29,7 +29,7 @@ import {
   whoCanResult,
 } from "./fixtures";
 import { IamTab } from "./IamTab";
-import type { IamChange } from "./types";
+import type { IamChange, PolicyRef } from "./types";
 
 vi.mock("./api", () => ({
   iamApi: {
@@ -828,6 +828,75 @@ describe("assignments", () => {
     update({ profile: "dev" });
     expect(screen.getByRole("grid", { name: "할당 표" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /· legacy-unused: / })).not.toBeInTheDocument();
+  });
+
+  const legacyRef: PolicyRef = { arn: "arn:aws:iam::123456789012:policy/legacy-unused", name: "legacy-unused", scope: "local", description: null, badges: [] };
+  const addColumn = async (name: RegExp) => {
+    fireEvent.click(screen.getByRole("button", { name: "열 추가" }));
+    fireEvent.click(await screen.findByRole("option", { name }));
+  };
+  const headNames = () =>
+    within(screen.getByRole("grid", { name: "할당 표" }))
+      .getAllByRole("columnheader")
+      .flatMap((h) => within(h).queryAllByRole("button").map((b) => b.textContent));
+
+  test("a column that was added is still there after opening a header and pressing back", async () => {
+    m.listPolicies.mockResolvedValue([legacyRef]);
+    await openAssignments();
+    await addColumn(/legacy-unused/);
+    expect(cell("bob", "legacy-unused")).toHaveAccessibleName("bob · legacy-unused: 없음");
+
+    fireEvent.click(screen.getByRole("button", { name: "AdministratorAccess" }));
+    expect(await screen.findByRole("heading", { name: "app-deploy" })).toBeInTheDocument();
+    expect(screen.queryByRole("grid", { name: "할당 표" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
+    expect(await screen.findByRole("grid", { name: "할당 표" })).toBeInTheDocument();
+    expect(cell("bob", "legacy-unused")).toHaveAccessibleName("bob · legacy-unused: 없음");
+  });
+
+  test("the added columns are also kept, in the order they were added, over a visit to another menu item", async () => {
+    m.listPolicies.mockResolvedValue([legacyRef, { arn: "arn:aws:iam::aws:policy/AmazonS3FullAccess", name: "AmazonS3FullAccess", scope: "aws", description: null, badges: [] }]);
+    await openAssignments();
+    await addColumn(/legacy-unused/);
+    await addColumn(/AmazonS3FullAccess/);
+    const all = ["AdministratorAccess", "ReadOnlyAccess", "app-deploy", "legacy-unused", "AmazonS3FullAccess"];
+    expect(headNames()).toEqual(all);
+
+    fireEvent.click(menu().getByRole("button", { name: /그룹/ }));
+    expect(screen.queryByRole("grid", { name: "할당 표" })).not.toBeInTheDocument();
+    fireEvent.click(menu().getByRole("button", { name: /할당/ }));
+    expect(await screen.findByRole("grid", { name: "할당 표" })).toBeInTheDocument();
+    expect(headNames()).toEqual(all);
+  });
+
+  test("a column added under the second profile is kept over a visit, and the first profile's list is not brought back", async () => {
+    m.listPolicies.mockResolvedValue([legacyRef]);
+    const { update } = await openAssignments();
+    await addColumn(/legacy-unused/);
+    update({ profile: "dev" });
+    await waitFor(() => expect(m.overview).toHaveBeenCalledWith("dev", false));
+    expect(await screen.findByRole("grid", { name: "할당 표" })).toBeInTheDocument();
+    expect(headNames()).toEqual(["AdministratorAccess", "ReadOnlyAccess", "app-deploy"]);
+
+    await addColumn(/legacy-unused/);
+    fireEvent.click(screen.getByRole("button", { name: "AdministratorAccess" }));
+    expect(await screen.findByRole("heading", { name: "app-deploy" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
+    expect(await screen.findByRole("grid", { name: "할당 표" })).toBeInTheDocument();
+    expect(headNames()).toEqual(["AdministratorAccess", "ReadOnlyAccess", "app-deploy", "legacy-unused"]);
+  });
+
+  test("a profile that is already loaded starts with the kind chips back on", async () => {
+    const { update } = await openAssignments();
+    update({ profile: "dev" });
+    await waitFor(() => expect(m.overview).toHaveBeenCalledWith("dev", false));
+    expect(await screen.findByRole("grid", { name: "할당 표" })).toBeInTheDocument();
+    update({ profile: "prod" }); // 이미 불러온 개요라서 불러오는 화면을 거치지 않는다
+    fireEvent.click(screen.getByRole("checkbox", { name: "사용자" }));
+    expect(screen.queryByRole("button", { name: /^bob · / })).not.toBeInTheDocument();
+    update({ profile: "dev" });
+    expect(screen.getByRole("checkbox", { name: "사용자" })).toBeChecked();
+    expect(cell("bob", "ReadOnlyAccess")).toBeInTheDocument();
   });
 
   test("the headers open the policy and the principal, and back restores the tab that was open", async () => {
