@@ -42,6 +42,7 @@
   - Role chips: "사용자", "그룹", and the toggle "시스템 역할 보기"
   - Badges: "관리자급", "IAM 인증", "CREATEROLE", "CREATEDB", "BYPASSRLS", "REPLICATION", "만료됨", "곧 만료", "앱이 로그인한 역할"
   - Default-privilege sentence: `${creator} 역할이 ${schemaLabel}에 새 ${objectLabel}을(를) 만들면 ${grantee} 역할이 ${privileges} 권한을 받아요`. `schemaLabel` is the schema name or "모든 스키마". `objectLabel` is "테이블", "시퀀스", "함수", "타입" or "스키마". Render the 을/를 particle with the same Hangul final-consonant rule as `objectParticle` in `src/iam/previewParts.tsx`. `PUBLIC` reads as "모든 역할(PUBLIC)", and for it the sentence ends `모든 역할(PUBLIC)이 ${privileges} 권한을 받아요` (no second "역할").
+  - Default-privilege row with no grants: `${creator} 역할이 ${schemaLabel}에 새 ${objectLabel}을(를) 만들어도 아무 역할도 권한을 받지 않아요`
   - Built-in defaults note: "PostgreSQL 기본값: 함수는 모든 역할(PUBLIC)이 EXECUTE, 타입은 USAGE를 받아요. 기본 권한을 바꾸지 않았다면 그대로예요"
 - **Limits:**
   - Connect timeout: 10 s.
