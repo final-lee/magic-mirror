@@ -177,11 +177,13 @@ pg_close(target: PgTarget): void                                  // 탭을 닫�
 pg_preview(target: PgTarget, change: PgChange): PgPreview
 pg_apply(target: PgTarget, change: PgChange, confirmText: string | null, undoOf: string | null): PgApplyResult  // { logId, password?, notes? }
 pg_preview_batch(target: PgTarget, database: string, changes: PgChange[]): PgBatchPreview
-pg_apply_batch(target: PgTarget, database: string, changes: PgChange[], confirmText: string | null): PgBatchResult
+pg_apply_batch(target: PgTarget, database: string, changes: PgChange[], confirmText: string | null, undoOf: string[] | null): PgBatchResult
+pg_preset(target: PgTarget, database: string, preset: PgPresetKind, schemas: string[]): PgPresetSuggestion   // 같은 권한을 가진 그룹, 제안할 이름, 기본 권한을 줄 역할
 pg_drop_plan(target: PgTarget, role: string, reassignTo: string): PgDropPlan
 pg_apply_drop(target: PgTarget, role: string, reassignTo: string, confirmText: string): PgDropResult
 pg_change_log(): PgChangeLogEntry[]
-pg_undo(logId: string): PgChange
+pg_undo(logId: string): PgUndo              // { database, changes, undoOf }: 만든 역할을 되돌리려면 변경 여럿이 한 트랜잭션에 들어가서 목록으로 돌려준다
+pg_undo_batch(batchId: string): PgUndo      // 묶음 전체(IAM처럼)
 ```
 - `password`는 `pg_apply` 결과에만 한 번 들어간다. 다른 어떤 명령·기록·오류에도 비밀번호와 토큰이 들어가지 않는다.
 - 세부 타입(`PgOverview`, `PgChange` 등)은 구현 계획에서 정하고, IAM 계약처럼 필드는 더하기만 한다.
