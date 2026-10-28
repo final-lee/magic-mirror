@@ -93,7 +93,7 @@ export interface PgAttributes {
   connectionLimit: number;       // -1 = 제한 없음
   validUntil: string | null;     // ISO 8601 UTC, null = 없음
 }
-export interface PgMembership { group: string; inherit: boolean; admin: boolean }
+export interface PgMembership { group: string; inherit: boolean; admin: boolean; set: boolean }   // set: SET ROLE works through this link (always true before PG16)
 export interface PgRoleSummary {
   name: string; kind: PgRoleKind; system: boolean; attributes: PgAttributes;
   memberOf: PgMembership[]; memberCount: number; sessionCount: number;
@@ -141,11 +141,11 @@ export interface PgSession {
   applicationName: string; state: string | null; backendStart: string | null; queryStart: string | null;
   waitEvent: string | null; own: boolean;
 }
-export interface PgRoleDatabase { database: string; loaded: boolean; cells: PgSchemaCell[]; owned: PgObjectRef[]; ownedOmitted: number }
+export interface PgRoleDatabase { database: string; loaded: boolean; truncated: boolean; cells: PgSchemaCell[]; owned: PgObjectRef[]; ownedOmitted: number }
 export interface PgRoleView {
   summary: PgRoleSummary;
-  settings: { database: string | null; setting: string }[];
-  members: { role: string; inherit: boolean; admin: boolean }[];
+  settings: { database: string | null; setting: string; allRoles: boolean }[];   // allRoles: the record has no role (ALTER DATABASE … SET / ALTER ROLE ALL)
+  members: { role: string; inherit: boolean; admin: boolean; set: boolean }[];
   databases: PgRoleDatabase[];     // 모든 연결 가능한 데이터베이스. 아직 안 읽은 곳은 loaded=false, 나머지 비움
   sessions: PgSession[];
   setRoleOnly: string[];           // 상속하지 않는 구성원 관계로만 닿는 역할
@@ -153,7 +153,7 @@ export interface PgRoleView {
 export type PgFindingKind = "publicSchemaCreate" | "publicObjectGrant" | "rdsSuperuser" | "createRole" | "bypassRls" | "expiringLogin" | "emptyLogin" | "defaultPrivilegeGap" | "securityDefinerPath" | "md5Encryption";
 export interface PgFinding { database: string | null; role: string | null; object: PgObjectRef | null; detail: string }
 export interface PgFindingGroup { kind: PgFindingKind; title: string; level: "high" | "medium" | "low"; items: PgFinding[] }
-export interface PgFindings { groups: PgFindingGroup[]; skipped: { database: string; reason: string }[]; fetchedAt: string }
+export interface PgFindings { groups: PgFindingGroup[]; skipped: { database: string; reason: string }[]; truncated: string[]; fetchedAt: string }   // truncated: databases read only in part
 ```
 
 Commands:
