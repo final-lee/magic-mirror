@@ -561,6 +561,7 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .pg-login h3 { margin: 0; font-size: 15px; }
 .pg-login p { margin: 0; color: var(--dim); font-size: 12px; }
 .pg-login .field-input:focus { border-color: var(--accent); outline: none; }
+.pg-login .pg-login-error { color: var(--red); }
 .pg-login-foot { display: flex; justify-content: flex-end; gap: 8px; }
 .pg-login-foot .btn { margin-top: 0; }
 
@@ -594,4 +595,5 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .pg-schema { font-weight: 500; }
 .pg-warn { margin-top: 2px; font-size: 11px; color: var(--yellow); }
 .pg-more { margin: 0; padding: 6px 16px 4px; font-size: 12px; }
+.pg-counts { margin: 0; padding: 2px 16px 6px; font-size: 12px; }
 .pg-own { margin-left: 6px; }
