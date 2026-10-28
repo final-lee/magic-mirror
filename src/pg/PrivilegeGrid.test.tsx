@@ -1,0 +1,811 @@
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { StrictMode, useState } from "react";
+import { renderWithClient } from "../test/utils";
+import { pgApi } from "./api";
+import { ROLES, attributes, pgTarget, role, sampleCellDetail, sampleDatabaseView, sampleOverview } from "./fixtures";
+import { PrivilegeGrid, ROW_H } from "./PrivilegeGrid";
+import { pgKeys } from "./queries";
+import { DEFAULT_KINDS, type RoleKindsValue } from "./RoleKinds";
+import type { PgDatabaseView, PgDbPrivilegeRow, PgRoleSummary, PgSchemaCell } from "./types";
+
+vi.mock("./api", () => ({ pgApi: { database: vi.fn(), cell: vi.fn() } }));
+vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
+
+const m = vi.mocked(pgApi);
+
+const overview = sampleOverview();
+
+type Props = Partial<React.ComponentProps<typeof PrivilegeGrid>> & { initialKinds?: RoleKindsValue };
+
+/** 칩 상태와 고른 데이터베이스는 PgTab이 들고 있다(경로에 기억한다). 여기서는 같은 일을 하는 작은 부모를 쓴다. */
+function Harness({ initialKinds = DEFAULT_KINDS, database: initialDatabase, onDatabase, ...rest }: Props) {
+  const [kinds, setKinds] = useState(initialKinds);
+  const [database, setDatabase] = useState(initialDatabase);
+  return (
+    <PrivilegeGrid
+      target={pgTarget}
+      overview={overview}
+      database={database}
+      onDatabase={(next) => {
+        setDatabase(next);
+        onDatabase?.(next);
+      }}
+      filter=""
+      kinds={kinds}
+      onKinds={setKinds}
+      {...rest}
+    />
+  );
+}
+
+function setup(props: Props = {}) {
+  const onDatabase = vi.fn();
+  const utils = renderWithClient(<Harness onDatabase={onDatabase} {...props} />);
+  const update = (next: Props) =>
+    utils.rerender(
+      <QueryClientProvider client={utils.qc as QueryClient}>
+        <Harness onDatabase={onDatabase} {...props} {...next} />
+      </QueryClientProvider>,
+    );
+  return { onDatabase, update, ...utils };
+}
+
+const grid = () => screen.getByRole("grid", { name: "권한 표" });
+const scroller = () => grid().closest(".pg-scroll") as HTMLElement;
+/** "역할 · 스키마: …"라는 이름의 칸(버튼) */
+const cellOf = (roleName: string, schema: string) => within(grid()).getByRole("button", { name: (n) => n.startsWith(`${roleName} · ${schema}: `) });
+const cellAt = (roleName: string, schema: string) => within(grid()).queryByRole("button", { name: (n) => n.startsWith(`${roleName} · ${schema}: `) });
+const rowOf = (roleName: string) => within(grid()).getByRole("rowheader", { name: roleName }).closest("tr") as HTMLElement;
+const dbCell = (roleName: string) => within(rowOf(roleName)).getByRole("gridcell", { name: (n) => n.startsWith(`${roleName} · 데이터베이스: `) });
+const rowHeads = () => within(grid()).getAllByRole("rowheader").map((h) => h.textContent);
+const columnHeads = () => within(grid()).getAllByRole("columnheader");
+const picker = () => screen.getByRole("combobox", { name: "데이터베이스" });
+const panel = () => screen.getByRole("complementary");
+/** 데이터가 와서 표가 그려질 때까지 기다린다 */
+const loaded = () => screen.findByRole("grid", { name: "권한 표" });
+
+const emptyCell = (roleName: string, schema: string): PgSchemaCell => ({
+  role: roleName,
+  schema,
+  usage: false,
+  create: false,
+  read: "none",
+  write: "none",
+  inheritedOnly: false,
+  unusable: null,
+});
+const dbRow = (roleName: string): PgDbPrivilegeRow => ({ role: roleName, connect: true, create: false, temp: true });
+
+/** 역할 목록과 스키마 이름에서 만든 데이터베이스 보기: 모든 칸이 비어 있다 */
+function viewOf(roles: PgRoleSummary[], schemas: string[], extra: Partial<PgDatabaseView> = {}): PgDatabaseView {
+  return sampleDatabaseView({
+    dbPrivileges: roles.map((r) => dbRow(r.name)),
+    schemas: schemas.map((name) => ({ name, owner: "app_owner", tableCount: 1 })),
+    cells: roles.flatMap((r) => schemas.map((s) => emptyCell(r.name, s))),
+    ...extra,
+  });
+}
+
+const manyUsers = (n = 300) => Array.from({ length: n }, (_, i) => role(`user-${String(i).padStart(3, "0")}`, { attributes: attributes({ login: true }) }));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  m.database.mockImplementation(async (_t, database) => sampleDatabaseView({ database }));
+  m.cell.mockImplementation(async (_t, _d, roleName, schema) => sampleCellDetail({ role: roleName, schema }));
+});
+
+describe("loading", () => {
+  test("reads the default database of the target, without force, and says so until it arrives", async () => {
+    let resolve!: (v: PgDatabaseView) => void;
+    m.database.mockReturnValue(new Promise((r) => (resolve = r)));
+    setup();
+    expect(screen.getByText("불러오는 중…")).toBeInTheDocument();
+    expect(m.database).toHaveBeenCalledTimes(1);
+    expect(m.database).toHaveBeenCalledWith(pgTarget, "orders", false);
+    // 읽는 동안에도 데이터베이스는 바꿀 수 있고 칩도 보인다
+    expect(picker()).toHaveValue("orders");
+    expect(screen.getByRole("checkbox", { name: "시스템 역할 보기" })).toBeInTheDocument();
+    await act(async () => resolve(sampleDatabaseView()));
+    expect(await loaded()).toBeInTheDocument();
+    expect(screen.queryByText("불러오는 중…")).not.toBeInTheDocument();
+  });
+
+  test("shows why it failed through the error box, with the picker still there, and 다시 시도 reads it again", async () => {
+    m.database.mockRejectedValueOnce({ kind: "other", message: '"orders"에 연결하지 못했어요: connection refused' });
+    setup();
+    expect(await screen.findByText('"orders"에 연결하지 못했어요: connection refused')).toBeInTheDocument();
+    expect(picker()).toBeInTheDocument();
+    expect(screen.queryByRole("grid")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+    // 다시 시도는 대상 전체를 다시 읽는다(PgError). 쓰는 쪽이 없는 개요와 대상은 건너뛰고, 이 화면의 읽기는 다시 돈다
+    await waitFor(() => expect(m.database).toHaveBeenCalledTimes(2));
+    expect(await loaded()).toBeInTheDocument();
+  });
+
+  test("a read that fails after the grid was shown keeps it on screen with the error above", async () => {
+    const { qc } = setup();
+    await loaded();
+    m.database.mockRejectedValueOnce({ kind: "network", message: "끊겼어요" });
+    await act(async () => {
+      await qc.invalidateQueries({ queryKey: pgKeys.database(pgTarget, "orders") });
+    });
+    expect(await screen.findByText("네트워크 오류: 끊겼어요")).toBeInTheDocument();
+    expect(grid()).toBeInTheDocument();
+  });
+});
+
+describe("the database", () => {
+  test("is chosen from the databases that accept connections, and starts at the default one of the target", async () => {
+    setup();
+    await loaded();
+    expect(within(picker()).getAllByRole("option").map((o) => o.textContent)).toEqual(["analytics", "orders", "postgres"]);
+    expect(picker()).toHaveValue("orders");
+  });
+
+  test("a database remembered in the route is the one that is read", async () => {
+    setup({ database: "analytics" });
+    await loaded();
+    expect(picker()).toHaveValue("analytics");
+    expect(m.database).toHaveBeenCalledTimes(1);
+    expect(m.database).toHaveBeenCalledWith(pgTarget, "analytics", false);
+  });
+
+  test("a remembered database that no longer accepts connections falls back to the default one", async () => {
+    setup({ database: "legacy_archive" });
+    await loaded();
+    expect(picker()).toHaveValue("orders");
+    expect(m.database).toHaveBeenCalledWith(pgTarget, "orders", false);
+    expect(m.database).not.toHaveBeenCalledWith(pgTarget, "legacy_archive", expect.anything());
+  });
+
+  test("choosing another one tells the screen that remembers it, and reads that database", async () => {
+    const { onDatabase } = setup();
+    await loaded();
+    fireEvent.change(picker(), { target: { value: "postgres" } });
+    expect(onDatabase).toHaveBeenCalledTimes(1);
+    expect(onDatabase).toHaveBeenCalledWith("postgres");
+    await waitFor(() => expect(m.database).toHaveBeenCalledWith(pgTarget, "postgres", false));
+    expect(picker()).toHaveValue("postgres");
+  });
+
+  test("while the other database is being read the old grid is gone, and the picker stays", async () => {
+    setup();
+    await loaded();
+    m.database.mockImplementation((_t, database) => (database === "analytics" ? new Promise(() => {}) : Promise.resolve(sampleDatabaseView({ database }))));
+    fireEvent.change(picker(), { target: { value: "analytics" } });
+    expect(await screen.findByText("불러오는 중…")).toBeInTheDocument();
+    expect(screen.queryByRole("grid")).not.toBeInTheDocument();
+    expect(picker()).toHaveValue("analytics");
+  });
+
+  test("each database has its own grid: the schemas are the ones of the database that was chosen", async () => {
+    m.database.mockImplementation(async (_t, database) =>
+      database === "analytics" ? viewOf(ROLES, ["reports"], { database }) : sampleDatabaseView({ database }),
+    );
+    setup();
+    await loaded();
+    expect(columnHeads().map((h) => h.querySelector(".pg-colname")?.textContent)).toEqual(["역할", "데이터베이스", "app", "audit"]);
+    fireEvent.change(picker(), { target: { value: "analytics" } });
+    await waitFor(() => expect(cellAt("alice", "reports")).toBeInTheDocument());
+    expect(columnHeads().map((h) => h.querySelector(".pg-colname")?.textContent)).toEqual(["역할", "데이터베이스", "reports"]);
+  });
+
+  test("a cluster with no database to connect to says so, and reads nothing", () => {
+    setup({ overview: sampleOverview({ databases: [{ name: "legacy_archive", owner: "app_owner", allowConn: false }] }) });
+    expect(screen.getByText("연결할 수 있는 데이터베이스가 없어요")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "데이터베이스" })).not.toBeInTheDocument();
+    expect(m.database).not.toHaveBeenCalled();
+  });
+});
+
+describe("the rows", () => {
+  test("are the users and then the groups, with how many there are, and no system roles", async () => {
+    setup();
+    await loaded();
+    expect(rowHeads()).toEqual(["사용자 5", "alice", "app_owner", "bob", "iam_admin", "postgres", "그룹 2", "app_read", "app_write"]);
+  });
+
+  test("keep to name order within a kind, whatever order the roles come in", async () => {
+    setup({ overview: sampleOverview({ roles: [...ROLES].reverse() }) });
+    await loaded();
+    expect(rowHeads()).toEqual(["사용자 5", "alice", "app_owner", "bob", "iam_admin", "postgres", "그룹 2", "app_read", "app_write"]);
+  });
+
+  test("have the same chips as the role list: each kind can be hidden", async () => {
+    setup();
+    await loaded();
+    expect(screen.getByRole("group", { name: "종류" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "사용자" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "그룹" })).toBeChecked();
+    fireEvent.click(screen.getByRole("checkbox", { name: "사용자" }));
+    expect(rowHeads()).toEqual(["그룹 2", "app_read", "app_write"]);
+    fireEvent.click(screen.getByRole("checkbox", { name: "사용자" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "그룹" }));
+    expect(rowHeads()).toEqual(["사용자 5", "alice", "app_owner", "bob", "iam_admin", "postgres"]);
+  });
+
+  test("have the same toggle as the role list: the system roles come in as groups", async () => {
+    setup();
+    await loaded();
+    expect(screen.getByRole("checkbox", { name: "시스템 역할 보기" })).not.toBeChecked();
+    fireEvent.click(screen.getByRole("checkbox", { name: "시스템 역할 보기" }));
+    expect(rowHeads()).toEqual(["사용자 5", "alice", "app_owner", "bob", "iam_admin", "postgres", "그룹 5", "app_read", "app_write", "pg_read_all_data", "rds_iam", "rds_superuser"]);
+    fireEvent.click(screen.getByRole("checkbox", { name: "시스템 역할 보기" }));
+    expect(screen.queryByText("rds_superuser")).not.toBeInTheDocument();
+  });
+
+  test("the toolbar filter matches the role names, ignoring case and the spaces around it", async () => {
+    const { update } = setup({ filter: "APP_" });
+    await loaded();
+    expect(rowHeads()).toEqual(["사용자 1", "app_owner", "그룹 2", "app_read", "app_write"]);
+    update({ filter: "  ali  " });
+    expect(rowHeads()).toEqual(["사용자 1", "alice"]);
+  });
+
+  test("a filter that matches nothing says so, and keeps the chips and the picker", async () => {
+    setup({ filter: "zzz" });
+    await loaded();
+    expect(screen.getByText("조건에 맞는 역할이 없어요")).toBeInTheDocument();
+    expect(within(grid()).queryAllByRole("rowheader")).toHaveLength(0);
+    expect(screen.getByRole("checkbox", { name: "사용자" })).toBeInTheDocument();
+    expect(picker()).toBeInTheDocument();
+  });
+
+  test("a cluster without roles says so", async () => {
+    setup({ overview: sampleOverview({ roles: [] }) });
+    await loaded();
+    expect(screen.getByText("역할이 없어요")).toBeInTheDocument();
+  });
+
+  test("a role the database view has nothing on shows empty cells", async () => {
+    setup({ overview: sampleOverview({ roles: [...ROLES, role("newcomer", { attributes: attributes({ login: true }) })] }) });
+    await loaded();
+    expect(cellOf("newcomer", "app")).toHaveAccessibleName("newcomer · app: 사용 x, 만들기 x, 읽기 없음, 쓰기 없음");
+    expect(dbCell("newcomer")).toHaveAccessibleName("newcomer · 데이터베이스: CONNECT x, CREATE x, TEMP x");
+  });
+});
+
+describe("the columns", () => {
+  test("are the role, then the database, then one per schema in name order", async () => {
+    m.database.mockResolvedValue(viewOf(ROLES, ["zeta", "app", "audit"]));
+    setup();
+    await loaded();
+    const heads = columnHeads();
+    expect(heads).toHaveLength(5);
+    expect(heads[0]).toHaveAccessibleName("역할");
+    expect(heads[1]).toHaveAccessibleName("데이터베이스");
+    expect(heads.slice(2).map((h) => h.querySelector(".pg-colname")?.textContent)).toEqual(["app", "audit", "zeta"]);
+    expect(heads[2]).toHaveAccessibleName("app");
+    expect(grid()).toHaveAttribute("aria-colcount", "5");
+  });
+
+  test("tell what the marks of a cell are, for those who look at them", async () => {
+    setup();
+    await loaded();
+    const heads = columnHeads();
+    expect(within(heads[1]).getByText("CONNECT")).toBeInTheDocument();
+    expect(within(heads[1]).getByText("CREATE")).toBeInTheDocument();
+    expect(within(heads[1]).getByText("TEMP")).toBeInTheDocument();
+    for (const head of heads.slice(2)) {
+      for (const word of ["사용", "만들기", "읽기", "쓰기"]) expect(within(head).getByText(word)).toBeInTheDocument();
+    }
+  });
+
+  test("a database without schemas shows the database column alone, and says so", async () => {
+    m.database.mockResolvedValue(viewOf(ROLES, []));
+    setup();
+    await loaded();
+    expect(columnHeads().map((h) => h.querySelector(".pg-colname")?.textContent)).toEqual(["역할", "데이터베이스"]);
+    expect(screen.getByText("스키마가 없어요")).toBeInTheDocument();
+    expect(dbCell("alice")).toBeInTheDocument();
+  });
+});
+
+describe("the database column", () => {
+  test("shows CONNECT, CREATE and TEMP of every role", async () => {
+    setup();
+    await loaded();
+    expect(dbCell("alice")).toHaveAccessibleName("alice · 데이터베이스: CONNECT o, CREATE x, TEMP o");
+    expect(dbCell("app_owner")).toHaveAccessibleName("app_owner · 데이터베이스: CONNECT o, CREATE o, TEMP o");
+    expect(dbCell("bob")).toHaveAccessibleName("bob · 데이터베이스: CONNECT x, CREATE x, TEMP o");
+  });
+
+  test("draws them as ● and ○ in that order", async () => {
+    setup();
+    await loaded();
+    expect(dbCell("alice")).toHaveTextContent(/^●○●$/);
+    expect(dbCell("app_owner")).toHaveTextContent(/^●●●$/);
+    expect(dbCell("bob")).toHaveTextContent(/^○○●$/);
+  });
+});
+
+describe("a cell", () => {
+  test("has four marks, and its name tells each of them", async () => {
+    setup();
+    await loaded();
+    expect(cellOf("alice", "app")).toHaveAccessibleName("alice · app: 사용 o, 만들기 x, 읽기 모든 테이블, 쓰기 일부 테이블");
+    expect(cellOf("alice", "audit")).toHaveAccessibleName("alice · audit: 사용 x, 만들기 x, 읽기 없음, 쓰기 없음");
+    expect(cellOf("app_owner", "app")).toHaveAccessibleName("app_owner · app: 사용 o, 만들기 o, 읽기 모든 테이블, 쓰기 모든 테이블");
+    expect(cellOf("app_read", "app")).toHaveAccessibleName("app_read · app: 사용 o, 만들기 x, 읽기 모든 테이블, 쓰기 없음");
+    expect(cellOf("bob", "app")).toHaveAccessibleName("bob · app: 사용 x, 만들기 x, 읽기 일부 테이블, 쓰기 없음");
+  });
+
+  test("draws the marks as ●, ◐ and ○: all, some, none", async () => {
+    setup();
+    await loaded();
+    // 사용 만들기 읽기 쓰기
+    expect(cellOf("alice", "app")).toHaveTextContent(/^●○●◐$/);
+    expect(cellOf("alice", "audit")).toHaveTextContent(/^○○○○$/);
+    expect(cellOf("app_owner", "app")).toHaveTextContent(/^●●●●$/);
+    expect(cellOf("app_read", "app")).toHaveTextContent(/^●○●○$/);
+  });
+
+  test("colours each mark by what it says: all, some or none", async () => {
+    setup();
+    await loaded();
+    const tones = (el: HTMLElement) => [...el.querySelectorAll(".pg-mark")].map((mark) => [...mark.classList].find((c) => c !== "pg-mark"));
+    expect(tones(cellOf("alice", "app"))).toEqual(["pg-all", "pg-none", "pg-all", "pg-some"]);
+    expect(tones(cellOf("alice", "audit"))).toEqual(["pg-none", "pg-none", "pg-none", "pg-none"]);
+    expect(tones(cellOf("app_owner", "app"))).toEqual(["pg-all", "pg-all", "pg-all", "pg-all"]);
+    expect(tones(dbCell("bob"))).toEqual(["pg-none", "pg-none", "pg-all"]);
+  });
+
+  test("is dimmed when everything it shows comes from groups or PUBLIC, and only then", async () => {
+    setup();
+    await loaded();
+    expect(cellOf("alice", "app")).toHaveClass("pg-dimmed");
+    expect(cellOf("iam_admin", "app")).toHaveClass("pg-dimmed");
+    expect(cellOf("alice", "app")).toHaveAttribute("title", "그룹·PUBLIC으로만 받음");
+    for (const [roleName, schema] of [
+      ["app_owner", "app"],
+      ["app_write", "app"],
+      ["app_read", "app"],
+      ["alice", "audit"],
+    ]) {
+      expect(cellOf(roleName, schema)).not.toHaveClass("pg-dimmed");
+      expect(cellOf(roleName, schema)).not.toHaveAttribute("title");
+    }
+  });
+
+  test("shows ⚠ and the reason when the privileges cannot really be used", async () => {
+    setup();
+    await loaded();
+    const bob = cellOf("bob", "app");
+    expect(bob).toHaveTextContent("⚠");
+    expect(bob).toHaveAttribute("title", "권한은 있지만 실제로는 못 써요 (CONNECT 없음)");
+    expect(within(grid()).getAllByText("⚠")).toHaveLength(1);
+    expect(cellOf("alice", "app")).not.toHaveTextContent("⚠");
+  });
+
+  test("tells the reason to those who do not see the ⚠, as the description of the cell", async () => {
+    setup();
+    await loaded();
+    const bob = cellOf("bob", "app");
+    expect(bob).toHaveAccessibleDescription("권한은 있지만 실제로는 못 써요 (CONNECT 없음)");
+    expect(bob).toHaveAccessibleName("bob · app: 사용 x, 만들기 x, 읽기 일부 테이블, 쓰기 없음"); // 이름은 그대로다
+    // 설명은 칸이 가리키는 글이다(title만으로도 설명은 읽히니, 가리키는 쪽까지 확인한다)
+    const why = bob.getAttribute("aria-describedby");
+    expect(why).toBeTruthy();
+    expect(document.getElementById(why!)).toHaveTextContent("권한은 있지만 실제로는 못 써요 (CONNECT 없음)");
+    expect(within(grid()).getAllByText(/실제로는 못 써요/)).toHaveLength(1); // 못 쓰는 칸만 말한다
+    expect(cellOf("app_owner", "app")).not.toHaveAttribute("aria-describedby");
+  });
+
+  test("says USAGE when that is what is missing", async () => {
+    const cells = sampleDatabaseView().cells.map((c) => (c.role === "alice" && c.schema === "audit" ? { ...c, read: "some" as const, unusable: "USAGE 없음" } : c));
+    m.database.mockResolvedValue(sampleDatabaseView({ cells }));
+    setup();
+    await loaded();
+    expect(cellOf("alice", "audit")).toHaveAttribute("title", "권한은 있지만 실제로는 못 써요 (USAGE 없음)");
+  });
+
+  test("a dimmed cell that cannot be used says both", async () => {
+    const cells = sampleDatabaseView().cells.map((c) => (c.role === "alice" && c.schema === "app" ? { ...c, unusable: "CONNECT 없음" } : c));
+    m.database.mockResolvedValue(sampleDatabaseView({ cells }));
+    setup();
+    await loaded();
+    expect(cellOf("alice", "app")).toHaveClass("pg-dimmed");
+    expect(cellOf("alice", "app")).toHaveAttribute("title", "그룹·PUBLIC으로만 받음 · 권한은 있지만 실제로는 못 써요 (CONNECT 없음)");
+  });
+
+  test("is a plain button in this phase: it only opens the detail", async () => {
+    setup();
+    await loaded();
+    expect(cellOf("alice", "app")).toHaveAttribute("type", "button");
+    expect(cellOf("alice", "app")).toBeEnabled();
+  });
+});
+
+describe("a truncated database", () => {
+  test("says so above the grid", async () => {
+    m.database.mockResolvedValue(sampleDatabaseView({ truncated: true }));
+    setup();
+    const note = await screen.findByText("객체가 많아 일부만 읽었어요");
+    expect(grid()).toBeInTheDocument();
+    expect(note.compareDocumentPosition(grid()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test("a complete one does not", async () => {
+    setup();
+    await loaded();
+    expect(screen.queryByText("객체가 많아 일부만 읽었어요")).not.toBeInTheDocument();
+  });
+});
+
+describe("the detail of a cell", () => {
+  test("opens beside the grid when the cell is clicked, for that role and schema of the database that is showing", async () => {
+    setup();
+    await loaded();
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    fireEvent.click(cellOf("alice", "app"));
+    expect(m.cell).toHaveBeenCalledWith(pgTarget, "orders", "alice", "app");
+    expect(panel()).toHaveAccessibleName("alice · app");
+    expect(await screen.findByText("app.customers")).toBeInTheDocument();
+    expect(grid()).toBeInTheDocument(); // 표는 그대로 있다
+  });
+
+  test("marks the cell it is for", async () => {
+    setup();
+    await loaded();
+    fireEvent.click(cellOf("alice", "app"));
+    const selected = within(grid()).getAllByRole("gridcell", { selected: true });
+    expect(selected).toHaveLength(1);
+    expect(within(selected[0]).getByRole("button")).toHaveAccessibleName(/^alice · app: /);
+  });
+
+  test("moves on to another cell when that one is clicked", async () => {
+    setup();
+    await loaded();
+    fireEvent.click(cellOf("alice", "app"));
+    await screen.findByText("app.customers");
+    fireEvent.click(cellOf("bob", "app"));
+    expect(m.cell).toHaveBeenCalledWith(pgTarget, "orders", "bob", "app");
+    expect(panel()).toHaveAccessibleName("bob · app");
+    expect(screen.getAllByRole("complementary")).toHaveLength(1);
+    expect(within(grid()).getAllByRole("gridcell", { selected: true })).toHaveLength(1);
+    // bob의 칸은 쓸 수 없는 칸이다
+    expect(within(panel()).getByText("권한은 있지만 실제로는 못 써요 (CONNECT 없음)")).toBeInTheDocument();
+  });
+
+  test("knows whether the role has BYPASSRLS", async () => {
+    const roles = ROLES.map((r) => (r.name === "alice" ? { ...r, attributes: { ...r.attributes, bypassRls: true } } : r));
+    setup({ overview: sampleOverview({ roles }) });
+    await loaded();
+    fireEvent.click(cellOf("alice", "app"));
+    expect(await screen.findByText("행 수준 보안 켜짐 · BYPASSRLS라 적용되지 않아요")).toBeInTheDocument();
+    fireEvent.click(cellOf("app_owner", "app"));
+    expect(await screen.findByText("행 수준 보안 켜짐")).toBeInTheDocument();
+  });
+
+  test("shows what the backend says about the cell, with the sources in the chip titles", async () => {
+    setup();
+    await loaded();
+    fireEvent.click(cellOf("alice", "app"));
+    const item = (await screen.findByText("app.orders")).closest("li") as HTMLElement;
+    expect(within(item).getByText("SELECT")).toHaveAttribute("title", "app_write ← app_read 그룹에서 받음");
+  });
+
+  test("[닫기] closes it and the focus goes back to the cell", async () => {
+    setup();
+    await loaded();
+    fireEvent.click(cellOf("alice", "app"));
+    await screen.findByText("app.customers");
+    fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(cellOf("alice", "app")).toHaveFocus();
+    expect(within(grid()).queryAllByRole("gridcell", { selected: true })).toHaveLength(0);
+  });
+
+  test("Esc inside the panel closes it, and the focus goes back to the cell", async () => {
+    setup();
+    await loaded();
+    fireEvent.click(cellOf("bob", "app"));
+    expect(panel()).toHaveFocus();
+    fireEvent.keyDown(panel(), { key: "Escape" });
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(cellOf("bob", "app")).toHaveFocus();
+  });
+
+  test("Esc on the cell closes it too", async () => {
+    setup();
+    await loaded();
+    fireEvent.click(cellOf("alice", "app"));
+    act(() => cellOf("alice", "app").focus());
+    fireEvent.keyDown(cellOf("alice", "app"), { key: "Escape" });
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(cellOf("alice", "app")).toHaveFocus();
+  });
+
+  test("Esc with nothing open does nothing", async () => {
+    setup();
+    await loaded();
+    act(() => cellOf("alice", "app").focus());
+    fireEvent.keyDown(cellOf("alice", "app"), { key: "Escape" });
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(cellOf("alice", "app")).toHaveFocus();
+  });
+
+  test("closes when another database is chosen, as its cells are other cells", async () => {
+    setup();
+    await loaded();
+    fireEvent.click(cellOf("alice", "app"));
+    await screen.findByText("app.customers");
+    fireEvent.change(picker(), { target: { value: "postgres" } });
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    await loaded();
+    expect(within(grid()).queryAllByRole("gridcell", { selected: true })).toHaveLength(0);
+  });
+
+  test("stays open when the snapshot is read again", async () => {
+    const { qc } = setup();
+    await loaded();
+    fireEvent.click(cellOf("alice", "app"));
+    await screen.findByText("app.customers");
+    await act(async () => {
+      await qc.invalidateQueries({ queryKey: pgKeys.root(pgTarget) });
+    });
+    expect(panel()).toHaveAccessibleName("alice · app");
+    expect(within(grid()).getAllByRole("gridcell", { selected: true })).toHaveLength(1);
+    expect(await screen.findByText("app.customers")).toBeInTheDocument();
+  });
+
+  test("closes when the cell is gone after the snapshot was read again: the schema was dropped", async () => {
+    const { qc } = setup();
+    await loaded();
+    fireEvent.click(cellOf("alice", "audit"));
+    await screen.findByText("app.customers");
+    m.database.mockResolvedValue(viewOf(ROLES, ["app"]));
+    await act(async () => {
+      await qc.invalidateQueries({ queryKey: pgKeys.database(pgTarget, "orders") });
+    });
+    await waitFor(() => expect(cellAt("alice", "audit")).not.toBeInTheDocument());
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(cellOf("alice", "app")).toBeInTheDocument();
+  });
+
+  test("closes when the cell is gone: the role was dropped", async () => {
+    const { update } = setup();
+    await loaded();
+    fireEvent.click(cellOf("alice", "app"));
+    await screen.findByText("app.customers");
+    update({ overview: sampleOverview({ roles: ROLES.filter((r) => r.name !== "alice") }) });
+    expect(within(grid()).queryByRole("rowheader", { name: "alice" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  });
+
+  test("typing in the toolbar filter while it is open does not take the focus from where it is", async () => {
+    const { update } = setup();
+    await loaded();
+    fireEvent.click(cellOf("alice", "app"));
+    await screen.findByText("app.customers");
+    const close = screen.getByRole("button", { name: "닫기" });
+    close.focus();
+    update({ filter: "al" });
+    expect(close).toHaveFocus();
+    expect(panel()).toHaveAccessibleName("alice · app");
+  });
+
+  test("shows why it failed, in the panel and not in the place of the grid", async () => {
+    m.cell.mockRejectedValue({ kind: "other", message: "먼저 연결해 주세요" });
+    setup();
+    await loaded();
+    fireEvent.click(cellOf("alice", "app"));
+    expect(await within(panel()).findByText("먼저 연결해 주세요")).toBeInTheDocument();
+    expect(grid()).toBeInTheDocument();
+  });
+});
+
+test("under StrictMode, as the app runs, each read is still made once and the detail takes the focus", async () => {
+  renderWithClient(
+    <StrictMode>
+      <Harness />
+    </StrictMode>,
+  );
+  await loaded();
+  fireEvent.click(cellOf("alice", "app"));
+  await screen.findByText("app.customers");
+  expect(m.database).toHaveBeenCalledTimes(1);
+  expect(m.cell).toHaveBeenCalledTimes(1);
+  expect(panel()).toHaveFocus();
+  fireEvent.keyDown(panel(), { key: "Escape" });
+  expect(cellOf("alice", "app")).toHaveFocus();
+});
+
+describe("the keyboard", () => {
+  const focusCell = (el: HTMLElement) => act(() => el.focus());
+
+  test("the grid is one stop for Tab: the first cell, until the focus moves", async () => {
+    setup();
+    await loaded();
+    const stops = within(grid())
+      .getAllByRole("button")
+      .filter((b) => b.getAttribute("tabindex") === "0");
+    expect(stops).toHaveLength(1);
+    expect(stops[0]).toHaveAccessibleName(/^alice · app: /);
+  });
+
+  test("the arrows move the focus one cell, and the stop goes with it", async () => {
+    const user = userEvent.setup();
+    setup();
+    await loaded();
+    focusCell(cellOf("alice", "app"));
+    await user.keyboard("{ArrowRight}");
+    expect(cellOf("alice", "audit")).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(cellOf("app_owner", "audit")).toHaveFocus();
+    await user.keyboard("{ArrowLeft}");
+    expect(cellOf("app_owner", "app")).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(cellOf("alice", "app")).toHaveFocus();
+    expect(cellOf("alice", "app")).toHaveAttribute("tabindex", "0");
+    expect(cellOf("alice", "audit")).toHaveAttribute("tabindex", "-1");
+  });
+
+  test("they stop at the edges of the grid", async () => {
+    const user = userEvent.setup();
+    setup();
+    await loaded();
+    focusCell(cellOf("alice", "app"));
+    await user.keyboard("{ArrowUp}{ArrowLeft}");
+    expect(cellOf("alice", "app")).toHaveFocus();
+    focusCell(cellOf("app_write", "audit"));
+    await user.keyboard("{ArrowDown}{ArrowRight}");
+    expect(cellOf("app_write", "audit")).toHaveFocus();
+  });
+
+  test("they go over the heading of a kind", async () => {
+    const user = userEvent.setup();
+    setup();
+    await loaded();
+    focusCell(cellOf("postgres", "app")); // 사용자의 마지막 행
+    await user.keyboard("{ArrowDown}");
+    expect(cellOf("app_read", "app")).toHaveFocus(); // 그룹의 첫 행
+    await user.keyboard("{ArrowUp}");
+    expect(cellOf("postgres", "app")).toHaveFocus();
+  });
+
+  test("Enter opens the detail of the cell, and the focus is in it", async () => {
+    const user = userEvent.setup();
+    setup();
+    await loaded();
+    focusCell(cellOf("alice", "app"));
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(m.cell).toHaveBeenCalledWith(pgTarget, "orders", "app_owner", "app");
+    expect(panel()).toHaveAccessibleName("app_owner · app");
+    expect(panel()).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(cellOf("app_owner", "app")).toHaveFocus(); // 초점은 칸으로 돌아온다
+    await user.keyboard("{ArrowDown}"); // 거기서 이어서 움직인다
+    expect(cellOf("bob", "app")).toHaveFocus();
+  });
+
+  test("keys with ⌘, Ctrl or Alt are left to the app", async () => {
+    const user = userEvent.setup();
+    setup();
+    await loaded();
+    focusCell(cellOf("alice", "app"));
+    await user.keyboard("{Meta>}{ArrowDown}{/Meta}");
+    await user.keyboard("{Control>}{ArrowRight}{/Control}");
+    expect(cellOf("alice", "app")).toHaveFocus();
+  });
+
+  test("a click is where the stop is, also when the browser does not focus the button", async () => {
+    setup();
+    await loaded();
+    fireEvent.click(cellOf("bob", "audit")); // fireEvent는 초점을 옮기지 않는다
+    act(() => (document.activeElement as HTMLElement | null)?.blur());
+    expect(cellOf("bob", "audit")).toHaveAttribute("tabindex", "0");
+    expect(cellOf("alice", "app")).toHaveAttribute("tabindex", "-1");
+  });
+});
+
+describe("tall grids", () => {
+  const bigOverview = () => sampleOverview({ roles: manyUsers() });
+  const bigView = () => viewOf(manyUsers(), ["app", "audit"]);
+
+  beforeEach(() => {
+    m.database.mockResolvedValue(bigView());
+  });
+
+  test("render only the rows in view", async () => {
+    setup({ overview: bigOverview() });
+    await loaded();
+    const rows = within(grid()).getAllByRole("row");
+    expect(rows.length).toBeLessThan(60);
+    expect(rows.length).toBeGreaterThan(10);
+    expect(within(grid()).getByRole("rowheader", { name: "user-000" })).toBeInTheDocument();
+    expect(within(grid()).queryByRole("rowheader", { name: "user-150" })).not.toBeInTheDocument();
+    expect(grid()).toHaveAttribute("aria-rowcount", "302"); // 머리 행 + 사용자 머리 + 300명
+  });
+
+  test("scrolling moves the window, and the rows that are not drawn keep their height", async () => {
+    setup({ overview: bigOverview() });
+    await loaded();
+    scroller().scrollTop = 150 * ROW_H;
+    fireEvent.scroll(scroller());
+    expect(within(grid()).getByRole("rowheader", { name: "user-150" })).toBeInTheDocument();
+    expect(within(grid()).queryByRole("rowheader", { name: "user-000" })).not.toBeInTheDocument();
+    expect(within(grid()).getAllByRole("row").length).toBeLessThan(60);
+    const heights = [...grid().querySelectorAll("tbody > tr")].map((tr) => parseInt((tr as HTMLElement).style.height, 10));
+    expect(heights.reduce((sum, h) => sum + h, 0)).toBe(301 * ROW_H); // 사용자 머리 1 + 사용자 300
+    // 보이는 행은 자기 자리를 안다
+    const row = rowOf("user-150");
+    expect(row).toHaveAttribute("aria-rowindex", String(150 + 3)); // 머리 행 1 + 사용자 머리 1 + 1부터 세기
+  });
+
+  test("the arrow keys keep going past the rows that are drawn", async () => {
+    const user = userEvent.setup();
+    setup({ overview: bigOverview() });
+    await loaded();
+    act(() => cellOf("user-000", "app").focus());
+    for (let i = 0; i < 40; i++) await user.keyboard("{ArrowDown}");
+    expect(cellOf("user-040", "app")).toHaveFocus();
+    expect(within(grid()).getAllByRole("row").length).toBeLessThan(60);
+  });
+
+  test("Tab still reaches the grid when the cell that was the stop has scrolled out", async () => {
+    setup({ overview: bigOverview() });
+    await loaded();
+    act(() => cellOf("user-000", "app").focus());
+    scroller().scrollTop = 150 * ROW_H;
+    fireEvent.scroll(scroller());
+    expect(cellAt("user-000", "app")).not.toBeInTheDocument();
+    const stops = within(grid())
+      .getAllByRole("button")
+      .filter((b) => b.getAttribute("tabindex") === "0");
+    expect(stops).toHaveLength(1);
+  });
+
+  test("Esc brings the focus back to a cell that has scrolled out while its detail was open", async () => {
+    setup({ overview: bigOverview() });
+    await loaded();
+    fireEvent.click(cellOf("user-003", "audit"));
+    await screen.findByText("app.customers");
+    scroller().scrollTop = 200 * ROW_H;
+    fireEvent.scroll(scroller());
+    expect(cellAt("user-003", "audit")).not.toBeInTheDocument();
+    expect(panel()).toHaveAccessibleName("user-003 · audit"); // 상세는 그대로 열려 있다
+    fireEvent.keyDown(panel(), { key: "Escape" });
+    expect(cellOf("user-003", "audit")).toHaveFocus();
+  });
+
+  test("a filter that leaves few rows while scrolled far down shows them instead of an empty page", async () => {
+    const { update } = setup({ overview: bigOverview() });
+    await loaded();
+    scroller().scrollTop = 200 * ROW_H;
+    fireEvent.scroll(scroller());
+    update({ filter: "user-00" });
+    expect(within(grid()).getByRole("rowheader", { name: "user-005" })).toBeInTheDocument();
+  });
+
+  test("roles named like the heading of a kind (head-user, head-group) do not clash with it", async () => {
+    const roles = [role("head-user", { attributes: attributes({ login: true }) }), ...manyUsers(120), role("head-group")];
+    m.database.mockResolvedValue(viewOf(roles, ["app"]));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      setup({ overview: sampleOverview({ roles }) });
+      await loaded();
+      expect(rowHeads().slice(0, 3)).toEqual(["사용자 121", "head-user", "user-000"]);
+      scroller().scrollTop = 200 * ROW_H;
+      fireEvent.scroll(scroller());
+      expect(rowHeads().slice(-3)).toEqual(["user-119", "그룹 1", "head-group"]);
+      expect(error).not.toHaveBeenCalled(); // 같은 키가 둘이면 React가 알린다
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  test("the kind headings are in the count of rows too: users and then groups", async () => {
+    const roles = [...manyUsers(120), role("grp-a"), role("grp-b")];
+    m.database.mockResolvedValue(viewOf(roles, ["app"]));
+    setup({ overview: sampleOverview({ roles }) });
+    await loaded();
+    expect(grid()).toHaveAttribute("aria-rowcount", String(1 + 1 + 120 + 1 + 2));
+    scroller().scrollTop = 200 * ROW_H;
+    fireEvent.scroll(scroller());
+    expect(rowHeads().slice(-4)).toEqual(["user-119", "그룹 2", "grp-a", "grp-b"]);
+  });
+});

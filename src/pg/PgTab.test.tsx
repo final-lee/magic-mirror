@@ -6,7 +6,7 @@ import type { Settings } from "../api/types";
 import type { SsoLogin } from "../lib/useSsoLogin";
 import { newQueryClient, renderWithClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { pgApi } from "./api";
-import { LOGIN_USER, pgTarget, sampleDatabaseView, sampleFindings, sampleOverview, sampleRoleView, sampleSessions, sampleTargetInfo } from "./fixtures";
+import { LOGIN_USER, pgTarget, sampleCellDetail, sampleDatabaseView, sampleFindings, sampleOverview, sampleRoleView, sampleSessions, sampleTargetInfo } from "./fixtures";
 import { LOGIN_NAME_INVALID } from "./loginName";
 import { PgTab } from "./PgTab";
 import type { PgTarget } from "./types";
@@ -94,6 +94,7 @@ beforeEach(() => {
   m.target.mockResolvedValue(sampleTargetInfo());
   m.open.mockResolvedValue(sampleOverview());
   m.database.mockResolvedValue(sampleDatabaseView());
+  m.cell.mockImplementation(async (_t, _database, role, schema) => sampleCellDetail({ role, schema }));
   m.findings.mockResolvedValue(sampleFindings());
   m.role.mockImplementation(async (_t, role) => sampleRoleView(role));
   m.sessions.mockResolvedValue(sampleSessions());
@@ -779,10 +780,10 @@ describe("menu", () => {
     expect(m.target).toHaveBeenCalledTimes(1);
   });
 
-  test("the other screens are not built yet and say so, each under its own name", async () => {
+  test("the screens still to come are not built yet and say so, each under its own name", async () => {
     setup();
     await connected();
-    for (const label of ["점검", "권한", "기본 권한", "누가 할 수 있나", "세션"]) {
+    for (const label of ["점검", "누가 할 수 있나", "세션"]) {
       fireEvent.click(menu().getByText(label).closest("button")!);
       expect(menu().getByText(label).closest("button")).toHaveAttribute("aria-current", "page");
       expect(crumb().getByText(label)).toBeInTheDocument();
@@ -926,6 +927,163 @@ describe("roles", () => {
     await openRole("alice");
     fireEvent.click(menu().getByRole("button", { name: /역할/ }));
     expect(screen.getByRole("table", { name: "역할 목록" })).toBeInTheDocument();
+  });
+});
+
+describe("privileges", () => {
+  const grid = () => screen.getByRole("grid", { name: "권한 표" });
+  const picker = () => screen.getByRole("combobox", { name: "데이터베이스" });
+  const loadedGrid = () => screen.findByRole("grid", { name: "권한 표" });
+  const rowHeads = () => within(grid()).getAllByRole("rowheader").map((h) => h.textContent);
+  const cellOf = (role: string, schema: string) => within(grid()).getByRole("button", { name: (n) => n.startsWith(`${role} · ${schema}: `) });
+  const openPrivileges = async () => {
+    await connected();
+    openMenu("권한");
+    return loadedGrid();
+  };
+
+  test("opens on the default database of the target, with the users and then the groups", async () => {
+    setup();
+    await openPrivileges();
+    expect(m.database).toHaveBeenCalledWith(pgTarget, "orders", false);
+    expect(picker()).toHaveValue("orders");
+    expect(crumb().getByText("권한")).toBeInTheDocument();
+    expect(rowHeads()).toEqual(["사용자 5", "alice", "app_owner", "bob", "iam_admin", "postgres", "그룹 2", "app_read", "app_write"]);
+  });
+
+  test("the toolbar filter narrows the rows by name", async () => {
+    const { update } = setup();
+    await openPrivileges();
+    update({ filter: "app_" });
+    expect(rowHeads()).toEqual(["사용자 1", "app_owner", "그룹 2", "app_read", "app_write"]);
+  });
+
+  test("the chips and the system roles toggle are those of the role list, in both directions", async () => {
+    setup();
+    await connected();
+    await screen.findByText("alice");
+    fireEvent.click(screen.getByRole("checkbox", { name: "시스템 역할 보기" }));
+    openMenu("권한");
+    await loadedGrid();
+    expect(screen.getByRole("checkbox", { name: "시스템 역할 보기" })).toBeChecked();
+    expect(within(grid()).getByRole("rowheader", { name: "rds_superuser" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "그룹" }));
+    expect(rowHeads()).toEqual(["사용자 5", "alice", "app_owner", "bob", "iam_admin", "postgres"]);
+    openMenu("역할");
+    expect(screen.getByRole("checkbox", { name: "그룹" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "시스템 역할 보기" })).toBeChecked();
+  });
+
+  test("the database that was chosen is remembered by the history entry, so back brings it again", async () => {
+    setup();
+    await openPrivileges();
+    fireEvent.change(picker(), { target: { value: "analytics" } });
+    await waitFor(() => expect(m.database).toHaveBeenCalledWith(pgTarget, "analytics", false));
+    openMenu("세션");
+    expect(screen.queryByRole("grid")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
+    await loadedGrid();
+    expect(picker()).toHaveValue("analytics");
+    fireEvent.click(screen.getByRole("button", { name: "앞으로" }));
+    expect(screen.getByText("세션 화면은 아직 준비 중이에요")).toBeInTheDocument();
+  });
+
+  test("choosing a database does not add an entry to the history", async () => {
+    setup();
+    await openPrivileges();
+    fireEvent.change(picker(), { target: { value: "analytics" } });
+    fireEvent.change(picker(), { target: { value: "postgres" } });
+    expect(picker()).toHaveValue("postgres");
+    fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
+    expect(screen.getByRole("table", { name: "역할 목록" })).toBeInTheDocument();
+  });
+
+  test("a cell opens its detail beside the grid, and Esc closes it and gives the focus back", async () => {
+    setup();
+    await openPrivileges();
+    fireEvent.click(cellOf("alice", "app"));
+    expect(m.cell).toHaveBeenCalledWith(pgTarget, "orders", "alice", "app");
+    expect(await screen.findByText("app.customers")).toBeInTheDocument();
+    expect(grid()).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("complementary", { name: "alice · app" }), { key: "Escape" });
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(cellOf("alice", "app")).toHaveFocus();
+  });
+
+  test("coming back to it reads nothing again, and 기본 권한 shares the read of the same database", async () => {
+    setup();
+    await openPrivileges();
+    openMenu("역할");
+    openMenu("권한");
+    await loadedGrid();
+    openMenu("기본 권한");
+    await screen.findByRole("table", { name: "기본 권한" });
+    expect(m.database).toHaveBeenCalledTimes(1);
+  });
+
+  test("다시 읽기 reads the database again with force, and the grid is still there", async () => {
+    setup();
+    await openPrivileges();
+    m.database.mockClear();
+    fireEvent.click(topBar().getByRole("button", { name: "다시 읽기" }));
+    await waitFor(() => expect(m.database).toHaveBeenCalledWith(pgTarget, "orders", true));
+    expect(await loadedGrid()).toBeInTheDocument();
+    expect(m.database).toHaveBeenCalledTimes(1);
+  });
+
+  test("a database that cannot be read shows why through the error box, and the picker lets you leave it", async () => {
+    m.database.mockImplementation(async (_t, database) => {
+      if (database === "analytics") throw { kind: "other", message: '"analytics"에 연결하지 못했어요: permission denied' };
+      return sampleDatabaseView({ database });
+    });
+    setup();
+    await openPrivileges();
+    fireEvent.change(picker(), { target: { value: "analytics" } });
+    expect(await screen.findByText('"analytics"에 연결하지 못했어요: permission denied')).toBeInTheDocument();
+    fireEvent.change(picker(), { target: { value: "orders" } });
+    expect(await loadedGrid()).toBeInTheDocument();
+  });
+});
+
+describe("default privileges", () => {
+  const picker = () => screen.getByRole("combobox", { name: "데이터베이스" });
+  const loadedTable = () => screen.findByRole("table", { name: "기본 권한" });
+
+  test("shows the note, the table and the sentences of the default database of the target", async () => {
+    setup();
+    await connected();
+    openMenu("기본 권한");
+    await loadedTable();
+    expect(m.database).toHaveBeenCalledWith(pgTarget, "orders", false);
+    expect(picker()).toHaveValue("orders");
+    expect(crumb().getByText("기본 권한")).toBeInTheDocument();
+    expect(screen.getByText(/^PostgreSQL 기본값: /)).toBeInTheDocument();
+    expect(screen.getByRole("rowheader", { name: "app_owner · app" })).toBeInTheDocument();
+    expect(screen.getByText("app_owner 역할이 app에 새 테이블을 만들면 app_read 역할이 SELECT 권한을 받아요")).toBeInTheDocument();
+  });
+
+  test("the database that was chosen is remembered by the history entry too", async () => {
+    setup();
+    await connected();
+    openMenu("기본 권한");
+    await loadedTable();
+    fireEvent.change(picker(), { target: { value: "postgres" } });
+    await waitFor(() => expect(m.database).toHaveBeenCalledWith(pgTarget, "postgres", false));
+    openMenu("세션");
+    fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
+    await loadedTable();
+    expect(picker()).toHaveValue("postgres");
+  });
+
+  test("다시 읽기 reads the database again with force", async () => {
+    setup();
+    await connected();
+    openMenu("기본 권한");
+    await loadedTable();
+    m.database.mockClear();
+    fireEvent.click(topBar().getByRole("button", { name: "다시 읽기" }));
+    await waitFor(() => expect(m.database).toHaveBeenCalledWith(pgTarget, "orders", true));
+    expect(await loadedTable()).toBeInTheDocument();
   });
 });
 
