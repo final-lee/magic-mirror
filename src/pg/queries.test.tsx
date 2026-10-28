@@ -20,6 +20,7 @@ import {
   closePg,
   pgKeys,
   refreshPg,
+  refreshPgData,
   usePgCell,
   usePgDatabase,
   usePgFindings,
@@ -482,6 +483,89 @@ describe("refreshPg", () => {
     expect(m.database).toHaveBeenCalledWith(t, "orders", true);
     expect(m.findings).toHaveBeenCalledWith(t, true);
     expect(m.role).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("refreshPgData", () => {
+  // refreshPg와 같은 쿼리들을 켜 둔다
+  async function mounted() {
+    const { qc, wrapper } = makeClient();
+    const hook = renderHook(
+      () => ({
+        target: usePgTarget(t),
+        overview: usePgOverview(t, LOGIN_USER),
+        database: usePgDatabase(t, "orders"),
+        findings: usePgFindings(t, true),
+        role: usePgRole(t, "alice"),
+        cell: usePgCell(t, "orders", "alice", "app"),
+        sessions: usePgSessions(t),
+      }),
+      { wrapper },
+    );
+    await waitFor(() => {
+      for (const q of Object.values(hook.result.current)) expect(q.isSuccess).toBe(true);
+    });
+    vi.clearAllMocks();
+    return { qc, wrapper, hook };
+  }
+
+  test("reads the database and the findings again with force: true and the rest again, but does not connect again", async () => {
+    const { qc } = await mounted();
+    await refreshPgData(qc, t);
+    expect(m.open).not.toHaveBeenCalled();
+    expect(m.target).not.toHaveBeenCalled();
+    expect(m.database).toHaveBeenCalledTimes(1);
+    expect(m.database).toHaveBeenCalledWith(t, "orders", true);
+    expect(m.findings).toHaveBeenCalledTimes(1);
+    expect(m.findings).toHaveBeenCalledWith(t, true);
+    for (const command of [m.role, m.cell, m.sessions]) expect(command).toHaveBeenCalledTimes(1);
+  });
+
+  test("reads the snapshots before the rest, as refreshPg does", async () => {
+    const { qc } = await mounted();
+    const order: string[] = [];
+    let finishDatabase!: () => void;
+    m.database.mockImplementation(async (_t, _db, force) => {
+      order.push(`database:${force}`);
+      await new Promise<void>((r) => (finishDatabase = r));
+      return sampleDatabaseView();
+    });
+    m.findings.mockImplementation(async (_t, force) => {
+      order.push(`findings:${force}`);
+      return sampleFindings();
+    });
+    m.role.mockImplementation(async () => {
+      order.push("role");
+      return roleView;
+    });
+    const done = refreshPgData(qc, t);
+    await waitFor(() => expect(order).toContain("database:true"));
+    expect(order).not.toContain("role");
+    finishDatabase();
+    await done;
+    expect(order.indexOf("database:true")).toBeLessThan(order.indexOf("role"));
+    expect(order.indexOf("findings:true")).toBeLessThan(order.indexOf("role"));
+  });
+
+  test("a database nobody is showing is read with force: true when it is shown again", async () => {
+    const { qc, wrapper, hook } = await mounted();
+    hook.unmount();
+    vi.clearAllMocks();
+    await refreshPgData(qc, t);
+    expect(m.database).not.toHaveBeenCalled();
+    renderHook(() => usePgDatabase(t, "orders"), { wrapper });
+    await waitFor(() => expect(m.database).toHaveBeenCalledWith(t, "orders", true));
+  });
+
+  test("leaves other targets alone", async () => {
+    const { qc, wrapper } = await mounted();
+    const other: PgTarget = { ...t, id: "billing" };
+    const otherSide = renderHook(() => usePgDatabase(other, "orders"), { wrapper });
+    await waitFor(() => expect(otherSide.result.current.isSuccess).toBe(true));
+    vi.clearAllMocks();
+    await refreshPgData(qc, t);
+    expect(m.database).toHaveBeenCalledTimes(1);
+    expect(m.database).toHaveBeenCalledWith(t, "orders", true);
   });
 });
 

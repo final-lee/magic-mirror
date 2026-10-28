@@ -166,6 +166,20 @@ const BASE = new Set(["target", "overview"]);
 /** 클러스터 스냅숏 위에서 만드는 스냅숏 */
 const SNAPSHOTS = new Set(["database", "findings"]);
 
+/** 이 대상의 스냅숏 쿼리(데이터베이스, 점검)가 다음에 조회할 때 force=true를 쓰도록 표시한다 */
+function markSnapshots(qc: QueryClient, target: PgTarget) {
+  for (const q of qc.getQueryCache().findAll({ queryKey: pgKeys.root(target) })) {
+    if (SNAPSHOTS.has(kindOf(q))) markForce(qc, q.queryHash);
+  }
+}
+
+/** 개요 다음 단계: 스냅숏을 다시 읽고, 그 위에서 읽는 나머지(역할, 칸, 검색, 세션 …)를 다시 읽는다. */
+async function rereadAfterOverview(qc: QueryClient, target: PgTarget) {
+  const root = pgKeys.root(target);
+  await qc.invalidateQueries({ queryKey: root, predicate: (q) => SNAPSHOTS.has(kindOf(q)) });
+  await qc.invalidateQueries({ queryKey: root, predicate: (q) => !BASE.has(kindOf(q)) && !SNAPSHOTS.has(kindOf(q)) });
+}
+
 /**
  * 새로 고침(다시 읽기). 이 대상의 모든 쿼리를 무효화하되, 백엔드 스냅숏을 새로 만든 뒤에 그것을 읽는 쿼리가 돌도록 순서를 지킨다.
  * 1) 대상 정보와 개요(pg_open)  2) 데이터베이스 스냅숏과 점검(force=true로 다시 읽는다)  3) 나머지(역할, 칸, 검색, 세션 …)
@@ -173,19 +187,24 @@ const SNAPSHOTS = new Set(["database", "findings"]);
  * 켜진 쿼리만 바로 다시 불리고, 나머지는 무효화만 되어 다시 열릴 때 읽는다.
  */
 export async function refreshPg(qc: QueryClient, target: PgTarget): Promise<void> {
-  const root = pgKeys.root(target);
-  for (const q of qc.getQueryCache().findAll({ queryKey: root })) {
-    if (SNAPSHOTS.has(kindOf(q))) markForce(qc, q.queryHash);
-  }
-  await qc.invalidateQueries({ queryKey: root, predicate: (q) => BASE.has(kindOf(q)) });
+  markSnapshots(qc, target);
+  await qc.invalidateQueries({ queryKey: pgKeys.root(target), predicate: (q) => BASE.has(kindOf(q)) });
   const overviewFailed = qc.getQueryCache().findAll({
-    queryKey: root,
+    queryKey: pgKeys.root(target),
     type: "active",
     predicate: (q) => kindOf(q) === "overview" && q.state.status === "error",
   });
   if (overviewFailed.length > 0) return;
-  await qc.invalidateQueries({ queryKey: root, predicate: (q) => SNAPSHOTS.has(kindOf(q)) });
-  await qc.invalidateQueries({ queryKey: root, predicate: (q) => !BASE.has(kindOf(q)) && !SNAPSHOTS.has(kindOf(q)) });
+  await rereadAfterOverview(qc, target);
+}
+
+/**
+ * refreshPg에서 연결(1단계)만 뺀 것. 로그인 사용자를 바꿔 새로 연결한 직후에 부른다.
+ * 새 사용자의 pg_open이 개요를 이미 새로 읽었으니 다시 연결하지 않고, 이전 사용자의 연결로 읽어 둔 나머지만 다시 읽는다.
+ */
+export async function refreshPgData(qc: QueryClient, target: PgTarget): Promise<void> {
+  markSnapshots(qc, target);
+  await rereadAfterOverview(qc, target);
 }
 
 /**

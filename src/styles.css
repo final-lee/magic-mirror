@@ -545,3 +545,53 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .iam-asg .asg-match-list li { padding: 5px 12px; border-bottom: 1px solid var(--line); }
 .iam-asg .asg-match-list li:last-child { border-bottom: 0; }
 .iam-asg .asg-match-list label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+
+/* PostgreSQL 작업 공간. 메뉴, 배지, 상세 머리와 탭은 IAM의 .iam-* 규칙을 그대로 쓴다. */
+.pg { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.pg .link:hover { text-decoration: underline; }
+.pg-top { display: flex; align-items: center; gap: 14px; padding: 6px 14px; min-height: 40px; background: #232325; border-bottom: 1px solid var(--line); }
+.pg-ident { font-size: 14px; font-weight: 600; }
+.pg-user { display: inline-flex; align-items: baseline; gap: 6px; }
+.pg-status { display: inline-flex; align-items: center; font-size: 12px; color: var(--dim); }
+.pg-top-end { margin-left: auto; display: flex; align-items: center; gap: 10px; flex: none; }
+.pg-main { flex: 1; display: flex; min-width: 0; min-height: 0; }
+
+.pg-prompt { flex: 1; display: grid; place-items: center; padding: 24px; }
+.pg-login { width: 440px; max-width: 100%; display: flex; flex-direction: column; gap: 10px; background: var(--panel); border: 1px solid #444; border-radius: 12px; padding: 20px; }
+.pg-login h3 { margin: 0; font-size: 15px; }
+.pg-login p { margin: 0; color: var(--dim); font-size: 12px; }
+.pg-login .field-input:focus { border-color: var(--accent); outline: none; }
+.pg-login-foot { display: flex; justify-content: flex-end; gap: 8px; }
+.pg-login-foot .btn { margin-top: 0; }
+
+/* 역할 목록: 종류 칩과 시스템 역할 토글 */
+.pg-bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.pg-kinds { display: flex; align-items: center; gap: 14px; }
+.pg-chips { display: flex; gap: 6px; }
+.pg-chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 10px 1px 7px; border: 1px solid var(--line); border-radius: 11px; color: var(--dim); font-size: 12px; cursor: pointer; }
+.pg-chip.on { color: var(--text); border-color: var(--accent); background: #0a84ff1f; }
+.pg-chip:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pg-chip input, .pg-toggle input { margin: 0; accent-color: var(--accent); }
+.pg-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); font-size: 12px; cursor: pointer; }
+.pg-name .iam-badges { margin-left: 8px; }
+
+/* 역할 상세 */
+.pg-overview { padding: 12px 16px; }
+.pg-overview .kv { grid-template-columns: 120px 1fr; }
+.pg-overview p, .pg-members p { margin: 0; }
+.pg-sect { margin: 14px 0 6px; font-size: 11px; font-weight: 600; color: var(--dim); }
+.pg-members .pg-sect, .pg-db .pg-sect { padding: 0 16px; }
+.pg-members { padding: 0 0 12px; }
+.pg-settings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.pg-settings li { display: flex; align-items: baseline; gap: 10px; }
+.pg-settings li > span { min-width: 120px; }
+.pg-db { padding: 4px 0 10px; border-bottom: 1px solid var(--line); }
+.pg-db:first-child .pg-sect { margin-top: 10px; }
+.pg-unloaded { display: flex; align-items: center; gap: 12px; padding: 4px 16px; font-size: 12px; }
+.pg-cells td, .pg-owned td, .pg-sessions td { white-space: normal; max-width: none; vertical-align: top; }
+.pg-cells th:first-child, .pg-cells td:first-child, .pg-owned th:first-child, .pg-owned td:first-child, .pg-sessions th:first-child, .pg-sessions td:first-child { padding-left: 16px; }
+.pg-cells th small { margin-left: 3px; font-weight: 400; color: #77777c; }
+.pg-schema { font-weight: 500; }
+.pg-warn { margin-top: 2px; font-size: 11px; color: var(--yellow); }
+.pg-more { margin: 0; padding: 6px 16px 4px; font-size: 12px; }
+.pg-own { margin-left: 6px; }

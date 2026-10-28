@@ -9,6 +9,7 @@ import {
   sampleDatabaseView,
   sampleFindings,
   sampleOverview,
+  sampleRoleView,
   sampleSessions,
   sampleTargetInfo,
   sampleWhoCan,
@@ -283,6 +284,110 @@ describe("findings", () => {
   });
 });
 
+describe("role view", () => {
+  const databaseView = sampleDatabaseView();
+
+  test("is the detail of a role the overview lists, with the summary the list shows", () => {
+    for (const name of ROLE_NAMES) expect(sampleRoleView(name).summary, name).toEqual(roleOf(name));
+    expect(sampleRoleView().summary.name).toBe("alice");
+  });
+
+  test("a role the sample does not have is a mistake in the test, not an empty view", () => {
+    expect(() => sampleRoleView("nobody")).toThrow("nobody");
+  });
+
+  test("members are the direct members, as many as memberCount says, with the flags of their membership", () => {
+    for (const name of ROLE_NAMES) {
+      const view = sampleRoleView(name);
+      expect(view.members.length, name).toBe(roleOf(name).memberCount);
+      for (const m of view.members) {
+        const link = roleOf(m.role).memberOf.find((x) => x.group === name)!;
+        expect(m, name).toEqual({ role: m.role, inherit: link.inherit, admin: link.admin });
+      }
+    }
+    expect(sampleRoleView("rds_superuser").members).toEqual([
+      { role: "iam_admin", inherit: true, admin: false },
+      { role: "postgres", inherit: true, admin: true },
+    ]);
+    expect(sampleRoleView("app_read").members.find((m) => m.role === "bob")).toEqual({ role: "bob", inherit: false, admin: false });
+  });
+
+  test("setRoleOnly is what a role reaches only through memberships that do not inherit", () => {
+    const reach = (name: string, viaInheritOnly: boolean): Set<string> => {
+      const seen = new Set<string>();
+      const walk = (r: string, throughSetRole: boolean) => {
+        for (const m of roleOf(r).memberOf) {
+          const direct = !throughSetRole && m.inherit;
+          if (viaInheritOnly && !direct) continue;
+          if (!seen.has(m.group)) {
+            seen.add(m.group);
+            walk(m.group, throughSetRole || !m.inherit);
+          }
+        }
+      };
+      walk(name, false);
+      return seen;
+    };
+    for (const name of ROLE_NAMES) {
+      const inherited = reach(name, true);
+      const all = reach(name, false);
+      expect(sampleRoleView(name).setRoleOnly, name).toEqual([...all].filter((g) => !inherited.has(g)).sort());
+    }
+    expect(sampleRoleView("bob").setRoleOnly).toEqual(["app_read"]);
+    expect(sampleRoleView("alice").setRoleOnly).toEqual([]);
+  });
+
+  test("has one entry per database that can be connected to, and only the default database is read", () => {
+    const view = sampleRoleView("app_owner");
+    const connectable = sampleOverview().databases.filter((d) => d.allowConn).map((d) => d.name);
+    expect(view.databases.map((d) => d.database)).toEqual(connectable);
+    expect(view.databases.filter((d) => d.loaded).map((d) => d.database)).toEqual([sampleOverview().target.defaultDatabase]);
+    for (const d of view.databases.filter((d) => !d.loaded)) expect(d).toEqual({ database: d.database, loaded: false, cells: [], owned: [], ownedOmitted: 0 });
+  });
+
+  test("the cells of the read database are the role's cells that have something in them", () => {
+    for (const name of ROLE_NAMES) {
+      const orders = sampleRoleView(name).databases.find((d) => d.database === databaseView.database)!;
+      const expected = databaseView.cells.filter((c) => c.role === name && (c.usage || c.create || c.read !== "none" || c.write !== "none"));
+      expect(orders.cells, name).toEqual(expected);
+    }
+    // bob의 칸 하나는 권한은 있지만 못 쓴다
+    expect(sampleRoleView("bob").databases.find((d) => d.loaded)!.cells.map((c) => c.unusable)).toEqual(["CONNECT 없음"]);
+  });
+
+  test("the owner of the schemas owns them with their tables, sequences and functions; nobody else owns anything", () => {
+    const owned = sampleRoleView("app_owner").databases.find((d) => d.loaded)!;
+    expect(owned.ownedOmitted).toBe(0);
+    expect(owned.owned.filter((o) => o.kind === "schema").map((o) => o.name)).toEqual(databaseView.schemas.map((s) => s.name));
+    for (const schema of databaseView.schemas) {
+      expect(owned.owned.filter((o) => o.kind === "table" && o.schema === schema.name), schema.name).toHaveLength(schema.tableCount);
+    }
+    expect(owned.owned.map((o) => o.kind)).toEqual(expect.arrayContaining(["schema", "table", "sequence", "function"]));
+    for (const name of ROLE_NAMES.filter((n) => n !== "app_owner")) {
+      for (const d of sampleRoleView(name).databases) expect(d.owned, name).toEqual([]);
+    }
+  });
+
+  test("the sessions are the sample sessions of the role, and the login user's are the app's own", () => {
+    for (const name of ROLE_NAMES) expect(sampleRoleView(name).sessions, name).toEqual(sampleSessions().filter((s) => s.role === name));
+    expect(sampleRoleView("iam_admin").sessions.every((s) => s.own)).toBe(true);
+    expect(sampleRoleView("iam_admin").sessions).toHaveLength(2);
+  });
+
+  test("has settings for the role that owns the schemas, for all databases and for one", () => {
+    expect(sampleRoleView("app_owner").settings).toEqual([
+      { database: null, setting: "search_path=app, public" },
+      { database: "orders", setting: "work_mem=64MB" },
+    ]);
+    expect(sampleRoleView("alice").settings).toEqual([]);
+  });
+
+  test("overrides replace single fields", () => {
+    expect(sampleRoleView("alice", { settings: [{ database: null, setting: "x=1" }] }).settings).toEqual([{ database: null, setting: "x=1" }]);
+    expect(sampleRoleView("alice", { sessions: [] }).summary.name).toBe("alice");
+  });
+});
+
 test("every sample is plain JSON, as the backend sends it", () => {
   const all = [
     sampleTargetInfo(),
@@ -292,6 +397,7 @@ test("every sample is plain JSON, as the backend sends it", () => {
     sampleWhoCan(),
     sampleSessions(),
     sampleFindings(),
+    sampleRoleView("app_owner"),
   ];
   for (const sample of all) expect(JSON.parse(JSON.stringify(sample))).toStrictEqual(sample);
 });
@@ -301,4 +407,6 @@ test("each call returns new top-level objects, so a test can change one without 
   expect(sampleDatabaseView().cells).not.toBe(sampleDatabaseView().cells);
   expect(sampleSessions()).not.toBe(sampleSessions());
   expect(sampleFindings().groups).not.toBe(sampleFindings().groups);
+  expect(sampleRoleView().databases).not.toBe(sampleRoleView().databases);
+  expect(sampleRoleView().summary).not.toBe(sampleRoleView().summary);
 });

@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { ErrorState } from "../components/ErrorState";
-import { onMouseNav } from "../explorer/api";
+import { useHistoryKeys } from "../lib/useHistoryKeys";
 import { Assignments } from "./AssignmentsScreen";
 import { BatchPreviewDialog } from "./BatchPreviewDialog";
 import { ChangeLog } from "./ChangeLog";
@@ -57,8 +57,6 @@ function listCount(ov: IamOverview, view: IamView): number | null {
   return view === "policies" ? ov.policies.length : null;
 }
 
-const hasOpenDialog = () => !!document.querySelector(".modal");
-
 /** 적용을 마친 뒤의 안내 한 줄. 함께 알릴 일(notes)이 있으면 사용자가 닫을 때까지 남는다 */
 function DoneNotice({ notice, onDismiss }: { notice: ApplyNotice; onDismiss: () => void }) {
   return (
@@ -106,41 +104,8 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
     if (target) navigate(target);
   }, [ov, focus, nonce, navigate]);
 
-  // ⌘[ / ⌘]: 보이는 탭에서만, 확인 창이 떠 있거나 글자를 입력하는 중이면 건드리지 않는다.
-  useEffect(() => {
-    if (!active) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (!e.metaKey || (e.key !== "[" && e.key !== "]")) return;
-      const tag = (document.activeElement as HTMLElement | null)?.tagName;
-      if (hasOpenDialog() || tag === "INPUT" || tag === "TEXTAREA") return;
-      e.preventDefault();
-      if (e.key === "[") back();
-      else forward();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [active, back, forward]);
-
-  // 마우스 뒤로/앞으로 버튼. WKWebView는 3·4번 버튼을 DOM으로 넘기지 않아서 네이티브 "mouse-nav" 이벤트로 받는다.
-  useEffect(() => {
-    if (!active) return;
-    let unlisten: (() => void) | null = null;
-    let cancelled = false;
-    onMouseNav((dir) => {
-      if (hasOpenDialog()) return;
-      if (dir === "back") back();
-      else forward();
-    })
-      .then((fn) => {
-        if (cancelled) fn();
-        else unlisten = fn;
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, [active, back, forward]);
+  // ⌘[ / ⌘]와 마우스 뒤로/앞으로 버튼: 보이는 탭에서만, 확인 창이 떠 있거나 글자를 입력하는 중이면 건드리지 않는다.
+  useHistoryKeys(active, back, forward);
 
   if (!ov) {
     return (
