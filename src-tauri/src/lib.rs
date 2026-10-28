@@ -8,6 +8,10 @@ mod iam;
 mod iam_commands;
 mod model;
 mod mouse_nav;
+// PostgreSQL 탭의 명령(`pg_commands`)이 쓰기 전까지는 쓰는 곳이 없어 안 쓰는 코드 경고가 나니 테스트에서만 빌드한다.
+// 명령을 붙일 때(PB4) 이 `cfg(test)`를 뺀다
+#[cfg(test)]
+mod pg;
 mod settings;
 mod topology;
 mod topology_commands;

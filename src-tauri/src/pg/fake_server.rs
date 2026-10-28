@@ -1,0 +1,382 @@
+//! 테스트용 가짜 PostgreSQL 서버. 로컬 주소에만 열고, 시작 메시지와 `SELECT pg_backend_pid()` 하나만 흉내 낸다.
+//! 진짜 `tokio_postgres::Client`와 진짜 접속 오류를 네트워크 없이 얻는 데 쓴다. 이 파일은 질의를 보내지 않고 서버 쪽 바이트만 다룬다.
+//! TLS를 받는 서버도 만들 수 있다: `TestPki`가 그때그때 테스트 CA와 서버 인증서를 만든다(비밀 키를 저장소에 두지 않는다).
+
+use std::collections::HashMap;
+use std::io;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
+
+use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair, KeyUsagePurpose};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+use rustls::{RootCertStore, ServerConfig};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
+use tokio_postgres::config::SslMode;
+use tokio_postgres::NoTls;
+use tokio_rustls::TlsAcceptor;
+
+use super::connect::Connected;
+
+/// `SELECT pg_backend_pid()`에 돌려주는 값
+pub const FAKE_PID: i32 = 4242;
+const SSL_REQUEST: u32 = 80_877_103;
+
+/// 클라이언트에게 어떻게 구는지
+#[derive(Clone, Copy)]
+pub enum Script {
+    /// 시작 메시지를 받아들이고 질의(`SELECT pg_backend_pid()`)에 답한다. 연결은 클라이언트가 닫거나 `close_connections`가 불릴 때까지 열려 있다
+    Ready,
+    /// `Ready`처럼 굴되, 먼저 비밀번호(평문)를 요구하고 받은 값을 적어 둔다. IAM 토큰이 비밀번호로 가는지 본다
+    AskPassword,
+    /// 시작 메시지는 받아들이지만 그 뒤의 질의에는 답하지 않는다
+    MuteAfterStartup,
+    /// 시작 메시지에 오류(`FATAL`)로 답한다
+    Fatal { code: &'static str, message: &'static str },
+    /// SSLRequest에 'S'(TLS 좋아요)라고 해 놓고 TLS가 아닌 바이트를 보낸다
+    NotTls,
+    /// SSLRequest에 'N'(TLS 안 돼요)이라고 한다
+    DeclinesTls,
+    /// 연결만 받고 아무 말도 하지 않는다
+    Silent,
+}
+
+/// 서버가 본 것들
+#[derive(Default)]
+struct Seen {
+    accepted: AtomicUsize,
+    /// TLS 없이(SSLRequest 없이, 또는 'N'을 받은 뒤에도) 온 시작 메시지 수
+    plaintext_startups: AtomicUsize,
+    /// 받은 시작 메시지의 매개변수(`user`, `database`, `application_name` …). 평문과 TLS 모두
+    startups: Mutex<Vec<HashMap<String, String>>>,
+    passwords: Mutex<Vec<String>>,
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// 테스트 CA 하나와, 그 CA가 서명한 서버 인증서 하나
+pub struct TestPki {
+    ca: CertificateDer<'static>,
+    chain: Vec<CertificateDer<'static>>,
+    key: Vec<u8>,
+}
+
+impl TestPki {
+    /// 새 CA를 만들고, `names`(DNS 이름이나 IP 주소)에 유효한 서버 인증서를 그 CA로 서명한다
+    pub fn new(names: &[&str]) -> TestPki {
+        let ca_key = KeyPair::generate().expect("CA 키를 만들지 못했어요");
+        let mut ca_params = CertificateParams::new(Vec::<String>::new()).expect("CA 설정이 잘못됐어요");
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
+        ca_params.distinguished_name.push(DnType::CommonName, "Magic Mirror test CA");
+        let ca = ca_params.self_signed(&ca_key).expect("CA 인증서를 만들지 못했어요");
+        let server_key = KeyPair::generate().expect("서버 키를 만들지 못했어요");
+        let server = CertificateParams::new(names.iter().map(|name| name.to_string()).collect::<Vec<_>>())
+            .expect("서버 인증서 설정이 잘못됐어요")
+            .signed_by(&server_key, &Issuer::from_params(&ca_params, &ca_key))
+            .expect("서버 인증서를 만들지 못했어요");
+        TestPki { ca: ca.der().clone(), chain: vec![server.der().clone()], key: server_key.serialize_der() }
+    }
+
+    /// 이 CA만 믿는 뿌리 저장소
+    pub fn roots(&self) -> RootCertStore {
+        let mut roots = RootCertStore::empty();
+        roots.add(self.ca.clone()).expect("테스트 CA를 읽지 못했어요");
+        roots
+    }
+
+    fn acceptor(&self) -> TlsAcceptor {
+        let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+        let config = ServerConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .expect("TLS 버전을 고르지 못했어요")
+            .with_no_client_auth()
+            .with_single_cert(self.chain.clone(), PrivateKeyDer::from(PrivatePkcs8KeyDer::from(self.key.clone())))
+            .expect("서버 인증서를 쓰지 못했어요");
+        TlsAcceptor::from(Arc::new(config))
+    }
+}
+
+pub struct FakeServer {
+    pub port: u16,
+    seen: Arc<Seen>,
+    closing: Arc<watch::Sender<u64>>,
+    task: JoinHandle<()>,
+}
+
+impl FakeServer {
+    pub async fn start(script: Script) -> FakeServer {
+        FakeServer::listen(script, None).await
+    }
+
+    /// TLS를 받아 준다: SSLRequest에 'S'로 답하고 `pki`의 서버 인증서로 핸드셰이크한 뒤 `script`대로 군다
+    pub async fn start_tls(script: Script, pki: &TestPki) -> FakeServer {
+        FakeServer::listen(script, Some(pki.acceptor())).await
+    }
+
+    async fn listen(script: Script, tls: Option<TlsAcceptor>) -> FakeServer {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("가짜 서버를 열지 못했어요");
+        let port = listener.local_addr().expect("주소를 읽지 못했어요").port();
+        let seen = Arc::new(Seen::default());
+        let closing = Arc::new(watch::channel(0u64).0);
+        let task = tokio::spawn({
+            let (seen, closing) = (seen.clone(), closing.clone());
+            async move {
+                while let Ok((stream, _)) = listener.accept().await {
+                    seen.accepted.fetch_add(1, Ordering::SeqCst);
+                    tokio::spawn(serve(stream, script, tls.clone(), seen.clone(), closing.subscribe()));
+                }
+            }
+        });
+        FakeServer { port, seen, closing, task }
+    }
+
+    /// 지금까지 받은 TCP 연결 수
+    pub fn accepted(&self) -> usize {
+        self.seen.accepted.load(Ordering::SeqCst)
+    }
+
+    /// TLS 없이(SSLRequest 없이, 또는 'N'을 받은 뒤에도) 온 시작 메시지 수
+    pub fn plaintext_startups(&self) -> usize {
+        self.seen.plaintext_startups.load(Ordering::SeqCst)
+    }
+
+    /// 받은 시작 메시지의 매개변수들(`user`, `database`, `application_name` …)
+    pub fn startups(&self) -> Vec<HashMap<String, String>> {
+        lock(&self.seen.startups).clone()
+    }
+
+    /// `Script::AskPassword`가 받은 비밀번호들
+    pub fn passwords(&self) -> Vec<String> {
+        lock(&self.seen.passwords).clone()
+    }
+
+    /// 지금 열려 있는 연결을 모두 서버 쪽에서 닫는다. 그 뒤에 오는 연결은 영향이 없다
+    pub fn close_connections(&self) {
+        self.closing.send_modify(|generation| *generation += 1);
+    }
+
+    /// 이 서버에 TLS 없이 연결해 `Connected`를 만든다(풀 테스트용)
+    pub async fn connected(&self, backend_pid: i32) -> Connected {
+        let (client, connection) = plain_config(self.port).connect(NoTls).await.expect("가짜 서버에 연결하지 못했어요");
+        tokio::spawn(async move {
+            let _ = connection.await;
+        });
+        Connected { client, backend_pid }
+    }
+}
+
+impl Drop for FakeServer {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// 가짜 서버(또는 닫힌 포트)에 TLS 없이 붙는 설정
+pub fn plain_config(port: u16) -> tokio_postgres::Config {
+    let mut config = tokio_postgres::Config::new();
+    config.host("127.0.0.1").port(port).user("iam_admin").dbname("app").ssl_mode(SslMode::Disable).connect_timeout(Duration::from_secs(5));
+    config
+}
+
+/// 아무도 듣지 않는 로컬 포트. 연결하면 바로 거절된다
+pub fn closed_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0").expect("포트를 열지 못했어요").local_addr().expect("주소를 읽지 못했어요").port()
+}
+
+async fn serve(mut stream: TcpStream, script: Script, tls: Option<TlsAcceptor>, seen: Arc<Seen>, closing: watch::Receiver<u64>) {
+    if matches!(script, Script::Silent) {
+        return session(stream, closing, false).await;
+    }
+    let Ok((first, mut params)) = read_startup(&mut stream).await else { return };
+    if first == SSL_REQUEST {
+        match (script, tls) {
+            (Script::NotTls, _) => {
+                if stream.write_all(b"S").await.is_err() || stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await.is_err() {
+                    return;
+                }
+                return session(stream, closing, false).await;
+            }
+            (Script::DeclinesTls, _) => {
+                if stream.write_all(b"N").await.is_err() {
+                    return;
+                }
+                // 'N'을 받은 클라이언트가 평문으로 이어 가는지 잠시 본다
+                if let Ok(Ok(_)) = tokio::time::timeout(Duration::from_millis(300), read_startup(&mut stream)).await {
+                    seen.plaintext_startups.fetch_add(1, Ordering::SeqCst);
+                }
+                return session(stream, closing, false).await;
+            }
+            (_, Some(acceptor)) => {
+                if stream.write_all(b"S").await.is_err() {
+                    return;
+                }
+                let Ok(mut secure) = acceptor.accept(stream).await else { return };
+                // 시작 메시지는 TLS 안에서 온다: 평문 시작으로 세지 않는다
+                if let Ok((_, params)) = read_startup(&mut secure).await {
+                    lock(&seen.startups).push(params);
+                    respond(secure, script, &seen, closing).await;
+                }
+                return;
+            }
+            (_, None) => {
+                match (stream.write_all(b"N").await, read_startup(&mut stream).await) {
+                    (Ok(()), Ok((_, startup_params))) => params = startup_params,
+                    _ => return,
+                }
+            }
+        }
+    }
+    seen.plaintext_startups.fetch_add(1, Ordering::SeqCst);
+    lock(&seen.startups).push(params);
+    respond(stream, script, &seen, closing).await;
+}
+
+/// 시작 메시지를 받은 뒤의 답: 오류, 또는 (비밀번호를 받고) 인증 성공과 `ReadyForQuery`
+async fn respond<S>(mut stream: S, script: Script, seen: &Seen, closing: watch::Receiver<u64>)
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    if let Script::Fatal { code, message } = script {
+        if stream.write_all(&error_response(code, message)).await.is_ok() {
+            session(stream, closing, false).await;
+        }
+        return;
+    }
+    if matches!(script, Script::AskPassword) {
+        // AuthenticationCleartextPassword를 보내고 PasswordMessage('p')를 기다린다
+        if stream.write_all(&message(b'R', &3u32.to_be_bytes())).await.is_err() {
+            return;
+        }
+        let Ok((b'p', body)) = read_message(&mut stream).await else { return };
+        let password = String::from_utf8_lossy(body.strip_suffix(&[0]).unwrap_or(&body)).into_owned();
+        lock(&seen.passwords).push(password);
+    }
+    let mut hello = message(b'R', &0u32.to_be_bytes());
+    hello.extend(message(b'K', &[FAKE_PID.to_be_bytes(), 7i32.to_be_bytes()].concat()));
+    hello.extend(message(b'Z', b"I"));
+    if stream.write_all(&hello).await.is_ok() {
+        session(stream, closing, !matches!(script, Script::MuteAfterStartup)).await;
+    }
+}
+
+/// 시작 단계 패킷 하나(태그 없이 길이, 코드, 나머지)를 읽는다. 코드와, 시작 메시지면 그 매개변수(`user`, `database` …)를 돌려준다
+async fn read_startup<S>(stream: &mut S) -> io::Result<(u32, HashMap<String, String>)>
+where
+    S: AsyncRead + Unpin,
+{
+    let len = stream.read_u32().await?;
+    let code = stream.read_u32().await?;
+    let mut rest = vec![0u8; (len as usize).saturating_sub(8)];
+    stream.read_exact(&mut rest).await?;
+    // 매개변수는 "이름\0값\0"이 이어지고 \0 하나로 끝난다
+    let mut fields = rest.split(|byte| *byte == 0).map(|field| String::from_utf8_lossy(field).into_owned());
+    let mut params = HashMap::new();
+    while let (Some(name), Some(value)) = (fields.next(), fields.next()) {
+        if name.is_empty() {
+            break;
+        }
+        params.insert(name, value);
+    }
+    Ok((code, params))
+}
+
+/// 시작이 끝난 뒤의 메시지(태그, 길이, 본문) 하나
+async fn read_message<S>(stream: &mut S) -> io::Result<(u8, Vec<u8>)>
+where
+    S: AsyncRead + Unpin,
+{
+    let tag = stream.read_u8().await?;
+    let len = stream.read_u32().await?;
+    let mut body = vec![0u8; (len as usize).saturating_sub(4)];
+    stream.read_exact(&mut body).await?;
+    Ok((tag, body))
+}
+
+/// 연결을 열어 둔다. `answer`면 `SELECT pg_backend_pid()`의 확장 질의 흐름에 답하고, 아니면 들어오는 바이트를 버린다.
+/// 클라이언트가 닫거나 `close_connections`가 불리면 끝나고, 그때 연결이 닫힌다
+async fn session<S>(mut stream: S, mut closing: watch::Receiver<u64>, answer: bool)
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    if !answer {
+        let mut sink = [0u8; 1024];
+        loop {
+            tokio::select! {
+                _ = closing.changed() => return,
+                read = stream.read(&mut sink) => if matches!(read, Ok(0) | Err(_)) { return },
+            }
+        }
+    }
+    // 다음 Sync까지 받은 메시지에 대한 답
+    let mut pending: Vec<u8> = Vec::new();
+    loop {
+        tokio::select! {
+            _ = closing.changed() => return,
+            received = read_message(&mut stream) => {
+                let Ok((tag, body)) = received else { return };
+                match tag {
+                    b'X' => return,
+                    b'P' => pending.extend(message(b'1', &[])),
+                    b'D' => {
+                        if body.first() == Some(&b'S') {
+                            pending.extend(message(b't', &0u16.to_be_bytes()));
+                        }
+                        pending.extend(row_description());
+                    }
+                    b'B' => pending.extend(message(b'2', &[])),
+                    b'E' => {
+                        pending.extend(message(b'D', &[1u16.to_be_bytes().as_slice(), 4i32.to_be_bytes().as_slice(), FAKE_PID.to_be_bytes().as_slice()].concat()));
+                        pending.extend(message(b'C', b"SELECT 1\0"));
+                    }
+                    b'C' => pending.extend(message(b'3', &[])),
+                    b'S' => {
+                        pending.extend(message(b'Z', b"I"));
+                        if stream.write_all(&pending).await.is_err() {
+                            return;
+                        }
+                        pending.clear();
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+fn message(tag: u8, body: &[u8]) -> Vec<u8> {
+    let mut out = vec![tag];
+    out.extend_from_slice(&(body.len() as u32 + 4).to_be_bytes());
+    out.extend_from_slice(body);
+    out
+}
+
+/// `RowDescription`: int4 열 하나(`pg_backend_pid`)
+fn row_description() -> Vec<u8> {
+    let mut body = 1u16.to_be_bytes().to_vec();
+    body.extend_from_slice(b"pg_backend_pid\0");
+    body.extend_from_slice(&0u32.to_be_bytes()); // 테이블 OID
+    body.extend_from_slice(&0u16.to_be_bytes()); // 열 번호
+    body.extend_from_slice(&23u32.to_be_bytes()); // 타입 OID: int4
+    body.extend_from_slice(&4i16.to_be_bytes()); // 타입 크기
+    body.extend_from_slice(&(-1i32).to_be_bytes()); // 타입 변경자
+    body.extend_from_slice(&0u16.to_be_bytes()); // 형식: 문 설명에서는 아직 정해지지 않아 0이다
+    message(b'T', &body)
+}
+
+/// `ErrorResponse`: 심각도, 오류 코드, 문구
+fn error_response(code: &str, text: &str) -> Vec<u8> {
+    let mut body = Vec::new();
+    for (field, value) in [(b'S', "FATAL"), (b'V', "FATAL"), (b'C', code), (b'M', text)] {
+        body.push(field);
+        body.extend_from_slice(value.as_bytes());
+        body.push(0);
+    }
+    body.push(0);
+    message(b'E', &body)
+}
