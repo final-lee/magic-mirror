@@ -163,19 +163,32 @@ fn the_admin_badge_covers_every_membership_path_that_reaches_rds_superuser() {
 }
 
 #[test]
-fn from_pg16_a_set_role_path_needs_the_set_option_on_every_link_and_before_pg16_it_needs_nothing() {
+fn from_pg16_a_set_role_path_needs_the_set_option_and_what_the_new_role_inherits_counts() {
     let setup = |version: i32| {
         let mut scene = rds_scene(version);
-        scene.cluster.roles.extend([RoleRec { inherit: false, ..login("set_ok") }, RoleRec { inherit: false, ..login("first_link_off") }, RoleRec { inherit: false, ..login("last_link_off") }, role("admins"), role("sealed")]);
-        let options = |who: &str, group: &str, set: bool| if version >= 160_000 { member_with(who, group, false, set) } else { member(who, group) };
+        scene.cluster.roles.extend([
+            RoleRec { inherit: false, ..login("set_ok") },
+            RoleRec { inherit: false, ..login("first_link_off") },
+            RoleRec { inherit: false, ..login("last_link_off") },
+            RoleRec { inherit: false, ..login("sudoer") },
+            role("admins"),
+            role("sealed"),
+            role("dba"),
+        ]);
+        // PG16부터는 관계마다 INHERIT·SET 옵션이 있고, 그 전에는 옵션 없이 구성원 속성만 본다
+        let link = |who: &str, group: &str, inherit: bool, set: bool| if version >= 160_000 { member_with(who, group, inherit, set) } else { member(who, group) };
         scene.cluster.members.extend([
-            options("admins", "rds_superuser", true),
-            options("set_ok", "admins", true),
+            link("admins", "rds_superuser", false, true),
+            link("set_ok", "admins", false, true),
             // 첫 관계에 SET 옵션이 없다: admins가 되지 못한다
-            options("first_link_off", "admins", false),
-            // 마지막 관계에 SET 옵션이 없다: sealed까지 가도 rds_superuser가 되지 못한다
-            options("sealed", "rds_superuser", false),
-            options("last_link_off", "sealed", true),
+            link("first_link_off", "admins", false, false),
+            // 마지막 관계에 INHERIT도 SET도 없다: sealed까지 가도 rds_superuser의 권한을 쓰지 못한다
+            link("sealed", "rds_superuser", false, false),
+            link("last_link_off", "sealed", false, true),
+            // sudoer는 dba로 SET ROLE을 할 수 있다. dba는 rds_superuser를 상속하지만 그것으로 SET ROLE을 할 수는 없다(SET 끔):
+            // dba가 된 세션은 rds_superuser의 권한을 쓴다
+            link("dba", "rds_superuser", true, false),
+            link("sudoer", "dba", false, true),
         ]);
         scene
     };
@@ -184,11 +197,12 @@ fn from_pg16_a_set_role_path_needs_the_set_option_on_every_link_and_before_pg16_
     let all = summaries(&setup(PG16));
     assert!(admin(&all, "set_ok"));
     assert!(!admin(&all, "first_link_off"), "첫 관계에 SET 옵션이 없으면 닿지 못해요");
-    assert!(!admin(&all, "last_link_off"), "마지막 관계에 SET 옵션이 없으면 닿지 못해요");
+    assert!(!admin(&all, "last_link_off"), "마지막 관계에 INHERIT도 SET도 없으면 닿지 못해요");
+    assert!(admin(&all, "sudoer"), "dba로 SET ROLE을 한 뒤에는 dba가 상속하는 rds_superuser의 권한을 써요");
 
-    // PG15 이하에는 SET 옵션이 없다: 구성원 관계가 이어지면 SET ROLE을 할 수 있다
+    // PG15 이하에는 옵션이 없다: 구성원 관계가 이어지면 SET ROLE을 할 수 있다
     let all = summaries(&setup(PG15));
-    for name in ["set_ok", "first_link_off", "last_link_off"] {
+    for name in ["set_ok", "first_link_off", "last_link_off", "sudoer"] {
         assert!(admin(&all, name), "{name}");
     }
 }

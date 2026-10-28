@@ -75,7 +75,7 @@ impl PgState {
 
     /// 열기가 끝났다: 로그인, 접속 정보, 클러스터 스냅숏을 담고 이 대상의 데이터베이스 스냅숏을 버린다.
     /// 열기를 시작한 뒤(`epoch`를 읽은 뒤) 탭이 닫혔으면 아무것도 담지 않고 "먼저 연결해 주세요"다.
-    pub(crate) fn finish_open(&self, target: &PgTarget, epoch: u64, login: String, info: PgTargetInfo, cluster: Arc<ClusterSnapshot>) -> Result<(), AppError> {
+    fn finish_open(&self, target: &PgTarget, epoch: u64, login: String, info: PgTargetInfo, cluster: Arc<ClusterSnapshot>) -> Result<(), AppError> {
         let mut clusters = locked(&self.clusters);
         if self.pool.epoch(target) != epoch {
             return Err(not_opened());
@@ -268,7 +268,7 @@ impl PgState {
     }
 
     /// 지금 접속해 있는 세션들. 매번 기본 데이터베이스의 연결로 새로 읽는다.
-    pub(crate) async fn sessions(&self, app: &AppState, target: &PgTarget) -> Result<Vec<PgSession>, AppError> {
+    async fn sessions(&self, app: &AppState, target: &PgTarget) -> Result<Vec<PgSession>, AppError> {
         let opened = self.opened(target)?;
         let conn = connection(app, self, target, &opened, &opened.info.default_database).await?;
         let records = catalog::sessions(&mut *conn.lock().await).await?;
@@ -289,6 +289,19 @@ impl PgState {
             checks::findings(&cluster, &refs, skipped, now_secs())
         })
         .await
+    }
+}
+
+/// live 시험(`pg::live_tests`)이 AWS 없이 열린 상태를 만들고 명령의 몸통을 부르는 길. 제품 빌드에는 없다:
+/// `finish_open`은 `open`이 로그인 이름과 대상을 확인한 뒤에만 부르는 것이라 크레이트 안의 다른 코드에 열어 두지 않는다.
+#[cfg(test)]
+impl PgState {
+    pub(crate) fn finish_open_for_tests(&self, target: &PgTarget, epoch: u64, login: String, info: PgTargetInfo, cluster: Arc<ClusterSnapshot>) -> Result<(), AppError> {
+        self.finish_open(target, epoch, login, info, cluster)
+    }
+
+    pub(crate) async fn sessions_for_tests(&self, app: &AppState, target: &PgTarget) -> Result<Vec<PgSession>, AppError> {
+        self.sessions(app, target).await
     }
 }
 

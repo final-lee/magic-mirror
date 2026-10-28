@@ -225,12 +225,12 @@ pub(super) async fn the_sessions_command_marks_the_connection_the_app_holds(serv
     };
     let state = PgState::default();
     let epoch = state.pool.epoch(&target);
-    state.finish_open(&target, epoch, "iam_admin".into(), info, Arc::new(cluster)).expect("열기");
+    state.finish_open_for_tests(&target, epoch, "iam_admin".into(), info, Arc::new(cluster)).expect("열기");
     let key = ConnKey { target: target.clone(), user: "iam_admin".into(), database: scene.database.clone() };
     state.pool.get_or_connect_at_epoch(key, epoch, || async { Ok(held) }).await.expect("보관함에 넣지 못했어요");
 
     let app = AppState { ctx: AwsContext::default(), adapters: Vec::new(), settings_path: PathBuf::new(), sso: Default::default() };
-    let listed = state.sessions(&app, &target).await.expect("세션을 읽지 못했어요");
+    let listed = state.sessions_for_tests(&app, &target).await.expect("세션을 읽지 못했어요");
     let own: BTreeMap<i32, bool> = listed.iter().map(|session| (session.pid, session.own)).collect();
     assert_eq!(own.get(&held_pid), Some(&true), "보관함의 연결이 앱의 연결로 표시되지 않았어요: {own:?}");
     assert_eq!(own.get(&elsewhere_pid), Some(&false), "보관함 밖의 연결은 앱의 연결이 아니에요: {own:?}");

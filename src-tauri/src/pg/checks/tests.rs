@@ -206,33 +206,45 @@ fn rds_superuser_skips_system_roles_and_roles_that_cannot_reach_the_privilege() 
 }
 
 #[test]
-fn from_pg16_a_set_role_member_needs_the_set_option_on_every_link() {
+fn from_pg16_a_set_role_member_needs_the_set_option_and_what_the_new_role_inherits_counts() {
     let setup = |version: i32| {
         let mut scene = with_rds_superusers();
         scene.cluster.version_num = version;
-        scene.cluster.roles.extend([RoleRec { inherit: false, ..login("first_off") }, RoleRec { inherit: false, ..login("last_off") }, role("sealed")]);
-        let options = |who: &str, group: &str, set: bool| if version >= 160_000 { member_with(who, group, false, set) } else { member(who, group) };
+        scene.cluster.roles.extend([
+            RoleRec { inherit: false, ..login("first_off") },
+            RoleRec { inherit: false, ..login("last_off") },
+            RoleRec { inherit: false, ..login("sudoer") },
+            role("sealed"),
+            role("dba"),
+        ]);
+        let link = |who: &str, group: &str, inherit: bool, set: bool| if version >= 160_000 { member_with(who, group, inherit, set) } else { member(who, group) };
         scene.cluster.members.extend([
             // 첫 관계에 SET 옵션이 없다
-            options("first_off", "admins", false),
-            // 마지막 관계에 SET 옵션이 없다
-            options("sealed", "rds_superuser", false),
-            options("last_off", "sealed", true),
+            link("first_off", "admins", false, false),
+            // 마지막 관계에 INHERIT도 SET도 없다
+            link("sealed", "rds_superuser", false, false),
+            link("last_off", "sealed", false, true),
+            // dba는 rds_superuser를 상속하지만 SET ROLE을 할 수는 없다. sudoer는 dba로 SET ROLE을 할 수 있다
+            link("dba", "rds_superuser", true, false),
+            link("sudoer", "dba", false, true),
         ]);
         scene
     };
     let reached = |version: i32| {
         let found = run(&setup(version));
-        let all: Vec<String> = roles_of(&found, RdsSuperuser).into_iter().map(str::to_string).collect();
+        let all: Vec<(String, String)> = items(&found, RdsSuperuser).into_iter().map(|i| (i.role.clone().expect("role"), i.detail.clone())).collect();
         all
     };
-    // PG16: blocked의 관계에는 옵션이 없어 SET이 허용된다. SET 옵션을 끈 관계를 지나는 first_off와 last_off는 닿지 못한다
+    let has = |all: &[(String, String)], name: &str| all.iter().any(|(role, _)| role == name);
+    // PG16: blocked의 관계에는 옵션이 없어 SET이 허용된다. SET 옵션을 끈 관계를 지나는 first_off와 마지막 관계에 옵션이 없는 last_off는 닿지 못한다
     let pg16 = reached(PG16);
-    assert!(pg16.contains(&"blocked".to_string()));
-    assert!(!pg16.contains(&"first_off".to_string()) && !pg16.contains(&"last_off".to_string()), "{pg16:?}");
-    // PG15 이하에는 SET 옵션이 없다
+    assert!(has(&pg16, "blocked"));
+    assert!(!has(&pg16, "first_off") && !has(&pg16, "last_off"), "{pg16:?}");
+    // sudoer는 dba로 SET ROLE을 한 뒤 dba가 상속하는 rds_superuser의 권한을 쓴다
+    assert!(pg16.contains(&("sudoer".to_string(), "SET ROLE로 rds_superuser 권한을 쓸 수 있어요".to_string())), "{pg16:?}");
+    // PG15 이하에는 옵션이 없다
     let pg15 = reached(PG15);
-    assert!(["blocked", "first_off", "last_off"].iter().all(|name| pg15.contains(&name.to_string())), "{pg15:?}");
+    assert!(["blocked", "first_off", "last_off", "sudoer"].iter().all(|name| has(&pg15, name)), "{pg15:?}");
 }
 
 #[test]
