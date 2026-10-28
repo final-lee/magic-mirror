@@ -4,7 +4,8 @@
 //! 접근 권한(ACL)은 `aclexplode`가 풀어 준 항목 하나가 `AclEntry` 하나다. 객체에 ACL이 비어 있으면(NULL) 서버가 `acldefault`로 채운 기본값이 들어 있다.
 
 /// 권한 종류. `aclexplode`의 `privilege_type` 문자열과 하나씩 맞는다.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// 순서는 선언 순서다. 화면에 권한을 나열할 때 이 순서를 쓴다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Privilege {
     Select,
     Insert,

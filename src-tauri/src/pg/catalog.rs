@@ -1,5 +1,5 @@
 //! 카탈로그 읽기. 앱이 PostgreSQL에 보내는 질의는 모두 이 파일에 있고, 하나도 빠짐없이 읽기 전용 트랜잭션 안에서 돈다.
-//! 다른 파일에는 질의도 트랜잭션도 두지 않는다(이 규칙을 지키는 검사 테스트는 명령을 붙일 때 들어간다).
+//! 다른 파일에는 질의도 트랜잭션도 두지 않는다(이 규칙을 지키는 검사 테스트는 `pg::hygiene`이다).
 //!
 //! - `read`: 읽기 전용 트랜잭션 하나를 열고 `statement_timeout`을 30초로 건 뒤 주어진 작업을 돌리고 커밋한다.
 //! - `cluster_snapshot`, `db_snapshot`, `sessions`: 질의 결과를 `model`의 레코드로 바꾼다. 호출 하나가 트랜잭션 하나다.
@@ -9,6 +9,7 @@
 
 use std::error::Error as StdError;
 
+use tokio_postgres::error::SqlState;
 use tokio_postgres::{Client, Error, IsolationLevel, Row, Transaction};
 
 use super::connect::Connected;
@@ -21,6 +22,12 @@ use crate::iam::clock;
 
 /// 읽기 하나가 쓸 수 있는 시간. 읽기 전용 트랜잭션 안에서 가장 먼저 건다. 넘기면 서버가 그 문장을 취소한다
 const STATEMENT_TIMEOUT: &str = "SET LOCAL statement_timeout = '30s'";
+
+/// 문장 시간 제한(`STATEMENT_TIMEOUT`)에 걸려 서버가 문장을 취소했을 때(SQLSTATE 57014)의 문구
+const READ_TIMEOUT: &str = "질의가 30초 안에 끝나지 않았어요. 잠시 뒤 다시 읽어 주세요";
+
+/// 읽는 도중 연결이 끊겼을 때의 문구. 연결 보관함이 닫힌 연결을 버리므로 다시 읽으면 새로 연결한다
+const CONNECTION_CLOSED: &str = "데이터베이스 연결이 끊겼어요. 다시 읽으면 새로 연결해요";
 
 /// 데이터베이스 하나에서 읽는 객체(관계와 함수를 합쳐)의 상한. 관계가 먼저 자리를 잡고 함수는 남는 만큼만 든다
 const MAX_OBJECTS: usize = 20_000;
@@ -141,8 +148,8 @@ where
 /// 읽기 전용 REPEATABLE READ 트랜잭션 하나에서 `job`을 돌린다: 시작하고, 문장 시간 제한(30초)을 걸고, `job`을 돌리고, 커밋한다.
 /// READ ONLY는 데이터 변경(INSERT·UPDATE·DELETE), DDL, GRANT, `nextval`을 거절한다(SQLSTATE `25006`).
 /// 하지만 세션 `SET`·`SET ROLE`(연결을 보관하면 트랜잭션이 끝나도 남는다)이나 부작용이 있는 함수(`pg_terminate_backend`, 권고 잠금 등)는 막지 못한다.
-/// 그래서 "아무것도 쓰지 않는다"는 보장은 서버가 아니라 이 파일의 고정된 SELECT들과, 다른 파일이 질의를 보내지 못하게 하는 검사 테스트(PB4)에 기댄다.
-/// 오류는 사용자에게 보일 오류로 바꾼다: 서버가 보낸 오류는 서버 문구 그대로, 서버에 닿지 못한 오류는 네트워크 오류.
+/// 그래서 "아무것도 쓰지 않는다"는 보장은 서버가 아니라 이 파일의 고정된 SELECT들과, 다른 파일이 질의를 보내지 못하게 하는 검사 테스트(`pg::hygiene`)에 기댄다.
+/// 오류는 사용자에게 보일 오류로 바꾼다(`app_error`): 서버가 보낸 오류는 서버 문구 그대로(시간 제한은 따로 안내하는 문구), 서버에 닿지 못한 오류는 네트워크 오류.
 pub async fn read<T, F>(conn: &mut Connected, job: F) -> Result<T, AppError>
 where
     F: AsyncFnOnce(&Transaction<'_>) -> Result<T, Error>,
@@ -156,11 +163,13 @@ pub(super) async fn backend_pid(client: &mut Client) -> Result<i32, Error> {
     transact(client, async |tx| tx.query_one(BACKEND_PID_SQL, &[]).await?.try_get::<_, i32>(0)).await
 }
 
-/// 질의 오류를 사용자에게 보일 오류로 바꾼다. 서버가 보낸 오류는 서버 문구 그대로(SQLSTATE는 넣지 않는다).
-/// 서버에 닿지 못한 오류(닫힌 연결, 입출력 오류)는 네트워크 오류. 그 밖에는 드라이버의 문구.
+/// 질의 오류를 사용자에게 보일 오류로 바꾼다.
+/// - 서버가 보낸 오류는 서버 문구 그대로(SQLSTATE는 넣지 않는다). 다만 문장 시간 제한이 문장을 취소한 오류(57014)는 `READ_TIMEOUT` 문구다.
+/// - 서버에 닿지 못한 오류(닫힌 연결, 입출력 오류)는 네트워크 오류이고 `CONNECTION_CLOSED` 문구다. 드라이버의 영어 문구는 보이지 않는다.
+/// - 그 밖에는 드라이버의 문구.
 fn app_error(e: &Error) -> AppError {
     if let Some(db) = e.as_db_error() {
-        return AppError::other(db.message());
+        return AppError::other(if *db.code() == SqlState::QUERY_CANCELED { READ_TIMEOUT } else { db.message() });
     }
     let mut unreachable = e.is_closed();
     let mut cause: Option<&(dyn StdError + 'static)> = Some(e);
@@ -169,7 +178,7 @@ fn app_error(e: &Error) -> AppError {
         cause = err.source();
     }
     if unreachable {
-        AppError::Network { message: e.to_string() }
+        AppError::Network { message: CONNECTION_CLOSED.to_string() }
     } else {
         AppError::other(e.to_string())
     }

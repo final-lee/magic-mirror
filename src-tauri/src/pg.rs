@@ -8,17 +8,27 @@
 //! - `model`: 카탈로그 스냅숏의 레코드(역할, 구성원 관계, 데이터베이스, 스키마, 관계, 함수, 기본 권한, 세션)
 //! - `catalog`: 카탈로그를 읽어 스냅숏을 만든다. 질의를 보내고 트랜잭션을 여는 유일한 곳이다.
 //! - `eval`: 스냅숏만으로 실효 권한을 계산한다(순수 함수). 역할이 객체에 권한을 어디서 받는지, 실제로 쓸 수 있는지, 스키마별 요약, 누가 할 수 있나.
+//! - `view`: 화면으로 나가는 계약(명령이 돌려주는 값의 모양). 프런트엔드의 `src/pg/types.ts`와 필드마다 맞는다.
+//! - `summary`: 스냅숏과 `eval`로 계약의 값을 만든다(순수 함수). 역할 요약·개요, 권한 표, 칸 상세, 객체 검색, 역할 상세, 누가 할 수 있나, 세션.
+//! - `checks`: 스냅숏을 보고 보안 점검 열 가지를 찾는다(순수 함수).
+//!
+//! 명령(Tauri)과 읽어 둔 값의 보관은 `pg_commands`에 있다. 질의를 보내거나 트랜잭션을 여는 곳이 `catalog` 하나뿐이라는 약속은 시험 `hygiene`이 지킨다.
 
 pub mod catalog;
+pub mod checks;
 pub mod connect;
 pub mod eval;
 pub mod model;
 pub mod pool;
+pub mod summary;
 pub mod target;
+pub mod view;
 
 #[cfg(test)]
-mod fake_server;
+pub(crate) mod fake_server;
 #[cfg(test)]
-mod fixtures;
+pub(crate) mod fixtures;
+#[cfg(test)]
+mod hygiene;
 #[cfg(test)]
 mod live_tests;

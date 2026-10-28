@@ -101,7 +101,9 @@ macro_rules! impl_granting {
 }
 impl_granting!(RelationRec, SchemaRec, FunctionRec, DatabaseRec);
 
-/// 소유자가 기본으로 갖는 권한만 가진 관계: 시퀀스는 USAGE·SELECT·UPDATE, 나머지는 테이블의 일곱 가지
+/// 소유자가 기본으로 갖는 권한만 가진 관계: 시퀀스는 USAGE·SELECT·UPDATE, 나머지는 테이블의 일곱 가지.
+/// 이것은 PG14~16의 기본값이다. PG17부터는 서버가 주는 소유자의 기본 권한에 MAINTAIN도 들어 있다(여기서는 넣지 않는다.
+/// 시험이 PG17 모양의 MAINTAIN을 볼 때는 `grant`로 더한다)
 pub fn relation(kind: RelKind, schema: &str, name: &str, owner: &str) -> RelationRec {
     let privileges: &[Privilege] =
         if kind == RelKind::Sequence { &[Usage, Select, Update] } else { &[Select, Insert, Update, Delete, Truncate, References, Trigger] };

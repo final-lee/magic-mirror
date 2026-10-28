@@ -224,3 +224,102 @@ async fn two_gets_racing_for_one_key_end_up_with_one_shared_entry() {
     assert!(Arc::ptr_eq(&a, &b), "같은 열쇠는 같은 연결을 받아야 해요");
     assert_eq!(pool.backend_pids(&target("a")).len(), 1);
 }
+
+// ───────────────────────── 대상이 닫힌 횟수에 묶인 연결 ─────────────────────────
+
+/// 명령이 시작할 때 읽어 둔 `epoch`로 연결한다
+async fn get_at_epoch(pool: &Pool, server: &FakeServer, key: ConnKey, epoch: u64, pid: i32) -> Result<Arc<Mutex<Connected>>, AppError> {
+    pool.get_or_connect_at_epoch(key, epoch, || open(server, pid)).await
+}
+
+#[test]
+fn the_epoch_of_a_target_goes_up_only_when_that_target_is_closed() {
+    let pool = Pool::default();
+    assert_eq!((pool.epoch(&target("a")), pool.epoch(&target("b"))), (0, 0));
+    pool.close_target(&target("b"));
+    assert_eq!((pool.epoch(&target("a")), pool.epoch(&target("b"))), (0, 1));
+    pool.close_target(&target("a"));
+    pool.close_target(&target("a"));
+    assert_eq!((pool.epoch(&target("a")), pool.epoch(&target("b"))), (2, 1));
+}
+
+#[test]
+fn the_not_opened_text_is_the_one_the_commands_use() {
+    assert_eq!(NOT_OPENED, "먼저 연결해 주세요");
+}
+
+#[tokio::test]
+async fn a_connect_pinned_to_an_epoch_the_target_has_left_makes_no_connection() {
+    let server = FakeServer::start(Script::Ready).await;
+    let pool = Pool::default();
+    let epoch = pool.epoch(&target("a"));
+    pool.close_target(&target("a"));
+    let called = AtomicUsize::new(0);
+    let refused = pool
+        .get_or_connect_at_epoch(key("a", "app"), epoch, || {
+            called.fetch_add(1, Ordering::SeqCst);
+            open(&server, 1)
+        })
+        .await;
+    assert_eq!(refused.err(), Some(AppError::other("먼저 연결해 주세요")));
+    assert_eq!(called.load(Ordering::SeqCst), 0, "닫힌 대상에는 연결 함수를 부르면 안 돼요");
+    assert_eq!(server.accepted(), 0, "닫힌 대상에는 연결을 열면 안 돼요");
+    assert!(pool.backend_pids(&target("a")).is_empty());
+}
+
+#[tokio::test]
+async fn a_pinned_connect_that_close_target_interrupts_is_not_stored() {
+    let server = FakeServer::start(Script::Ready).await;
+    let pool = Pool::default();
+    let epoch = pool.epoch(&target("a"));
+    // 연결하는 사이에 탭이 닫힌다
+    let interrupted = pool
+        .get_or_connect_at_epoch(key("a", "app"), epoch, || async {
+            pool.close_target(&target("a"));
+            open(&server, 1).await
+        })
+        .await;
+    assert_eq!(interrupted.err(), Some(AppError::other("먼저 연결해 주세요")));
+    assert!(pool.backend_pids(&target("a")).is_empty(), "닫힌 대상의 연결이 보관됐어요");
+    // 닫은 뒤에 새로 읽은 epoch로는 다시 연결할 수 있다
+    get_at_epoch(&pool, &server, key("a", "app"), pool.epoch(&target("a")), 2).await.unwrap();
+    assert_eq!(pool.backend_pids(&target("a")), vec![2]);
+}
+
+#[tokio::test]
+async fn a_pinned_get_reuses_an_entry_without_connecting_while_the_epoch_is_the_same() {
+    let server = FakeServer::start(Script::Ready).await;
+    let pool = Pool::default();
+    let epoch = pool.epoch(&target("a"));
+    let first = get_at_epoch(&pool, &server, key("a", "app"), epoch, 11).await.unwrap();
+    let called = AtomicUsize::new(0);
+    let second = pool
+        .get_or_connect_at_epoch(key("a", "app"), epoch, || {
+            called.fetch_add(1, Ordering::SeqCst);
+            open(&server, 12)
+        })
+        .await
+        .unwrap();
+    assert!(Arc::ptr_eq(&first, &second));
+    assert_eq!((called.load(Ordering::SeqCst), server.accepted()), (0, 1));
+    // 닫은 뒤에는 보관돼 있던 연결도 없고, 옛 epoch로는 다시 얻을 수 없다
+    pool.close_target(&target("a"));
+    assert_eq!(get_at_epoch(&pool, &server, key("a", "app"), epoch, 13).await.err(), Some(AppError::other("먼저 연결해 주세요")));
+    assert_eq!(server.accepted(), 1);
+}
+
+#[tokio::test]
+async fn closing_another_target_does_not_stop_a_pinned_connect() {
+    let server = FakeServer::start(Script::Ready).await;
+    let pool = Pool::default();
+    let epoch = pool.epoch(&target("a"));
+    pool.close_target(&target("b"));
+    let kept = pool
+        .get_or_connect_at_epoch(key("a", "app"), epoch, || async {
+            pool.close_target(&target("b"));
+            open(&server, 1).await
+        })
+        .await;
+    assert!(kept.is_ok());
+    assert_eq!(pool.backend_pids(&target("a")), vec![1]);
+}

@@ -32,6 +32,15 @@ fn every_privilege_round_trips_through_its_pg_name() {
 }
 
 #[test]
+fn privileges_are_listed_in_the_order_they_are_declared() {
+    // 화면에 나열하는 순서: 테이블 권한(SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN)이 먼저고 USAGE는 그 뒤다
+    use Privilege::*;
+    let mut shuffled = [Usage, Trigger, Select, Truncate, Delete, Insert, Maintain, References, Update];
+    shuffled.sort();
+    assert_eq!(shuffled, [Select, Insert, Update, Delete, Truncate, References, Trigger, Maintain, Usage]);
+}
+
+#[test]
 fn an_unknown_privilege_name_is_none() {
     // `aclexplode`는 TEMP가 아니라 TEMPORARY라고 쓴다. SET·ALTER SYSTEM은 설정 값의 권한이라 이 앱이 다루지 않는다
     for name in ["", "select", "Select", " SELECT", "SELECT ", "TEMP", "SET", "ALTER SYSTEM", "ALL", "FROBNICATE"] {
@@ -533,13 +542,61 @@ async fn a_server_error_in_a_read_is_the_servers_own_message_and_the_transaction
 }
 
 #[tokio::test]
-async fn a_lost_connection_is_a_network_error() {
+async fn a_lost_connection_is_a_network_error_with_the_connection_closed_text() {
     let server = FakeServer::start(Script::Ready).await;
     let mut conn = server.connected(1).await;
     server.close_connections();
     wait_until_closed(&conn).await;
     let failed = read(&mut conn, async |tx| tx.batch_execute("SELECT 1").await).await;
+    // 드라이버의 영어 문구("connection closed")가 아니라 사용자 문구다
+    assert_eq!(failed, Err(AppError::Network { message: "데이터베이스 연결이 끊겼어요. 다시 읽으면 새로 연결해요".into() }));
+}
+
+#[tokio::test]
+async fn a_statement_timeout_reads_as_the_read_timeout_text() {
+    // 문장 시간 제한이 문장을 취소하면 서버는 SQLSTATE 57014를 보낸다(진짜 서버에서는 live 시험이 본다)
+    let server = FakeServer::start(Script::RejectsQueries { code: "57014", message: "canceling statement due to statement timeout" }).await;
+    let mut conn = server.connected(1).await;
+    let failed = read(&mut conn, async |tx| tx.query_one("SELECT 1", &[]).await.map(|_| ())).await;
+    assert_eq!(failed, Err(AppError::other("질의가 30초 안에 끝나지 않았어요. 잠시 뒤 다시 읽어 주세요")));
+    assert!(!format!("{failed:?}").contains("statement timeout"), "서버의 영어 문구는 나가지 않아요: {failed:?}");
+    // 연결은 그대로 쓸 수 있다
+    assert_eq!(read(&mut conn, async |tx| tx.batch_execute("SELECT 1").await).await, Ok(()));
+}
+
+#[tokio::test]
+async fn only_the_cancel_code_reads_as_a_timeout() {
+    // 다른 서버 오류는 서버 문구 그대로다: 57014 하나만 시간 제한 문구가 된다
+    for (code, message) in [("57P01", "terminating connection due to administrator command"), ("55P03", "could not obtain lock on relation"), ("42501", "permission denied")] {
+        let server = FakeServer::start(Script::RejectsQueries { code, message }).await;
+        let mut conn = server.connected(1).await;
+        let failed = read(&mut conn, async |tx| tx.query_one("SELECT 1", &[]).await.map(|_| ())).await;
+        assert_eq!(failed, Err(AppError::other(message)), "{code}");
+    }
+}
+
+#[tokio::test]
+async fn after_a_lost_connection_the_next_read_reconnects() {
+    use crate::pg::pool::{ConnKey, Pool};
+    use crate::pg::target::{PgTarget, TargetKind};
+
+    let server = FakeServer::start(Script::Ready).await;
+    let pool = Pool::default();
+    let target = PgTarget { profile: "dev".into(), region: "ap-northeast-2".into(), kind: TargetKind::Cluster, id: "a".into() };
+    let key = ConnKey { target: target.clone(), user: "iam_admin".into(), database: "app".into() };
+    let epoch = pool.epoch(&target);
+
+    let first = pool.get_or_connect_at_epoch(key.clone(), epoch, || async { Ok(server.connected(1).await) }).await.unwrap();
+    server.close_connections();
+    wait_until_closed(&*first.lock().await).await;
+    let failed = read(&mut *first.lock().await, async |tx| tx.batch_execute("SELECT 1").await).await;
     assert!(matches!(failed, Err(AppError::Network { .. })), "{failed:?}");
+
+    // 다시 읽으면: 풀이 닫힌 연결을 버리고 새로 연결한다
+    let second = pool.get_or_connect_at_epoch(key, epoch, || async { Ok(server.connected(2).await) }).await.unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&first, &second));
+    assert_eq!(pool.backend_pids(&target), vec![2]);
+    assert_eq!(read(&mut *second.lock().await, async |tx| tx.batch_execute("SELECT 1").await).await, Ok(()));
 }
 
 #[tokio::test]
