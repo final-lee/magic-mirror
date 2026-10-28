@@ -17,8 +17,9 @@ import { policyNameFromId, policyRoute, principalRoute, routeForFocus, VIEW_LABE
 import type { IamOverview, PrincipalKind } from "./types";
 import { useAddedColumns } from "./useAddedColumns";
 import { useAssignmentDraft } from "./useAssignmentDraft";
+import type { ApplyNotice } from "./useApplyFlow";
 import { useIamBatch } from "./useIamBatch";
-import { useIamChange, type ApplyNotice } from "./useIamChange";
+import { useIamChange } from "./useIamChange";
 import { useIamHistory } from "./useIamHistory";
 import { WhoCan } from "./WhoCan";
 
@@ -69,8 +70,9 @@ function DoneNotice({ notice, onDismiss }: { notice: ApplyNotice; onDismiss: () 
       {/* 바꾸기는 했지만 하지 못한 일(변경 기록 저장 등). 이 안내는 닫을 때까지 남는다 */}
       {notice.notes.length > 0 && (
         <ul className="iam-done-notes" aria-label="함께 알릴 일">
-          {notice.notes.map((note) => (
-            <li key={note}>{note}</li>
+          {/* 같은 안내가 여러 번 올 수 있고(되돌림 표시를 못 한 기록마다 같은 문구) 목록은 순서가 바뀌지 않아서, 글이 아니라 순서를 키로 쓴다 */}
+          {notice.notes.map((note, i) => (
+            <li key={i}>{note}</li>
           ))}
         </ul>
       )}

@@ -75,7 +75,10 @@ function deferred<T>() {
 
 const applyButton = () => screen.getByRole("button", { name: /^적용( 중…)?$/ });
 const cancelButton = () => screen.getByRole("button", { name: "취소" });
-const confirmInput = (text = CONFIRM) => screen.getByLabelText(`확인하려면 ${text}를 입력하세요`);
+// 조사는 받침에 따라 달라서 문구를 그대로 적는다: "적용" 뒤는 을, 영문 이름 뒤는 를
+const CONFIRM_LABEL = "확인하려면 변경 3개 적용을 입력하세요";
+const BOB_LABEL = "확인하려면 bob를 입력하세요";
+const confirmInput = (label = CONFIRM_LABEL) => screen.getByLabelText(label);
 const rowsOfList = () => Array.from(screen.getByRole("list", { name: "변경 목록" }).children) as HTMLElement[];
 
 beforeEach(() => {
@@ -296,11 +299,11 @@ describe("type to confirm", () => {
 
   test("a single target asks for its name instead", () => {
     const { props } = setup(confirmPreview({ confirmText: "bob" }));
-    expect(screen.queryByLabelText(`확인하려면 ${CONFIRM}를 입력하세요`)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(CONFIRM_LABEL)).not.toBeInTheDocument();
     expect(applyButton()).toBeDisabled();
-    fireEvent.change(confirmInput("bob"), { target: { value: "Bob" } });
+    fireEvent.change(confirmInput(BOB_LABEL), { target: { value: "Bob" } });
     expect(applyButton()).toBeDisabled();
-    fireEvent.change(confirmInput("bob"), { target: { value: "bob" } });
+    fireEvent.change(confirmInput(BOB_LABEL), { target: { value: "bob" } });
     expect(applyButton()).toBeEnabled();
     fireEvent.click(applyButton());
     expect(props.onApply).toHaveBeenCalledWith("bob");
@@ -317,12 +320,14 @@ describe("type to confirm", () => {
 
   test("hints when what was typed differs, but not before anything was typed or while a correct start is being typed", () => {
     setup(confirmPreview());
-    const hint = () => screen.queryByText("입력한 이름이 달라요");
+    // 입력할 것이 이름이 아니라 문구라서 "이름이 달라요"가 아니다
+    const hint = () => screen.queryByText("입력한 문구가 달라요");
     expect(hint()).not.toBeInTheDocument();
     fireEvent.change(confirmInput(), { target: { value: "변경 3" } });
     expect(hint()).not.toBeInTheDocument();
     fireEvent.change(confirmInput(), { target: { value: "변경 4" } });
     expect(hint()).toBeInTheDocument();
+    expect(screen.queryByText("입력한 이름이 달라요")).not.toBeInTheDocument();
     fireEvent.change(confirmInput(), { target: { value: CONFIRM } });
     expect(hint()).not.toBeInTheDocument();
   });

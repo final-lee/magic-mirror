@@ -1,8 +1,7 @@
-import { memo, useEffect, useRef, useState } from "react";
-import { CallList, ConfirmField, GATE_HINT, ImpactList, PreviewAlerts, ReversibleNote, WarningList } from "./previewParts";
+import { memo, useState } from "react";
+import { CallList, ConfirmField, GATE_HINT, ImpactList, PreviewAlerts, ReversibleNote, useSheetFocus, WarningList } from "./previewParts";
 import type { ChangePreview } from "./types";
 import { applyGate, type PendingChange } from "./useIamChange";
-import { useModal } from "./useModal";
 
 interface Props {
   pending: PendingChange;
@@ -25,21 +24,7 @@ function Sheet({ pending, onApply, onRetry, onCancel }: Props) {
   const { preview, phase, error, stale, undoOf } = pending;
   const applying = phase === "applying";
   const [typed, setTyped] = useState("");
-  const cancelRef = useRef<HTMLButtonElement>(null);
-  const retryRef = useRef<HTMLButtonElement>(null);
-  const wasApplying = useRef(false);
-  const { sheetRef, trapTab } = useModal(() => {
-    if (!applying) onCancel();
-  });
-  useEffect(() => cancelRef.current?.focus(), []);
-  // 적용 중에는 버튼이 잠겨 초점이 사라진다. 실패해서 돌아오면 안전한 버튼(다시 받기, 없으면 취소)으로 초점을 돌려준다.
-  useEffect(() => {
-    if (phase === "applying") wasApplying.current = true;
-    else if (wasApplying.current) {
-      wasApplying.current = false;
-      (retryRef.current ?? cancelRef.current)?.focus();
-    }
-  }, [phase]);
+  const { sheetRef, trapTab, cancelRef, retryRef } = useSheetFocus(phase, onCancel);
 
   const gate = preview ? applyGate(preview, typed) : null;
   const canApply = !!preview && gate?.ok === true && phase === "ready" && !stale;

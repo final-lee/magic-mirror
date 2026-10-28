@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
+import type { MockInstance } from "vitest";
 import { iamApi } from "./api";
 import { attachReadOnlyToBob, batchResult, ciBot, detachReadOnlyFromAlice, PLAN_DRIFTED, previewBatchOf, readOnlyPolicy, sampleOverview } from "./fixtures";
 import { iamKeys, useIamOverview } from "./queries";
 import type { BatchPreview, BatchResult, IamChange, PreviewWarning } from "./types";
-import { NOTICE_MS, REFRESH_DELAY_MS } from "./useIamChange";
+import { NOTICE_MS, REFRESH_DELAY_MS } from "./useApplyFlow";
 import { batchGate, stopMessage, useIamBatch, type BatchStartOptions } from "./useIamBatch";
 
 vi.mock("./api", () => ({ iamApi: { previewBatch: vi.fn(), applyBatch: vi.fn(), overview: vi.fn() } }));
@@ -75,7 +76,14 @@ beforeEach(() => {
   m.previewBatch.mockImplementation(async (_p, changes) => previewBatchOf(applyOrder(changes)));
   m.applyBatch.mockResolvedValue(batchResult({ logIds: ["l-1", "l-2", "l-3"] }));
 });
-afterEach(() => vi.useRealTimers());
+// console.error를 막고 불린 내용을 본다. 테스트가 끝나면 되돌린다
+let consoleError: MockInstance | undefined;
+const silenceConsoleError = () => (consoleError = vi.spyOn(console, "error").mockImplementation(() => {}));
+afterEach(() => {
+  consoleError?.mockRestore();
+  consoleError = undefined;
+  vi.useRealTimers();
+});
 
 describe("batchGate", () => {
   const warn = (level: PreviewWarning["level"]): PreviewWarning => ({ level, message: `${level} 경고` });
@@ -402,6 +410,28 @@ describe("when every change is applied", () => {
     expect(h.qc.getQueryState(iamKeys.principal("prod", "arn:x"))?.isInvalidated).toBe(true);
   });
 
+  test("an onApplied that throws does not leave the dialog stuck in applying or skip the reload, and the error is reported", async () => {
+    const errors = silenceConsoleError();
+    const boom = new Error("장바구니 오류");
+    const h = setup();
+    await waitFor(() => expect(h.result.current.overview.isSuccess).toBe(true));
+    const key = iamKeys.principal("prod", "arn:x");
+    h.qc.setQueryData(key, { any: "thing" });
+    const seen: (boolean | undefined)[] = [];
+    const onApplied = vi.fn(() => {
+      seen.push(h.qc.getQueryState(key)?.isInvalidated);
+      throw boom;
+    });
+    await startAndWait(h, queued, { onApplied });
+    await act(async () => h.flow().apply(""));
+    expect(h.flow().pending).toBeNull(); // 적용 중에 갇히지 않고 닫혔다
+    expect(h.flow().notices.map((n) => n.summary)).toEqual(["변경 3개를 적용했어요"]);
+    expect(seen).toEqual([false]); // 장바구니가 먼저다
+    expect(h.qc.getQueryState(key)?.isInvalidated).toBe(true); // 다시 읽기는 그대로 돈다
+    expect(errors).toHaveBeenCalledWith("적용 완료 알림을 처리하다 오류가 났어요", boom);
+    await startAndWait(h, [attachBob]); // 다음 묶음도 시작할 수 있다
+  });
+
   test("a closed tab does not refresh later", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const h = setup();
@@ -461,6 +491,31 @@ describe("when a change stops the batch", () => {
     expect(h.qc.getQueryState(iamKeys.principal("prod", "arn:x"))?.isInvalidated).toBe(true);
     expect(h.qc.getQueryState(iamKeys.changeLog)?.isInvalidated).toBe(true);
     await expectTwoReads(1);
+  });
+
+  test("an onApplied that throws still leaves the result on screen, the tray hears first and the reload goes on", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const errors = silenceConsoleError();
+    const boom = new Error("장바구니 오류");
+    m.applyBatch.mockResolvedValue(stoppedAt(1));
+    const h = setup();
+    await waitFor(() => expect(h.result.current.overview.isSuccess).toBe(true));
+    const key = iamKeys.principal("prod", "arn:x");
+    h.qc.setQueryData(key, { any: "thing" });
+    const seen: (boolean | undefined)[] = [];
+    const onApplied = vi.fn(() => {
+      seen.push(h.qc.getQueryState(key)?.isInvalidated);
+      throw boom;
+    });
+    await startAndWait(h, queued, { onApplied });
+    await act(async () => h.flow().apply(""));
+    expect(h.flow().pending).toMatchObject({ phase: "result", result: stoppedAt(1) });
+    expect(seen).toEqual([false]);
+    expect(h.qc.getQueryState(key)?.isInvalidated).toBe(true);
+    expect(errors).toHaveBeenCalledWith("적용 완료 알림을 처리하다 오류가 났어요", boom);
+    await expectTwoReads(1); // 3초 뒤 다시 읽기도 예약돼 있다
+    act(() => h.flow().cancel());
+    expect(h.flow().pending).toBeNull(); // 결과를 닫을 수 있다
   });
 
   test("when the first change is the one that stops, nothing is handed to onApplied, but the data is still read again", async () => {
@@ -639,13 +694,6 @@ describe("profile and unmount", () => {
     expect(m.applyBatch).not.toHaveBeenCalled();
   });
 
-  test("applies with the profile the preview was made for", async () => {
-    const h = setup("prod");
-    await startAndWait(h);
-    await act(async () => h.flow().apply(""));
-    expect(m.applyBatch).toHaveBeenCalledWith("prod", queued, null, null);
-  });
-
   test("a batch that finishes after the profile changed is announced, leaves the other profile's tray alone and marks only its own profile stale", async () => {
     const slow = deferred<BatchResult>();
     m.applyBatch.mockReturnValueOnce(slow.promise);
@@ -656,6 +704,7 @@ describe("profile and unmount", () => {
     h.qc.setQueryData(iamKeys.principal("dev", "arn:x"), { any: "thing" });
     await startAndWait(h, queued, { onApplied });
     act(() => h.flow().apply(""));
+    expect(m.applyBatch).toHaveBeenCalledWith("prod", queued, null, null); // 미리보기를 받은 프로필로 보냈다
     h.rerender({ p: "dev" });
     expect(h.flow().pending?.phase).toBe("applying"); // 이미 보낸 요청은 거둘 수 없다
     await act(async () => slow.resolve(batchResult()));

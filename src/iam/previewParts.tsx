@@ -1,6 +1,8 @@
-// 변경 미리보기 창(하나짜리, 묶음)이 함께 쓰는 조각: 경고, 호출, 영향받는 주체, 확인 문구 입력, 오류 안내.
+// 변경 미리보기 창(하나짜리, 묶음)이 함께 쓰는 조각: 초점 규칙, 경고, 호출, 영향받는 주체, 확인 문구 입력, 오류 안내.
+import { useEffect, useRef } from "react";
 import { KIND_LABEL, LEVEL_LABEL } from "./labels";
 import type { Impact, PermDelta, PreviewWarning } from "./types";
+import { useModal } from "./useModal";
 
 /** 자세히 보여 주는 주체 수. 백엔드도 이만큼만 자세히 보내고 나머지는 수(impactsOmitted)만 보낸다 */
 const MAX_IMPACTS = 30;
@@ -23,6 +25,29 @@ export const GATE_HINT = {
   blocked: "막힘 경고가 있어서 적용할 수 없어요",
   noText: "확인 문구를 받지 못해서 적용할 수 없어요",
 } as const;
+
+/**
+ * 미리보기 창이 함께 쓰는 초점 규칙(ConfirmDialog와 같다): 처음 초점은 [취소], Esc는 취소(적용 중에는 안 됨), Tab은 창 안을 돈다.
+ * 적용 중에는 버튼이 잠겨 초점이 사라지므로, 끝나서 돌아오면 안전한 버튼(다시 받기, 없으면 취소)으로 초점을 돌려준다.
+ * 돌려받은 cancelRef, retryRef는 그 버튼에, sheetRef와 trapTab은 창에 붙인다.
+ */
+export function useSheetFocus(phase: string, onCancel: () => void) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const retryRef = useRef<HTMLButtonElement>(null);
+  const wasApplying = useRef(false);
+  const { sheetRef, trapTab } = useModal(() => {
+    if (phase !== "applying") onCancel();
+  });
+  useEffect(() => cancelRef.current?.focus(), []);
+  useEffect(() => {
+    if (phase === "applying") wasApplying.current = true;
+    else if (wasApplying.current) {
+      wasApplying.current = false;
+      (retryRef.current ?? cancelRef.current)?.focus();
+    }
+  }, [phase]);
+  return { sheetRef, trapTab, cancelRef, retryRef };
+}
 
 /** 경고를 막힘 → 확인 → 주의 순서로 묶어서 보여 준다. 경고가 없으면 아무것도 그리지 않는다 */
 export function WarningList({ warnings }: { warnings: PreviewWarning[] }) {
@@ -136,13 +161,38 @@ export function ReversibleNote({ reversible }: { reversible: boolean }) {
   return <p className={`cp-rev${reversible ? "" : " no"}`}>{reversible ? "되돌릴 수 있어요" : "되돌릴 수 없어요"}</p>;
 }
 
-/** 확인 문구 입력. 입력할 때마다 다시 그려지는 것은 이 칸과 버튼뿐이다 */
-export function ConfirmField({ required, typed, onTyped, locked }: { required: string; typed: string; onTyped: (v: string) => void; locked: boolean }) {
+/**
+ * 목적격 조사. 마지막 글자가 받침 있는 한글이면 "을", 그 밖에는(받침 없는 한글, 영문 이름, 숫자 등) "를"이다.
+ * 한글 음절은 0xAC00(가)부터 0xD7A3(힣)까지이고, 28개씩(받침 없음 + 받침 27가지) 묶여 있어서 28로 나눈 나머지가 0이 아니면 받침이 있다.
+ */
+export function objectParticle(word: string): "을" | "를" {
+  const syllable = word.charCodeAt(word.length - 1) - 0xac00;
+  return syllable >= 0 && syllable <= 0xd7a3 - 0xac00 && syllable % 28 !== 0 ? "을" : "를";
+}
+
+/**
+ * 확인 문구 입력. 입력할 때마다 다시 그려지는 것은 이 칸과 버튼뿐이다.
+ * 입력해야 할 것이 대상의 이름이면 기본 안내("이름이 달라요")를 쓰고, 문장이면 mismatchHint로 알맞은 말을 넘긴다.
+ */
+export function ConfirmField({
+  required,
+  typed,
+  onTyped,
+  locked,
+  mismatchHint = "입력한 이름이 달라요",
+}: {
+  required: string;
+  typed: string;
+  onTyped: (v: string) => void;
+  locked: boolean;
+  mismatchHint?: string;
+}) {
+  const label = `확인하려면 ${required}${objectParticle(required)} 입력하세요`;
   return (
     <label className="field cp-confirm">
-      <span>확인하려면 {required}를 입력하세요</span>
+      <span>{label}</span>
       <input
-        aria-label={`확인하려면 ${required}를 입력하세요`}
+        aria-label={label}
         value={typed}
         disabled={locked}
         autoComplete="off"
@@ -155,7 +205,7 @@ export function ConfirmField({ required, typed, onTyped, locked }: { required: s
         }}
       />
       {/* 아직 입력하는 중(맞게 쓴 앞부분)일 때는 틀렸다고 하지 않는다 */}
-      {!required.startsWith(typed) && <span className="err">입력한 이름이 달라요</span>}
+      {!required.startsWith(typed) && <span className="err">{mismatchHint}</span>}
     </label>
   );
 }
