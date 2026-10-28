@@ -45,6 +45,12 @@ export interface PrincipalSummary {
   policyCount: number;
   memberCount: number | null; // memberCount: 그룹만
   badges: Badge[];
+  /** 직접 붙은 관리형 정책 ARN. 없으면 [] */
+  attached?: string[];
+  /** 사용자만: 속한 그룹 이름. 없으면 [] */
+  groups?: string[];
+  /** 권한 경계 정책 ARN */
+  boundary?: string;
 }
 export interface PolicySummary {
   id: string;
@@ -228,6 +234,7 @@ export type IamChange =
   | { op: "putInlinePolicy"; target: string; name: string; document: string }
   | { op: "deleteInlinePolicy"; target: string; name: string }
   | { op: "updateManagedPolicy"; policyArn: string; document: string };
+export type PreviewWarning = { level: "block" | "confirm" | "warn"; message: string };
 export interface ChangePreview {
   change: IamChange;
   summary: string;
@@ -235,7 +242,7 @@ export interface ChangePreview {
   impacts: Impact[]; // 최대 30명
   /** impacts에 넣지 못한 주체 수. 없으면 0 */
   impactsOmitted?: number;
-  warnings: { level: "block" | "confirm" | "warn"; message: string }[];
+  warnings: PreviewWarning[];
   confirmText: string | null; // confirm 경고가 있으면 입력해야 할 문자열(대상 이름)
   reversible: boolean;
 }
@@ -262,6 +269,30 @@ export interface ApplyResult {
   /** IAM은 바꿨지만 그 뒤에 하지 못한 일(변경 기록 저장 실패 등). 없으면 [] */
   notes?: string[];
 } // 실패하면 AppError(기록은 남김)
+export interface BatchItem {
+  change: IamChange;
+  summary: string;
+  calls: { api: string; params: Record<string, string> }[];
+  warnings: PreviewWarning[];
+}
+export interface BatchPreview {
+  changes: BatchItem[];
+  impacts: Impact[];
+  impactsOmitted?: number;
+  warnings: PreviewWarning[];
+  confirmText: string | null;
+  reversible: boolean;
+}
+export interface BatchResult {
+  batchId: string;
+  logIds: string[];
+  failed: { index: number; summary: string; message: string } | null;
+  notes?: string[];
+}
+export interface UndoBatch {
+  changes: IamChange[];
+  undoOf: string[];
+}
 export interface ChangeLogEntry {
   id: string;
   at: string;
@@ -276,4 +307,6 @@ export interface ChangeLogEntry {
   inverse: IamChange | null;
   undoOf: string | null;
   undone: boolean;
+  /** 묶음으로 적용한 변경. 같은 묶음은 같은 값 */
+  batchId?: string;
 }
