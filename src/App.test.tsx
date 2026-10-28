@@ -651,12 +651,12 @@ describe("PostgreSQL 탭", () => {
     const opensOf = (id: string) => vi.mocked(pgApi.open).mock.calls.filter(([t]) => t.id === id).length;
     const targetsOf = (id: string) => vi.mocked(pgApi.target).mock.calls.filter(([t]) => t.id === id).length;
     const cmdR = () => fireEvent.keyDown(window, { key: "r", metaKey: true });
-    /** orders-aurora 탭을 열어 연결이 끝나고 점검 건수가 보일 때까지 기다린다 */
+    /** orders-aurora 탭을 열어 연결이 끝나고 역할 목록이 보일 때까지 기다린다 */
     const openConnected = async (id = "orders-aurora") => {
       await openCluster(id);
       await screen.findByRole("tab", { name: `🐘 ${id}` });
       await screen.findByRole("navigation", { name: "PostgreSQL 메뉴" });
-      await waitFor(() => expect(pgApi.findings).toHaveBeenCalled());
+      await screen.findByRole("table", { name: "역할 목록" });
     };
 
     test("⌘R with a PostgreSQL tab showing reads that target again, from the connection on", async () => {
@@ -668,7 +668,28 @@ describe("PostgreSQL 탭", () => {
       await waitFor(() => expect(opensOf("orders-aurora")).toBe(2));
       expect(pgApi.open).toHaveBeenLastCalledWith(target("orders-aurora"), LOGIN_USER);
       expect(targetsOf("orders-aurora")).toBe(2);
-      await waitFor(() => expect(pgApi.findings).toHaveBeenLastCalledWith(target("orders-aurora"), true));
+    });
+
+    test("⌘R on 역할 sends no pg_findings, as the findings are only read while 점검 is showing", async () => {
+      rememberBoth();
+      await showClusters();
+      await openConnected();
+      cmdR();
+      await waitFor(() => expect(opensOf("orders-aurora")).toBe(2));
+      await act(async () => {});
+      expect(pgApi.findings).not.toHaveBeenCalled();
+    });
+
+    test("⌘R with 점검 showing reads the findings again with force", async () => {
+      rememberBoth();
+      await showClusters();
+      await openConnected();
+      fireEvent.click(within(screen.getByRole("navigation", { name: "PostgreSQL 메뉴" })).getByText("점검").closest("button")!);
+      await waitFor(() => expect(pgApi.findings).toHaveBeenCalledTimes(1));
+      expect(pgApi.findings).toHaveBeenLastCalledWith(target("orders-aurora"), false);
+      cmdR();
+      await waitFor(() => expect(pgApi.findings).toHaveBeenCalledTimes(2));
+      expect(pgApi.findings).toHaveBeenLastCalledWith(target("orders-aurora"), true);
     });
 
     test("the toolbar refresh button does the same", async () => {

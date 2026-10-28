@@ -1,14 +1,14 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { api } from "../api/client";
 import type { Settings } from "../api/types";
-import { SsoLoginContext, type SsoLogin } from "../lib/useSsoLogin";
-import { renderWithClient } from "../test/utils";
+import type { SsoLogin } from "../lib/useSsoLogin";
+import { newQueryClient, renderWithClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { pgApi } from "./api";
 import { LOGIN_USER, pgTarget, sampleDatabaseView, sampleFindings, sampleOverview, sampleRoleView, sampleSessions, sampleTargetInfo } from "./fixtures";
+import { LOGIN_NAME_INVALID } from "./loginName";
 import { PgTab } from "./PgTab";
-import { pgKeys } from "./queries";
 import type { PgTarget } from "./types";
 
 vi.mock("./api", () => ({
@@ -67,6 +67,7 @@ const remembered = (user = LOGIN_USER) => vi.mocked(api.getSettings).mockResolve
 
 const topBar = () => within(screen.getByRole("group", { name: "연결 정보" }));
 const menu = () => within(screen.getByRole("navigation", { name: "PostgreSQL 메뉴" }));
+const openMenu = (label: string) => fireEvent.click(menu().getByText(label).closest("button")!);
 const crumb = () => within(screen.getByRole("navigation", { name: "현재 위치" }));
 /** 연결이 끝나 메뉴가 보일 때까지 기다린다 */
 const connected = () => screen.findByRole("navigation", { name: "PostgreSQL 메뉴" });
@@ -234,6 +235,19 @@ describe("the DB user", () => {
     expect(screen.getByRole("heading", { name: "DB 사용자" })).toBeInTheDocument();
   });
 
+  test("a name the backend would refuse is refused in the prompt: nothing is saved and nothing is opened", async () => {
+    setup();
+    await screen.findByRole("heading", { name: "DB 사용자" });
+    const user = await type("iam admin");
+    expect(screen.getByText(LOGIN_NAME_INVALID)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "연결" })).toBeDisabled();
+    await user.type(promptInput(), "{Enter}");
+    await act(async () => {});
+    expect(api.saveSettings).not.toHaveBeenCalled();
+    expect(m.open).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "DB 사용자" })).toBeInTheDocument();
+  });
+
   test("a remembered login connects at once, without asking", async () => {
     remembered("alice");
     setup();
@@ -304,23 +318,9 @@ describe("connecting", () => {
 
   test("an expired SSO session asks for the login of the profile, and a login done by the app's manager connects again", async () => {
     m.open.mockRejectedValueOnce({ kind: "ssoExpired" });
-    const manager: SsoLogin = {
-      entries: [],
-      statusFor: () => null,
-      lastSuccessAt: () => null,
-      start: vi.fn(async () => true),
-      cancel: vi.fn(),
-      dismiss: vi.fn(),
-      rearm: vi.fn(),
-    };
-    const tree = (sso: SsoLogin, qc: QueryClient) => (
-      <QueryClientProvider client={qc}>
-        <SsoLoginContext.Provider value={sso}>
-          <PgTab {...baseProps} />
-        </SsoLoginContext.Provider>
-      </QueryClientProvider>
-    );
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const manager = ssoLoginStub();
+    const tree = (sso: SsoLogin, qc: QueryClient) => withClientAndSso(<PgTab {...baseProps} />, qc, sso);
+    const qc = newQueryClient();
     const view = render(tree(manager, qc));
     expect(await screen.findByText("SSO 세션이 만료됐어요 (prod)")).toBeInTheDocument();
     expect(m.open).toHaveBeenCalledTimes(1);
@@ -334,23 +334,9 @@ describe("connecting", () => {
 
   test("an expired SSO session in the target check is handled the same way", async () => {
     m.target.mockRejectedValueOnce({ kind: "ssoExpired" });
-    const manager: SsoLogin = {
-      entries: [],
-      statusFor: () => null,
-      lastSuccessAt: () => null,
-      start: vi.fn(async () => true),
-      cancel: vi.fn(),
-      dismiss: vi.fn(),
-      rearm: vi.fn(),
-    };
-    const tree = (sso: SsoLogin, qc: QueryClient) => (
-      <QueryClientProvider client={qc}>
-        <SsoLoginContext.Provider value={sso}>
-          <PgTab {...baseProps} />
-        </SsoLoginContext.Provider>
-      </QueryClientProvider>
-    );
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const manager = ssoLoginStub();
+    const tree = (sso: SsoLogin, qc: QueryClient) => withClientAndSso(<PgTab {...baseProps} />, qc, sso);
+    const qc = newQueryClient();
     const view = render(tree(manager, qc));
     expect(await screen.findByText("SSO 세션이 만료됐어요 (prod)")).toBeInTheDocument();
     const later = Date.now() + 1000;
@@ -407,6 +393,21 @@ describe("changing the DB user", () => {
     expect(screen.getByText(MANAGE_REASON)).toBeInTheDocument(); // 새 사용자의 개요
   });
 
+  test("a refused name changes nothing: the user stays, nothing is saved, and 취소 goes back", async () => {
+    setup();
+    await connected();
+    fireEvent.click(topBar().getByRole("button", { name: "바꾸기" }));
+    const user = await type("bad name");
+    expect(screen.getByText(LOGIN_NAME_INVALID)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "연결" })).toBeDisabled();
+    await user.type(promptInput(), "{Enter}");
+    fireEvent.click(screen.getByRole("button", { name: "취소" }));
+    expect(await connected()).toBeInTheDocument();
+    expect(api.saveSettings).not.toHaveBeenCalled();
+    expect(m.open).toHaveBeenCalledTimes(1);
+    expect(topBar().getByText(LOGIN_USER)).toBeInTheDocument();
+  });
+
   test("saving the same name connects again", async () => {
     setup();
     await connected();
@@ -432,8 +433,10 @@ describe("changing the DB user", () => {
   test("connects once as the new user, then reads again what the previous user's connection had read", async () => {
     setup();
     await connected();
-    await openRole("alice");
+    openMenu("점검");
     await waitFor(() => expect(m.findings).toHaveBeenCalledTimes(1));
+    openMenu("역할");
+    await openRole("alice");
     expect(m.role).toHaveBeenCalledTimes(1);
     vi.clearAllMocks();
     m.open.mockResolvedValue(sampleOverview({ loginUser: "bob" }));
@@ -444,24 +447,44 @@ describe("changing the DB user", () => {
     const user = await type("bob");
     await user.click(screen.getByRole("button", { name: "연결" }));
     expect(await screen.findByRole("heading", { name: "alice" })).toBeInTheDocument(); // 보던 상세로 돌아온다
-    await waitFor(() => expect(m.findings).toHaveBeenCalledWith(pgTarget, true));
     await waitFor(() => expect(m.role).toHaveBeenCalledWith(pgTarget, "alice"));
     expect(m.open).toHaveBeenCalledTimes(1); // 다시 연결하지는 않는다
     expect(m.open).toHaveBeenCalledWith(pgTarget, "bob");
     expect(m.target).not.toHaveBeenCalled();
+    // 점검이 보이는 화면이 아니라서 지금은 읽지 않고, 다시 열 때 새로 읽는다
+    await act(async () => {});
+    expect(m.findings).not.toHaveBeenCalled();
+    openMenu("점검");
+    await waitFor(() => expect(m.findings).toHaveBeenCalledTimes(1));
+    expect(m.findings).toHaveBeenLastCalledWith(pgTarget, true);
+  });
+
+  test("with 점검 showing, a new user reads the findings again once the new connection is up, and not before", async () => {
+    setup();
+    await connected();
+    openMenu("점검");
+    await waitFor(() => expect(m.findings).toHaveBeenCalledTimes(1));
+    let resolve!: (v: ReturnType<typeof sampleOverview>) => void;
+    m.open.mockReturnValue(new Promise((r) => (resolve = r)));
+    fireEvent.click(topBar().getByRole("button", { name: "바꾸기" }));
+    const user = await type("bob");
+    await user.click(screen.getByRole("button", { name: "연결" }));
+    await screen.findByText("연결하는 중이에요");
+    await act(async () => {});
+    expect(m.findings).toHaveBeenCalledTimes(1); // 연결이 서기 전에는 읽지 않는다
+    await act(async () => resolve(sampleOverview({ loginUser: "bob" })));
+    await waitFor(() => expect(m.findings).toHaveBeenCalledTimes(2));
+    expect(m.findings).toHaveBeenLastCalledWith(pgTarget, true);
   });
 
   test("nothing is read again just because the connection came up the first time", async () => {
-    const { qc } = setup();
+    setup();
     await connected();
     await act(async () => {});
-    expect(m.findings).toHaveBeenCalledTimes(1);
-    expect(m.findings).toHaveBeenCalledWith(pgTarget, false);
-    // 첫 연결에서 다시 읽기를 걸었다면 "다음 조회는 force" 표시가 남아, 다음 평범한 조회가 force로 나간다
-    await act(async () => {
-      await qc.invalidateQueries({ queryKey: pgKeys.findings(pgTarget) });
-    });
-    expect(m.findings).toHaveBeenCalledTimes(2);
+    expect(m.findings).not.toHaveBeenCalled();
+    // 첫 연결에서 다시 읽기를 걸었다면 "다음 조회는 force" 표시가 남아, 처음 여는 점검이 force로 나간다
+    openMenu("점검");
+    await waitFor(() => expect(m.findings).toHaveBeenCalledTimes(1));
     expect(m.findings).toHaveBeenLastCalledWith(pgTarget, false);
   });
 });
@@ -487,9 +510,10 @@ describe("top bar", () => {
     expect(topBar().getByText(`읽은 시각 ${new Date("2026-10-28T12:34:56Z").toLocaleTimeString("ko-KR")}`)).toBeInTheDocument();
   });
 
-  test("다시 읽기 reads everything again: the target, the connection, the snapshots with force", async () => {
+  test("다시 읽기 reads the target and the connection again, and the snapshot that is showing with force", async () => {
     setup();
     await connected();
+    openMenu("점검");
     await waitFor(() => expect(m.findings).toHaveBeenCalledTimes(1));
     fireEvent.click(topBar().getByRole("button", { name: "다시 읽기" }));
     await waitFor(() => expect(m.open).toHaveBeenCalledTimes(2));
@@ -497,6 +521,34 @@ describe("top bar", () => {
     expect(m.target).toHaveBeenCalledTimes(2);
     await waitFor(() => expect(m.findings).toHaveBeenCalledTimes(2));
     expect(m.findings).toHaveBeenLastCalledWith(pgTarget, true);
+  });
+
+  test("다시 읽기 on 역할 reads no findings, and 점검 opened afterwards reads them with force", async () => {
+    setup();
+    await connected();
+    openMenu("점검");
+    await waitFor(() => expect(m.findings).toHaveBeenCalledTimes(1));
+    openMenu("역할");
+    m.findings.mockClear();
+    fireEvent.click(topBar().getByRole("button", { name: "다시 읽기" }));
+    await waitFor(() => expect(m.open).toHaveBeenCalledTimes(2));
+    await topBar().findByRole("button", { name: "다시 읽기" });
+    await act(async () => {});
+    expect(m.findings).not.toHaveBeenCalled();
+    expect(menu().getByTestId("nav-count")).toHaveTextContent("5"); // 읽어 둔 건수는 그대로다
+    openMenu("점검");
+    await waitFor(() => expect(m.findings).toHaveBeenCalledTimes(1));
+    expect(m.findings).toHaveBeenLastCalledWith(pgTarget, true);
+  });
+
+  test("다시 읽기 on 역할 reads no findings when 점검 was never opened", async () => {
+    setup();
+    await connected();
+    fireEvent.click(topBar().getByRole("button", { name: "다시 읽기" }));
+    await waitFor(() => expect(m.open).toHaveBeenCalledTimes(2));
+    await topBar().findByRole("button", { name: "다시 읽기" });
+    await act(async () => {});
+    expect(m.findings).not.toHaveBeenCalled();
   });
 
   test("the time moves on to the new snapshot", async () => {
@@ -533,6 +585,41 @@ describe("top bar", () => {
     fireEvent.click(within(banner.closest(".error-banner") as HTMLElement).getByRole("button", { name: "다시 시도" }));
     await waitFor(() => expect(screen.queryByText(VPN_TEXT)).not.toBeInTheDocument());
     expect(topBar().getByText("연결됨")).toBeInTheDocument();
+  });
+
+  test("a failed re-read of the target keeps the old information on screen and says why above it", async () => {
+    setup();
+    await connected();
+    await screen.findByText("alice");
+    m.target.mockRejectedValueOnce(NETWORK);
+    fireEvent.click(topBar().getByRole("button", { name: "다시 읽기" }));
+    const banner = await screen.findByText(VPN_TEXT);
+    expect(banner.closest(".error-banner")).not.toBeNull();
+    expect(topBar().getByText("orders-aurora")).toBeInTheDocument();
+    expect(topBar().getByText("aurora-postgresql 16.4")).toBeInTheDocument();
+    expect(screen.getByText("alice")).toBeInTheDocument();
+    expect(menu().getAllByRole("button")).toHaveLength(6);
+    fireEvent.click(within(banner.closest(".error-banner") as HTMLElement).getByRole("button", { name: "다시 시도" }));
+    await waitFor(() => expect(screen.queryByText(VPN_TEXT)).not.toBeInTheDocument());
+  });
+
+  test("when the target and the connection both fail to be read again, it says so once", async () => {
+    setup();
+    await connected();
+    m.target.mockRejectedValueOnce(NETWORK);
+    m.open.mockRejectedValueOnce(NETWORK);
+    fireEvent.click(topBar().getByRole("button", { name: "다시 읽기" }));
+    await screen.findByText(VPN_TEXT);
+    await act(async () => {});
+    expect(screen.getAllByText(VPN_TEXT)).toHaveLength(1);
+  });
+
+  test("a target that is read for the first time and fails still shows the full error box, not a banner", async () => {
+    m.target.mockRejectedValueOnce(NETWORK);
+    setup();
+    const text = await screen.findByText(VPN_TEXT);
+    expect(text.closest(".error-banner")).toBeNull();
+    expect(screen.queryByRole("group", { name: "연결 정보" })).not.toBeInTheDocument();
   });
 
   test("a user who cannot manage sees the reason as a hint", async () => {
@@ -573,26 +660,7 @@ describe("menu", () => {
     expect(await screen.findByRole("table", { name: "역할 목록" })).toBeInTheDocument();
   });
 
-  test("점검 shows the number of findings once they are loaded", async () => {
-    setup();
-    await connected();
-    const count = await within(menu().getByRole("button", { name: /점검/ })).findByTestId("nav-count");
-    expect(count).toHaveTextContent("5"); // rds_superuser 2 + SECURITY DEFINER 1 + CREATEROLE 1 + 만료 1
-    expect(count).toHaveClass("alert");
-    expect(m.findings).toHaveBeenCalledWith(pgTarget, false);
-  });
-
-  test("점검 shows no number while the findings are being read, or when they could not be read", async () => {
-    let resolve!: (v: ReturnType<typeof sampleFindings>) => void;
-    m.findings.mockReturnValue(new Promise((r) => (resolve = r)));
-    setup();
-    await connected();
-    expect(menu().queryByTestId("nav-count")).not.toBeInTheDocument();
-    await act(async () => resolve(sampleFindings()));
-    expect(await menu().findByTestId("nav-count")).toHaveTextContent("5");
-  });
-
-  test("the findings are not read before the connection is up", async () => {
+  test("connecting and staying on 역할 never reads the findings, so 점검 has no number yet", async () => {
     let resolve!: (v: ReturnType<typeof sampleOverview>) => void;
     m.open.mockReturnValue(new Promise((r) => (resolve = r)));
     setup();
@@ -600,13 +668,97 @@ describe("menu", () => {
     expect(m.findings).not.toHaveBeenCalled();
     await act(async () => resolve(sampleOverview()));
     await connected();
+    expect(await screen.findByRole("table", { name: "역할 목록" })).toBeInTheDocument();
+    await act(async () => {});
+    expect(m.findings).not.toHaveBeenCalled();
+    expect(menu().queryByTestId("nav-count")).not.toBeInTheDocument();
+  });
+
+  test("opening 점검 reads the findings once, without force, and its number appears", async () => {
+    setup();
+    await connected();
+    openMenu("점검");
+    const count = await within(menu().getByRole("button", { name: /점검/ })).findByTestId("nav-count");
+    expect(count).toHaveTextContent("5"); // rds_superuser 2 + SECURITY DEFINER 1 + CREATEROLE 1 + 만료 1
+    expect(count).toHaveClass("alert");
+    expect(m.findings).toHaveBeenCalledTimes(1);
+    expect(m.findings).toHaveBeenCalledWith(pgTarget, false);
+  });
+
+  test("점검 shows no number while the findings are being read", async () => {
+    let resolve!: (v: ReturnType<typeof sampleFindings>) => void;
+    m.findings.mockReturnValue(new Promise((r) => (resolve = r)));
+    setup();
+    await connected();
+    openMenu("점검");
     await waitFor(() => expect(m.findings).toHaveBeenCalledTimes(1));
+    expect(menu().queryByTestId("nav-count")).not.toBeInTheDocument();
+    await act(async () => resolve(sampleFindings()));
+    expect(await menu().findByTestId("nav-count")).toHaveTextContent("5");
+  });
+
+  test("the findings are read on 점검 only, not on the other screens", async () => {
+    setup();
+    await connected();
+    for (const label of ["권한", "기본 권한", "누가 할 수 있나", "세션"]) openMenu(label);
+    await act(async () => {});
+    expect(m.findings).not.toHaveBeenCalled();
+    expect(menu().queryByTestId("nav-count")).not.toBeInTheDocument();
+  });
+
+  describe("while there is no connection", () => {
+    afterEach(() => focusManager.setFocused(undefined));
+
+    test("no findings are read, not even when the window gets its focus back", async () => {
+      m.findings.mockRejectedValue({ kind: "other", message: "점검을 읽지 못했어요" });
+      setup();
+      await connected();
+      openMenu("점검");
+      await waitFor(() => expect(m.findings).toHaveBeenCalledTimes(1));
+      // 다른 DB 사용자로 바꾸면 새 연결이 서기 전까지 개요가 없다. 점검은 읽지 못한 채라 낡은 것으로 치지만, 연결 없이 다시 읽지는 않는다
+      m.open.mockReturnValue(new Promise(() => {}));
+      fireEvent.click(topBar().getByRole("button", { name: "바꾸기" }));
+      const user = await type("bob");
+      await user.click(screen.getByRole("button", { name: "연결" }));
+      await screen.findByText("연결하는 중이에요");
+      m.findings.mockClear();
+      act(() => focusManager.setFocused(true));
+      await act(async () => {});
+      expect(m.findings).not.toHaveBeenCalled();
+    });
+  });
+
+  test("going back to 역할 keeps the number and reads nothing", async () => {
+    setup();
+    await connected();
+    openMenu("점검");
+    await within(menu().getByRole("button", { name: /점검/ })).findByTestId("nav-count");
+    m.findings.mockClear();
+    openMenu("역할");
+    expect(await screen.findByRole("table", { name: "역할 목록" })).toBeInTheDocument();
+    expect(menu().getByTestId("nav-count")).toHaveTextContent("5");
+    await act(async () => {});
+    expect(m.findings).not.toHaveBeenCalled();
+  });
+
+  test("opening 점검 again does not read what is up to date again", async () => {
+    setup();
+    await connected();
+    openMenu("점검");
+    await within(menu().getByRole("button", { name: /점검/ })).findByTestId("nav-count");
+    openMenu("역할");
+    openMenu("점검");
+    await act(async () => {});
+    expect(m.findings).toHaveBeenCalledTimes(1);
   });
 
   test("a failure of the findings does not get in the way of the other screens", async () => {
     m.findings.mockRejectedValue({ kind: "other", message: "점검을 읽지 못했어요" });
     setup();
     await connected();
+    openMenu("점검");
+    await waitFor(() => expect(m.findings).toHaveBeenCalledTimes(1));
+    openMenu("역할");
     expect(await screen.findByRole("table", { name: "역할 목록" })).toBeInTheDocument();
     expect(menu().queryByTestId("nav-count")).not.toBeInTheDocument();
     expect(screen.queryByText("점검을 읽지 못했어요")).not.toBeInTheDocument();

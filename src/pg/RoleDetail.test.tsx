@@ -4,7 +4,7 @@ import { formatDateTime, formatDay } from "../iam/format";
 import { renderWithClient } from "../test/utils";
 import { pgApi } from "./api";
 import { pgTarget, sampleDatabaseView, sampleRoleView } from "./fixtures";
-import { pgKeys } from "./queries";
+import { pgKeys, refreshPg } from "./queries";
 import { RoleDetail } from "./RoleDetail";
 import type { PgObjectRef, PgRoleDatabase, PgRoleView, PgSchemaCell } from "./types";
 
@@ -27,6 +27,20 @@ const openTab = async (name: string) => fireEvent.click(await screen.findByRole(
 const attr = (label: string) => screen.getByText(label, { selector: "dt" }).nextElementSibling as HTMLElement;
 const section = (database: string) => screen.getByRole("region", { name: database });
 const cellTexts = (row: HTMLElement) => within(row).getAllByRole("cell").map((c) => c.textContent);
+/** pg_database가 이 데이터베이스로 불린 일들. 읽혀 있는 데이터베이스(orders)도 상세가 열려 있는 동안 구독하니, 부른 횟수는 데이터베이스별로 센다. */
+const readsOf = (database: string) => m.database.mock.calls.filter((c) => c[1] === database);
+/** 이 데이터베이스의 첫 읽기만 실패하게 한다. mockRejectedValueOnce는 가장 먼저 읽는 데이터베이스가 걸린다. */
+function failFirstReadOf(database: string, failure: unknown) {
+  const read = m.database.getMockImplementation()!;
+  let failed = false;
+  m.database.mockImplementation(async (...args) => {
+    if (args[1] === database && !failed) {
+      failed = true;
+      throw failure;
+    }
+    return read(...args);
+  });
+}
 
 /** 한 데이터베이스를 읽은 것으로 바꾼 상세 */
 function withLoaded(view: PgRoleView, database: string, patch: Partial<PgRoleDatabase> = {}): PgRoleView {
@@ -266,7 +280,7 @@ describe("권한", () => {
     const rows = within(table).getAllByRole("row").slice(1);
     expect(rows).toHaveLength(1);
     // alice는 app_write ← app_read 그룹에서만 받았다
-    expect(cellTexts(rows[0])).toEqual(["app", "있음", "없음", "모든 테이블", "일부 테이블", "상속으로만 받음"]);
+    expect(cellTexts(rows[0])).toEqual(["app", "있음", "없음", "모든 테이블", "일부 테이블", "그룹·PUBLIC으로만 받음"]);
   });
 
   test("a privilege that is held directly or through ownership is not called inherited", async () => {
@@ -287,6 +301,39 @@ describe("권한", () => {
     await openTab("권한");
     const rows = within(within(section("orders")).getByRole("table")).getAllByRole("row").slice(1);
     expect(rows.map((r) => cellTexts(r)[0])).toEqual(["app", "mid", "zeta"]);
+  });
+
+  test.each([
+    ["USAGE", { usage: true }],
+    ["CREATE", { create: true }],
+    ["SELECT on some tables", { read: "some" as const }],
+    ["INSERT, UPDATE and DELETE on all tables", { write: "all" as const }],
+  ])("a schema with only %s is listed", async (_what, extra) => {
+    m.role.mockResolvedValue(withLoaded(sampleRoleView("alice"), "orders", { cells: [cell({ schema: "app", ...extra })] }));
+    setup("alice");
+    await openTab("권한");
+    const rows = within(within(section("orders")).getByRole("table")).getAllByRole("row").slice(1);
+    expect(rows.map((r) => cellTexts(r)[0])).toEqual(["app"]);
+  });
+
+  test("a schema the role holds nothing on is not listed, even when the backend sends it", async () => {
+    m.role.mockResolvedValue(
+      withLoaded(sampleRoleView("alice"), "orders", {
+        cells: [cell({ schema: "empty_a" }), cell({ schema: "app", usage: true }), cell({ schema: "empty_b", inheritedOnly: true })],
+      }),
+    );
+    setup("alice");
+    await openTab("권한");
+    const rows = within(within(section("orders")).getByRole("table")).getAllByRole("row").slice(1);
+    expect(rows.map((r) => cellTexts(r)[0])).toEqual(["app"]);
+  });
+
+  test("a database where every cell is empty says the role holds no privileges", async () => {
+    m.role.mockResolvedValue(withLoaded(sampleRoleView("alice"), "orders", { cells: [cell({ schema: "empty_a" }), cell({ schema: "empty_b" })] }));
+    setup("alice");
+    await openTab("권한");
+    expect(within(section("orders")).getByText("이 데이터베이스에서 받은 권한이 없어요")).toBeInTheDocument();
+    expect(within(section("orders")).queryByRole("table")).not.toBeInTheDocument();
   });
 
   test("a schema the role holds privileges on but cannot use says why, with the exact words, under its name", async () => {
@@ -313,7 +360,7 @@ describe("권한", () => {
     await openTab("권한");
     const row = within(section("orders")).getAllByRole("row")[1];
     expect(within(row).getByText("⚠ 권한은 있지만 실제로는 못 써요 (CONNECT 없음)")).toBeInTheDocument();
-    expect(cellTexts(row).slice(-1)).toEqual(["상속으로만 받음"]);
+    expect(cellTexts(row).slice(-1)).toEqual(["그룹·PUBLIC으로만 받음"]);
   });
 
   test("a schema that can be used has no warning", async () => {
@@ -387,11 +434,11 @@ describe("권한", () => {
     test("reads only the database that was asked for, and the role only after it", async () => {
       backendRemembersLoads();
       const order: string[] = [];
-      let finishDatabase!: () => void;
+      let finishAnalytics!: () => void;
       const readDatabase = m.database.getMockImplementation()!;
       m.database.mockImplementation(async (...args) => {
-        order.push("database");
-        await new Promise<void>((r) => (finishDatabase = r));
+        order.push(`database ${args[1]}`);
+        if (args[1] === "analytics") await new Promise<void>((r) => (finishAnalytics = r));
         return readDatabase(...args);
       });
       const readRole = m.role.getMockImplementation()!;
@@ -402,13 +449,15 @@ describe("권한", () => {
       setup("alice");
       await openTab("권한");
       fireEvent.click(within(section("analytics")).getByRole("button", { name: "불러오기" }));
-      await waitFor(() => expect(order).toEqual(["role", "database"]));
+      await waitFor(() => expect(readsOf("analytics")).toHaveLength(1));
       expect(within(section("analytics")).getByText("불러오는 중…")).toBeInTheDocument();
       expect(within(section("postgres")).getByRole("button", { name: "불러오기" })).toBeInTheDocument();
-      expect(m.database).toHaveBeenCalledTimes(1);
-      await act(async () => finishDatabase());
+      expect(readsOf("postgres")).toHaveLength(0); // 누르지 않은 데이터베이스는 읽지 않는다
+      expect(order.filter((o) => o === "role")).toHaveLength(1); // 읽는 동안 역할은 다시 읽지 않는다
+      await act(async () => finishAnalytics());
       await within(section("analytics")).findByRole("table");
-      expect(order).toEqual(["role", "database", "role"]);
+      expect(order.filter((o) => o === "role")).toHaveLength(2);
+      expect(order.indexOf("database analytics")).toBeLessThan(order.lastIndexOf("role"));
     });
 
     test("a database that was already read elsewhere is not read again, only the role", async () => {
@@ -419,7 +468,7 @@ describe("권한", () => {
       m.role.mockImplementation(async (_t, role) => withLoaded(sampleRoleView(role), "analytics", { cells: [cell({ schema: "reports", usage: true })] }));
       fireEvent.click(within(section("analytics")).getByRole("button", { name: "불러오기" }));
       await within(section("analytics")).findByRole("table");
-      expect(m.database).not.toHaveBeenCalled();
+      expect(readsOf("analytics")).toHaveLength(0);
       expect(m.role).toHaveBeenCalledTimes(2);
     });
 
@@ -451,19 +500,19 @@ describe("권한", () => {
 
     test("when the database cannot be read, says why, and 다시 시도 reads it again", async () => {
       const failure = { kind: "other", message: 'analytics에 연결하지 못했어요: permission denied for database "analytics"' };
-      m.database.mockRejectedValueOnce(failure);
+      failFirstReadOf("analytics", failure);
       setup("alice");
       await openTab("권한");
       fireEvent.click(within(section("analytics")).getByRole("button", { name: "불러오기" }));
       expect(await within(section("analytics")).findByText(failure.message)).toBeInTheDocument();
       expect(m.role).toHaveBeenCalledTimes(1); // 읽지 못했으니 역할을 다시 읽을 까닭이 없다
       fireEvent.click(within(section("analytics")).getByRole("button", { name: "다시 시도" }));
-      await waitFor(() => expect(m.database).toHaveBeenCalledTimes(2));
-      expect(m.database).toHaveBeenLastCalledWith(pgTarget, "analytics", true);
+      await waitFor(() => expect(readsOf("analytics")).toHaveLength(2));
+      expect(readsOf("analytics")[1]).toEqual([pgTarget, "analytics", true]);
     });
 
     test("the other databases keep their own button while one has failed", async () => {
-      m.database.mockRejectedValueOnce({ kind: "other", message: "못 읽었어요" });
+      failFirstReadOf("analytics", { kind: "other", message: "못 읽었어요" });
       setup("alice");
       await openTab("권한");
       fireEvent.click(within(section("analytics")).getByRole("button", { name: "불러오기" }));
@@ -487,6 +536,149 @@ describe("권한", () => {
   });
 });
 
+describe("a refresh while the detail is open", () => {
+  /**
+   * 백엔드 대역. pg_database는 그 데이터베이스를 읽은 것으로 기억하고, pg_role은 읽은 데이터베이스마다 지금 세대의 칸으로 답한다.
+   * pg_open이 데이터베이스 스냅숏 캐시를 비우는 일은 forget(), 읽은 내용이 달라지는 일은 next()로 흉내 낸다.
+   */
+  function fakeBackend() {
+    const loaded = new Set<string>();
+    let generation = 1;
+    m.database.mockImplementation(async (_t, database) => {
+      loaded.add(database);
+      return sampleDatabaseView({ database });
+    });
+    m.role.mockImplementation(async (_t, role) => {
+      let view = sampleRoleView(role);
+      for (const database of loaded) view = withLoaded(view, database, { cells: [cell({ role, schema: `reports${generation}`, usage: true, read: "all" })] });
+      return view;
+    });
+    return {
+      forget: () => loaded.clear(),
+      next: () => void generation++,
+    };
+  }
+
+  test("a database that was loaded here is read again with force, and the role is read only after that, so the new cells show", async () => {
+    const backend = fakeBackend();
+    const { qc } = setup("alice");
+    await openTab("권한");
+    fireEvent.click(within(section("analytics")).getByRole("button", { name: "불러오기" }));
+    await within(section("analytics")).findByText("reports1");
+    await openTab("개요"); // 다시 읽는 일은 어느 하위 탭이 보이는지와 상관없다
+
+    // 새로 고침: pg_open이 데이터베이스 스냅숏을 비웠고, 다시 읽으면 내용이 달라져 있다
+    backend.forget();
+    backend.next();
+    let finishAnalytics!: () => void;
+    const readDatabase = m.database.getMockImplementation()!;
+    m.database.mockImplementation(async (...args) => {
+      if (args[1] === "analytics" && args[2]) await new Promise<void>((r) => (finishAnalytics = r));
+      return readDatabase(...args);
+    });
+    const rolesBefore = m.role.mock.calls.length;
+    let refreshed!: Promise<void>;
+    await act(async () => {
+      refreshed = refreshPg(qc, pgTarget);
+    });
+    await waitFor(() => expect(m.database).toHaveBeenCalledWith(pgTarget, "analytics", true));
+    expect(m.role).toHaveBeenCalledTimes(rolesBefore); // 데이터베이스를 다 읽기 전에는 역할을 읽지 않는다
+    await act(async () => {
+      finishAnalytics();
+      await refreshed;
+    });
+    expect(m.role).toHaveBeenCalledTimes(rolesBefore + 1);
+    await openTab("권한");
+    expect(await within(section("analytics")).findByText("reports2")).toBeInTheDocument();
+    expect(within(section("analytics")).queryByRole("button", { name: "불러오기" })).not.toBeInTheDocument();
+  });
+
+  test("a database the role reports as loaded is followed too, and one nobody asked for is not", async () => {
+    fakeBackend();
+    const { qc } = setup("alice");
+    await screen.findByRole("heading", { name: "alice" });
+    await waitFor(() => expect(readsOf("orders")).toHaveLength(1));
+    expect(readsOf("orders")[0]).toEqual([pgTarget, "orders", false]); // 이 탭에는 사본이 없어서 처음 읽는다
+    await act(async () => {
+      await refreshPg(qc, pgTarget);
+    });
+    expect(readsOf("orders")).toHaveLength(2);
+    expect(readsOf("orders")[1]).toEqual([pgTarget, "orders", true]);
+    expect(m.database.mock.invocationCallOrder[1]).toBeLessThan(m.role.mock.invocationCallOrder[1]); // 읽은 뒤에 역할을 읽는다
+    expect(readsOf("analytics")).toHaveLength(0);
+    expect(readsOf("postgres")).toHaveLength(0);
+  });
+
+  test("a copy of the database that went out of date is not taken for a finished read: the role waits for the new one", async () => {
+    fakeBackend();
+    const { qc } = setup("alice");
+    await openTab("권한");
+    // 앞서 읽어 둔 사본이 있지만 새로 고침으로 낡았고, 그 사이 백엔드는 스냅숏을 비웠다
+    qc.setQueryData(pgKeys.database(pgTarget, "analytics"), sampleDatabaseView({ database: "analytics" }));
+    await act(async () => {
+      await qc.invalidateQueries({ queryKey: pgKeys.database(pgTarget, "analytics") });
+    });
+    let finish!: () => void;
+    const readDatabase = m.database.getMockImplementation()!;
+    m.database.mockImplementation(async (...args) => {
+      if (args[1] === "analytics") await new Promise<void>((r) => (finish = r));
+      return readDatabase(...args);
+    });
+    const rolesBefore = m.role.mock.calls.length;
+    fireEvent.click(within(section("analytics")).getByRole("button", { name: "불러오기" }));
+    await waitFor(() => expect(readsOf("analytics")).toHaveLength(1));
+    await act(async () => {});
+    expect(m.role).toHaveBeenCalledTimes(rolesBefore); // 사본이 있어도 새로 읽는 중이니 기다린다
+    expect(within(section("analytics")).getByText("불러오는 중…")).toBeInTheDocument();
+    await act(async () => finish());
+    expect(await within(section("analytics")).findByText("reports1")).toBeInTheDocument();
+    await act(async () => {});
+    expect(m.role).toHaveBeenCalledTimes(rolesBefore + 1); // 다 읽은 뒤에 한 번
+  });
+
+  test("when the role still says unloaded after a read, the next finished read of that database asks for the role again", async () => {
+    // 백엔드가 읽은 것을 한동안 기억하지 못한다(읽자마자 스냅숏이 비워지는 경우)
+    let remembers = false;
+    const loaded = new Set<string>();
+    m.database.mockImplementation(async (_t, database) => {
+      if (remembers) loaded.add(database);
+      return sampleDatabaseView({ database });
+    });
+    m.role.mockImplementation(async (_t, role) => {
+      let view = sampleRoleView(role);
+      for (const database of loaded) view = withLoaded(view, database, { cells: [cell({ role, schema: "reports1", usage: true })] });
+      return view;
+    });
+    const { qc } = setup("alice");
+    await openTab("권한");
+    fireEvent.click(within(section("analytics")).getByRole("button", { name: "불러오기" }));
+    await waitFor(() => expect(readsOf("analytics")).toHaveLength(1));
+    await act(async () => {});
+    expect(within(section("analytics")).getByText("불러오는 중…")).toBeInTheDocument(); // 읽었지만 역할은 아직 읽지 않은 것으로 답한다
+    const rolesBefore = m.role.mock.calls.length;
+    remembers = true;
+    await act(async () => {
+      await qc.invalidateQueries({ queryKey: pgKeys.database(pgTarget, "analytics") });
+    });
+    expect(await within(section("analytics")).findByText("reports1")).toBeInTheDocument();
+    expect(m.role).toHaveBeenCalledTimes(rolesBefore + 1);
+  });
+
+  test("다시 시도 after a failed load reads the database again with force, and the role after that", async () => {
+    fakeBackend();
+    failFirstReadOf("analytics", { kind: "other", message: "못 읽었어요" });
+    setup("alice");
+    await openTab("권한");
+    fireEvent.click(within(section("analytics")).getByRole("button", { name: "불러오기" }));
+    await within(section("analytics")).findByText("못 읽었어요");
+    const rolesBefore = m.role.mock.calls.length;
+    fireEvent.click(within(section("analytics")).getByRole("button", { name: "다시 시도" }));
+    expect(await within(section("analytics")).findByRole("table")).toBeInTheDocument();
+    expect(readsOf("analytics").slice(-1)[0]).toEqual([pgTarget, "analytics", true]);
+    expect(m.role.mock.calls.length).toBeGreaterThan(rolesBefore);
+  });
+});
+
 describe("소유 객체", () => {
   const rows = (database: string) =>
     within(within(section(database)).getByRole("table", { name: `${database} 소유 객체` }))
@@ -507,6 +699,45 @@ describe("소유 객체", () => {
       ["시퀀스", "app.orders_id_seq"],
       ["함수", "app.touch_order(order_id integer)"],
     ]);
+  });
+
+  test("starts with a count per kind: schemas, tables (views included), sequences and functions", async () => {
+    setup("app_owner");
+    await openTab("소유 객체");
+    expect(within(section("orders")).getByText("스키마 2 · 테이블(뷰 포함) 4 · 시퀀스 1 · 함수 1")).toBeInTheDocument();
+    expect(within(section("orders")).queryByText(/세지 않았어요|센 수예요/)).not.toBeInTheDocument();
+  });
+
+  test("views, materialized views, partitioned tables and foreign tables count as tables", async () => {
+    const owned: PgObjectRef[] = (["table", "view", "matview", "partitioned", "foreign"] as const).map((kind, i) => ({ kind, schema: "app", name: `o${i}`, signature: null }));
+    m.role.mockResolvedValue(withLoaded(sampleRoleView("app_owner"), "orders", { owned }));
+    setup("app_owner");
+    await openTab("소유 객체");
+    expect(within(section("orders")).getByText("스키마 0 · 테이블(뷰 포함) 5 · 시퀀스 0 · 함수 0")).toBeInTheDocument();
+  });
+
+  test("a kind the role owns none of is counted as 0, and a function counts as a function", async () => {
+    const owned: PgObjectRef[] = [{ kind: "function", schema: "app", name: "touch", signature: "id integer" }];
+    m.role.mockResolvedValue(withLoaded(sampleRoleView("app_owner"), "orders", { owned }));
+    setup("app_owner");
+    await openTab("소유 객체");
+    expect(within(section("orders")).getByText("스키마 0 · 테이블(뷰 포함) 0 · 시퀀스 0 · 함수 1")).toBeInTheDocument();
+  });
+
+  test("when objects were left out the counts say they cover only the list", async () => {
+    const owned: PgObjectRef[] = [{ kind: "table", schema: "app", name: "orders", signature: null }];
+    m.role.mockResolvedValue(withLoaded(sampleRoleView("app_owner"), "orders", { owned, ownedOmitted: 37 }));
+    setup("app_owner");
+    await openTab("소유 객체");
+    expect(within(section("orders")).getByText("스키마 0 · 테이블(뷰 포함) 1 · 시퀀스 0 · 함수 0")).toBeInTheDocument();
+    expect(within(section("orders")).getByText("(목록에 있는 객체만 센 수예요)")).toBeInTheDocument();
+    expect(within(section("orders")).getByText("외 37개")).toBeInTheDocument();
+  });
+
+  test("a database that was not read has no counts, and neither has one where the role owns nothing", async () => {
+    setup("alice");
+    await openTab("소유 객체");
+    expect(screen.queryByText(/^스키마 \d+ ·/)).not.toBeInTheDocument();
   });
 
   test("objects the list leaves out are counted as 외 N개", async () => {

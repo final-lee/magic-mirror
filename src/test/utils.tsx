@@ -2,10 +2,40 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import type { Column, Resource, ServiceInfo } from "../api/types";
+import { SsoLoginContext, type SsoLogin } from "../lib/useSsoLogin";
+
+/** 테스트용 쿼리 클라이언트: 실패해도 다시 시도하지 않는다 */
+export const newQueryClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
 export function renderWithClient(ui: ReactElement) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const qc = newQueryClient();
   return { qc, ...render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>) };
+}
+
+/** 앱의 로그인 관리자 대역. 로그인은 늘 성공하고, 성공했다고 알리는 시각은 lastSuccessAt으로 정한다. */
+export function ssoLoginStub(over: Partial<SsoLogin> = {}): SsoLogin {
+  return {
+    entries: [],
+    statusFor: () => null,
+    lastSuccessAt: () => null,
+    start: vi.fn(async () => true),
+    cancel: vi.fn(),
+    dismiss: vi.fn(),
+    rearm: vi.fn(),
+    ...over,
+  };
+}
+
+/**
+ * 쿼리 클라이언트와 로그인 관리자를 씌운 트리. 같은 클라이언트로 rerender하면서 관리자만 바꿔
+ * "관리자가 로그인 성공을 알렸다"를 흉내 낼 때 쓴다.
+ */
+export function withClientAndSso(ui: ReactElement, qc: QueryClient, sso: SsoLogin) {
+  return (
+    <QueryClientProvider client={qc}>
+      <SsoLoginContext.Provider value={sso}>{ui}</SsoLoginContext.Provider>
+    </QueryClientProvider>
+  );
 }
 
 export function makeResource(id: string, values: Record<string, string>, extra: Partial<Resource> = {}): Resource {

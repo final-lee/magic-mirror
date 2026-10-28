@@ -1,7 +1,7 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { SsoLoginContext, type SsoLogin } from "../lib/useSsoLogin";
-import { renderWithClient } from "../test/utils";
+import type { SsoLogin } from "../lib/useSsoLogin";
+import { newQueryClient, renderWithClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { pgTarget } from "./fixtures";
 import { PgError } from "./PgError";
 import { refreshPg } from "./queries";
@@ -14,19 +14,6 @@ beforeEach(() => {
 });
 
 const network = { kind: "network", message: "엔드포인트에 연결하지 못했어요(db.example:5432). VPN이 켜져 있는지 확인하세요" };
-
-function manager(over: Partial<SsoLogin> = {}): SsoLogin {
-  return {
-    entries: [],
-    statusFor: () => null,
-    lastSuccessAt: () => null,
-    start: vi.fn(async () => true),
-    cancel: vi.fn(),
-    dismiss: vi.fn(),
-    rearm: vi.fn(),
-    ...over,
-  };
-}
 
 test("shows the message of the failure, and 다시 시도 re-reads the whole target", () => {
   const { qc } = renderWithClient(<PgError error={network} target={pgTarget} />);
@@ -48,15 +35,9 @@ test("asks for the login of the target's profile when the SSO session ran out", 
 });
 
 test("after a login through the app's login manager the whole target is read again, once, and not through 다시 시도", () => {
-  const sso = manager();
-  const box = (qc: QueryClient, value: SsoLogin) => (
-    <QueryClientProvider client={qc}>
-      <SsoLoginContext.Provider value={value}>
-        <PgError error={{ kind: "ssoExpired" }} target={pgTarget} />
-      </SsoLoginContext.Provider>
-    </QueryClientProvider>
-  );
-  const qc = new QueryClient();
+  const sso = ssoLoginStub();
+  const box = (qc: QueryClient, value: SsoLogin) => withClientAndSso(<PgError error={{ kind: "ssoExpired" }} target={pgTarget} />, qc, value);
+  const qc = newQueryClient();
   const view = render(box(qc, sso));
   expect(refreshPg).not.toHaveBeenCalled();
   const later = Date.now() + 1000;

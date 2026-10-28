@@ -5,7 +5,7 @@ import { COVERAGE_LABEL, OBJECT_KIND_LABEL, ROLE_KIND_LABEL, objectName, unusabl
 import { PgError } from "./PgError";
 import { usePgDatabase, usePgRole } from "./queries";
 import { roleRoute, type PgRoute } from "./route";
-import type { PgRoleDatabase, PgRoleView, PgSession, PgTarget } from "./types";
+import type { PgObjectKind, PgRoleDatabase, PgRoleView, PgSchemaCell, PgSession, PgTarget } from "./types";
 
 type Tab = "overview" | "members" | "privileges" | "owned" | "sessions";
 
@@ -36,8 +36,6 @@ interface Load {
   /** [불러오기]를 누른 데이터베이스들 */
   requested: ReadonlySet<string>;
   onRequest: (database: string) => void;
-  /** 데이터베이스를 읽었다. 역할을 다시 읽어 그 데이터베이스의 내용을 받는다. */
-  onLoaded: () => void;
 }
 
 export function RoleDetail({ target, role, onOpen, initialTab, onViewState }: Props) {
@@ -62,11 +60,18 @@ export function RoleDetail({ target, role, onOpen, initialTab, onViewState }: Pr
     target,
     requested,
     onRequest: (database) => setRequested((current) => new Set(current).add(database)),
-    onLoaded: () => void q.refetch(),
   };
+  // 백엔드가 읽은 것으로 답한 데이터베이스와 [불러오기]를 누른 데이터베이스는, 상세가 열려 있는 동안 어느 하위 탭이 보이든 계속 구독한다.
+  // 구독해야 refreshPg가 2단계에서 이 데이터베이스들을 force로 다시 읽고, 그다음 3단계에서 역할을 읽는다.
+  // 구독이 없으면 pg_open이 비운 스냅숏을 다시 읽지 않은 채 역할이 읽혀서, 읽어 둔 데이터베이스가 읽지 않은 것으로 돌아온다.
+  const followed = view.databases.filter((d) => d.loaded || requested.has(d.database));
+  const reread = () => void q.refetch();
 
   return (
     <section className="center iam-detail">
+      {followed.map((d) => (
+        <DatabaseWatch key={d.database} target={target} database={d.database} waiting={!d.loaded} onRead={reread} />
+      ))}
       {q.isError && <PgError compact error={q.error} target={target} />}
       <header className="iam-head">
         <div className="iam-title">
@@ -198,7 +203,7 @@ function Databases({ view, load, children }: { view: PgRoleView; load: Load; chi
           {db.loaded ? (
             children(db)
           ) : load.requested.has(db.database) ? (
-            <DatabaseLoader target={load.target} database={db.database} onLoaded={load.onLoaded} />
+            <DatabaseStatus target={load.target} database={db.database} />
           ) : (
             <div className="pg-unloaded">
               <span className="dim">아직 읽지 않았어요</span>
@@ -214,27 +219,41 @@ function Databases({ view, load, children }: { view: PgRoleView; load: Load; chi
 }
 
 /**
- * [불러오기]를 누른 데이터베이스를 읽는다(usePgDatabase). 다 읽으면 역할을 다시 읽어, 백엔드가 그 데이터베이스를 읽은 것으로 답하게 한다.
- * 이미 다른 화면에서 읽어 둔 데이터베이스면 바로 끝나서 역할만 다시 읽는다.
+ * 데이터베이스 하나를 구독한다(화면에는 아무것도 그리지 않는다). 역할이 그 데이터베이스를 아직 읽지 않은 것으로 답하는 동안(waiting)에는
+ * 읽기가 끝날 때마다 onRead로 역할을 다시 읽게 해서, 백엔드가 그 데이터베이스를 읽은 것으로 답하게 한다.
+ * 끝난 읽기만 센다(isSuccess && !isFetching). 낡은 사본이 있는 쿼리는 다시 읽는 중에도 isSuccess라서, 그때 역할을 읽으면 아직 비어 있다.
+ * 이미 읽은 데이터베이스(waiting이 아님)는 구독만 하고 알리지 않는다.
  */
-function DatabaseLoader({ target, database, onLoaded }: { target: PgTarget; database: string; onLoaded: () => void }) {
+function DatabaseWatch({ target, database, waiting, onRead }: { target: PgTarget; database: string; waiting: boolean; onRead: () => void }) {
   const db = usePgDatabase(target, database);
-  const latest = useRef(onLoaded);
-  latest.current = onLoaded;
-  const notified = useRef(false);
-  const done = db.isSuccess;
+  const latest = useRef(onRead);
+  latest.current = onRead;
+  const finished = db.isSuccess && !db.isFetching;
+  // 읽기 하나(그 읽기가 끝난 시각 dataUpdatedAt)에 한 번만 알린다. React의 strict mode가 효과를 두 번 돌려도,
+  // 역할이 여전히 읽지 않은 것으로 답해도 되풀이하지 않고, 다음 읽기가 끝나면 다시 알린다.
+  // 읽기가 너무 빨라 "읽는 중"이 화면에 그려지지 않아도 시각은 바뀐다.
+  const told = useRef<number | null>(null);
   useEffect(() => {
-    if (!done || notified.current) return;
-    notified.current = true;
+    if (!finished || !waiting || told.current === db.dataUpdatedAt) return;
+    told.current = db.dataUpdatedAt;
     latest.current();
-  }, [done]);
+  }, [finished, waiting, db.dataUpdatedAt]);
+  return null;
+}
+
+/** [불러오기]를 누르고 기다리는 데이터베이스의 모습: 읽는 중이거나, 읽지 못한 까닭 */
+function DatabaseStatus({ target, database }: { target: PgTarget; database: string }) {
+  const db = usePgDatabase(target, database);
   if (db.isError) return <PgError error={db.error} target={target} />;
   return <div className="empty small">불러오는 중…</div>;
 }
 
+/** 칸에 권한이 하나라도 있는가. 백엔드가 빈 칸을 보내더라도 "없음"만 늘어놓은 줄은 보이지 않는다. */
+const hasSomething = (c: PgSchemaCell) => c.usage || c.create || c.read !== "none" || c.write !== "none";
+
 function SchemaPrivileges({ db }: { db: PgRoleDatabase }) {
-  if (db.cells.length === 0) return <div className="empty small">이 데이터베이스에서 받은 권한이 없어요</div>;
-  const cells = [...db.cells].sort((a, b) => a.schema.localeCompare(b.schema));
+  const cells = db.cells.filter(hasSomething).sort((a, b) => a.schema.localeCompare(b.schema));
+  if (cells.length === 0) return <div className="empty small">이 데이터베이스에서 받은 권한이 없어요</div>;
   const has = (v: boolean) => (v ? "있음" : <span className="dim">없음</span>);
   return (
     <table className="pg-cells" aria-label={`${db.database} 권한`}>
@@ -271,7 +290,7 @@ function SchemaPrivileges({ db }: { db: PgRoleDatabase }) {
             <td>{has(c.create)}</td>
             <td>{c.read === "none" ? <span className="dim">{COVERAGE_LABEL.none}</span> : COVERAGE_LABEL[c.read]}</td>
             <td>{c.write === "none" ? <span className="dim">{COVERAGE_LABEL.none}</span> : COVERAGE_LABEL[c.write]}</td>
-            <td className="dim">{c.inheritedOnly ? "상속으로만 받음" : "직접 받음·소유"}</td>
+            <td className="dim">{c.inheritedOnly ? "그룹·PUBLIC으로만 받음" : "직접 받음·소유"}</td>
           </tr>
         ))}
       </tbody>
@@ -279,10 +298,23 @@ function SchemaPrivileges({ db }: { db: PgRoleDatabase }) {
   );
 }
 
+/** 소유 객체의 개수를 세는 묶음. 뷰, 구체화 뷰, 파티션 테이블, 외부 테이블은 테이블로 센다. */
+const OWNED_COUNTS: { label: string; kinds: ReadonlySet<PgObjectKind> }[] = [
+  { label: "스키마", kinds: new Set<PgObjectKind>(["schema"]) },
+  { label: "테이블(뷰 포함)", kinds: new Set<PgObjectKind>(["table", "view", "matview", "partitioned", "foreign"]) },
+  { label: "시퀀스", kinds: new Set<PgObjectKind>(["sequence"]) },
+  { label: "함수", kinds: new Set<PgObjectKind>(["function"]) },
+];
+
 function OwnedObjects({ db }: { db: PgRoleDatabase }) {
   if (db.owned.length === 0 && db.ownedOmitted === 0) return <div className="empty small">소유한 객체가 없어요</div>;
+  const counts = OWNED_COUNTS.map(({ label, kinds }) => `${label} ${db.owned.filter((o) => kinds.has(o.kind)).length}`).join(" · ");
   return (
     <>
+      <p className="pg-counts">
+        {counts}
+        {db.ownedOmitted > 0 && <span className="dim"> (목록에 있는 객체만 센 수예요)</span>}
+      </p>
       <table className="pg-owned" aria-label={`${db.database} 소유 객체`}>
         <thead>
           <tr>

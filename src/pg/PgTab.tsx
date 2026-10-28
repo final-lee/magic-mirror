@@ -99,13 +99,15 @@ export function PgTab({ target, active, filter }: Props) {
   // 이 탭이 사는 동안 계속 구독해야 한다. 화면마다 바뀌는 자식에서만 부르면 화면을 옮길 때마다 다시 연결한다(usePgOverview).
   const overview = usePgOverview(target, targetInfo?.iamAuth ? loginUser : null);
   const ov = overview.data;
-  const findings = usePgFindings(target, !!ov);
+  const { route, canBack, canForward, navigate, replace, back, forward } = useRouteHistory(HOME, samePgRoute);
+  useHistoryKeys(active, back, forward);
+  // 점검은 모든 데이터베이스를 읽어 무겁다. 점검 화면을 열었을 때만 읽는다. 이 탭이 계속 구독하니 한 번 읽은 건수는 화면을 떠나도 메뉴에 남는다.
+  // 점검이 보이지 않는 동안의 새로 고침은 표시와 무효화만 하고, 점검을 다시 열 때 force로 읽는다(refreshPg).
+  const findings = usePgFindings(target, !!ov && route.view === "findings");
   const [changing, setChanging] = useState(false);
   // 역할 목록의 칩과 시스템 역할 토글, 고른 행. 상세를 보고 돌아와도 남는다.
   const [kinds, setKinds] = useState(DEFAULT_KINDS);
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
-  const { route, canBack, canForward, navigate, replace, back, forward } = useRouteHistory(HOME, samePgRoute);
-  useHistoryKeys(active, back, forward);
 
   // 로그인 사용자를 바꿔 새로 연결하면, 데이터베이스·역할·점검 …은 이전 사용자의 연결로 읽은 것이다. 새 개요가 오면 나머지를 다시 읽는다.
   // 첫 연결에서는 읽을 것이 없고, 개요를 다시 읽는 새로 고침은 사용자가 같아서 여기에 걸리지 않는다.
@@ -221,6 +223,8 @@ export function PgTab({ target, active, filter }: Props) {
       )}
       {ov && !ov.canManage && ov.manageReason && <div className="iam-hint">{ov.manageReason}</div>}
       {ov && overview.isError && <PgError compact error={overview.error} target={target} />}
+      {/* 대상 정보를 다시 읽다 실패해도 이전 정보는 화면에 남는다. 연결도 실패했으면 그 쪽이 이유를 이미 보이니 한 번만 알린다. */}
+      {targetInfo && info.isError && !overview.isError && <PgError compact error={info.error} target={target} />}
       <div className="pg-main">{content}</div>
     </div>
   );
