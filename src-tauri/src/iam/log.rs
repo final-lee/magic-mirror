@@ -33,6 +33,9 @@ pub struct ChangeLogEntry {
     pub undo_of: Option<String>,
     #[serde(default)]
     pub undone: bool,
+    /// 묶음으로 적용한 변경. 같은 묶음의 기록은 같은 값을 쓴다
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch_id: Option<String>,
 }
 
 /// 파일을 바꾸는 일(덧붙이기, 고쳐 쓰기)은 한 번에 하나씩 한다: 고쳐 쓰는 동안 덧붙인 기록이 사라지지 않게.
@@ -140,6 +143,7 @@ mod tests {
             inverse: Some(IamChange::DetachPolicy { target: "arn:aws:iam::111111111111:user/bob".into(), policy_arn: "arn:aws:iam::aws:policy/ReadOnlyAccess".into() }),
             undo_of: None,
             undone: false,
+            batch_id: None,
         }
     }
 
@@ -286,6 +290,28 @@ mod tests {
         assert_eq!(keys, vec!["accountId", "at", "callerArn", "calls", "change", "error", "id", "inverse", "ok", "profile", "summary", "undoOf", "undone"]);
         assert_eq!(value["change"], json!({ "op": "attachPolicy", "target": "arn:aws:iam::111111111111:user/bob", "policyArn": "arn:aws:iam::aws:policy/ReadOnlyAccess" }));
         assert_eq!((&value["inverse"], &value["undoOf"], &value["error"], &value["undone"]), (&json!(null), &json!(null), &json!(null), &json!(false)));
+    }
+
+    #[test]
+    fn an_entry_without_a_batch_reads_back_and_serializes_without_the_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("log.jsonl");
+        // 묶음이 생기기 전에 남은 줄에는 batchId가 없다
+        let old_line = r#"{"id":"a","at":"2026-10-27T01:02:03Z","profile":"prod","accountId":"111111111111","callerArn":"arn:aws:sts::111111111111:assumed-role/dev/me","change":{"op":"attachPolicy","target":"t","policyArn":"p"},"summary":"요약","calls":["iam:AttachUserPolicy"],"ok":true,"error":null,"inverse":null,"undoOf":null,"undone":false}"#;
+        fs::write(&path, format!("{old_line}\n")).unwrap();
+        let back = read_all(&path);
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].batch_id, None);
+
+        // batch_id가 없으면 키도 보내지 않는다. 있으면 camelCase로 보내고 파일을 거쳐도 그대로 돌아온다
+        assert!(!serde_json::to_value(&back[0]).unwrap().as_object().unwrap().contains_key("batchId"));
+        let mut batched = entry("b");
+        batched.batch_id = Some("b1".into());
+        assert_eq!(serde_json::to_value(&batched).unwrap()["batchId"], json!("b1"));
+        append(&path, &batched).unwrap();
+        mark_undone(&path, "b").unwrap();
+        let read_back = read_all(&path);
+        assert_eq!(read_back[1].batch_id.as_deref(), Some("b1"), "되돌림 표시를 해도 묶음 표시는 남아요");
     }
 
     #[test]

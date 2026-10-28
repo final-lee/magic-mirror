@@ -82,6 +82,15 @@ pub struct PrincipalSummary {
     /// 그룹만
     pub member_count: Option<usize>,
     pub badges: Vec<Badge>,
+    /// 직접 붙은 관리형 정책 ARN. 비면 보내지 않는다(계약에 더한 선택 필드)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub attached: Vec<String>,
+    /// 사용자만: 속한 그룹 이름. 비면 보내지 않는다(계약에 더한 선택 필드)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<String>,
+    /// 권한 경계 정책 ARN. 없으면 보내지 않는다(계약에 더한 선택 필드)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub boundary: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]

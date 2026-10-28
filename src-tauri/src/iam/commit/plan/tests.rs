@@ -3,7 +3,7 @@
 use serde_json::json;
 
 use super::*;
-use crate::iam::change::{preview, Facts, IamChange};
+use crate::iam::change::{ordered, preview, preview_batch, Facts, IamChange};
 use crate::iam::fixtures::*;
 use crate::iam::model::{Snapshot, VersionRec};
 
@@ -212,4 +212,124 @@ fn only_the_latest_fifty_previews_are_kept() {
     for change in &changes[1..] {
         assert!(store.take("prod", change, NOW + 100).is_some(), "{change:?}");
     }
+}
+
+// ── 묶음 ────────────────────────────────────────────────────────────────
+
+fn batch_plan_of(s: &Snapshot, changes: &[IamChange]) -> BatchPlan {
+    BatchPlan::of(&s.account_id, &preview_batch(s, changes, &[]))
+}
+
+fn remove_s3_from_carol() -> IamChange {
+    IamChange::DetachPolicy { target: CAROL.into(), policy_arn: S3_FULL.into() }
+}
+
+#[test]
+fn a_batch_plan_is_taken_once_by_its_ordered_changes() {
+    let s = snapshot();
+    // 받은 순서는 [떼기, 붙이기]이고 적용 순서는 [붙이기, 떼기]다. 계획은 적용 순서의 목록 아래에 기억한다
+    let received = vec![remove_s3_from_carol(), attach_s3_to_bob()];
+    let key: Vec<IamChange> = ordered(&received);
+    assert_eq!(key, vec![attach_s3_to_bob(), remove_s3_from_carol()]);
+    let mut store: PlanStore<BatchPlan> = PlanStore::default();
+    store.remember("prod", &key, batch_plan_of(&s, &received), NOW);
+
+    // 다른 프로필이나 다른 변경 묶음의 미리보기는 이 묶음의 미리보기가 아니다
+    assert_eq!(store.take("dev", &key, NOW + 1), None);
+    assert_eq!(store.take("prod", &vec![attach_s3_to_bob()], NOW + 1), None);
+    // 담은 순서가 달라도 적용 순서가 같으면 같은 미리보기다
+    let swapped = vec![attach_s3_to_bob(), remove_s3_from_carol()];
+    assert_eq!(ordered(&swapped), key);
+    assert_eq!(check(store.take("prod", &ordered(&swapped), NOW + 2).as_ref(), &batch_plan_of(&s, &swapped)), Ok(()));
+    // 꺼낸 계획은 지워져서 한 번만 쓴다
+    assert_eq!(store.take("prod", &key, NOW + 3), None);
+    assert_eq!(check(store.take("prod", &key, NOW + 4).as_ref(), &batch_plan_of(&s, &received)), Err(AppError::other(DRIFTED)));
+}
+
+#[test]
+fn a_batch_plan_differs_when_a_call_changes() {
+    let s = snapshot();
+    let changes = vec![attach_s3_to_bob(), IamChange::AddToGroup { user_name: "carol".into(), group_name: "admins".into() }];
+    let seen = batch_plan_of(&s, &changes);
+    assert_eq!(seen.items.len(), 2);
+    assert_eq!(check(Some(&seen), &batch_plan_of(&s, &changes)), Ok(()));
+
+    // 호출의 인자나 순서가 하나라도 달라지면 사용자가 본 일이 아니다
+    let mut other_target = seen.clone();
+    other_target.items[1].1[0].params.insert("GroupName".into(), "ops".into());
+    assert_eq!(check(Some(&seen), &other_target), Err(AppError::other(DRIFTED)));
+    let mut other_api = seen.clone();
+    other_api.items[0].1[0].api = "iam:AttachGroupPolicy".into();
+    assert_eq!(check(Some(&seen), &other_api), Err(AppError::other(DRIFTED)));
+    let mut reordered = seen.clone();
+    reordered.items.swap(0, 1);
+    assert_eq!(check(Some(&seen), &reordered), Err(AppError::other(DRIFTED)));
+    let mut dropped = seen.clone();
+    dropped.items.pop();
+    assert_eq!(check(Some(&seen), &dropped), Err(AppError::other(DRIFTED)));
+    // 요약, 확인 문구, 되돌릴 수 있는지, 계정도 견준다
+    let mut summary = seen.clone();
+    summary.items[0].0.push_str(" (수정하기)");
+    let mut confirm_text = seen.clone();
+    confirm_text.confirm_text = Some("변경 2개 적용".into());
+    let mut reversible = seen.clone();
+    reversible.reversible = !seen.reversible;
+    let mut elsewhere = seen.clone();
+    elsewhere.account_id = "222222222222".into();
+    for changed in [summary, confirm_text, reversible, elsewhere] {
+        assert_eq!(check(Some(&seen), &changed), Err(AppError::other(DRIFTED)), "{changed:?}");
+    }
+}
+
+#[test]
+fn a_batch_plan_differs_when_a_confirm_reason_appears_but_not_when_only_notes_do() {
+    let seen_snapshot = snapshot();
+    let changes = vec![attach_s3_to_bob(), remove_s3_from_carol()];
+    let seen = batch_plan_of(&seen_snapshot, &changes);
+    assert!(seen.checks.is_empty() && seen.items.iter().all(|item| item.2.is_empty()));
+
+    // 그 사이 bob이 CloudFormation 스택 대상이 됐다: 주의(warn)만 늘어서 확인한 것은 그대로다
+    let mut tagged = snapshot();
+    tagged.users[1].tags.insert("aws:cloudformation:stack-name".into(), "users-stack".into());
+    let noted = preview_batch(&tagged, &changes, &[]);
+    assert!(noted.changes.iter().any(|item| !item.warnings.is_empty()));
+    assert_eq!(check(Some(&seen), &BatchPlan::of(&tagged.account_id, &noted)), Ok(()));
+
+    // 그 사이 앱이 carol의 자격 증명을 쓰게 됐다: carol에게서 떼면 이 앱의 권한이 줄어서 묶음 전체의 확인 이유가 새로 생긴다
+    let mut caller_now = snapshot();
+    caller_now.caller_principal_arn = Some(CAROL.into());
+    let confirming = batch_plan_of(&caller_now, &changes);
+    assert!(!confirming.checks.is_empty());
+    assert_eq!(check(Some(&seen), &confirming), Err(AppError::other(DRIFTED)));
+
+    // 변경 하나의 막힘·확인이 달라져도 거부한다: 그 사이 carol에게서 S3_FULL이 이미 떨어졌다
+    let mut gone = snapshot();
+    gone.users[2].attached.clear();
+    let blocked = batch_plan_of(&gone, &changes);
+    assert!(blocked.items[1].2.iter().any(|w| w.level == WarnLevel::Block), "{:?}", blocked.items);
+    assert_eq!(check(Some(&seen), &blocked), Err(AppError::other(DRIFTED)));
+}
+
+#[test]
+fn a_batch_preview_of_another_account_is_refused() {
+    let s = snapshot();
+    let mut elsewhere = snapshot();
+    elsewhere.account_id = "222222222222".into();
+    // 이름으로 가리키는 변경은 다른 계정에서도 같은 호출이 된다: 계정이 같아야만 같은 계획이다
+    let changes = vec![IamChange::AddToGroup { user_name: "bob".into(), group_name: "admins".into() }];
+    let (seen, now) = (batch_plan_of(&s, &changes), batch_plan_of(&elsewhere, &changes));
+    assert_eq!((&seen.items, &seen.checks, &seen.confirm_text, seen.reversible), (&now.items, &now.checks, &now.confirm_text, now.reversible));
+    assert_eq!(check(Some(&seen), &now), Err(AppError::other(DRIFTED)));
+}
+
+#[test]
+fn a_batch_that_can_no_longer_be_undone_is_refused() {
+    // 미리보기 때는 carol에게 S3_FULL이 없어서 붙이면 되돌릴 수 있었는데, 그 사이 누군가 붙였다: 달라지는 게 없어 되돌릴 것도 없다(주의만 늘어난다)
+    let changes = vec![IamChange::AttachPolicy { target: CAROL.into(), policy_arn: S3_FULL.into() }];
+    let mut before = snapshot();
+    before.users[2].attached.clear();
+    let (seen, now) = (batch_plan_of(&before, &changes), batch_plan_of(&snapshot(), &changes));
+    assert_eq!((&seen.items, &seen.checks, &seen.confirm_text), (&now.items, &now.checks, &now.confirm_text));
+    assert!(seen.reversible && !now.reversible);
+    assert_eq!(check(Some(&seen), &now), Err(AppError::other(DRIFTED)));
 }

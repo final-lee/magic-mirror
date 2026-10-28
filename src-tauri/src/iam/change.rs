@@ -12,9 +12,6 @@
 
 use serde::{Deserialize, Serialize};
 
-// 묶음 적용(`commit`)과 명령이 쓰기 전까지는 쓰는 곳이 없어 안 쓰는 코드 경고가 나니 테스트에서만 빌드한다.
-// 그것들을 붙일 때 이 `cfg(test)`와 `pub use batch` 위의 `cfg(test)`를 뺀다
-#[cfg(test)]
 mod batch;
 mod calls;
 pub(crate) mod document;
@@ -29,7 +26,6 @@ mod warnings;
 #[cfg(test)]
 mod scenarios;
 
-#[cfg(test)]
 pub use batch::{application_order, ordered, preview_batch, BatchItem, BatchPreview, MAX_BATCH};
 pub use calls::{calls, ApiCall};
 pub use facts::{deletes_policy_version, Facts, PolicyCheck};

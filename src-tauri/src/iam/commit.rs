@@ -1,7 +1,9 @@
 //! 변경 적용의 마지막 관문. 백엔드가 미리보기를 다시 계산해, 사용자가 미리보기에서 본 계획과 같은지(`plan`)와 막힘·확인 문구를 확인한 뒤에만
 //! 쓰기 호출을 하고, 결과를 변경 기록에 남긴다. IAM 쓰기 호출은 `write`에 있고 여기서는 함수로 받는다(테스트는 가짜 쓰기를 넣는다).
 //! 변경 기록 파일은 비동기 실행기를 막지 않게 따로(`spawn_blocking`) 읽고 쓴다.
+//! 장바구니의 묶음은 `batch`가 같은 관문을 지나 적용 순서대로 변경마다 쓰고 기록한다(`gate_batch`, `BatchPlan`).
 
+pub mod batch;
 pub mod plan;
 
 use std::collections::hash_map::RandomState;
@@ -14,7 +16,7 @@ use std::sync::Arc;
 use serde::Serialize;
 
 pub use self::plan::{Plan, PlanStore};
-use super::change::{inverse, preview, ApiCall, ChangePreview, Facts, IamChange, PolicyCheck, WarnLevel};
+use super::change::{inverse, preview, ApiCall, BatchPreview, ChangePreview, Facts, IamChange, PolicyCheck, WarnLevel, Warning};
 use super::clock::{iso, parse_iso};
 use super::log::{self, ChangeLogEntry};
 use super::model::Snapshot;
@@ -72,19 +74,29 @@ pub fn new_log_id(now_millis: u128) -> String {
     format!("{now_millis:x}-{:x}-{:08x}", NEXT.fetch_add(1, Ordering::Relaxed), random as u32)
 }
 
-/// 미리보기대로 적용해도 되는지. 막힘이 있으면 거부하고, 확인 문구가 필요하면 한 글자도 다르지 않게 입력해야 한다.
-pub fn gate(preview: &ChangePreview, typed: Option<&str>) -> Result<(), AppError> {
-    let blocks: Vec<&str> = preview.warnings.iter().filter(|w| w.level == WarnLevel::Block).map(|w| w.message.as_str()).collect();
+/// 경고들과 확인 문구로 본 관문. 막힘이 있으면 거부하고, 확인 문구가 필요하면 한 글자도 다르지 않게 입력해야 한다.
+fn gate_of<'a>(mut warnings: impl Iterator<Item = &'a Warning> + Clone, confirm_text: Option<&str>, typed: Option<&str>) -> Result<(), AppError> {
+    let blocks: Vec<&str> = warnings.clone().filter(|w| w.level == WarnLevel::Block).map(|w| w.message.as_str()).collect();
     if !blocks.is_empty() {
         return Err(AppError::other(format!("막혀 있어서 적용할 수 없어요: {}", blocks.join(" / "))));
     }
-    match preview.confirm_text.as_deref() {
+    match confirm_text {
         Some(expected) if typed != Some(expected) => Err(AppError::other(format!("확인 문구가 달라요. 입력해야 할 이름: {expected}"))),
         Some(_) => Ok(()),
         // 확인이 필요한데 입력할 이름을 알 수 없으면 확인할 방법이 없다
-        None if preview.warnings.iter().any(|w| w.level == WarnLevel::Confirm) => Err(AppError::other("확인할 이름을 알 수 없어서 적용할 수 없어요")),
+        None if warnings.any(|w| w.level == WarnLevel::Confirm) => Err(AppError::other("확인할 이름을 알 수 없어서 적용할 수 없어요")),
         None => Ok(()),
     }
+}
+
+/// 미리보기대로 적용해도 되는지. 막힘이 있으면 거부하고, 확인 문구가 필요하면 한 글자도 다르지 않게 입력해야 한다.
+pub fn gate(preview: &ChangePreview, typed: Option<&str>) -> Result<(), AppError> {
+    gate_of(preview.warnings.iter(), preview.confirm_text.as_deref(), typed)
+}
+
+/// 묶음 미리보기대로 적용해도 되는지. 묶음 전체의 경고와 변경마다의 경고를 모두 본다.
+pub fn gate_batch(p: &BatchPreview, typed: Option<&str>) -> Result<(), AppError> {
+    gate_of(p.warnings.iter().chain(p.changes.iter().flat_map(|i| i.warnings.iter())), p.confirm_text.as_deref(), typed)
 }
 
 /// 변경 기록에서 `id`의 역변경. 기록이 없거나 되돌릴 수 없거나 이미 되돌렸으면 이유(한국어)를 오류로 돌려준다.
@@ -200,6 +212,7 @@ async fn finish(req: Request, checked: ChangePreview, undo: Option<IamChange>, a
         inverse: if ok { undo } else { None },
         undo_of: req.undo_of.clone(),
         undone: false,
+        batch_id: None,
     };
     let notes = record(req.log_path, entry, if ok { req.undo_of } else { None }).await;
     let result = match outcome {

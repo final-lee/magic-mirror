@@ -18,7 +18,7 @@ use crate::iam::model::Snapshot;
 use crate::iam::summary::principal_summary;
 use crate::iam::view::PrincipalSummary;
 
-/// 한 번에 계산하는 주체 수의 한도. 넘으면 앞에서부터 이만큼만 계산한다.
+/// 한 번에 계산하는 주체 수의 한도. 넘으면 앞에서부터 이만큼만 계산한다(한도 밖에 있는 앱의 주체는 한 자리를 더 받아 함께 계산한다: `analyze`).
 pub(super) const MAX_AFFECTED: usize = 50;
 /// 증감마다 보여 주는 작업 이름 수.
 pub(super) const SAMPLE: usize = 5;
@@ -96,7 +96,7 @@ pub(super) struct Analysis {
 /// 순서를 지키면서 중복 없이 ARN을 모은다.
 #[derive(Default)]
 pub(super) struct Ordered {
-    pub(super) list: Vec<String>,
+    list: Vec<String>,
     seen: HashSet<String>,
 }
 
@@ -105,6 +105,10 @@ impl Ordered {
         if self.seen.insert(arn.to_string()) {
             self.list.push(arn.to_string());
         }
+    }
+
+    pub(super) fn into_list(self) -> Vec<String> {
+        self.list
     }
 
     /// 사용자·역할은 자기 자신, 그룹은 그룹과 구성원. 스냅숏에 없으면 아무것도 넣지 않는다.
@@ -302,15 +306,17 @@ fn impact(principal: PrincipalSummary, d: Deltas) -> Impact {
     Impact { principal, gained, lost, restricted, gained_omitted, lost_omitted, restricted_omitted }
 }
 
-/// `affected` 주체마다 `before`와 `after`의 권한을 비교한다. 앱이 쓰는 주체(`caller`)는 한도를 넘어도 반드시 계산한다.
+/// `affected` 주체마다 `before`와 `after`의 권한을 비교한다. 앱이 쓰는 주체(`caller`)는 한도를 넘어도 반드시 계산한다:
+/// 한도 밖에 있던 그 주체를 앞으로 옮길 때는 한 자리를 더 줘서 앞선 주체를 밀어내지 않는다(한도 + 1명까지 계산한다).
 pub(super) fn analyze(before: &Snapshot, after: &Snapshot, mut affected: Vec<String>, caller: Option<&str>) -> Analysis {
     let truncated = affected.len() > MAX_AFFECTED;
     if truncated {
-        if let Some(at) = caller.and_then(|c| affected.iter().position(|a| a == c)) {
+        let at = caller.and_then(|c| affected.iter().position(|a| a == c));
+        if let Some(at) = at {
             let first = affected.remove(at);
             affected.insert(0, first);
         }
-        affected.truncate(MAX_AFFECTED);
+        affected.truncate(MAX_AFFECTED + usize::from(at.is_some_and(|at| at >= MAX_AFFECTED)));
     }
 
     let mut out = Analysis { truncated, ..Default::default() };

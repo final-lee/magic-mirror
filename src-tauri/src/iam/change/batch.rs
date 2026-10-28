@@ -123,8 +123,6 @@ pub fn preview_batch(s: &Snapshot, changes: &[IamChange], facts: &[Facts]) -> Ba
     let mut items: Vec<BatchItem> = Vec::with_capacity(changes.len());
     // 영향을 계산할 주체. `analyze`는 앞에서부터 `MAX_AFFECTED`명만 계산하니, 변경마다 직접 바꾸는 주체(그룹은 그 자신)를 모두 먼저 넣고
     // 그룹 구성원처럼 `affected`가 더 돌려준 주체는 그 뒤에 넣는다: 큰 그룹을 바꾸는 변경이 뒤의 변경의 대상을 한도 밖으로 밀어내지 못한다.
-    // 남는 틈: 직접 바꾸는 주체가 50명이고 앱의 자격 증명이 그룹을 거쳐서만 영향받으면, `analyze`가 앱의 자격 증명을 앞으로 옮기면서
-    // 마지막 주체가 빠진다(계산을 줄였다는 주의는 그대로 나온다).
     let (mut touched, mut reached) = (Ordered::default(), Ordered::default());
     for i in application_order(changes) {
         let (c, f) = (&changes[i], facts.get(i).cloned().unwrap_or_default());
@@ -161,10 +159,10 @@ pub fn preview_batch(s: &Snapshot, changes: &[IamChange], facts: &[Facts]) -> Ba
             item.warnings.retain(|w| w.level != WarnLevel::Confirm);
         }
     } else {
-        for arn in &reached.list {
-            touched.push(arn);
+        for arn in reached.into_list() {
+            touched.push(&arn);
         }
-        let analysis = analyze(s, &state, touched.list, caller);
+        let analysis = analyze(s, &state, touched.into_list(), caller);
         // 되돌리기는 적용의 반대 순서로 한다
         let inverses: Vec<IamChange> = items.iter().rev().filter_map(|i| i.inverse.clone()).collect();
         let (found, lost) = warnings::analysis_warnings(s, &state, &analysis, &inverses, false);
