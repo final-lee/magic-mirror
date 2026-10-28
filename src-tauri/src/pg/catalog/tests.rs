@@ -204,8 +204,23 @@ fn group_acl_does_not_invent_an_entry_from_a_half_filled_row() {
 
 // ───────────────────────── 구성원 관계 합치기 ─────────────────────────
 
+fn grant(grantor: &str, admin: bool, inherit: Option<bool>, set: Option<bool>) -> MemberGrant {
+    MemberGrant { grantor: grantor.into(), admin, inherit, set }
+}
+
+/// 질의가 주는 줄 하나의 모양: 부여 하나를 가진 구성원 관계
+fn row_by(grantor: &str, member: &str, group: &str, admin: bool, inherit: Option<bool>, set: Option<bool>) -> MemberRec {
+    MemberRec { member: member.into(), group: group.into(), admin, inherit, set, grants: vec![grant(grantor, admin, inherit, set)] }
+}
+
+/// 부여자가 `postgres`인 줄
 fn member(member: &str, group: &str, admin: bool, inherit: Option<bool>, set: Option<bool>) -> MemberRec {
-    MemberRec { member: member.into(), group: group.into(), admin, inherit, set }
+    row_by("postgres", member, group, admin, inherit, set)
+}
+
+/// 합친 구성원 관계: 합친 값과, 그것을 이룬 부여들
+fn pair(member: &str, group: &str, admin: bool, inherit: Option<bool>, set: Option<bool>, grants: Vec<MemberGrant>) -> MemberRec {
+    MemberRec { member: member.into(), group: group.into(), admin, inherit, set, grants }
 }
 
 #[test]
@@ -222,14 +237,31 @@ fn members_without_duplicates_are_left_alone() {
 fn several_grantors_of_one_membership_become_one_pair() {
     // PG16: 부여자마다 한 줄. 하나라도 허용하면 허용이다
     let merged = merge_members(vec![
-        member("alice", "app_read", false, Some(false), Some(false)),
-        member("alice", "app_read", true, Some(true), Some(true)),
-        member("bob", "app_read", false, Some(false), Some(false)),
-        member("bob", "app_read", false, Some(false), Some(false)),
+        row_by("ops_admin", "alice", "app_read", false, Some(false), Some(false)),
+        row_by("postgres", "alice", "app_read", true, Some(true), Some(true)),
+        row_by("ops_admin", "bob", "app_read", false, Some(false), Some(false)),
+        row_by("postgres", "bob", "app_read", false, Some(false), Some(false)),
     ]);
     assert_eq!(
         merged,
-        vec![member("alice", "app_read", true, Some(true), Some(true)), member("bob", "app_read", false, Some(false), Some(false))]
+        vec![
+            pair(
+                "alice",
+                "app_read",
+                true,
+                Some(true),
+                Some(true),
+                vec![grant("ops_admin", false, Some(false), Some(false)), grant("postgres", true, Some(true), Some(true))]
+            ),
+            pair(
+                "bob",
+                "app_read",
+                false,
+                Some(false),
+                Some(false),
+                vec![grant("ops_admin", false, Some(false), Some(false)), grant("postgres", false, Some(false), Some(false))]
+            ),
+        ]
     );
 }
 
@@ -237,45 +269,87 @@ fn several_grantors_of_one_membership_become_one_pair() {
 fn each_option_of_a_merged_pair_comes_from_any_grant_that_allows_it() {
     // 옵션마다 허용한 부여가 서로 다르다: INHERIT은 첫째, ADMIN은 둘째, SET은 셋째 부여만 허용한다
     let merged = merge_members(vec![
-        member("a", "g", false, Some(true), Some(false)),
-        member("a", "g", true, Some(false), Some(false)),
-        member("a", "g", false, Some(false), Some(true)),
+        row_by("g1", "a", "g", false, Some(true), Some(false)),
+        row_by("g2", "a", "g", true, Some(false), Some(false)),
+        row_by("g3", "a", "g", false, Some(false), Some(true)),
     ]);
-    assert_eq!(merged, vec![member("a", "g", true, Some(true), Some(true))]);
+    let grants = vec![grant("g1", false, Some(true), Some(false)), grant("g2", true, Some(false), Some(false)), grant("g3", false, Some(false), Some(true))];
+    assert_eq!(merged, vec![pair("a", "g", true, Some(true), Some(true), grants)]);
 }
 
 #[test]
-fn the_options_of_a_merged_pair_do_not_depend_on_the_order_of_the_rows() {
+fn the_options_and_the_grants_of_a_merged_pair_do_not_depend_on_the_order_of_the_rows() {
     let rows = [
-        member("a", "g", false, Some(true), Some(false)),
-        member("a", "g", true, Some(false), Some(false)),
-        member("a", "g", false, Some(false), Some(true)),
+        row_by("g1", "a", "g", false, Some(true), Some(false)),
+        row_by("g2", "a", "g", true, Some(false), Some(false)),
+        row_by("g3", "a", "g", false, Some(false), Some(true)),
+    ];
+    let grants = vec![grant("g1", false, Some(true), Some(false)), grant("g2", true, Some(false), Some(false)), grant("g3", false, Some(false), Some(true))];
+    for order in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
+        let merged = merge_members(order.iter().map(|&i| rows[i].clone()).collect());
+        assert_eq!(merged, vec![pair("a", "g", true, Some(true), Some(true), grants.clone())], "{order:?}");
+    }
+}
+
+#[test]
+fn two_grantors_of_one_pair_give_one_record_with_both_grants_in_grantor_order() {
+    let merged = merge_members(vec![
+        row_by("postgres", "alice", "app_read", false, Some(true), Some(true)),
+        row_by("ops_admin", "alice", "app_read", true, Some(false), Some(true)),
+    ]);
+    assert_eq!(merged.len(), 1, "{merged:?}");
+    // 부여는 부여자 이름순이고 각자의 옵션을 그대로 가진다
+    assert_eq!(merged[0].grants, vec![grant("ops_admin", true, Some(false), Some(true)), grant("postgres", false, Some(true), Some(true))]);
+    // 합친 값은 부여가 여럿이 되기 전과 같다: 하나라도 허용하면 허용
+    assert_eq!((merged[0].admin, merged[0].inherit, merged[0].set), (true, Some(true), Some(true)));
+}
+
+#[test]
+fn grants_are_listed_by_grantor_name_whatever_order_the_rows_come_in() {
+    let rows = [
+        row_by("postgres", "a", "g", false, Some(true), Some(true)),
+        row_by("ops_admin", "a", "g", false, Some(true), Some(true)),
+        row_by("mm_admin", "a", "g", false, Some(true), Some(true)),
     ];
     for order in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
         let merged = merge_members(order.iter().map(|&i| rows[i].clone()).collect());
-        assert_eq!(merged, vec![member("a", "g", true, Some(true), Some(true))], "{order:?}");
+        let grantors: Vec<&str> = merged[0].grants.iter().map(|g| g.grantor.as_str()).collect();
+        assert_eq!(grantors, ["mm_admin", "ops_admin", "postgres"], "{order:?}");
     }
 }
 
 #[test]
 fn a_pair_cannot_set_role_only_when_every_grant_says_so() {
     // PG16에서 CREATEROLE 사용자가 만든 역할의 자동 부여(ADMIN만 있고 INHERIT도 SET도 없다)가 부여자만 달리 두 줄이어도 SET은 false로 남는다
-    let auto_grant = member("creator", "created", true, Some(false), Some(false));
-    assert_eq!(merge_members(vec![auto_grant.clone(), auto_grant.clone()]), vec![auto_grant]);
+    let merged = merge_members(vec![
+        row_by("rdsadmin", "creator", "created", true, Some(false), Some(false)),
+        row_by("postgres", "creator", "created", true, Some(false), Some(false)),
+    ]);
+    let grants = vec![grant("postgres", true, Some(false), Some(false)), grant("rdsadmin", true, Some(false), Some(false))];
+    assert_eq!(merged, vec![pair("creator", "created", true, Some(false), Some(false), grants)]);
 }
 
 #[test]
 fn memberships_before_pg16_keep_missing_options() {
     // 옵션이 없는 서버에서는 합쳐도 없는 채로다. "없음"을 "허용 안 함"으로 바꾸면 안 된다(INHERIT도 SET도)
     assert_eq!(
-        merge_members(vec![member("a", "g", false, None, None), member("a", "g", false, None, None)]),
-        vec![member("a", "g", false, None, None)]
+        merge_members(vec![row_by("x", "a", "g", false, None, None), row_by("y", "a", "g", false, None, None)]),
+        vec![pair("a", "g", false, None, None, vec![grant("x", false, None, None), grant("y", false, None, None)])]
     );
     // 한쪽만 값이 있으면 그 값이 쓰인다
     assert_eq!(
-        merge_members(vec![member("a", "g", false, None, None), member("a", "g", false, Some(false), Some(false))]),
-        vec![member("a", "g", false, Some(false), Some(false))]
+        merge_members(vec![row_by("x", "a", "g", false, None, None), row_by("y", "a", "g", false, Some(false), Some(false))]),
+        vec![pair("a", "g", false, Some(false), Some(false), vec![grant("x", false, None, None), grant("y", false, Some(false), Some(false))])]
     );
+}
+
+#[test]
+fn a_membership_before_pg16_is_one_grant_without_options() {
+    // PG15 이하는 쌍마다 줄이 하나다. 부여자는 있고 옵션은 없다
+    let rows = vec![row_by("postgres", "alice", "app_write", false, None, None), row_by("postgres", "bob", "app_read", true, None, None)];
+    let merged = merge_members(rows.clone());
+    assert_eq!(merged, rows);
+    assert_eq!(merged[1].grants, vec![grant("postgres", true, None, None)]);
 }
 
 #[test]
@@ -460,6 +534,37 @@ fn the_pg16_members_query_reads_the_set_option_and_the_older_one_has_none() {
     // 열 순서는 `read_members`가 읽는 순서다: 구성원, 그룹, ADMIN, INHERIT, SET
     assert!(MEMBERS_SQL_16.contains("SELECT m.rolname, g.rolname, am.admin_option, am.inherit_option, am.set_option"), "{MEMBERS_SQL_16}");
     assert!(MEMBERS_SQL_OLD.contains("SELECT m.rolname, g.rolname, am.admin_option, NULL::bool, NULL::bool"), "{MEMBERS_SQL_OLD}");
+}
+
+#[test]
+fn both_members_queries_read_the_grantor_of_every_row_after_the_options() {
+    // 부여자는 여섯째 칸이다. PG15 이하에도 `pg_auth_members.grantor`가 있다
+    assert!(
+        MEMBERS_SQL_16.starts_with("SELECT m.rolname, g.rolname, am.admin_option, am.inherit_option, am.set_option, pg_get_userbyid(am.grantor)\n"),
+        "{MEMBERS_SQL_16}"
+    );
+    assert!(
+        MEMBERS_SQL_OLD.starts_with("SELECT m.rolname, g.rolname, am.admin_option, NULL::bool, NULL::bool, pg_get_userbyid(am.grantor)\n"),
+        "{MEMBERS_SQL_OLD}"
+    );
+}
+
+#[test]
+fn the_roles_query_reads_the_oid_after_the_comment() {
+    assert!(ROLES_SQL.contains("shobj_description(r.oid, 'pg_authid'), r.oid\nFROM pg_roles r"), "{ROLES_SQL}");
+}
+
+#[test]
+fn the_server_query_reads_the_bootstrap_superuser_and_two_settings_a_server_may_not_have() {
+    // 열 순서는 `read_server`가 읽는 순서다: 버전 번호, 버전, 비밀번호 방식, 부트스트랩 superuser, createrole_self_grant, restrict_password_commands
+    assert!(
+        SERVER_SQL.starts_with("SELECT current_setting('server_version_num')::int, current_setting('server_version'), current_setting('password_encryption'),"),
+        "{SERVER_SQL}"
+    );
+    assert!(SERVER_SQL.contains("(SELECT rolname FROM pg_roles WHERE oid = 10)"), "{SERVER_SQL}");
+    // 설정이 없는 서버(PG15 이하, RDS가 아닌 서버)에서도 읽혀야 한다: 없는 설정은 오류가 아니라 NULL이다(`missing_ok`). 그때 값은 빈 문자열과 false다
+    assert!(SERVER_SQL.contains("coalesce(current_setting('createrole_self_grant', true), '')"), "{SERVER_SQL}");
+    assert!(SERVER_SQL.contains("coalesce(current_setting('rds.restrict_password_commands', true) = 'on', false)"), "{SERVER_SQL}");
 }
 
 #[test]

@@ -50,6 +50,9 @@ tauri-plugin-dialog = "2"
 aws-sdk-accessanalyzer = "1"
 tokio-postgres = "0.7"
 tokio-postgres-rustls = "0.14"
+# 문장에 넣는 이름과 값의 이스케이프(`pg::sql`)와 SCRAM-SHA-256 검증값(`pg::password`). 둘 다 tokio-postgres가 이미 쓰는 크레이트라 새로 받는 것은 없다
+postgres-protocol = "0.6"
+rand = "0.10"
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "aws_lc_rs"] }
 
 [dev-dependencies]

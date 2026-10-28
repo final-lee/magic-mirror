@@ -50,9 +50,15 @@ fn open(state: &PgState, target: &PgTarget) -> u64 {
 }
 
 fn open_with(state: &PgState, target: &PgTarget, cluster: Arc<ClusterSnapshot>) -> u64 {
-    let epoch = state.pool.epoch(target);
-    state.finish_open(target, epoch, "iam_admin".into(), info(), cluster).expect("finish_open");
-    epoch
+    let start = state.begin_open(target);
+    state.finish_open(target, start, "iam_admin".into(), info(), cluster).expect("finish_open");
+    start.epoch
+}
+
+/// 열기 하나를 `login`으로 시작하고 바로 끝낸다
+fn open_as(state: &PgState, target: &PgTarget, login: &str) -> Result<(), AppError> {
+    let start = state.begin_open(target);
+    state.finish_open(target, start, login.into(), info(), cluster())
 }
 
 fn not_opened_error() -> Option<AppError> {
@@ -85,7 +91,7 @@ fn opening_stores_the_login_the_info_and_the_cluster_and_drops_the_database_snap
     assert!(state.cached_db(&a, "appdb").is_some());
 
     // 다시 열면(다시 읽기, 로그인 사용자 바꾸기) 그 대상의 데이터베이스 스냅숏은 버리고 새 로그인을 기억한다. 다른 대상은 그대로다
-    state.finish_open(&a, epoch, "other_user".into(), info(), cluster()).expect("reopen");
+    open_as(&state, &a, "other_user").expect("reopen");
     assert!(state.cached_db(&a, "appdb").is_none());
     assert!(state.cached_db(&b, "appdb").is_some());
     assert_eq!(state.opened(&a).expect("opened").login, "other_user");
@@ -129,14 +135,14 @@ async fn opening_as_another_login_closes_the_connections_of_the_previous_login_a
     state.pool.get_or_connect_at_epoch(key, epoch, || async { Ok(server.connected(9).await) }).await.expect("connect as the new login");
     assert_eq!(state.pool.backend_pids(&a), vec![7, 8, 9]);
 
-    state.finish_open(&a, epoch, "other_user".into(), info(), cluster()).expect("switch");
+    open_as(&state, &a, "other_user").expect("switch");
     assert_eq!(state.pool.backend_pids(&a), vec![9], "이전 사용자의 연결이 남았어요");
     assert_eq!(state.pool.backend_pids(&b), vec![20], "다른 대상의 연결은 그대로예요");
     assert_eq!(state.pool.epoch(&a), epoch, "대상을 닫은 것이 아니에요");
     assert_eq!(state.opened(&a).expect("opened").login, "other_user");
 
     // 같은 사용자로 다시 열면(다시 읽기) 그 사용자의 연결을 닫지 않는다
-    state.finish_open(&a, epoch, "other_user".into(), info(), cluster()).expect("reopen");
+    open_as(&state, &a, "other_user").expect("reopen");
     assert_eq!(state.pool.backend_pids(&a), vec![9]);
     // 처음 열 때(기억한 로그인이 없다)는 닫을 이전 사용자가 없다
     let c = target("c");
@@ -152,12 +158,12 @@ async fn a_late_open_that_is_refused_closes_nothing_of_the_tab_opened_since() {
     let server = FakeServer::start(Script::Ready).await;
     let state = PgState::default();
     let a = target("a");
-    let started_at = state.pool.epoch(&a);
+    let started = state.begin_open(&a);
     state.close(&a);
     let epoch = open(&state, &a);
     pool_a_connection(&state, &server, &a, epoch, "appdb", 7).await;
 
-    let late = state.finish_open(&a, started_at, "other_user".into(), info(), cluster());
+    let late = state.finish_open(&a, started, "other_user".into(), info(), cluster());
     assert_eq!(late.err(), not_opened_error());
     assert_eq!(state.pool.backend_pids(&a), vec![7]);
     assert_eq!(state.opened(&a).expect("opened").login, "iam_admin");
@@ -167,11 +173,117 @@ async fn a_late_open_that_is_refused_closes_nothing_of_the_tab_opened_since() {
 fn an_open_that_started_before_a_close_stores_nothing() {
     let state = PgState::default();
     let a = target("a");
-    let started_at = state.pool.epoch(&a);
+    let started = state.begin_open(&a);
     state.close(&a);
-    let late = state.finish_open(&a, started_at, "iam_admin".into(), info(), cluster());
+    let late = state.finish_open(&a, started, "iam_admin".into(), info(), cluster());
     assert_eq!(late.err(), not_opened_error());
     assert_eq!(state.opened(&a).err(), not_opened_error());
+}
+
+// ───────────────────────── 겹쳐 도는 열기 ─────────────────────────
+// 열기는 시작할 때 그 대상의 다음 번호를 받는다. 로그인 사용자가 다른 두 열기가 겹쳐 돌 때 먼저 시작한 쪽이 나중에 끝나도 남는 것은 나중에 시작한 쪽이다:
+// 화면은 사용자를 바꾼 마지막 선택을 보여 주니, 백엔드가 기억하는 로그인도 그것이어야 한다.
+
+#[tokio::test]
+async fn an_older_open_that_finishes_last_is_refused_and_the_newer_login_stays_with_its_connections() {
+    let server = FakeServer::start(Script::Ready).await;
+    let state = PgState::default();
+    let a = target("a");
+    let older = state.begin_open(&a);
+    let newer = state.begin_open(&a);
+    // 열기는 끝나기 전에 자기 사용자로 연결을 열어 둔다(`open`)
+    pool_a_connection_as(&state, &server, &a, older.epoch, "old_user", "appdb", 7).await;
+    pool_a_connection_as(&state, &server, &a, newer.epoch, "new_user", "appdb", 8).await;
+
+    state.finish_open(&a, newer, "new_user".into(), info(), cluster()).expect("나중에 시작한 열기가 먼저 끝나요");
+    let late = state.finish_open(&a, older, "old_user".into(), info(), cluster());
+
+    assert_eq!(late.err(), not_opened_error());
+    assert_eq!(state.opened(&a).expect("opened").login, "new_user");
+    assert_eq!(state.pool.backend_pids(&a), vec![8], "물러난 열기의 연결은 닫히고 나중 열기의 연결은 남아요");
+}
+
+#[tokio::test]
+async fn an_older_open_of_the_same_login_is_refused_without_closing_the_connection_the_newer_one_uses() {
+    let server = FakeServer::start(Script::Ready).await;
+    let state = PgState::default();
+    let a = target("a");
+    let older = state.begin_open(&a);
+    let newer = state.begin_open(&a);
+    // 같은 사용자라 연결 열쇠가 같다: 그 연결은 나중 열기가 쓰는 것이다
+    pool_a_connection_as(&state, &server, &a, newer.epoch, "iam_admin", "appdb", 8).await;
+
+    state.finish_open(&a, newer, "iam_admin".into(), info(), cluster()).expect("newer");
+    let late = state.finish_open(&a, older, "iam_admin".into(), info(), cluster());
+
+    assert_eq!(late.err(), not_opened_error());
+    assert_eq!(state.opened(&a).expect("opened").login, "iam_admin");
+    assert_eq!(state.pool.backend_pids(&a), vec![8]);
+}
+
+#[test]
+fn a_refused_older_open_stores_nothing_and_leaves_what_the_newer_one_stored() {
+    let state = PgState::default();
+    let a = target("a");
+    let older = state.begin_open(&a);
+    let newer = state.begin_open(&a);
+    let newer_cluster = Arc::new(ClusterSnapshot { fetched_at: "newer".into(), ..(*cluster()).clone() });
+    let older_cluster = Arc::new(ClusterSnapshot { fetched_at: "older".into(), ..(*cluster()).clone() });
+    state.finish_open(&a, newer, "new_user".into(), info(), newer_cluster).expect("newer");
+    // 나중 열기가 담은 뒤에 읽은 데이터베이스 스냅숏을, 물러나는 열기가 비우지 않는다
+    state.keep_db(&a, newer.epoch, "appdb", Arc::new(snapshot("appdb")));
+
+    assert!(state.finish_open(&a, older, "old_user".into(), info(), older_cluster).is_err());
+    let opened = state.opened(&a).expect("opened");
+    assert_eq!((opened.login.as_str(), opened.cluster.fetched_at.as_str()), ("new_user", "newer"));
+    assert!(state.cached_db(&a, "appdb").is_some());
+}
+
+#[test]
+fn opens_that_finish_in_the_order_they_started_each_replace_the_one_before() {
+    let state = PgState::default();
+    let a = target("a");
+    let first = state.begin_open(&a);
+    let second = state.begin_open(&a);
+    state.finish_open(&a, first, "first".into(), info(), cluster()).expect("first");
+    assert_eq!(state.opened(&a).expect("opened").login, "first");
+    state.finish_open(&a, second, "second".into(), info(), cluster()).expect("second");
+    assert_eq!(state.opened(&a).expect("opened").login, "second");
+}
+
+#[test]
+fn an_open_that_never_finishes_does_not_stop_an_older_one_from_being_accepted() {
+    let state = PgState::default();
+    let a = target("a");
+    let older = state.begin_open(&a);
+    // 나중에 시작했지만 연결하지 못해 끝내지 못한 열기
+    let _failed = state.begin_open(&a);
+    state.finish_open(&a, older, "old_user".into(), info(), cluster()).expect("older");
+    assert_eq!(state.opened(&a).expect("opened").login, "old_user");
+}
+
+#[test]
+fn each_target_counts_its_own_opens() {
+    let state = PgState::default();
+    let (a, b) = (target("a"), target("b"));
+    let (b1, b2) = (state.begin_open(&b), state.begin_open(&b));
+    let a1 = state.begin_open(&a);
+    assert_eq!((b1.number, b2.number, a1.number), (1, 2, 1));
+    // 대상 b의 둘째 열기가 받아들여진 뒤에도 대상 a의 첫 열기는 받아들여진다
+    state.finish_open(&b, b2, "iam_admin".into(), info(), cluster()).expect("b2");
+    state.finish_open(&a, a1, "iam_admin".into(), info(), cluster()).expect("a1");
+    assert_eq!(state.finish_open(&b, b1, "iam_admin".into(), info(), cluster()).err(), not_opened_error());
+}
+
+#[test]
+fn closing_a_target_does_not_restart_its_numbers() {
+    let state = PgState::default();
+    let a = target("a");
+    let before = state.begin_open(&a);
+    state.close(&a);
+    let after = state.begin_open(&a);
+    assert!(after.number > before.number, "{before:?} → {after:?}");
+    assert_eq!(after.epoch, before.epoch + 1);
 }
 
 #[test]
@@ -580,7 +692,12 @@ const PERMISSION_DENIED: &str = "permission denied for table pg_class";
 
 /// 연결 보관함에 `database`용 연결을 미리 넣어 둔다(가짜 서버, 백엔드 PID는 `pid`). 명령은 새로 연결하지 않고 이것을 쓴다
 async fn pool_a_connection(state: &PgState, server: &FakeServer, target: &PgTarget, epoch: u64, database: &str, pid: i32) {
-    let key = ConnKey { target: target.clone(), user: "iam_admin".into(), database: database.into() };
+    pool_a_connection_as(state, server, target, epoch, "iam_admin", database, pid).await;
+}
+
+/// `pool_a_connection`을 DB 사용자 `user`로 넣는다
+async fn pool_a_connection_as(state: &PgState, server: &FakeServer, target: &PgTarget, epoch: u64, user: &str, database: &str, pid: i32) {
+    let key = ConnKey { target: target.clone(), user: user.into(), database: database.into() };
     state.pool.get_or_connect_at_epoch(key, epoch, || async { Ok(server.connected(pid).await) }).await.expect("pooled");
 }
 

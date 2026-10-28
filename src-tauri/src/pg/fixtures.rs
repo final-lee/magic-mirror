@@ -8,7 +8,7 @@
 use super::eval::Ctx;
 use super::model::Privilege::{Connect, Create, Delete, Execute, Insert, References, Select, Temporary, Trigger, Truncate, Update, Usage};
 use super::model::{
-    AclEntry, ClusterSnapshot, DatabaseRec, DbSnapshot, FunctionRec, MemberRec, Privilege, RelKind, RelationRec, RoleRec, SchemaRec,
+    AclEntry, ClusterSnapshot, DatabaseRec, DbSnapshot, FunctionRec, MemberGrant, MemberRec, Privilege, RelKind, RelationRec, RoleRec, SchemaRec,
     MEMBERSHIP_OPTIONS_SINCE,
 };
 
@@ -19,7 +19,13 @@ pub const PG15: i32 = 150_000;
 pub const PG16: i32 = 160_000;
 pub const PG17: i32 = 170_000;
 
-/// 속성이 서버 기본값인 NOLOGIN 역할(INHERIT만 켜져 있다)
+/// 시험 장면의 부트스트랩 superuser(RDS의 `rdsadmin`): 클러스터의 `bootstrap_superuser`고, 시험의 구성원 관계는 이 역할이 맺어 준 것이다
+pub const BOOTSTRAP: &str = "rdsadmin";
+
+/// 서버가 사용자 역할에 처음 매기는 OID. 그 아래는 서버가 직접 만든 역할(미리 정의된 역할 등)의 것이다
+const FIRST_ROLE_OID: u32 = 16_384;
+
+/// 속성이 서버 기본값인 NOLOGIN 역할(INHERIT만 켜져 있다). OID는 0이다: `cluster`가 역할들에 이름순으로 서로 다른 OID를 매긴다
 pub fn role(name: &str) -> RoleRec {
     RoleRec {
         name: name.into(),
@@ -33,6 +39,7 @@ pub fn role(name: &str) -> RoleRec {
         conn_limit: -1,
         valid_until: None,
         comment: None,
+        oid: 0,
     }
 }
 
@@ -40,14 +47,21 @@ pub fn login(name: &str) -> RoleRec {
     RoleRec { login: true, ..role(name) }
 }
 
-/// 옵션이 없는 구성원 관계(PG15 이하가 주는 모양)
+/// 옵션이 없는 구성원 관계(PG15 이하가 주는 모양). 부여는 `BOOTSTRAP`이 한 하나다
 pub fn member(member: &str, group: &str) -> MemberRec {
-    MemberRec { member: member.into(), group: group.into(), admin: false, inherit: None, set: None }
+    member_options(member, group, None, None)
 }
 
-/// INHERIT·SET 옵션이 있는 구성원 관계(PG16 이상이 주는 모양)
+/// INHERIT·SET 옵션이 있는 구성원 관계(PG16 이상이 주는 모양). 부여는 `BOOTSTRAP`이 한 하나다
 pub fn member_with(member: &str, group: &str, inherit: bool, set: bool) -> MemberRec {
-    MemberRec { inherit: Some(inherit), set: Some(set), ..self::member(member, group) }
+    member_options(member, group, Some(inherit), Some(set))
+}
+
+/// 옵션을 `Option`으로 주는 꼴. 부여는 `BOOTSTRAP`이 한 하나이고, 합친 값(`admin`·`inherit`·`set`)은 그 부여와 같다.
+/// 시험이 합친 값만 고쳐 쓰면(`scene.member_mut(…).inherit = …`) `grants`는 그대로라서, 부여를 읽는 시험은 `grants`도 함께 고친다
+pub fn member_options(member: &str, group: &str, inherit: Option<bool>, set: Option<bool>) -> MemberRec {
+    let grant = MemberGrant { grantor: BOOTSTRAP.into(), admin: false, inherit, set };
+    MemberRec { member: member.into(), group: group.into(), admin: false, inherit, set, grants: vec![grant] }
 }
 
 pub fn entry(grantor: &str, grantee: Option<&str>, privilege: Privilege) -> AclEntry {
@@ -145,18 +159,33 @@ pub fn database(name: &str, owner: &str) -> DatabaseRec {
     DatabaseRec { name: name.into(), owner: owner.into(), allow_conn: true, acl }
 }
 
+/// 역할마다 서로 다른 OID를 이름순으로 매긴다(`FIRST_ROLE_OID`부터). 이미 있던 OID는 덮어쓴다: 특정 OID가 필요한 시험은 장면을 만든 뒤 `role_mut`로 고친다
+fn numbered(mut roles: Vec<RoleRec>) -> Vec<RoleRec> {
+    let mut by_name: Vec<usize> = (0..roles.len()).collect();
+    by_name.sort_by(|&a, &b| roles[a].name.cmp(&roles[b].name));
+    for (rank, index) in by_name.into_iter().enumerate() {
+        roles[index].oid = FIRST_ROLE_OID + u32::try_from(rank).expect("역할이 너무 많아요");
+    }
+    roles
+}
+
+/// 클러스터 스냅숏. 역할의 OID는 이름순으로 매기고(`numbered`), 부트스트랩 superuser는 `BOOTSTRAP`이며,
+/// `createrole_self_grant`는 비어 있고 `restrict_password_commands`는 꺼져 있다
 pub fn cluster(version_num: i32, roles: Vec<RoleRec>, members: Vec<MemberRec>, databases: Vec<DatabaseRec>) -> ClusterSnapshot {
     ClusterSnapshot {
         version_num,
         version: format!("{}.{}", version_num / 10_000, version_num % 10_000),
         password_encryption: "scram-sha-256".into(),
         login_user: "iam_admin".into(),
-        roles,
+        roles: numbered(roles),
         members,
         databases,
         settings: Vec::new(),
         sessions: Vec::new(),
         fetched_at: "2026-10-28T00:00:00Z".into(),
+        bootstrap_superuser: BOOTSTRAP.into(),
+        createrole_self_grant: String::new(),
+        restrict_password_commands: false,
     }
 }
 
@@ -254,3 +283,6 @@ pub fn app_scene(version_num: i32) -> Scene {
     ];
     Scene { cluster: cluster(version_num, roles, members, vec![appdb]), db: db("appdb", "app_owner", schemas, relations, functions) }
 }
+
+#[cfg(test)]
+mod tests;
