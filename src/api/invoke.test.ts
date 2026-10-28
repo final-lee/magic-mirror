@@ -1,5 +1,7 @@
 /// <reference types="vite/client" />
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { pgApi } from "../pg/api";
+import { pgTarget } from "../pg/fixtures";
 import { invoke, onSsoExpired, reportSsoExpired } from "./invoke";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -15,6 +17,73 @@ test("an ssoExpired failure with a profile is reported and still rethrown", asyn
   raw.mockRejectedValueOnce({ kind: "ssoExpired" });
   await expect(invoke("list_resources", { profile: "prod", region: "x" })).rejects.toEqual({ kind: "ssoExpired" });
   expect(seen).toEqual(["prod"]);
+  off();
+});
+
+// pg 명령은 profile을 최상위 인자가 아니라 target 객체 안에 담는다(`{ target: { profile, region, kind, id }, … }`). 샘플 대상의 프로필은 "prod"다.
+test("an ssoExpired failure of a pg command is reported with the profile inside its target", async () => {
+  const seen: string[] = [];
+  const off = onSsoExpired((p) => seen.push(p));
+  raw.mockRejectedValueOnce({ kind: "ssoExpired" });
+  await expect(invoke("pg_open", { target: pgTarget, loginUser: "iam_admin" })).rejects.toEqual({ kind: "ssoExpired" });
+  expect(seen).toEqual(["prod"]);
+  off();
+});
+
+test("the pg wrappers report an expired session through the same path", async () => {
+  const seen: string[] = [];
+  const off = onSsoExpired((p) => seen.push(p));
+  raw.mockRejectedValueOnce({ kind: "ssoExpired" });
+  await expect(pgApi.target({ ...pgTarget, profile: "dev" })).rejects.toEqual({ kind: "ssoExpired" });
+  raw.mockRejectedValueOnce({ kind: "ssoExpired" });
+  await expect(pgApi.open({ ...pgTarget, profile: "dev" }, "iam_admin")).rejects.toEqual({ kind: "ssoExpired" });
+  expect(seen).toEqual(["dev", "dev"]);
+  off();
+});
+
+test("the top-level profile wins when a call has both", async () => {
+  const seen: string[] = [];
+  const off = onSsoExpired((p) => seen.push(p));
+  raw.mockRejectedValueOnce({ kind: "ssoExpired" });
+  await expect(invoke("odd", { profile: "dev", target: pgTarget })).rejects.toBeTruthy();
+  expect(seen).toEqual(["dev"]);
+  off();
+});
+
+test("a top-level profile that is not a string does not hide the one in the target", async () => {
+  const seen: string[] = [];
+  const off = onSsoExpired((p) => seen.push(p));
+  raw.mockRejectedValueOnce({ kind: "ssoExpired" });
+  await expect(invoke("odd", { profile: 7, target: pgTarget })).rejects.toBeTruthy();
+  expect(seen).toEqual(["prod"]);
+  off();
+});
+
+test.each([
+  ["neither field", { region: "ap-northeast-2" }],
+  ["a target without a profile", { target: { region: "ap-northeast-2", kind: "cluster", id: "orders-aurora" } }],
+  ["a target that is not an object", { target: "prod" }],
+  ["a null target", { target: null }],
+  ["an array target", { target: ["prod"] }],
+  ["a target profile that is not a string", { target: { ...pgTarget, profile: 7 } }],
+  ["a profile that is not a string anywhere", { profile: 7, target: { profile: null } }],
+])("an ssoExpired failure of a call with %s is not reported", async (_name, args) => {
+  const seen: string[] = [];
+  const off = onSsoExpired((p) => seen.push(p));
+  raw.mockRejectedValueOnce({ kind: "ssoExpired" });
+  await expect(invoke("odd", args)).rejects.toEqual({ kind: "ssoExpired" });
+  expect(seen).toEqual([]);
+  off();
+});
+
+test("other failures of a pg command are not reported", async () => {
+  const seen: string[] = [];
+  const off = onSsoExpired((p) => seen.push(p));
+  raw.mockRejectedValueOnce({ kind: "network", message: "엔드포인트에 연결하지 못했어요(db.example:5432). VPN이 켜져 있는지 확인하세요" });
+  await expect(invoke("pg_open", { target: pgTarget, loginUser: "iam_admin" })).rejects.toBeTruthy();
+  raw.mockResolvedValueOnce(null);
+  await expect(invoke("pg_close", { target: pgTarget })).resolves.toBeNull();
+  expect(seen).toEqual([]);
   off();
 });
 

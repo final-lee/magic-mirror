@@ -13,7 +13,7 @@ import type {
 } from "./types";
 
 // 명령 이름과 인자 이름은 설계 문서의 "계약"과 같아야 한다(Tauri가 camelCase 인자를 snake_case로 바꿔 준다).
-// 모든 명령은 target을 객체 하나로 받는다.
+// 모든 명령은 target을 객체 하나로 받는다. invoke가 SSO 만료를 알릴 때 그 안의 profile을 읽으므로(src/api/invoke.ts) 풀어서 넘기지 않는다.
 export const pgApi = {
   /** RDS API로 대상을 확인한다. DB에는 연결하지 않는다. */
   target: (target: PgTarget) => invoke<PgTargetInfo>("pg_target", { target }),

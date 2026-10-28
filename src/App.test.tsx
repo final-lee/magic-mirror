@@ -9,7 +9,7 @@ import { LOGIN_USER, sampleOverview as samplePgOverview } from "./pg/fixtures";
 import { pgKeys } from "./pg/queries";
 import { vpcApi } from "./vpcmap/api";
 import { sampleTopology } from "./vpcmap/fixtures";
-import { makeResource, renderWithClient, sampleServices } from "./test/utils";
+import { dbRow, makeResource, rdsService, renderWithClient, sampleServices } from "./test/utils";
 
 vi.mock("./api/client", () => ({
   api: {
@@ -467,17 +467,6 @@ describe("IAM 작업 공간 탭", () => {
 });
 
 describe("PostgreSQL 탭", () => {
-  const column = (key: string, label: string) => ({ key, label, kind: "text" as const });
-  const rdsService = {
-    id: "rds",
-    name: "RDS",
-    global: false,
-    types: [
-      { id: "db-instances", name: "DB Instances", columns: [column("name", "Identifier"), column("engine", "Engine")] },
-      { id: "db-clusters", name: "DB Clusters", columns: [column("name", "Identifier"), column("engine", "Engine")] },
-    ],
-  };
-  const dbRow = (id: string, engine: string, extra: Record<string, string> = {}) => makeResource(id, { name: id, engine, ...extra });
   const target = (id: string, kind: "cluster" | "instance" = "cluster") => ({ profile: "prod", region: "ap-northeast-2", kind, id });
   const pgTabs = () => screen.queryAllByRole("tab", { name: /🐘/ });
   const closeButtonOf = (tab: HTMLElement) => within(tab.parentElement as HTMLElement).getByRole("button", { name: /닫기/ });
@@ -582,7 +571,7 @@ describe("PostgreSQL 탭", () => {
     expect(screen.getByRole("tab", { name: "🐘 billing" })).toHaveAttribute("aria-selected", "true");
   });
 
-  test("closing the tab drops that target's cached reads and no other target's, so reopening connects again", async () => {
+  test("closing the tab drops that target's cached reads and no other target's", async () => {
     const { qc } = await showClusters();
     await openCluster("orders-aurora");
     const tab = await screen.findByRole("tab", { name: "🐘 orders-aurora" });
