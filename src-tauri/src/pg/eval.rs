@@ -11,10 +11,16 @@
 //!   모든 스키마의 USAGE를 ACL과 상관없이 준다(권한을 쓰는 역할 가운데 있을 때).
 //! - PG14부터 데이터베이스 소유자는 `pg_database_owner`의 구성원이다. PG16은 늘 상속하고, PG15 이하는 다른 구성원 관계처럼 소유자의
 //!   `rolinherit`를 따른다.
+//! - MAINTAIN은 PG17부터 시퀀스를 뺀 모든 관계에 있다. 그 전에는 어떤 객체에도 없어서 superuser도 갖지 못한다.
+//!   PG17부터 `pg_maintain`이 모든 관계의 MAINTAIN을 준다.
+//! - 스키마에 만드는 데는 CREATE만 있으면 되고 USAGE는 필요 없다(서버가 그 스키마의 이름으로 만드는 것을 허락한다). 데이터베이스에 붙는 CONNECT는 그대로 필요하다.
 //!
-//! 구성: 공개된 것은 `Ctx`의 메서드(한 역할·한 객체), `schema_cells`(역할 × 스키마), `who_can`(한 객체에 권한이 있는 역할들)이다.
-//! 셋 모두 안쪽의 `Evaluator` 하나를 거친다. 그것이 `Ctx`에서 역할 그래프를 한 번 만들고, 역할마다 상속하는 역할의 집합을 한 번 구해 둔다.
+//! 구성: 공개된 것은 `Eval`(한 명령이 한 번 만들어 쓰는 계산기)과 그것이 역할마다 돌려주는 `RoleView`, 그 위의 `Ctx` 메서드
+//! (부를 때마다 `Eval`을 새로 만드는 한 줄 포장), `schema_cells`(역할 × 스키마), `who_can`(한 객체에 권한이 있는 역할들)이다.
+//! `Eval`이 `Ctx`에서 역할 그래프를 한 번 만들고, `RoleView`가 역할마다 상속하는 역할의 집합을 한 번 구해 둔다.
+//! `schema_cells`와 `who_can`은 명령 하나에 `Eval` 하나를 쓴다.
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 
 use serde::Serialize;
@@ -28,6 +34,9 @@ const PREDEFINED_ROLES_SINCE: i32 = 140_000;
 const READ_ALL_DATA: &str = "pg_read_all_data";
 const WRITE_ALL_DATA: &str = "pg_write_all_data";
 const DATABASE_OWNER: &str = "pg_database_owner";
+/// MAINTAIN 권한과 `pg_maintain`이 있는 첫 서버 버전
+const MAINTAIN_SINCE: i32 = 170_000;
+const MAINTAIN_ROLE: &str = "pg_maintain";
 
 /// 권한은 있어도 쓸 수 없는 이유(화면에 그대로 나간다)
 const NO_CONNECT: &str = "CONNECT 없음";
@@ -53,7 +62,7 @@ pub enum SourceKind {
     Group,
     /// PUBLIC 앞으로 부여된 ACL 항목
     Public,
-    /// `pg_read_all_data`·`pg_write_all_data`(ACL에 없다)
+    /// `pg_read_all_data`·`pg_write_all_data`·`pg_maintain`(ACL에 없다)
     Predefined,
     /// 역할 자신이 superuser다(ACL에 없다)
     Superuser,
@@ -131,22 +140,23 @@ impl<'a> Obj<'a> {
         }
     }
 
-    /// 이 객체에 있는 권한인가. 테이블에 USAGE, 스키마에 SELECT, 시퀀스에 INSERT 같은 것은 없다
-    fn offers(self, p: Privilege) -> bool {
+    /// 서버 버전 `version`에서 이 객체에 있는 권한인가. 테이블에 USAGE, 스키마에 SELECT, 시퀀스에 INSERT 같은 것은 없고,
+    /// MAINTAIN은 PG17부터 시퀀스를 뺀 관계에만 있다
+    fn offers(self, p: Privilege, version: i32) -> bool {
         use Privilege::*;
         match self {
             Obj::Database(_) => matches!(p, Connect | Create | Temporary),
             Obj::Schema(_) => matches!(p, Usage | Create),
             Obj::Relation(r) if r.kind == RelKind::Sequence => matches!(p, Usage | Select | Update),
-            Obj::Relation(_) => matches!(p, Select | Insert | Update | Delete | Truncate | References | Trigger | Maintain),
+            Obj::Relation(_) => matches!(p, Select | Insert | Update | Delete | Truncate | References | Trigger) || (p == Maintain && version >= MAINTAIN_SINCE),
             Obj::Function(_) => matches!(p, Execute),
         }
     }
 }
 
-/// 서버가 ACL과 상관없이 `p`를 주는 미리 정의된 역할들(PG14부터). 권한을 쓰는 역할 가운데 있으면 준다
-fn predefined_roles(obj: Obj, p: Privilege) -> &'static [&'static str] {
-    if !obj.offers(p) {
+/// 서버 버전 `version`에서 ACL과 상관없이 `p`를 주는 미리 정의된 역할들(PG14부터). 권한을 쓰는 역할 가운데 있으면 준다
+fn predefined_roles(obj: Obj, p: Privilege, version: i32) -> &'static [&'static str] {
+    if !obj.offers(p, version) {
         return &[];
     }
     match (obj, p) {
@@ -156,6 +166,8 @@ fn predefined_roles(obj: Obj, p: Privilege) -> &'static [&'static str] {
         (Obj::Relation(_), Privilege::Select) => &[READ_ALL_DATA],
         // 모든 관계의 INSERT·UPDATE·DELETE. 서버는 관계 종류를 가리지 않는다(시퀀스는 `offers`가 UPDATE만 남긴다)
         (Obj::Relation(_), Privilege::Insert | Privilege::Update | Privilege::Delete) => &[WRITE_ALL_DATA],
+        // PG17부터 모든 관계의 MAINTAIN(시퀀스는 `offers`가 거른다)
+        (Obj::Relation(_), Privilege::Maintain) => &[MAINTAIN_ROLE],
         _ => &[],
     }
 }
@@ -285,31 +297,77 @@ struct Found<'o> {
     grantor: Option<&'o str>,
 }
 
-struct Evaluator<'a> {
-    ctx: Ctx<'a>,
+/// 한 명령이 한 번 만들어 두고 여러 번 묻는 계산기. `Ctx`에서 역할 그래프(모든 역할과 구성원 관계)를 한 번 만든다.
+/// 역할 하나에 대한 질문은 `role`이 돌려주는 `RoleView`로 한다. 거기서 그 역할이 상속하는 역할의 집합을 한 번만 구한다.
+/// `Ctx`의 메서드는 부를 때마다 이것을 새로 만든다. 같은 `Ctx`에 여러 번 묻는다면(객체마다, 역할마다) `Eval`을 한 번 만들어 쓴다.
+/// 릴리스에서 역할 235개, 구성원 관계 460개일 때 `Ctx::sources` 한 번은 23µs였고, 뷰의 `sources`는 호출당 60ns 안팎이다
+/// (역할 200 × 관계 2만 개, 400만 번에 0.25초).
+pub struct Eval<'a> {
     graph: Graph<'a>,
     /// 이 스냅숏의 데이터베이스. 클러스터 스냅숏에 없으면 None
     database: Option<&'a DatabaseRec>,
+    schemas: HashMap<&'a str, &'a SchemaRec>,
 }
 
-impl<'a> Evaluator<'a> {
-    fn new(ctx: &Ctx<'a>) -> Evaluator<'a> {
+impl<'a> Eval<'a> {
+    pub fn new(ctx: &Ctx<'a>) -> Eval<'a> {
         let database = ctx.cluster.databases.iter().find(|d| d.name == ctx.db.database);
-        Evaluator { ctx: *ctx, graph: Graph::new(ctx), database }
+        let schemas = ctx.db.schemas.iter().map(|s| (s.name.as_str(), s)).collect();
+        Eval { graph: Graph::new(ctx), database, schemas }
     }
 
-    fn holder<'x>(&'x self, role: &'x str) -> Holder<'x> {
-        Holder { reach: self.graph.reach(role, |e| e.inherits), superuser: self.graph.roles.get(role).is_some_and(|r| r.superuser) }
+    /// 역할 하나의 계산. 스냅숏에 없는 역할도 자기 자신과 PUBLIC이 주는 것은 갖는다
+    pub fn role<'x>(&'x self, name: &'x str) -> RoleView<'x> {
+        let superuser = self.graph.roles.get(name).is_some_and(|r| r.superuser);
+        let holder = Holder { reach: self.graph.reach(name, |e| e.inherits), superuser };
+        RoleView { eval: self, holder, set_only: OnceCell::new() }
+    }
+}
+
+/// `Eval`이 만든 역할 하나의 계산. 상속하는 역할의 집합을 만들 때 한 번 구해 두고 질문마다 다시 구하지 않는다
+pub struct RoleView<'x> {
+    eval: &'x Eval<'x>,
+    holder: Holder<'x>,
+    /// `SET ROLE`로만 닿는 역할들. 처음 물을 때 구한다
+    set_only: OnceCell<Vec<String>>,
+}
+
+impl RoleView<'_> {
+    /// 역할 자신(경로 없음)과 상속하는 모든 역할을 너비 우선 순서로
+    pub fn inherited(&self) -> Vec<Inherited> {
+        self.holder.reach.inherited()
     }
 
-    fn set_role_only(&self, role: &str) -> Vec<String> {
-        let inherited = self.graph.reach(role, |e| e.inherits);
-        let settable = self.graph.reach(role, |e| e.can_set);
-        settable.nodes.iter().skip(1).filter(|n| !inherited.index.contains_key(n.role)).map(|n| n.role.to_string()).collect()
+    /// 상속하지는 않지만 `SET ROLE`로 닿을 수 있는 역할들. PG16부터 SET 옵션이 꺼진 관계는 건너뛴다
+    pub fn set_role_only(&self) -> Vec<String> {
+        self.set_only
+            .get_or_init(|| {
+                let settable = self.eval.graph.reach(self.holder.reach.nodes[0].role, |e| e.can_set);
+                let inherited = &self.holder.reach.index;
+                settable.nodes.iter().skip(1).filter(|n| !inherited.contains_key(n.role)).map(|n| n.role.to_string()).collect()
+            })
+            .clone()
+    }
+
+    /// 이 역할이 `obj`에 `p`를 갖는 모든 출처. 비어 있으면 그 권한이 없다
+    pub fn sources(&self, obj: Obj, p: Privilege) -> Vec<Source> {
+        let mut sources = Vec::new();
+        if self.offers(obj, p) {
+            self.each_source(obj, &[p], |found| {
+                sources.push(Source { kind: found.kind, via: self.holder.reach.path(found.node), grantor: found.grantor.map(str::to_string) });
+            });
+        }
+        sources
+    }
+
+    /// 권한이 있어도 못 쓰는 이유: 이 데이터베이스의 CONNECT가 없으면 "CONNECT 없음", 있으면서 `schema`의 USAGE가 없으면 "USAGE 없음"
+    pub fn unusable(&self, schema: &str) -> Option<&'static str> {
+        self.unusable_in(self.eval.database, self.eval.schemas.get(schema).copied())
     }
 
     /// `ps` 가운데 하나라도 `obj`에 대해 갖는 출처를 모두 `found`로 넘긴다. ACL 항목 순서대로, 그다음 미리 정의된 역할, 마지막에 superuser
-    fn each_source<'o>(&self, h: &Holder, obj: Obj<'o>, ps: &[Privilege], mut found: impl FnMut(Found<'o>)) {
+    fn each_source<'o>(&self, obj: Obj<'o>, ps: &[Privilege], mut found: impl FnMut(Found<'o>)) {
+        let holder = &self.holder;
         let owner = obj.owner();
         // ACL은 받는 쪽끼리 이웃해 있어서 방금 본 받는 쪽의 결과를 다시 쓴다
         let mut previous: Option<Option<&str>> = None;
@@ -317,85 +375,76 @@ impl<'a> Evaluator<'a> {
         for entry in obj.acl().iter().filter(|e| ps.contains(&e.privilege)) {
             let grantee = entry.grantee.as_deref();
             if previous != Some(grantee) {
-                link = h.link(owner, grantee);
+                link = holder.link(owner, grantee);
                 previous = Some(grantee);
             }
             if let Some((kind, node)) = link {
                 found(Found { kind, node, grantor: Some(entry.grantor.as_str()) });
             }
         }
-        if self.graph.version >= PREDEFINED_ROLES_SINCE {
+        if self.eval.graph.version >= PREDEFINED_ROLES_SINCE {
             for &p in ps {
-                for name in predefined_roles(obj, p) {
-                    if let Some(&node) = h.reach.index.get(*name) {
+                for name in predefined_roles(obj, p, self.eval.graph.version) {
+                    if let Some(&node) = holder.reach.index.get(*name) {
                         found(Found { kind: SourceKind::Predefined, node, grantor: None });
                     }
                 }
             }
         }
-        if h.superuser && ps.iter().any(|&p| obj.offers(p)) {
+        if holder.superuser && ps.iter().any(|&p| self.offers(obj, p)) {
             found(Found { kind: SourceKind::Superuser, node: 0, grantor: None });
         }
     }
 
     /// `ps` 가운데 하나라도 갖는지와, 그 출처에 소유·직접·superuser가 있는지
-    fn access(&self, h: &Holder, obj: Obj, ps: &[Privilege]) -> (bool, bool) {
+    fn access(&self, obj: Obj, ps: &[Privilege]) -> (bool, bool) {
         let (mut any, mut own) = (false, false);
-        self.each_source(h, obj, ps, |found| {
+        self.each_source(obj, ps, |found| {
             any = true;
             own |= found.kind.is_own();
         });
         (any, own)
     }
 
-    fn holds(&self, h: &Holder, obj: Obj, p: Privilege) -> bool {
-        obj.offers(p) && self.access(h, obj, &[p]).0
+    /// 이 서버 버전에서 `obj`에 `p`가 있는가
+    fn offers(&self, obj: Obj, p: Privilege) -> bool {
+        obj.offers(p, self.eval.graph.version)
     }
 
-    fn sources(&self, h: &Holder, obj: Obj, p: Privilege) -> Vec<Source> {
-        let mut sources = Vec::new();
-        if obj.offers(p) {
-            self.each_source(h, obj, &[p], |found| {
-                sources.push(Source { kind: found.kind, via: h.reach.path(found.node), grantor: found.grantor.map(str::to_string) });
-            });
-        }
-        sources
+    fn holds(&self, obj: Obj, p: Privilege) -> bool {
+        self.offers(obj, p) && self.access(obj, &[p]).0
     }
 
-    /// 권한이 있어도 못 쓰는 이유. 데이터베이스 CONNECT가 먼저고 스키마 USAGE가 다음이다.
-    /// 판단할 수 없는 것(클러스터 스냅숏에 없는 데이터베이스, `schema`가 None)은 문제로 보지 않는다
-    fn unusable(&self, h: &Holder, schema: Option<&SchemaRec>) -> Option<&'static str> {
-        if let Some(database) = self.database {
-            if !self.holds(h, Obj::Database(database), Privilege::Connect) {
+    /// 못 쓰는 이유. 데이터베이스 CONNECT가 먼저고 스키마 USAGE가 다음이다.
+    /// 판단할 수 없는 것(`database`나 `schema`가 None)은 문제로 보지 않는다
+    fn unusable_in(&self, database: Option<&DatabaseRec>, schema: Option<&SchemaRec>) -> Option<&'static str> {
+        if let Some(database) = database {
+            if !self.holds(Obj::Database(database), Privilege::Connect) {
                 return Some(NO_CONNECT);
             }
         }
         let schema = schema?;
-        (!self.holds(h, Obj::Schema(schema), Privilege::Usage)).then_some(NO_USAGE)
+        (!self.holds(Obj::Schema(schema), Privilege::Usage)).then_some(NO_USAGE)
     }
 
-    fn schema(&self, name: &str) -> Option<&'a SchemaRec> {
-        self.ctx.db.schemas.iter().find(|s| s.name == name)
-    }
-
-    /// 역할 하나와 스키마 하나의 칸. `relations`는 그 스키마의 관계들이다
-    fn cell(&self, h: &Holder, role: &str, schema: &SchemaRec, relations: &[&RelationRec]) -> SchemaCell {
+    /// 이 역할과 스키마 하나의 칸. `relations`는 그 스키마의 관계들이다
+    fn cell(&self, schema: &SchemaRec, relations: &[&RelationRec]) -> SchemaCell {
         // 보이는 값 가운데 하나라도 소유·직접·superuser 출처에서 온 것이 있는가
         let mut own = false;
-        let (usage, usage_own) = self.access(h, Obj::Schema(schema), &[Privilege::Usage]);
-        let (create, create_own) = self.access(h, Obj::Schema(schema), &[Privilege::Create]);
+        let (usage, usage_own) = self.access(Obj::Schema(schema), &[Privilege::Usage]);
+        let (create, create_own) = self.access(Obj::Schema(schema), &[Privilege::Create]);
         own |= usage_own | create_own;
 
         let (mut read_have, mut read_total, mut write_have, mut write_total) = (0, 0, 0, 0);
         for &rel in relations {
             if READ_KINDS.contains(&rel.kind) {
-                let (any, from_own) = self.access(h, Obj::Relation(rel), &READ);
+                let (any, from_own) = self.access(Obj::Relation(rel), &READ);
                 read_total += 1;
                 read_have += usize::from(any);
                 own |= from_own;
             }
             if WRITE_KINDS.contains(&rel.kind) {
-                let (any, from_own) = self.access(h, Obj::Relation(rel), &WRITE);
+                let (any, from_own) = self.access(Obj::Relation(rel), &WRITE);
                 write_total += 1;
                 write_have += usize::from(any);
                 own |= from_own;
@@ -404,15 +453,17 @@ impl<'a> Evaluator<'a> {
         let (read, write) = (Coverage::of(read_have, read_total), Coverage::of(write_have, write_total));
         // 잃을 것이 있는 칸만 못 쓰는 이유를 붙인다. 보이는 값이 없는 칸은 출처를 내세우지 않는다
         let shown = usage || create || read != Coverage::None || write != Coverage::None;
+        // 보이는 것이 CREATE뿐인 칸은 USAGE 없이도 쓸 수 있어서 USAGE가 없다는 이유를 달지 않는다. CONNECT는 그대로 본다
+        let create_only = create && !usage && read == Coverage::None && write == Coverage::None;
         SchemaCell {
-            role: role.to_string(),
+            role: self.holder.reach.nodes[0].role.to_string(),
             schema: schema.name.clone(),
             usage,
             create,
             read,
             write,
             inherited_only: shown && !own,
-            unusable: if shown { self.unusable(h, Some(schema)) } else { None },
+            unusable: if shown { self.unusable_in(self.eval.database, (!create_only).then_some(schema)) } else { None },
         }
     }
 }
@@ -420,24 +471,22 @@ impl<'a> Evaluator<'a> {
 impl Ctx<'_> {
     /// 역할 자신(경로 없음)과 상속하는 모든 역할을 너비 우선 순서로
     pub fn inherited(&self, role: &str) -> Vec<Inherited> {
-        Evaluator::new(self).holder(role).reach.inherited()
+        Eval::new(self).role(role).inherited()
     }
 
     /// 상속하지는 않지만 `SET ROLE`로 닿을 수 있는 역할들. PG16부터 SET 옵션이 꺼진 관계는 건너뛴다
     pub fn set_role_only(&self, role: &str) -> Vec<String> {
-        Evaluator::new(self).set_role_only(role)
+        Eval::new(self).role(role).set_role_only()
     }
 
     /// `role`이 `obj`에 `p`를 갖는 모든 출처. 비어 있으면 그 권한이 없다
     pub fn sources(&self, role: &str, obj: Obj, p: Privilege) -> Vec<Source> {
-        let evaluator = Evaluator::new(self);
-        evaluator.sources(&evaluator.holder(role), obj, p)
+        Eval::new(self).role(role).sources(obj, p)
     }
 
     /// 권한이 있어도 못 쓰는 이유: 이 데이터베이스의 CONNECT가 없으면 "CONNECT 없음", 있으면서 `schema`의 USAGE가 없으면 "USAGE 없음"
     pub fn unusable(&self, role: &str, schema: &str) -> Option<&'static str> {
-        let evaluator = Evaluator::new(self);
-        evaluator.unusable(&evaluator.holder(role), evaluator.schema(schema))
+        Eval::new(self).role(role).unusable(schema)
     }
 }
 
@@ -476,14 +525,15 @@ pub struct SchemaCell {
     /// 보이는 값(`usage`, `create`가 참이거나 `read`, `write`가 `None`이 아닌 것)의 출처가 모두 그룹·PUBLIC·미리 정의된 역할이다.
     /// 보이는 값이 하나도 없는 칸은 거짓이다
     pub inherited_only: bool,
-    /// 잃을 것이 있는 칸(`usage || create || read != None || write != None`)에 `Ctx::unusable`의 결과
+    /// 잃을 것이 있는 칸(`usage || create || read != None || write != None`)에 `Ctx::unusable`의 결과.
+    /// 보이는 값이 `create`뿐이면 스키마의 USAGE 없이도 쓸 수 있어서 "USAGE 없음"이 아니라 "CONNECT 없음"이거나 None이다
     pub unusable: Option<&'static str>,
 }
 
 /// 역할 × 스키마의 칸들. 주어진 역할 순서대로, 각 역할 안에서는 스키마 이름순이다.
 /// 20,000개 관계에 역할 200개여도 2초 안에 끝나도록, 역할마다 상속하는 역할의 집합을 한 번만 구한다
 pub fn schema_cells(ctx: &Ctx, roles: &[&str]) -> Vec<SchemaCell> {
-    let evaluator = Evaluator::new(ctx);
+    let eval = Eval::new(ctx);
     let mut schemas: Vec<&SchemaRec> = ctx.db.schemas.iter().collect();
     schemas.sort_by(|a, b| a.name.cmp(&b.name));
     let mut relations: HashMap<&str, Vec<&RelationRec>> = HashMap::new();
@@ -493,10 +543,10 @@ pub fn schema_cells(ctx: &Ctx, roles: &[&str]) -> Vec<SchemaCell> {
 
     let mut cells = Vec::with_capacity(roles.len() * schemas.len());
     for &role in roles {
-        let holder = evaluator.holder(role);
+        let view = eval.role(role);
         for &schema in &schemas {
             let of_schema = relations.get(schema.name.as_str()).map_or(&[][..], Vec::as_slice);
-            cells.push(evaluator.cell(&holder, role, schema, of_schema));
+            cells.push(view.cell(schema, of_schema));
         }
     }
     cells
@@ -507,26 +557,38 @@ pub fn schema_cells(ctx: &Ctx, roles: &[&str]) -> Vec<SchemaCell> {
 pub struct WhoCanRow {
     pub role: String,
     pub sources: Vec<Source>,
-    /// 권한은 있어도 못 쓰는 이유. 객체가 있는 스키마의 USAGE와 데이터베이스의 CONNECT를 본다
+    /// 권한은 있어도 못 쓰는 이유. 데이터베이스의 CONNECT(데이터베이스를 물었으면 그 데이터베이스의, 아니면 이 스냅숏의)와
+    /// 객체가 있는 스키마의 USAGE를 본다. 스키마의 CREATE는 USAGE 없이도 되니 "CONNECT 없음"만 있을 수 있다
     pub unusable: Option<&'static str>,
 }
 
 /// `obj`에 `p`를 가진 역할들(출처가 하나 이상). 역할 이름순이다. 시스템 역할도 포함한다
 pub fn who_can(ctx: &Ctx, obj: Obj, p: Privilege) -> Vec<WhoCanRow> {
-    let evaluator = Evaluator::new(ctx);
-    let schema = obj.schema().and_then(|name| evaluator.schema(name));
+    let eval = Eval::new(ctx);
+    // CONNECT는 물은 데이터베이스에서 본다. 그 밖의 객체는 이 스냅숏의 데이터베이스 안에 있다
+    let database = match obj {
+        Obj::Database(d) => Some(d),
+        _ => eval.database,
+    };
+    // 스키마에 만드는 일은 그 스키마의 USAGE 없이도 되니 USAGE를 보지 않는다
+    let schema = match (obj, p) {
+        (Obj::Schema(_), Privilege::Create) => None,
+        _ => obj.schema().and_then(|name| eval.schemas.get(name).copied()),
+    };
     let mut names: Vec<&str> = ctx.cluster.roles.iter().map(|r| r.name.as_str()).collect();
     names.sort_unstable();
     names.dedup();
     names
         .into_iter()
         .filter_map(|role| {
-            let holder = evaluator.holder(role);
-            let sources = evaluator.sources(&holder, obj, p);
-            (!sources.is_empty()).then(|| WhoCanRow { role: role.to_string(), unusable: evaluator.unusable(&holder, schema), sources })
+            let view = eval.role(role);
+            let sources = view.sources(obj, p);
+            (!sources.is_empty()).then(|| WhoCanRow { role: role.to_string(), unusable: view.unusable_in(database, schema), sources })
         })
         .collect()
 }
 
+#[cfg(test)]
+mod generated;
 #[cfg(test)]
 mod tests;

@@ -1,20 +1,19 @@
-use std::collections::HashSet;
-use std::time::{Duration, Instant};
-
 use serde_json::json;
 
 use super::SourceKind::{Direct, Group, Owner, Predefined, Public, Superuser};
 use super::*;
 use crate::pg::fixtures::*;
-use crate::pg::model::Privilege::{Connect, Create, Delete, Execute, Insert, References, Select, Temporary, Trigger, Truncate, Update, Usage};
-use crate::pg::model::RelKind::{Foreign, MatView, Partitioned, Sequence, Table, View};
-use crate::pg::model::{AclEntry, MemberRec, Privilege, RelKind, RelationRec, RoleRec, SchemaRec};
+use crate::pg::model::Privilege::{
+    Connect, Create, Delete, Execute, Insert, Maintain, References, Select, Temporary, Trigger, Truncate, Update, Usage,
+};
+use crate::pg::model::RelKind::Sequence;
+use crate::pg::model::{Privilege, RoleRec};
 
 fn src(kind: SourceKind, via: &[&str], grantor: Option<&str>) -> Source {
     Source { kind, via: via.iter().map(|s| s.to_string()).collect(), grantor: grantor.map(str::to_string) }
 }
 
-fn inh(role: &str, path: &[&str]) -> Inherited {
+pub(super) fn inh(role: &str, path: &[&str]) -> Inherited {
     Inherited { role: role.to_string(), path: path.iter().map(|s| s.to_string()).collect() }
 }
 
@@ -375,12 +374,73 @@ fn the_predefined_role_itself_has_what_it_grants() {
 
 #[test]
 fn predefined_roles_are_ignored_before_pg14() {
-    let scene = app_scene(PG13);
+    let mut scene = app_scene(PG13);
+    scene.cluster.roles.push(login("dana"));
+    scene.cluster.members.push(member("dana", "pg_write_all_data"));
     let ctx = scene.ctx();
-    assert!(ctx.sources("carol", Obj::Relation(scene.relation("app.orders")), Select).is_empty());
-    assert!(ctx.sources("carol", Obj::Schema(scene.schema("app")), Usage).is_empty());
+    let orders = Obj::Relation(scene.relation("app.orders"));
+    let app = Obj::Schema(scene.schema("app"));
+    // 읽기 역할(carol)도 쓰기 역할(dana)도 주는 것이 없다
+    assert!(ctx.sources("carol", orders, Select).is_empty());
+    assert!(ctx.sources("carol", app, Usage).is_empty());
+    for p in [Insert, Update, Delete] {
+        assert!(ctx.sources("dana", orders, p).is_empty(), "{p:?}");
+    }
+    assert!(ctx.sources("dana", app, Usage).is_empty());
     // 구성원 관계 자체는 있다
     assert_eq!(ctx.inherited("carol").len(), 2);
+    assert_eq!(ctx.inherited("dana").len(), 2);
+}
+
+// ───────────────────────── 출처: MAINTAIN ─────────────────────────
+
+#[test]
+fn maintain_exists_from_pg17_on_every_relation_except_sequences() {
+    let mut scene = app_scene(PG17);
+    scene.cluster.roles.extend([RoleRec { superuser: true, ..login("root") }, login("maint")]);
+    scene.cluster.members.push(member_with("maint", "pg_maintain", true, true));
+    scene.db.relations.push(table("app", "kept", "app_owner").grant("alice", &[Maintain]));
+    let ctx = scene.ctx();
+
+    // 테이블, 뷰, 구체화 뷰, 파티션 테이블, 외부 테이블: superuser도 pg_maintain의 구성원도 MAINTAIN을 갖는다
+    for name in ["app.orders", "app.order_totals", "app.order_summary", "audit.events", "audit.remote_log"] {
+        let obj = Obj::Relation(scene.relation(name));
+        assert_eq!(ctx.sources("root", obj, Maintain), [src(Superuser, &[], None)], "{name}");
+        assert_eq!(ctx.sources("maint", obj, Maintain), [src(Predefined, &["pg_maintain"], None)], "{name}");
+        // pg_maintain은 MAINTAIN만 준다
+        for p in [Select, Insert, Update, Delete, Truncate] {
+            assert!(ctx.sources("maint", obj, p).is_empty(), "{name} {p:?}");
+        }
+    }
+    // 시퀀스에는 MAINTAIN이 없다
+    let ticket = Obj::Relation(scene.relation("app.ticket_seq"));
+    for role in ["root", "maint", "app_owner"] {
+        assert!(ctx.sources(role, ticket, Maintain).is_empty(), "{role}");
+    }
+    // ACL의 MAINTAIN은 다른 권한처럼 받는다
+    assert_eq!(ctx.sources("alice", Obj::Relation(scene.relation("app.kept")), Maintain), [src(Direct, &[], Some("app_owner"))]);
+    // 스키마·함수·데이터베이스에는 주지 않는다
+    assert!(ctx.sources("maint", Obj::Schema(scene.schema("app")), Usage).is_empty());
+    assert!(ctx.sources("maint", Obj::Function(scene.function("app.touch")), Execute).is_empty());
+    assert!(ctx.sources("maint", Obj::Database(scene.database()), Connect).is_empty());
+}
+
+#[test]
+fn before_pg17_no_object_offers_maintain() {
+    let mut scene = app_scene(PG16);
+    scene.cluster.roles.extend([RoleRec { superuser: true, ..login("root") }, login("maint")]);
+    scene.cluster.members.push(member_with("maint", "pg_maintain", true, true));
+    // PG16 서버가 줄 수 없는 ACL 항목이 있어도 이 권한은 없다
+    scene.db.relations.push(table("app", "kept", "app_owner").grant("alice", &[Maintain]));
+    let ctx = scene.ctx();
+    for name in ["app.orders", "app.kept", "audit.events"] {
+        let obj = Obj::Relation(scene.relation(name));
+        for role in ["root", "maint", "alice", "app_owner"] {
+            assert!(ctx.sources(role, obj, Maintain).is_empty(), "{role} {name}");
+        }
+    }
+    // 다른 권한은 그대로다
+    assert_eq!(ctx.sources("root", Obj::Relation(scene.relation("app.orders")), Select), [src(Superuser, &[], None)]);
 }
 
 // ───────────────────────── 출처: pg_database_owner ─────────────────────────
@@ -755,6 +815,42 @@ fn a_role_that_is_not_in_the_snapshot_still_gets_public_privileges_in_cells() {
     assert_eq!((public.usage, public.create, public.inherited_only), (true, false, true));
 }
 
+#[test]
+fn a_cell_that_shows_only_create_is_not_blamed_on_a_missing_usage() {
+    // CREATE는 USAGE 없이도 된다. 칸이 보이는 것이 CREATE뿐이면 USAGE가 없다는 이유를 달지 않는다. CONNECT는 그대로 본다
+    let mut scene = app_scene(PG16);
+    scene.cluster.roles.push(login("maker"));
+    for name in ["scratch", "app"] {
+        scene.db.schemas.iter_mut().find(|s| s.name == name).expect("schema").acl.push(entry("app_owner", Some("maker"), Create));
+    }
+    grant_on(&mut scene, "orders", "maker", &[Select]);
+
+    // maker는 CONNECT가 없다: CREATE뿐인 칸도 읽기가 함께 보이는 칸도 CONNECT가 이유다
+    let cells = schema_cells(&scene.ctx(), &["maker"]);
+    let unusable = |schema: &str| cells.iter().find(|c| c.schema == schema).expect("cell").unusable;
+    assert_eq!((unusable("scratch"), unusable("app"), unusable("audit")), (Some("CONNECT 없음"), Some("CONNECT 없음"), None));
+
+    // PUBLIC에 CONNECT를 되돌렸다. scratch: 보이는 것이 CREATE뿐이라 이유가 없다. app: CREATE에 읽기도 보이니 USAGE가 없는 것이 이유다
+    scene.cluster.databases[0].acl.push(entry("app_owner", None, Connect));
+    let ctx = scene.ctx();
+    let cells = schema_cells(&ctx, &["maker"]);
+    let find = |schema: &str| cells.iter().find(|c| c.schema == schema).expect("cell").clone();
+    assert_eq!(find("scratch"), SchemaCell { create: true, ..cell("maker", "scratch") });
+    assert_eq!(find("app"), SchemaCell { create: true, read: Coverage::Some, unusable: Some("USAGE 없음"), ..cell("maker", "app") });
+    // 역할과 스키마만 묻는 `Ctx::unusable`은 그대로 USAGE가 없다고 답한다. 무엇을 보이는지는 칸이 정한다
+    assert_eq!(ctx.unusable("maker", "scratch"), Some("USAGE 없음"));
+
+    // USAGE가 함께 있으면 이유가 있을 수 없다. 쓰기만 보이는 칸은 USAGE가 이유다
+    scene.db.schemas.iter_mut().find(|s| s.name == "scratch").expect("scratch").acl.push(entry("app_owner", Some("maker"), Usage));
+    scene.db.relations.push(table("scratch", "t", "app_owner").grant("maker", &[Insert]));
+    scene.db.schemas.iter_mut().find(|s| s.name == "audit").expect("audit").acl.push(entry("app_owner", Some("maker"), Create));
+    scene.db.relations.iter_mut().find(|r| r.name == "remote_log").expect("remote_log").acl.push(entry("app_owner", Some("maker"), Delete));
+    let cells = schema_cells(&scene.ctx(), &["maker"]);
+    let find = |schema: &str| cells.iter().find(|c| c.schema == schema).expect("cell").clone();
+    assert_eq!(find("scratch"), SchemaCell { usage: true, create: true, write: Coverage::All, ..cell("maker", "scratch") });
+    assert_eq!(find("audit"), SchemaCell { create: true, write: Coverage::Some, unusable: Some("USAGE 없음"), ..cell("maker", "audit") });
+}
+
 // ───────────────────────── 누가 할 수 있나 ─────────────────────────
 
 #[test]
@@ -831,6 +927,63 @@ fn who_can_marks_the_roles_that_hold_a_database_privilege_without_connect() {
     assert_eq!(rows.iter().map(|r| (r.role.as_str(), r.unusable)).collect::<Vec<_>>(), [("app_owner", None), ("bob", Some("CONNECT 없음"))]);
 }
 
+#[test]
+fn who_can_does_not_blame_usage_for_a_schemas_create() {
+    let mut scene = app_scene(PG16);
+    scene.cluster.roles.push(login("maker"));
+    scene.db.schemas.iter_mut().find(|s| s.name == "scratch").expect("scratch").acl.push(entry("app_owner", Some("maker"), Create));
+    scene.db.relations.push(table("scratch", "t", "app_owner").grant("maker", &[Select]));
+    let maker = |scene: &Scene, obj: Obj, p: Privilege| who_can(&scene.ctx(), obj, p).into_iter().find(|r| r.role == "maker").expect("maker").unusable;
+
+    // CONNECT가 없으면 그것이 이유다
+    let scratch = Obj::Schema(scene.schema("scratch"));
+    assert_eq!(maker(&scene, scratch, Create), Some("CONNECT 없음"));
+    // CONNECT를 되돌리면 이유가 없다: maker는 scratch의 USAGE가 없어도 거기에 만들 수 있다
+    scene.cluster.databases[0].acl.push(entry("app_owner", None, Connect));
+    assert_eq!(maker(&scene, Obj::Schema(scene.schema("scratch")), Create), None);
+    // 같은 역할, 같은 스키마여도 그 안의 테이블을 읽으려면 USAGE가 있어야 한다
+    assert_eq!(maker(&scene, Obj::Relation(scene.relation("scratch.t")), Select), Some("USAGE 없음"));
+}
+
+#[test]
+fn who_can_on_a_database_object_checks_connect_on_that_database() {
+    // reporting은 PUBLIC이 CONNECT를 그대로 갖고 bob만 CREATE를 받았다. 이 스냅숏의 appdb는 PUBLIC의 CONNECT를 거뒀다
+    let mut scene = app_scene(PG16);
+    scene.cluster.databases.push(database("reporting", "app_owner").grant("bob", &[Create]));
+    let ctx = scene.ctx();
+    let reporting = Obj::Database(&scene.cluster.databases[1]);
+    let all = ["alice", "app_owner", "app_read", "app_write", "bob", "carol"];
+
+    // bob과 carol은 appdb에 붙을 수 없지만 reporting에는 붙는다
+    for p in [Connect, Temporary] {
+        let rows = who_can(&ctx, reporting, p);
+        assert_eq!(rows.iter().map(|r| r.role.as_str()).collect::<Vec<_>>(), all, "{p:?}");
+        assert!(rows.iter().all(|r| r.unusable.is_none()), "{p:?}: {rows:?}");
+    }
+    let rows = who_can(&ctx, reporting, Create);
+    assert_eq!(rows.iter().map(|r| (r.role.as_str(), r.unusable)).collect::<Vec<_>>(), [("app_owner", None), ("bob", None)]);
+}
+
+#[test]
+fn who_can_on_a_database_object_reports_a_missing_connect_on_that_database_only() {
+    // sealed는 PUBLIC의 CONNECT를 거뒀고 carol만 CREATE를 받았다. 이 스냅숏의 appdb에는 PUBLIC이 CONNECT를 가진다
+    let mut scene = app_scene(PG16);
+    scene.cluster.databases[0].acl.push(entry("app_owner", None, Connect));
+    scene.cluster.databases.push(database("sealed", "app_owner").revoke_public(&[Connect]).grant("carol", &[Create]));
+    let ctx = scene.ctx();
+    let sealed = Obj::Database(&scene.cluster.databases[1]);
+
+    // carol은 appdb에는 붙지만 sealed에는 붙을 수 없다
+    let rows = who_can(&ctx, sealed, Create);
+    assert_eq!(rows.iter().map(|r| (r.role.as_str(), r.unusable)).collect::<Vec<_>>(), [("app_owner", None), ("carol", Some("CONNECT 없음"))]);
+    // PUBLIC의 TEMPORARY는 모두에게 있지만 CONNECT가 없으면 쓸 수 없다
+    let rows = who_can(&ctx, sealed, Temporary);
+    let usable: Vec<&str> = rows.iter().filter(|r| r.unusable.is_none()).map(|r| r.role.as_str()).collect();
+    assert_eq!(usable, ["app_owner"]);
+    assert_eq!(rows.len(), 6);
+    assert!(rows.iter().filter(|r| r.role != "app_owner").all(|r| r.unusable == Some("CONNECT 없음")), "{rows:?}");
+}
+
 // ───────────────────────── 계약 ─────────────────────────
 
 #[test]
@@ -842,350 +995,4 @@ fn sources_serialize_to_the_contract() {
     assert_eq!(serde_json::to_value(src(Superuser, &[], None)).expect("json"), json!({ "kind": "superuser", "via": [], "grantor": null }));
     let names: Vec<_> = [Owner, Direct, Group, Public, Predefined, Superuser].map(|k| serde_json::to_value(k).expect("json")).to_vec();
     assert_eq!(names, [json!("owner"), json!("direct"), json!("group"), json!("public"), json!("predefined"), json!("superuser")]);
-}
-
-// ───────────────────────── 생성한 스냅숏으로 빠른 길과 정의를 맞대 보기 ─────────────────────────
-
-/// 시드가 정해진 간단한 난수(xorshift). 시험이 매번 같은 스냅숏을 만든다
-struct Rng(u64);
-
-impl Rng {
-    fn next(&mut self) -> u64 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 7;
-        self.0 ^= self.0 << 17;
-        self.0
-    }
-
-    fn below(&mut self, n: usize) -> usize {
-        usize::try_from(self.next() % n as u64).expect("fits")
-    }
-
-    fn chance(&mut self, percent: u64) -> bool {
-        self.next() % 100 < percent
-    }
-
-    fn pick<'a, T>(&mut self, items: &'a [T]) -> &'a T {
-        &items[self.below(items.len())]
-    }
-}
-
-const RANDOM_RELATION_PRIVILEGES: [Privilege; 4] = [Select, Insert, Update, Delete];
-
-/// 받는 쪽(PUBLIC 포함)마다 권한 일부를 고른 ACL 항목들
-fn random_acl(rng: &mut Rng, grantees: &[Option<String>], privileges: &[Privilege], owner: &str) -> Vec<AclEntry> {
-    let mut acl = Vec::new();
-    for &p in privileges {
-        if rng.chance(80) {
-            acl.push(entry(owner, Some(owner), p));
-        }
-    }
-    for grantee in grantees {
-        for &p in privileges {
-            if rng.chance(8) {
-                acl.push(entry(rng.pick(&[owner, "grantor"]), grantee.as_deref(), p));
-            }
-        }
-    }
-    acl
-}
-
-/// PG16부터 구성원 관계마다 INHERIT·SET 옵션이 있다(서버가 비워 주는 일은 없지만 가끔 비운다)
-fn random_member(rng: &mut Rng, version: i32, who: &str, group: &str) -> MemberRec {
-    if version < 160_000 {
-        return member(who, group);
-    }
-    let inherit = if rng.chance(90) { Some(rng.chance(60)) } else { None };
-    let set = if rng.chance(90) { Some(rng.chance(70)) } else { None };
-    MemberRec { inherit, set, ..member(who, group) }
-}
-
-fn random_scene(seed: u64) -> Scene {
-    let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
-    for _ in 0..4 {
-        rng.next();
-    }
-    let version = *rng.pick(&[PG13, PG14, PG15, PG16]);
-    let users: Vec<String> = (0..10).map(|i| format!("r{i}")).collect();
-    let mut roles: Vec<RoleRec> = users.iter().map(|n| RoleRec { inherit: rng.chance(70), superuser: rng.chance(8), ..role(n) }).collect();
-    roles.extend(["pg_read_all_data", "pg_write_all_data", "pg_database_owner"].map(role));
-
-    // 구성원 관계: 번호가 큰 역할이 작은 역할의 구성원이다(순환 없음). 읽기·쓰기 역할의 구성원도 있다
-    let mut members = Vec::new();
-    for i in 1..users.len() {
-        for j in 0..i {
-            if rng.chance(18) {
-                members.push(random_member(&mut rng, version, &users[i], &users[j]));
-            }
-        }
-    }
-    for user in &users {
-        for group in ["pg_read_all_data", "pg_write_all_data"] {
-            if rng.chance(12) {
-                members.push(random_member(&mut rng, version, user, group));
-            }
-        }
-    }
-    members.sort_by(|a, b| (&a.member, &a.group).cmp(&(&b.member, &b.group)));
-
-    let mut grantees: Vec<Option<String>> = users.iter().cloned().map(Some).collect();
-    grantees.extend(["pg_read_all_data", "pg_write_all_data", "pg_database_owner"].map(|n| Some(n.to_string())));
-    grantees.push(None);
-    let owners: Vec<String> = users.iter().cloned().chain(["pg_database_owner".to_string()]).collect();
-
-    let db_owner = rng.pick(&users).clone();
-    let mut database = database("d", &db_owner);
-    database.acl = random_acl(&mut rng, &grantees, &[Connect, Create, Temporary], &db_owner);
-    let schemas: Vec<SchemaRec> = (0..4)
-        .map(|i| {
-            let owner = rng.pick(&owners).clone();
-            SchemaRec { acl: random_acl(&mut rng, &grantees, &[Usage, Create], &owner), ..schema(&format!("s{i}"), &owner) }
-        })
-        .collect();
-    let kinds = [Table, Table, Table, View, MatView, Partitioned, Foreign, Sequence];
-    let relations: Vec<RelationRec> = (0..40)
-        .map(|i| {
-            let kind = *rng.pick(&kinds);
-            let owner = rng.pick(&users).clone();
-            let privileges: &[Privilege] = if kind == Sequence { &[Usage, Select, Update] } else { &RANDOM_RELATION_PRIVILEGES };
-            let schema_name = format!("s{}", rng.below(4));
-            RelationRec { acl: random_acl(&mut rng, &grantees, privileges, &owner), ..relation(kind, &schema_name, &format!("t{i:02}"), &owner) }
-        })
-        .collect();
-    Scene { cluster: cluster(version, roles, members, vec![database]), db: db("d", &db_owner, schemas, relations, vec![]) }
-}
-
-const READ_KINDS: [RelKind; 5] = [Table, View, MatView, Partitioned, Foreign];
-const WRITE_KINDS: [RelKind; 3] = [Table, Partitioned, Foreign];
-
-/// 칸의 정의를 `sources`와 `unusable`만으로 그대로 옮긴 계산. 느리지만 읽는 대로다
-fn defined_cell(ctx: &Ctx, role: &str, schema: &SchemaRec) -> SchemaCell {
-    let mut own = false;
-    let mut note = |sources: &[Source]| own |= sources.iter().any(|s| matches!(s.kind, Owner | Direct | Superuser));
-    let has = |obj: Obj, p: Privilege, note: &mut dyn FnMut(&[Source])| {
-        let sources = ctx.sources(role, obj, p);
-        note(&sources);
-        !sources.is_empty()
-    };
-    let usage = has(Obj::Schema(schema), Usage, &mut note);
-    let create = has(Obj::Schema(schema), Create, &mut note);
-    let (mut read_have, mut read_total, mut write_have, mut write_total) = (0, 0, 0, 0);
-    for rel in ctx.db.relations.iter().filter(|r| r.schema == schema.name) {
-        if READ_KINDS.contains(&rel.kind) {
-            read_total += 1;
-            read_have += usize::from(has(Obj::Relation(rel), Select, &mut note));
-        }
-        if WRITE_KINDS.contains(&rel.kind) {
-            write_total += 1;
-            let mut any = false;
-            for p in [Insert, Update, Delete] {
-                any |= has(Obj::Relation(rel), p, &mut note);
-            }
-            write_have += usize::from(any);
-        }
-    }
-    let coverage = |have: usize, total: usize| match (have, total) {
-        (0, _) => Coverage::None,
-        (h, t) if h == t => Coverage::All,
-        _ => Coverage::Some,
-    };
-    let (read, write) = (coverage(read_have, read_total), coverage(write_have, write_total));
-    let shown = usage || create || read != Coverage::None || write != Coverage::None;
-    SchemaCell {
-        role: role.to_string(),
-        schema: schema.name.clone(),
-        usage,
-        create,
-        read,
-        write,
-        inherited_only: shown && !own,
-        unusable: if shown { ctx.unusable(role, &schema.name) } else { None },
-    }
-}
-
-#[test]
-fn the_cells_equal_their_definition_on_generated_snapshots() {
-    let mut seen = std::collections::BTreeMap::<&str, usize>::new();
-    for seed in 1..=100u64 {
-        let scene = random_scene(seed);
-        let ctx = scene.ctx();
-        let mut roles: Vec<&str> = scene.cluster.roles.iter().map(|r| r.name.as_str()).collect();
-        roles.push("stranger");
-        let cells = schema_cells(&ctx, &roles);
-        assert_eq!(cells.len(), roles.len() * scene.db.schemas.len(), "seed {seed}");
-        let mut at = cells.iter();
-        for role in &roles {
-            for schema in &scene.db.schemas {
-                let got = at.next().expect("cell");
-                let want = defined_cell(&ctx, role, schema);
-                assert_eq!(got, &want, "seed {seed}, version {}, {role}/{}", scene.cluster.version_num, schema.name);
-                for (name, hit) in [
-                    ("usage", got.usage),
-                    ("create", got.create),
-                    ("read_all", got.read == Coverage::All),
-                    ("read_some", got.read == Coverage::Some),
-                    ("write_all", got.write == Coverage::All),
-                    ("write_some", got.write == Coverage::Some),
-                    ("inherited_only", got.inherited_only),
-                    ("own_source", !got.inherited_only && (got.usage || got.read != Coverage::None)),
-                    ("no_connect", got.unusable == Some("CONNECT 없음")),
-                    ("no_usage", got.unusable == Some("USAGE 없음")),
-                ] {
-                    *seen.entry(name).or_default() += usize::from(hit);
-                }
-            }
-        }
-    }
-    // 생성한 스냅숏이 모든 경우를 실제로 만나는지 확인한다: 안 그러면 위 비교가 아무것도 시험하지 못한다
-    for (name, count) in &seen {
-        assert!(*count >= 100, "생성한 스냅숏에서 `{name}`이(가) {count}번뿐이에요: 비교가 이 경우를 시험하지 못해요 ({seen:?})");
-    }
-}
-
-#[test]
-fn who_can_equals_the_roles_that_have_a_source_on_generated_snapshots() {
-    let mut nonempty = 0;
-    for seed in 1..=150u64 {
-        let scene = random_scene(seed);
-        let ctx = scene.ctx();
-        let mut names: Vec<&str> = scene.cluster.roles.iter().map(|r| r.name.as_str()).collect();
-        names.sort_unstable();
-        for rel in scene.db.relations.iter().take(8) {
-            for p in [Select, Insert, Update, Delete, Usage] {
-                let rows = who_can(&ctx, Obj::Relation(rel), p);
-                let expected: Vec<(&str, Vec<Source>)> =
-                    names.iter().map(|&n| (n, ctx.sources(n, Obj::Relation(rel), p))).filter(|(_, s)| !s.is_empty()).collect();
-                let got: Vec<(&str, Vec<Source>)> = rows.iter().map(|r| (r.role.as_str(), r.sources.clone())).collect();
-                assert_eq!(got, expected, "seed {seed} {}.{} {p:?}", rel.schema, rel.name);
-                nonempty += usize::from(!rows.is_empty());
-            }
-        }
-    }
-    assert!(nonempty > 100, "{nonempty}");
-}
-
-/// 서버 규칙으로 `from → to` 한 걸음이 상속인지(시험이 규칙을 따로 다시 적은 것)
-fn inherits_edge(scene: &Scene, from: &str, to: &str) -> bool {
-    let version = scene.cluster.version_num;
-    let attribute = scene.cluster.roles.iter().find(|r| r.name == from).is_none_or(|r| r.inherit);
-    match scene.cluster.members.iter().find(|m| m.member == from && m.group == to) {
-        Some(m) if version >= 160_000 => m.inherit.unwrap_or(attribute),
-        Some(_) => attribute,
-        // 데이터베이스 소유자는 PG14부터 pg_database_owner의 구성원이다. PG15 이하는 소유자의 INHERIT 속성을 따른다
-        None => to == "pg_database_owner" && version >= 140_000 && from == scene.db.owner && (version >= 160_000 || attribute),
-    }
-}
-
-#[test]
-fn inherited_is_the_closure_of_the_inheriting_memberships_on_generated_snapshots() {
-    let (mut followed, mut blocked, mut longest) = (0, 0, 0);
-    for seed in 1..=300u64 {
-        let scene = random_scene(seed);
-        let ctx = scene.ctx();
-        let all: Vec<&str> = scene.cluster.roles.iter().map(|r| r.name.as_str()).collect();
-        for member in &scene.cluster.members {
-            if inherits_edge(&scene, &member.member, &member.group) {
-                followed += 1;
-            } else {
-                blocked += 1;
-            }
-        }
-        for &role in &all {
-            // 닿는 역할을 늘려 가며 더 늘지 않을 때까지 모은다
-            let mut reached: HashSet<&str> = HashSet::from([role]);
-            loop {
-                let more: Vec<&str> =
-                    all.iter().copied().filter(|to| !reached.contains(to) && reached.iter().any(|from| inherits_edge(&scene, from, to))).collect();
-                if more.is_empty() {
-                    break;
-                }
-                reached.extend(more);
-            }
-
-            let inherited = ctx.inherited(role);
-            let names: HashSet<&str> = inherited.iter().map(|i| i.role.as_str()).collect();
-            assert_eq!(inherited[0], inh(role, &[]), "seed {seed}: 자기 자신이 먼저예요");
-            assert_eq!(names.len(), inherited.len(), "seed {seed}: 중복");
-            assert_eq!(names, reached, "seed {seed}, 버전 {}, {role}", scene.cluster.version_num);
-            longest = longest.max(inherited.len());
-            // 경로: 끝은 그 역할이고, 걸음마다 상속 규칙을 통과한다
-            for item in &inherited[1..] {
-                assert_eq!(item.path.last(), Some(&item.role), "seed {seed}");
-                let mut from = role;
-                for to in &item.path {
-                    assert!(inherits_edge(&scene, from, to), "seed {seed}: {role}의 경로 {:?}에서 {from} → {to}는 상속이 아니에요", item.path);
-                    from = to;
-                }
-            }
-            // SET ROLE로만 닿는 역할은 상속하는 역할과 겹치지 않고 자기 자신도 아니다
-            let only = ctx.set_role_only(role);
-            assert!(only.iter().all(|r| !names.contains(r.as_str()) && r != role), "seed {seed}: {role} {only:?}");
-        }
-    }
-    // 생성한 스냅숏에 상속하는 관계도 막힌 관계도 긴 사슬도 있어야 위 비교가 의미가 있다
-    assert!(followed > 200 && blocked > 200 && longest >= 5, "상속한 관계 {followed}, 막힌 관계 {blocked}, 가장 큰 상속 집합 {longest}");
-}
-
-// ───────────────────────── 속도 ─────────────────────────
-
-/// 역할 200개 × 관계 2만 개(스키마 100개, 관계마다 ACL 항목 열 개 안팎)
-fn big_scene() -> (Scene, Vec<String>) {
-    let tops: Vec<String> = (0..10).map(|i| format!("top{i}")).collect();
-    let mids: Vec<String> = (0..20).map(|i| format!("mid{i}")).collect();
-    let owners: Vec<String> = (0..5).map(|i| format!("owner{i}")).collect();
-    let users: Vec<String> = (0..200).map(|i| format!("user{i:03}")).collect();
-    let roles: Vec<RoleRec> = owners.iter().chain(&tops).chain(&mids).chain(&users).map(|n| role(n)).collect();
-    let mut members = Vec::new();
-    for (i, mid) in mids.iter().enumerate() {
-        members.push(member(mid, &tops[i % 10]));
-    }
-    for (i, user) in users.iter().enumerate() {
-        members.push(member(user, &mids[i % 20]));
-        members.push(member(user, &mids[(i * 7 + 3) % 20]));
-        if i % 5 == 0 {
-            members.push(member(user, &tops[(i / 5) % 10]));
-        }
-    }
-    let schemas: Vec<SchemaRec> = (0..100)
-        .map(|i| schema(&format!("s{i:03}"), &owners[i % 5]).grant(&tops[i % 10], &[Usage]).grant(&mids[i % 20], &[Usage]))
-        .collect();
-    let mut relations = Vec::with_capacity(20_000);
-    for (i, schema) in schemas.iter().enumerate() {
-        for n in 0..200 {
-            let kind = match n % 25 {
-                0 => MatView,
-                1..=4 => View,
-                _ => Table,
-            };
-            let mut rel = relation(kind, &schema.name, &format!("t{n:04}"), &owners[i % 5]).grant(&tops[i % 10], &[Select]).grant(&mids[i % 20], &[Insert, Update, Delete]);
-            if n % 20 == 0 {
-                rel = rel.grant_public(&[Select]);
-            }
-            relations.push(rel);
-        }
-    }
-    let scene = Scene { cluster: cluster(PG16, roles, members, vec![database("appdb", &owners[0])]), db: db("appdb", &owners[0], schemas, relations, vec![]) };
-    (scene, users)
-}
-
-#[test]
-#[ignore = "큰 스냅숏(역할 200 × 관계 2만 개)으로 속도를 재요: cargo test --release pg::eval -- --ignored"]
-fn schema_cells_for_200_roles_and_20000_relations_stay_within_two_seconds() {
-    let (scene, users) = big_scene();
-    assert_eq!((users.len(), scene.db.relations.len()), (200, 20_000));
-    let roles: Vec<&str> = users.iter().map(String::as_str).collect();
-
-    let started = Instant::now();
-    let cells = schema_cells(&scene.ctx(), &roles);
-    let elapsed = started.elapsed();
-    eprintln!("schema_cells: 역할 {} × 스키마 {} = 칸 {}개, {elapsed:?}", roles.len(), scene.db.schemas.len(), cells.len());
-
-    assert_eq!(cells.len(), 200 * 100);
-    // 계산이 비어 있지 않은지 몇 칸을 본다: user000은 mid0과 mid3을 거쳐 top0·top3을 상속한다(여기에 top0도 직접)
-    let find = |role: &str, schema: &str| cells.iter().find(|c| c.role == role && c.schema == schema).expect("cell").clone();
-    let sample = find("user000", "s000");
-    assert!(sample.usage && sample.read != Coverage::None && sample.write != Coverage::None, "{sample:?}");
-    // 디버그 빌드는 최적화가 없어 수십 배 느리다: 예산은 릴리스에서만 2초다
-    let budget = if cfg!(debug_assertions) { Duration::from_secs(120) } else { Duration::from_secs(2) };
-    assert!(elapsed < budget, "{elapsed:?}이(가) 예산 {budget:?}을(를) 넘었어요");
 }
