@@ -1243,7 +1243,7 @@ describe("findings", () => {
     openMenu("권한");
     await screen.findByRole("grid", { name: "권한 표" });
     expect(markedColumns()).toEqual([]);
-    // 뒤로 가기로 돌아와도 한 번 쓴 부탁은 다시 쓰지 않는다
+    // 점검에서 다시 누르면 새 부탁이라서 그 부탁은 다시 쓴다
     openMenu("점검");
     fireEvent.click(within(itemRow(/^app.touch_order는 SECURITY DEFINER/)).getByRole("button", { name: "app.touch_order(order_id integer)" }));
     await screen.findByRole("grid", { name: "권한 표" });

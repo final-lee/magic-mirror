@@ -14,6 +14,7 @@ import {
   sampleTargetInfo,
   sampleWhoCan,
 } from "./fixtures";
+import type { PgSchemaCell } from "./types";
 
 // 이후 화면 테스트가 기대는 값이 서로 어긋나지 않는지 확인한다.
 const roleOf = (name: string) => ROLES.find((r) => r.name === name)!;
@@ -96,6 +97,20 @@ describe("overview", () => {
 describe("database view", () => {
   const view = sampleDatabaseView();
 
+  /** 칸에 잃을 것이 있는가: 보이는 권한이 하나라도 있다 */
+  const somethingToLose = (c: PgSchemaCell) => c.usage || c.create || c.read !== "none" || c.write !== "none";
+  /**
+   * 계약이 정하는 칸의 unusable: 잃을 것이 없으면 null, 있으면 CONNECT가 먼저고 그다음이 스키마 USAGE다.
+   * 보이는 것이 만들기(CREATE)뿐인 칸은 USAGE 없이도 쓸 수 있어서 USAGE 없음을 달지 않는다(CONNECT는 그대로 본다).
+   * 이 픽스처에는 CONNECT는 있는데 USAGE가 없고 잃을 것이 있는 칸이 없다. 그런 칸이 생기면 이 규칙이 맞는 값을 요구한다.
+   */
+  const unusableOf = (c: PgSchemaCell, canConnect: boolean): string | null => {
+    if (!somethingToLose(c)) return null;
+    if (!canConnect) return "CONNECT 없음";
+    const createOnly = c.create && !c.usage && c.read === "none" && c.write === "none";
+    return !c.usage && !createOnly ? "USAGE 없음" : null;
+  };
+
   test("is for a database the overview lists", () => {
     expect(sampleOverview().databases.map((d) => d.name)).toContain(view.database);
     expect(view.database).toBe(sampleOverview().target.defaultDatabase);
@@ -117,18 +132,12 @@ describe("database view", () => {
   });
 
   test("every unusable cell has something to lose", () => {
-    for (const c of view.cells.filter((c) => c.unusable !== null)) {
-      expect(c.usage || c.create || c.read !== "none" || c.write !== "none", `${c.role}/${c.schema}`).toBe(true);
-    }
+    for (const c of view.cells.filter((c) => c.unusable !== null)) expect(somethingToLose(c), `${c.role}/${c.schema}`).toBe(true);
   });
 
-  test("an unusable cell names the first thing missing: CONNECT, then schema USAGE; a cell with nothing to lose is never flagged", () => {
+  test("an unusable cell follows the contract: CONNECT when it is missing, and a cell with nothing to lose is never flagged", () => {
     const connect = new Map(view.dbPrivileges.map((p) => [p.role, p.connect]));
-    for (const c of view.cells) {
-      const somethingToLose = c.usage || c.create || c.read !== "none" || c.write !== "none";
-      const expected = !somethingToLose ? null : !connect.get(c.role) ? "CONNECT 없음" : !c.usage ? "USAGE 없음" : null;
-      expect(c.unusable, `${c.role}/${c.schema}`).toBe(expected);
-    }
+    for (const c of view.cells) expect(c.unusable, `${c.role}/${c.schema}`).toBe(unusableOf(c, connect.get(c.role) ?? false));
     // 사용자 bob은 CONNECT가 없고 audit에는 USAGE도 없지만, 거기에는 잃을 것이 없다
     expect(view.cells.find((c) => c.role === "bob" && c.schema === "audit")?.unusable).toBeNull();
     expect(view.cells.find((c) => c.role === "alice" && c.schema === "audit")?.unusable).toBeNull();

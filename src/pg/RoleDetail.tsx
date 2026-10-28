@@ -61,7 +61,7 @@ export function RoleDetail({ target, role, onOpen, initialTab, onViewState }: Pr
     onRequest: (database) => setRequested((current) => new Set(current).add(database)),
   };
   // 이 상세에서 [불러오기]를 눌러 읽은 데이터베이스는, 상세가 열려 있는 동안 어느 하위 탭이 보이든 계속 구독한다.
-  // 구독해야 refreshPg가 2단계에서 이 데이터베이스들을 force로 다시 읽고, 그다음 3단계에서 역할을 읽는다.
+  // 구독해야 refreshPg가 2단계에서 이 데이터베이스들을 다시 읽고, 그다음 3단계에서 역할을 읽는다.
   // 백엔드가 읽은 것으로 답한 나머지(점검 같은 다른 화면이 읽어 둔 것)는 구독하지 않는다. 구독하면 새로 고침마다 클러스터의 데이터베이스를
   // 모두 다시 읽게 된다. 그 데이터베이스들은 pg_open이 스냅숏을 비운 뒤 "아직 읽지 않았어요 [불러오기]"로 돌아오고, 누르면 읽는다.
   const followed = view.databases.filter((d) => requested.has(d.database));

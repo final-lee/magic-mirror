@@ -209,7 +209,7 @@ describe("the search for an object", () => {
 
   test("tells that the list stops at 100 when it has 100, and only then", async () => {
     const many = (n: number) => Array.from({ length: n }, (_, i) => object("table", "app", `t${String(i).padStart(3, "0")}`));
-    const NOTE = "결과가 많아 처음 100개만 보여요. 이름을 더 입력해 좁혀 보세요";
+    const NOTE = "최대 100개까지만 보여줘요. 이름을 더 입력해 좁혀 보세요";
     m.objects.mockResolvedValue(many(100));
     setup();
     fireEvent.click(objectButton());
