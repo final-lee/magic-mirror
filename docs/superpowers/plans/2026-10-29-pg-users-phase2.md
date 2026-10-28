@@ -174,6 +174,7 @@
       - all sequences: `${schema} 스키마의 모든 시퀀스`
     - `PUBLIC` reads as "모든 역할(PUBLIC)" in summaries.
   - **Owner-held aspect** (not toggleable in 바꾸기 mode): title "소유자라서 가진 권한이에요"
+  - **Preview header:** `적용할 DB 사용자: ${loginUser}`
   - **Password result:**
     - Title "새 비밀번호"
     - Note "이 창을 닫으면 다시 볼 수 없어요"
@@ -239,7 +240,7 @@ export interface PgRoleDelta {
   groupsAdded: string[]; groupsRemoved: string[];
 }
 export interface PgPreview {
-  change: PgChange; database: string; summary: string;
+  change: PgChange; database: string; summary: string; loginUser: string;   // the DB user the change runs as
   sql: string[];               // run order; passwords masked
   impacts: PgImpact[]; impactsOmitted: number; roles: PgRoleDelta[]; defaults: PgDefaultDelta[];
   warnings: PgWarning[];       // block, then confirm, then warn
@@ -247,7 +248,7 @@ export interface PgPreview {
 }
 export interface PgBatchItem { change: PgChange; summary: string; sql: string[]; warnings: PgWarning[] }
 export interface PgBatchPreview {
-  database: string; items: PgBatchItem[]; sql: string[];
+  database: string; loginUser: string; items: PgBatchItem[]; sql: string[];
   impacts: PgImpact[]; impactsOmitted: number; roles: PgRoleDelta[]; defaults: PgDefaultDelta[];
   warnings: PgWarning[]; confirmText: string | null; reversible: boolean;
 }
@@ -453,6 +454,10 @@ pub struct MemberGrant { pub grantor: String, pub admin: bool, pub inherit: Opti
   - Make `Statement::run` replace the first occurrence of the mask in the joined text. The name test must fail.
   - Drop the `E` branch of `literal`. The backslash test must fail.
   - Restore both.
+- [ ] **Step 4a: Carried from K1 (N1).** Two overlapping `pg_open` calls with different logins must not leave the older one remembered.
+  - Give `PgState` a per-target open counter. Each `pg_open` takes the next number when it starts. `finish_open` refuses, and drops its snapshot and connections, when a later open was already accepted.
+  - Test with two opens finishing out of order: the later-started login stays remembered and its connections stay open.
+  - This touches `src-tauri/src/pg_commands.rs`; add it to the Modify list.
 - [ ] **Step 5: Commit** with `feat(pg): change model, SQL builders, SCRAM passwords and membership grantors`.
 
 ### Task QB2: What the login may do, the operations a change becomes, and the snapshot after it
@@ -883,7 +888,7 @@ where X: FnOnce(Vec<Step>) -> XF, XF: Future<Output = Result<(), ExecError>>,
         - their `inverse` lists, concatenated in `undoOf` order, equal the changes as passed (before any batch reordering).
         Each failure has its exact text.
      2. (In `pg_commands`, before calling commit.) Re-read the cluster and the execution database with `force`.
-     3. Recompute the preview, take the remembered plan, and compare the whole previews. A miss or a difference gives the stale text.
+     3. Recompute the preview, take the remembered plan, and compare the whole previews. A miss or a difference gives the stale text. Previews carry `loginUser`, so a login switch between preview and apply is stale too.
      4. Gate with IAM's texts: blocked, wrong confirm text, or a confirm warning without text.
      5. If the change needs a password (a `createRole` with `login: true`, or `password`), generate it, hash it, and fill the Password part.
      6. `exec::run` in the execution database's pooled connection.
@@ -1134,6 +1139,7 @@ export function usePgBatch(target: PgTarget): {
      7. the buttons "취소" and "적용" ("적용 중…" while applying).
      - A warning with `add` shows "기본 권한도 담기" only when the dialog got an `onAddDefaults` prop.
      - Esc and focus handling come from `useSheetFocus`, as in IAM.
+     - Under the title, `적용할 DB 사용자: ${loginUser}` from the preview.
   6. **Impact rendering:**
      - Per role, "얻는 권한" and "잃는 권한" lines read `${schema ?? database} · ${OBJECT_KIND_LABEL[objectKind]} ${count}개 ${privilege}`, with the sample names after.
      - When `impactsOmitted > 0`, the list ends with `그 밖에 ${n}개 역할`.
