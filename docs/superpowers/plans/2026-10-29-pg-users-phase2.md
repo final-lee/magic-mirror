@@ -404,7 +404,7 @@ pub struct MemberGrant { pub grantor: String, pub admin: bool, pub inherit: Opti
       - `REVOKE "app_read" FROM "alice" GRANTED BY "ops_admin"`
     - Object privileges:
       - `GRANT SELECT, INSERT ON TABLE "app"."orders" TO "app_read"`
-      - `GRANT USAGE, SELECT ON SEQUENCE "app"."orders_id_seq" TO "app_read"`
+      - `GRANT SELECT, USAGE ON SEQUENCE "app"."orders_id_seq" TO "app_read"`
       - `GRANT EXECUTE ON ROUTINE "app"."touch_order"(integer) TO "app_read"`
       - `GRANT USAGE ON SCHEMA "app" TO "app_read"`
       - `GRANT CONNECT, TEMPORARY ON DATABASE "orders" TO "app_read"`
@@ -595,7 +595,7 @@ pub struct DirectCell { pub usage: bool, pub create: bool, pub read: Coverage, p
        8. `ALTER DEFAULT PRIVILEGES FOR ROLE "app_owner" IN SCHEMA "app" GRANT SELECT ON SEQUENCES TO "app_read"`
        9. `GRANT "app_read" TO "alice2"`
        10. each extra group, `GRANT "<group>" TO "alice2"`, in the given order.
-     - **readWrite** grants `SELECT, INSERT, UPDATE, DELETE` on all tables and `USAGE, SELECT` on all sequences. Its default privileges are `SELECT, INSERT, UPDATE, DELETE` on tables and `USAGE, SELECT` on sequences.
+     - **readWrite** grants `SELECT, INSERT, UPDATE, DELETE` on all tables and `SELECT, USAGE` on all sequences. Its default privileges are `SELECT, INSERT, UPDATE, DELETE` on tables and `SELECT, USAGE` on sequences. (Statement texts always list privileges in `Privilege` enum order.)
      - **owner** grants CONNECT and `USAGE, CREATE` on each schema, with no default privileges.
      - **admin** gives `GRANT "rds_superuser" TO "<name>"` and nothing else from the preset.
      - **A group with a preset** (`login: false`, `group: null`) gets the grants itself.
