@@ -3,6 +3,8 @@
 
 use aws_config::SdkConfig;
 use aws_sdk_rds::types::{DbCluster, DbInstance};
+use aws_smithy_runtime_api::client::result::SdkError;
+use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{from_sdk, AppError};
@@ -108,6 +110,10 @@ pub fn info_of_instance(instance: &DbInstance) -> Result<PgTargetInfo, AppError>
     })
 }
 
+/// RDS가 없는 식별자에 빈 목록이 아니라 오류로 답할 때의 오류 코드(클러스터와 인스턴스가 다르다)
+const CLUSTER_NOT_FOUND: &str = "DBClusterNotFoundFault";
+const INSTANCE_NOT_FOUND: &str = "DBInstanceNotFound";
+
 /// RDS API로 대상을 찾아 접속 정보를 읽는다. 읽기 호출만 한다(`DescribeDBClusters`, `DescribeDBInstances`).
 pub async fn resolve(cfg: &SdkConfig, target: &PgTarget) -> Result<PgTargetInfo, AppError> {
     let client = aws_sdk_rds::Client::new(cfg);
@@ -118,7 +124,7 @@ pub async fn resolve(cfg: &SdkConfig, target: &PgTarget) -> Result<PgTargetInfo,
                 .db_cluster_identifier(&target.id)
                 .send()
                 .await
-                .map_err(|e| from_sdk(e, "rds:DescribeDBClusters"))?;
+                .map_err(|e| lookup_error(e, CLUSTER_NOT_FOUND, "rds:DescribeDBClusters", target))?;
             info_of_cluster(out.db_clusters().first().ok_or_else(|| not_found(target))?)
         }
         TargetKind::Instance => {
@@ -127,10 +133,22 @@ pub async fn resolve(cfg: &SdkConfig, target: &PgTarget) -> Result<PgTargetInfo,
                 .db_instance_identifier(&target.id)
                 .send()
                 .await
-                .map_err(|e| from_sdk(e, "rds:DescribeDBInstances"))?;
+                .map_err(|e| lookup_error(e, INSTANCE_NOT_FOUND, "rds:DescribeDBInstances", target))?;
             info_of_instance(out.db_instances().first().ok_or_else(|| not_found(target))?)
         }
     }
+}
+
+/// 조회 오류를 앱 오류로 바꾼다. 없는 대상을 가리키는 코드만 "찾지 못했어요"로 읽고, 나머지는 작업 이름이 붙은 일반 분류를 그대로 탄다.
+fn lookup_error<E, R>(err: SdkError<E, R>, not_found_code: &str, action: &str, target: &PgTarget) -> AppError
+where
+    E: ProvideErrorMetadata + std::error::Error + Send + Sync + 'static,
+    R: std::fmt::Debug + Send + Sync + 'static,
+{
+    if err.code() == Some(not_found_code) {
+        return not_found(target);
+    }
+    from_sdk(err, action)
 }
 
 fn not_found(target: &PgTarget) -> AppError {

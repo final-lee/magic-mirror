@@ -242,6 +242,29 @@ async fn resolve_names_the_denied_describe_call() {
 }
 
 #[tokio::test]
+async fn resolve_reports_the_not_found_faults_as_a_missing_target() {
+    // RDS는 없는 식별자에 빈 목록이 아니라 404 오류로 답한다: 클러스터는 DBClusterNotFoundFault, 인스턴스는 DBInstanceNotFound
+    let recorder = Recorder::new(|sent| match sent.action.as_str() {
+        "DescribeDBClusters" => (404, error_response("DBClusterNotFoundFault")),
+        _ => (404, error_response("DBInstanceNotFound")),
+    });
+    let cfg = config(&recorder);
+    for kind in [TargetKind::Cluster, TargetKind::Instance] {
+        let err = resolve(&cfg, &target(kind, "gone")).await.unwrap_err();
+        assert_eq!(err, AppError::other("RDS에서 대상을 찾지 못했어요: gone"), "{kind:?}");
+    }
+}
+
+#[tokio::test]
+async fn resolve_leaves_other_404s_to_the_generic_error_mapping() {
+    // 다른 코드의 404는 "없는 대상"이 아니다. 작업 이름이 붙은 일반 오류 분류를 그대로 탄다
+    let recorder = Recorder::new(|_| (404, error_response("SomethingElseNotFound")));
+    let err = resolve(&config(&recorder), &target(TargetKind::Cluster, "x")).await.unwrap_err();
+    assert_ne!(err, AppError::other("RDS에서 대상을 찾지 못했어요: x"));
+    assert!(matches!(err, AppError::Other { ref message } if message.contains("SomethingElseNotFound")), "{err:?}");
+}
+
+#[tokio::test]
 async fn resolve_reports_a_target_the_account_does_not_have() {
     let recorder = Recorder::new(|sent| match sent.action.as_str() {
         "DescribeDBClusters" => (200, describe_response("DescribeDBClusters", "DBClusters", "")),

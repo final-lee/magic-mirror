@@ -40,6 +40,8 @@ pub enum Script {
     NotTls,
     /// SSLRequest에 'N'(TLS 안 돼요)이라고 한다
     DeclinesTls,
+    /// SSLRequest에 'S'라고 해 놓고 TLS 협상 도중에 연결을 끊는다
+    TlsThenHangUp,
     /// 연결만 받고 아무 말도 하지 않는다
     Silent,
 }
@@ -201,6 +203,11 @@ async fn serve(mut stream: TcpStream, script: Script, tls: Option<TlsAcceptor>, 
                     return;
                 }
                 return session(stream, closing, false).await;
+            }
+            (Script::TlsThenHangUp, _) => {
+                // 'S'만 보내고 끊는다: 클라이언트가 보낸 ClientHello에 답하지 않고 연결이 닫힌다
+                let _ = stream.write_all(b"S").await;
+                return;
             }
             (Script::DeclinesTls, _) => {
                 if stream.write_all(b"N").await.is_err() {
