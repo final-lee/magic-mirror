@@ -88,8 +88,8 @@ pub fn findings(cluster: &ClusterSnapshot, dbs: &[&DbSnapshot], skipped: Vec<PgS
 // ───────────────────────── 클러스터 전체 ─────────────────────────
 
 /// 시스템 역할이 아닌, `rds_superuser`의 권한을 쓸 수 있는 역할: 직접 구성원, 상속하는 구성원 관계로 그 권한을 받는 역할,
-/// 상속하지는 않지만 `SET ROLE`로 닿는 역할(PG16부터는 사슬의 모든 관계에 SET 옵션이 있어야 한다).
-/// 직접 구성원이면 상속 여부와 상관없이 직접 구성원이라고 쓴다. 상속해서 받으면 거치는 역할들을 보이고, 그렇지 않고 SET ROLE로만 닿으면 그렇게 쓴다.
+/// 상속하지는 않지만 `SET ROLE`을 한 뒤에 쓰는 역할(되어 볼 수 있는 역할이 상속하는 것까지. PG16부터는 사슬의 모든 관계에 SET 옵션이 있어야 한다).
+/// 직접 구성원이면 상속 여부와 상관없이 직접 구성원이라고 쓴다. 상속해서 받으면 거치는 역할들을 보이고, 그렇지 않고 SET ROLE을 해야만 쓰면 그렇게 쓴다.
 fn rds_superuser(cluster: &ClusterSnapshot, roles: &[&RoleRec], eval: &Eval) -> Vec<PgFinding> {
     let direct: HashSet<&str> = cluster.members.iter().filter(|m| m.group == RDS_SUPERUSER).map(|m| m.member.as_str()).collect();
     roles
@@ -105,7 +105,7 @@ fn rds_superuser(cluster: &ClusterSnapshot, roles: &[&RoleRec], eval: &Eval) -> 
                 let (_, via) = reach.path.split_last()?;
                 return Some(role_finding(role, format!("{} 역할을 거쳐 rds_superuser 권한을 받아요", via.join(" → "))));
             }
-            view.set_role_only().iter().any(|reached| reached == RDS_SUPERUSER).then(|| role_finding(role, RDS_SUPERUSER_SET_ROLE))
+            view.usable_after_set_role().contains(RDS_SUPERUSER).then(|| role_finding(role, RDS_SUPERUSER_SET_ROLE))
         })
         .collect()
 }

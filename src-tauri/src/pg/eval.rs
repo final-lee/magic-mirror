@@ -22,7 +22,7 @@
 //! 데이터베이스 스냅숏 없이 클러스터 스냅숏만 있을 때는 `Eval::for_cluster`다.
 
 use std::cell::OnceCell;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use serde::Serialize;
 
@@ -334,7 +334,7 @@ impl<'a> Eval<'a> {
     pub fn role<'x>(&'x self, name: &'x str) -> RoleView<'x> {
         let superuser = self.graph.roles.get(name).is_some_and(|r| r.superuser);
         let holder = Holder { reach: self.graph.reach(name, |e| e.inherits), superuser };
-        RoleView { eval: self, holder, set_only: OnceCell::new() }
+        RoleView { eval: self, holder, set_only: OnceCell::new(), after_set: OnceCell::new() }
     }
 }
 
@@ -344,6 +344,8 @@ pub struct RoleView<'x> {
     holder: Holder<'x>,
     /// `SET ROLE`로만 닿는 역할들. 처음 물을 때 구한다
     set_only: OnceCell<Vec<String>>,
+    /// `SET ROLE`을 한 뒤에 권한을 쓰는 역할들. 처음 물을 때 구한다
+    after_set: OnceCell<BTreeSet<String>>,
 }
 
 impl RoleView<'_> {
@@ -361,6 +363,25 @@ impl RoleView<'_> {
                 settable.nodes.iter().skip(1).filter(|n| !inherited.contains_key(n.role)).map(|n| n.role.to_string()).collect()
             })
             .clone()
+    }
+
+    /// `SET ROLE`을 한 뒤에 그 권한을 쓰게 되는 역할들 가운데, 지금 상속하는 것이 아닌 것(이름순). `SET ROLE`로 닿는 모든 역할
+    /// (PG16부터는 사슬의 모든 관계에 SET 옵션이 있어야 한다)이 각각 상속하는 역할의 합집합에서 이 역할이 지금 상속하는 역할을 뺀 것이다.
+    /// `set_role_only`는 "되어 볼 수 있는 역할", 이것은 "그렇게 되면 권한을 쓰는 역할"이다: PG16에서 `GRANT g TO dba WITH INHERIT TRUE, SET FALSE`면
+    /// dba로 SET ROLE을 한 세션은 g의 권한을 쓰지만 g로 SET ROLE을 할 수는 없으니 g는 여기에만 나온다.
+    /// PG15 이하는 모든 관계로 SET ROLE을 할 수 있어서 `set_role_only`와 같은 역할들이다.
+    pub fn usable_after_set_role(&self) -> &BTreeSet<String> {
+        self.after_set.get_or_init(|| {
+            let graph = &self.eval.graph;
+            let settable = graph.reach(self.holder.reach.nodes[0].role, |e| e.can_set);
+            let inherited = &self.holder.reach.index;
+            let mut usable = BTreeSet::new();
+            for switched in settable.nodes.iter().skip(1) {
+                let inherits = graph.reach(switched.role, |e| e.inherits);
+                usable.extend(inherits.nodes.iter().filter(|n| !inherited.contains_key(n.role)).map(|n| n.role.to_string()));
+            }
+            usable
+        })
     }
 
     /// 이 역할이 `obj`에 `p`를 갖는 모든 출처. 비어 있으면 그 권한이 없다
@@ -495,6 +516,11 @@ impl Ctx<'_> {
     /// 상속하지는 않지만 `SET ROLE`로 닿을 수 있는 역할들. PG16부터 SET 옵션이 꺼진 관계는 건너뛴다
     pub fn set_role_only(&self, role: &str) -> Vec<String> {
         Eval::new(self).role(role).set_role_only()
+    }
+
+    /// `SET ROLE`을 한 뒤에 쓸 수 있는 권한의 역할들 가운데 지금 상속하지 않는 것
+    pub fn usable_after_set_role(&self, role: &str) -> Vec<String> {
+        Eval::new(self).role(role).usable_after_set_role().iter().cloned().collect()
     }
 
     /// `role`이 `obj`에 `p`를 갖는 모든 출처. 비어 있으면 그 권한이 없다

@@ -196,6 +196,82 @@ fn set_role_only_skips_memberships_that_do_not_allow_set_role() {
     assert_eq!(scene.ctx().set_role_only("alice"), ["app_write"]);
 }
 
+#[test]
+fn usable_after_set_role_adds_what_the_roles_it_can_switch_to_inherit() {
+    // alice → app_write(INHERIT 끔, SET 허용) → app_read(INHERIT 켬, SET 끔). app_write로 SET ROLE을 하면 그 세션은 app_write가 상속하는
+    // app_read의 권한도 쓴다. app_read로 SET ROLE을 할 수는 없어서 setRoleOnly에는 app_write뿐이다
+    let mut scene = app_scene(PG16);
+    *scene.member_mut("alice", "app_write") = member_with("alice", "app_write", false, true);
+    *scene.member_mut("app_write", "app_read") = member_with("app_write", "app_read", true, false);
+    let ctx = scene.ctx();
+    assert_eq!(ctx.set_role_only("alice"), ["app_write"]);
+    assert_eq!(ctx.usable_after_set_role("alice"), ["app_read", "app_write"]);
+    // app_write 자신은 app_read를 상속한다: 지금 쓰는 것이라 SET ROLE을 한 뒤에야 쓰는 역할이 아니다
+    assert_eq!(ctx.inherited("app_write").len(), 2);
+    assert!(ctx.usable_after_set_role("app_write").is_empty());
+}
+
+#[test]
+fn a_membership_with_neither_option_reaches_nothing_even_after_a_set_role() {
+    // top → mid(INHERIT 끔, SET 허용) → app_read(INHERIT도 SET도 끔): mid로는 SET ROLE을 하지만 그 뒤로는 아무것도 닿지 않는다
+    let mut scene = app_scene(PG16);
+    scene.cluster.roles.extend([role("top"), role("mid")]);
+    scene.cluster.members.extend([member_with("top", "mid", false, true), member_with("mid", "app_read", false, false)]);
+    let ctx = scene.ctx();
+    assert_eq!(ctx.set_role_only("top"), ["mid"]);
+    assert_eq!(ctx.usable_after_set_role("top"), ["mid"]);
+}
+
+#[test]
+fn a_role_listed_once_is_not_repeated_and_what_it_inherits_already_is_left_out() {
+    let mut scene = app_scene(PG16);
+    // x는 a와 b로 SET ROLE을 할 수 있고(상속은 하지 않는다), 둘 다 c를 상속한다(SET은 끔). c는 한 번만 나온다
+    scene.cluster.roles.extend([RoleRec { inherit: false, ..role("x") }, role("a"), role("b"), role("c")]);
+    scene.cluster.members.extend([
+        member_with("x", "a", false, true),
+        member_with("x", "b", false, true),
+        member_with("a", "c", true, false),
+        member_with("b", "c", true, false),
+    ]);
+    let ctx = scene.ctx();
+    assert_eq!(ctx.usable_after_set_role("x"), ["a", "b", "c"]);
+
+    // 이미 상속하는 역할은 빠진다: y는 d를 상속하고 a로 SET ROLE을 할 수 있다. a가 d도 상속해도 d는 목록에 없다
+    scene.cluster.roles.extend([role("y"), role("d")]);
+    scene.cluster.members.extend([member_with("y", "d", true, true), member_with("y", "a", false, true), member_with("a", "d", true, false)]);
+    let ctx = scene.ctx();
+    assert_eq!(ctx.inherited("y"), [inh("y", &[]), inh("d", &["d"])]);
+    assert_eq!(ctx.usable_after_set_role("y"), ["a", "c"]);
+}
+
+#[test]
+fn usable_after_set_role_is_the_set_role_only_roles_when_nothing_is_inherit_only() {
+    // 기본 부여(SET 허용)만 있는 장면과 PG15 이하(옵션이 없다)에서는 이 합집합이 `setRoleOnly`와 같다
+    for version in [PG15, PG16] {
+        let scene = app_scene(version);
+        let ctx = scene.ctx();
+        for name in ["alice", "app_owner", "app_read", "app_write", "bob", "carol", "nobody"] {
+            let mut set_only = ctx.set_role_only(name);
+            set_only.sort();
+            assert_eq!(ctx.usable_after_set_role(name), set_only, "{version} {name}");
+        }
+    }
+    // 상속하는 alice에게는 SET ROLE을 한 뒤에야 쓰는 역할이 없고, NOINHERIT인 bob에게는 app_read가 있다
+    let scene = app_scene(PG16);
+    assert!(scene.ctx().usable_after_set_role("alice").is_empty());
+    assert_eq!(scene.ctx().usable_after_set_role("bob"), ["app_read"]);
+}
+
+#[test]
+fn usable_after_set_role_survives_a_cycle_and_an_unknown_role() {
+    let scene = Scene {
+        cluster: cluster(PG16, vec![role("p"), role("q")], vec![member_with("p", "q", false, true), member_with("q", "p", false, true)], vec![]),
+        db: db("appdb", "nobody", vec![], vec![], vec![]),
+    };
+    assert_eq!(scene.ctx().usable_after_set_role("p"), ["q"]);
+    assert!(app_scene(PG16).ctx().usable_after_set_role("nobody").is_empty());
+}
+
 // ───────────────────────── 출처: 소유자, 직접, 그룹, PUBLIC ─────────────────────────
 
 #[test]

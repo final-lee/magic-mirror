@@ -110,9 +110,10 @@ impl<'a> Index<'a> {
         // 직접 구성원이거나(상속 여부와 상관없이), 상속하는 구성원 관계로 닿는 구성원이다. 자기 자신은 구성원이 아니다
         let inherited = view.inherited();
         let is_member = |group: &str| direct.iter().any(|m| m.group == group) || inherited.iter().any(|i| i.role == group && !i.path.is_empty());
-        // 상속하지 않아도 `SET ROLE`로 쓸 수 있으면 그 그룹의 권한을 쓰는 것이다. PG16부터는 사슬의 모든 관계에 SET 옵션이 있어야 한다
-        let settable = view.set_role_only();
-        let can_use = |group: &str| is_member(group) || settable.iter().any(|reached| reached == group);
+        // 상속하지 않아도 `SET ROLE`을 한 뒤에 그 그룹의 권한을 쓰면 쓰는 것이다. `SET ROLE`로 되어 볼 수 있는 역할(PG16부터는 사슬의 모든 관계에
+        // SET 옵션이 있어야 한다)이 상속하는 역할까지 본다: `GRANT g TO dba WITH INHERIT TRUE, SET FALSE`여도 dba로 SET ROLE을 하면 g의 권한을 쓴다
+        let after_set = view.usable_after_set_role();
+        let can_use = |group: &str| is_member(group) || after_set.contains(group);
 
         let mut member_of: Vec<PgMembership> = direct
             .iter()
