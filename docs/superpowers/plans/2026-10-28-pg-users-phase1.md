@@ -361,8 +361,8 @@ FROM pg_default_acl d LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace
 LEFT JOIN LATERAL aclexplode(d.defaclacl) a ON true ORDER BY 1, 2, 3;
 ```
 
-  - The relation limit is 20 000 minus the function count. Functions are read first with limit 20 001. If more than 20 000 come back, keep 20 000, set `truncated`, and read no relations. Otherwise relations get `20 001 - functions`, and `truncated` is set when the cap is hit.
-  - `DbSnapshot.owner` comes from the `pg_database` row of the connected database, read with `SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()`.
+  - Relations are read first with limit 20 001; if more than 20 000 come back, keep 20 000, set `truncated`, and read no functions. Otherwise functions get `20 001 - relations`, and `truncated` is set when the cap is hit. (Changed in review: tables matter more than functions.)
+  - `DbSnapshot.owner` and `DbSnapshot.database` come from `SELECT current_database(), pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()`. If the server's database differs from the requested one, the read fails with "연결한 데이터베이스가 요청과 달라요: <요청> / <실제>". Reads run `READ ONLY` at `REPEATABLE READ`, so one `read` sees one snapshot.
   - `fetched_at` is ISO 8601 UTC from the app clock (`crate::iam::clock::iso(now_secs())` or the equivalent).
 - [ ] **Step 3: The live harness.**
   - `scripts/pg-live-test.sh` (bash, `set -euo pipefail`):
