@@ -467,7 +467,7 @@ fn role_database(cluster: &ClusterSnapshot, db: &DbSnapshot, role: &str) -> PgRo
     let ctx = Ctx { cluster, db };
     let cells = schema_cells(&Eval::new(&ctx), &ctx, &[role]).into_iter().filter(shows_something).map(Into::into).collect();
     let (owned, owned_omitted) = owned_objects(db, role);
-    PgRoleDatabase { database: db.database.clone(), loaded: true, cells, owned, owned_omitted }
+    PgRoleDatabase { database: db.database.clone(), loaded: true, truncated: db.truncated, cells, owned, owned_omitted }
 }
 
 /// 역할 하나의 상세. 새로 읽는 것은 없다: 클러스터 스냅숏과, 이미 읽어 둔 데이터베이스 스냅숏(`loaded`)만 쓴다.
@@ -482,7 +482,7 @@ pub fn role_view(cluster: &ClusterSnapshot, loaded: &[&DbSnapshot], role: &str, 
         .settings
         .iter()
         .filter(|s| s.role.as_deref().is_none_or(|owner| owner == role))
-        .map(|s| PgRoleSetting { database: s.database.clone(), setting: s.setting.clone() })
+        .map(|s| PgRoleSetting { database: s.database.clone(), setting: s.setting.clone(), all_roles: s.role.is_none() })
         .collect();
     settings.sort_by(|a, b| (&a.database, &a.setting).cmp(&(&b.database, &b.setting)));
 
@@ -505,7 +505,7 @@ pub fn role_view(cluster: &ClusterSnapshot, loaded: &[&DbSnapshot], role: &str, 
         .filter(|d| d.allow_conn)
         .map(|d| match loaded.iter().find(|snapshot| snapshot.database == d.name) {
             Some(snapshot) => role_database(cluster, snapshot, role),
-            None => PgRoleDatabase { database: d.name.clone(), loaded: false, cells: Vec::new(), owned: Vec::new(), owned_omitted: 0 },
+            None => PgRoleDatabase { database: d.name.clone(), loaded: false, truncated: false, cells: Vec::new(), owned: Vec::new(), owned_omitted: 0 },
         })
         .collect();
 

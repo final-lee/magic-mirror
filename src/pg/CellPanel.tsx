@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
-import { OBJECT_KIND_LABEL, objectName, unusableText } from "./labels";
+import { OBJECT_KIND_LABEL, TRUNCATED_TEXT, objectName, unusableText } from "./labels";
 import { PgError } from "./PgError";
 import { usePgCell } from "./queries";
 import { sourceText } from "./sentences";
@@ -80,7 +80,7 @@ function Objects({ detail, role, bypassRls, tab, onTab }: { detail: PgCellDetail
     <>
       {detail.truncated && (
         <div className="notice" role="note">
-          객체가 많아 일부만 읽었어요
+          {TRUNCATED_TEXT}
         </div>
       )}
       <div className="iam-tabs" role="tablist" aria-label="객체 종류">

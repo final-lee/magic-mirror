@@ -1,7 +1,6 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { formatDay } from "../iam/format";
 import { BadgeList } from "./Badges";
-import { COVERAGE_LABEL, INHERITED_ONLY_TEXT, OBJECT_KIND_LABEL, ROLE_KIND_LABEL, objectName, unusableText } from "./labels";
+import { COVERAGE_LABEL, INHERITED_ONLY_TEXT, OBJECT_KIND_LABEL, ROLE_KIND_LABEL, TRUNCATED_TEXT, objectName, unusableText, utcDay } from "./labels";
 import { PgError } from "./PgError";
 import { usePgDatabase, usePgRole } from "./queries";
 import { roleRoute, type PgRoute } from "./route";
@@ -109,7 +108,7 @@ function Overview({ view }: { view: PgRoleView }) {
     ["REPLICATION", yesNo(a.replication)],
     ["BYPASSRLS", yesNo(a.bypassRls)],
     ["연결 수 제한", a.connectionLimit < 0 ? "제한 없음" : String(a.connectionLimit)],
-    ["만료일", a.validUntil ? formatDay(a.validUntil) : "없음"],
+    ["만료일", a.validUntil ? utcDay(a.validUntil) : "없음"],
   ];
   return (
     <div className="pg-overview">
@@ -128,9 +127,10 @@ function Overview({ view }: { view: PgRoleView }) {
         ) : (
           <ul className="pg-settings" aria-label="역할별 설정">
             {view.settings.map((s) => (
-              <li key={`${s.database}:${s.setting}`}>
+              <li key={`${s.database}:${s.setting}:${s.allRoles}`}>
                 <span className="dim">{s.database ?? "모든 데이터베이스"}</span>
                 <code className="mono">{s.setting}</code>
+                {s.allRoles && <span className="iam-chip">모든 역할</span>}
               </li>
             ))}
           </ul>
@@ -204,6 +204,11 @@ function Databases({ view, load, children }: { view: PgRoleView; load: Load; chi
       {view.databases.map((db) => (
         <section key={db.database} className="pg-db" aria-label={db.database}>
           <h3 className="pg-sect">{db.database}</h3>
+          {db.loaded && db.truncated && (
+            <div className="notice" role="note">
+              {TRUNCATED_TEXT}
+            </div>
+          )}
           {db.loaded ? (
             children(db)
           ) : load.requested.has(db.database) ? (

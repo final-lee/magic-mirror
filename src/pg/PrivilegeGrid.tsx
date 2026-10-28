@@ -3,7 +3,7 @@ import { visibleRange } from "../iam/AssignmentGrid";
 import { parsePos, posKey, type Pos } from "../iam/gridPos";
 import { CellPanel } from "./CellPanel";
 import { DatabaseScreen } from "./DatabaseScreen";
-import { COVERAGE_LABEL, INHERITED_ONLY_TEXT, ROLE_KIND_LABEL, collate, unusableText } from "./labels";
+import { COVERAGE_LABEL, INHERITED_ONLY_TEXT, ROLE_KIND_LABEL, TRUNCATED_TEXT, collate, unusableText } from "./labels";
 import { PgError } from "./PgError";
 import { usePgDatabase } from "./queries";
 import { RoleKinds, filterRoles, type RoleKindsValue } from "./RoleKinds";
@@ -198,7 +198,7 @@ function DatabasePrivileges({ target, overview, database, filter, kinds, pick, o
   return (
     <>
       {q.isError && <PgError compact error={q.error} target={target} />}
-      {view.truncated && <div className="notice">객체가 많아 일부만 읽었어요</div>}
+      {view.truncated && <div className="notice">{TRUNCATED_TEXT}</div>}
       <div className="pg-split">
         <Grid
           rows={rows}

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { DASH, objectName } from "./labels";
+import { DASH, TRUNCATED_TEXT, objectName } from "./labels";
 import { PgError } from "./PgError";
 import { usePgFindings } from "./queries";
 import type { SchemaFocus } from "./route";
@@ -31,7 +31,8 @@ interface Props {
 
 /**
  * 점검: 읽을 수 있는 모든 데이터베이스를 읽어 찾은 보안 문제를 심각도 높은 순으로 묶어 보인다.
- * 항목의 역할은 역할 상세로, 객체는 권한 표로 이어진다. 읽지 못한 데이터베이스는 이유와 함께 알리고, 점검이 보지 못하는 것은 맨 아래에 밝힌다.
+ * 항목의 역할은 역할 상세로, 객체는 권한 표로 이어진다. 읽지 못한 데이터베이스는 이유와 함께 알리고, 객체가 많아 일부만 읽은 데이터베이스는 이름과 함께 맨 위에서 알리고,
+ * 점검이 보지 못하는 것은 맨 아래에 밝힌다.
  * 이 화면이 열려 있을 때만 읽는다(PgTab이 같은 쿼리로 메뉴의 건수를 가져간다).
  */
 export function Findings({ target, overview, onOpenRole, onOpenSchema }: Props) {
@@ -47,6 +48,11 @@ export function Findings({ target, overview, onOpenRole, onOpenSchema }: Props) 
   return (
     <section className="center fx">
       {q.isError && <PgError compact error={q.error} target={target} />}
+      {data.truncated.length > 0 && (
+        <div className="notice" role="note">
+          {TRUNCATED_TEXT} <span className="mono">({data.truncated.join(", ")})</span>
+        </div>
+      )}
       {groups.length === 0 ? (
         <div className="empty small">발견된 문제가 없어요</div>
       ) : (

@@ -364,6 +364,8 @@ pub struct PgRoleSetting {
     pub database: Option<String>,
     /// `이름=값`
     pub setting: String,
+    /// 이 역할만의 설정이 아니라 모든 역할에 걸린 설정이다(`ALTER DATABASE … SET`, `ALTER ROLE ALL SET`)
+    pub all_roles: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -383,6 +385,8 @@ pub struct PgRoleDatabase {
     pub database: String,
     /// 이 데이터베이스의 스냅숏을 이미 읽었다. 아니면 나머지 칸은 비어 있다
     pub loaded: bool,
+    /// 읽은 스냅숏이 객체가 너무 많아 일부만 읽은 것이다(칸과 소유 객체가 일부만 본 것이다). 읽지 않았으면 false
+    pub truncated: bool,
     /// 이 역할에게 보이는 권한이 있는 칸만
     pub cells: Vec<PgSchemaCell>,
     pub owned: Vec<PgObjectRef>,
@@ -461,6 +465,8 @@ pub struct PgFindings {
     /// 항목이 있는 그룹만, 심각도 높은 순
     pub groups: Vec<PgFindingGroup>,
     pub skipped: Vec<PgSkippedDatabase>,
+    /// 객체가 너무 많아 일부만 읽고 점검한 데이터베이스들의 이름(이름순). 그 데이터베이스의 항목은 읽은 만큼만 찾은 것이다
+    pub truncated: Vec<String>,
     pub fetched_at: String,
 }
 

@@ -29,6 +29,15 @@ export const unusableText = (reason: string) => `권한은 있지만 실제로�
 /** 보이는 권한의 출처가 그룹, PUBLIC, 미리 정의된 역할뿐인 칸(inheritedOnly)의 설명. 역할 상세와 권한 표가 함께 쓴다. */
 export const INHERITED_ONLY_TEXT = "그룹·PUBLIC으로만 받음";
 
+/** 객체가 너무 많아 데이터베이스를 일부만 읽었을 때 알리는 말. 그 스냅숏으로 만든 화면이 모두 같은 말을 쓴다. */
+export const TRUNCATED_TEXT = "객체가 많아 일부만 읽었어요";
+
+/**
+ * 백엔드가 보내는 시각(ISO 8601 UTC, YYYY-MM-DDTHH:MM:SSZ)의 날짜. 점검이 "2026-11-30에 만료돼요"라고 말하는 UTC 날짜와 같다.
+ * 로컬 날짜로 바꾸면 한국에서는 UTC 15시부터 다음 날이라 두 화면이 하루 어긋난다.
+ */
+export const utcDay = (iso: string) => iso.slice(0, 10);
+
 /** 사람이 읽는 객체 이름: schema.name, 함수는 인자까지. 데이터베이스와 스키마는 이름만이다. */
 export function objectName(o: PgObjectRef): string {
   const base = o.kind === "database" || o.kind === "schema" || !o.schema ? o.name : `${o.schema}.${o.name}`;

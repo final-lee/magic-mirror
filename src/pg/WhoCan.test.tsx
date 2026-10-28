@@ -2,14 +2,14 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { useState } from "react";
 import { renderWithClient } from "../test/utils";
 import { pgApi } from "./api";
-import { customersTable, object, ordersIdSeq, ordersTable, pgTarget, sampleOverview, sampleWhoCan, source, touchOrderFn } from "./fixtures";
+import { customersTable, object, ordersIdSeq, ordersTable, pgTarget, sampleDatabaseView, sampleOverview, sampleWhoCan, source, touchOrderFn } from "./fixtures";
 import { objectName } from "./labels";
 import { pgKeys } from "./queries";
 import { DEFAULT_KINDS, type RoleKindsValue } from "./RoleKinds";
 import type { PgObjectKind, PgObjectRef, PgOverview, PgWhoCan, PgWhoCanRow } from "./types";
 import { OBJECT_PRIVILEGES, SEARCH_DELAY_MS, WhoCan } from "./WhoCan";
 
-vi.mock("./api", () => ({ pgApi: { objects: vi.fn(), whoCan: vi.fn() } }));
+vi.mock("./api", () => ({ pgApi: { objects: vi.fn(), whoCan: vi.fn(), database: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 
 const m = vi.mocked(pgApi);
@@ -60,6 +60,52 @@ beforeEach(() => {
   vi.clearAllMocks();
   m.objects.mockResolvedValue(OBJECTS);
   m.whoCan.mockResolvedValue(sampleWhoCan());
+});
+
+describe("a database whose privileges were read only in part", () => {
+  const NOTE = "객체가 많아 일부만 읽었어요";
+  /** 권한 표가 읽어 둔 사본을 캐시에 둔다 */
+  const cache = (qc: ReturnType<typeof setup>["qc"], database: string, truncated: boolean) =>
+    act(() => {
+      qc.setQueryData(pgKeys.database(pgTarget, database), sampleDatabaseView({ database, truncated }));
+    });
+
+  test("says so when the copy of the privileges that was read before was cut", async () => {
+    const { qc } = setup();
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
+    cache(qc, "orders", true);
+    expect(await screen.findByText(NOTE)).toBeInTheDocument();
+    expect(screen.getAllByText(NOTE)).toHaveLength(1);
+  });
+
+  test("says nothing when the copy was read whole, or when none was read, and does not read the privileges for this", async () => {
+    const { qc } = setup();
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
+    cache(qc, "orders", false);
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
+    // 다른 데이터베이스의 사본은 이 데이터베이스에 대해 말하지 않는다
+    cache(qc, "analytics", true);
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
+    expect(m.database).not.toHaveBeenCalled();
+  });
+
+  test("follows the database that is chosen", async () => {
+    const { qc } = setup();
+    cache(qc, "analytics", true);
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
+    fireEvent.change(picker(), { target: { value: "analytics" } });
+    expect(await screen.findByText(NOTE)).toBeInTheDocument();
+    fireEvent.change(picker(), { target: { value: "orders" } });
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
+  });
+
+  test("keeps saying so while an object is chosen and the roles are listed", async () => {
+    const { qc } = setup();
+    cache(qc, "orders", true);
+    await choose("app.orders");
+    await results();
+    expect(screen.getByText(NOTE)).toBeInTheDocument();
+  });
 });
 
 describe("before an object is chosen", () => {

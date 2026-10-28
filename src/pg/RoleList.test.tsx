@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { ROLES, alice, appOwner, appRead, bob, rdsSuperuser } from "./fixtures";
-import { formatDay } from "../iam/format";
 import { RoleList } from "./RoleList";
 import { DEFAULT_KINDS, type RoleKindsValue } from "./RoleKinds";
 
@@ -92,7 +91,7 @@ test("a group shows its members, and a user with an expiry shows the date and th
   expect(cells("app_read").slice(1).map((c) => c.textContent)).toEqual(["그룹", "0", "2", "0", "없음"]);
   const row = cells("bob");
   expect(within(row[0]).getByText("곧 만료")).toBeInTheDocument();
-  expect(row[5].textContent).toBe(formatDay(bob.attributes.validUntil));
+  expect(row[5].textContent).toBe("2026-11-05");
   expect(row[5].textContent).toMatch(/^\d{4}-\d{2}-\d{2}$/);
 });
 
@@ -146,4 +145,16 @@ test("the chips stay on screen when no row matches, so the filter can be undone"
   render(<Harness roles={[]} />);
   expect(screen.getByRole("checkbox", { name: "사용자" })).toBeInTheDocument();
   expect(screen.getByRole("checkbox", { name: "시스템 역할 보기" })).toBeInTheDocument();
+});
+
+test("the expiry is the UTC date, as 점검 prints it, also where the local date is already the next day", () => {
+  // 한국에서는 UTC 20시가 이미 다음 날이다. 점검은 "2026-11-30에 만료돼요"라고 한다
+  vi.stubEnv("TZ", "Asia/Seoul");
+  try {
+    const late = { ...bob, attributes: { ...bob.attributes, validUntil: "2026-11-30T20:00:00Z" } };
+    render(<Harness roles={[late]} />);
+    expect(cells("bob")[5].textContent).toBe("2026-11-30");
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });

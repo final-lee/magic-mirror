@@ -278,6 +278,10 @@ describe("findings", () => {
     for (const s of findings.skipped) expect(databases).toContain(s.database);
   });
 
+  test("were all read whole, and the skipped database is not one that was cut", () => {
+    expect(findings.truncated).toEqual([]);
+  });
+
   test("include a skipped database and an item that names an object", () => {
     expect(findings.skipped.length).toBeGreaterThan(0);
     expect(findings.groups.flatMap((g) => g.items).some((i) => i.object !== null)).toBe(true);
@@ -342,7 +346,9 @@ describe("role view", () => {
     const connectable = sampleOverview().databases.filter((d) => d.allowConn).map((d) => d.name);
     expect(view.databases.map((d) => d.database)).toEqual(connectable);
     expect(view.databases.filter((d) => d.loaded).map((d) => d.database)).toEqual([sampleOverview().target.defaultDatabase]);
-    for (const d of view.databases.filter((d) => !d.loaded)) expect(d).toEqual({ database: d.database, loaded: false, cells: [], owned: [], ownedOmitted: 0 });
+    for (const d of view.databases.filter((d) => !d.loaded)) expect(d).toEqual({ database: d.database, loaded: false, truncated: false, cells: [], owned: [], ownedOmitted: 0 });
+    // 읽은 데이터베이스도 온전히 읽은 것이다
+    expect(view.databases.filter((d) => d.loaded).every((d) => !d.truncated)).toBe(true);
   });
 
   test("the cells of the read database are the role's cells that have something in them", () => {
@@ -376,14 +382,14 @@ describe("role view", () => {
 
   test("has settings for the role that owns the schemas, for all databases and for one", () => {
     expect(sampleRoleView("app_owner").settings).toEqual([
-      { database: null, setting: "search_path=app, public" },
-      { database: "orders", setting: "work_mem=64MB" },
+      { database: null, setting: "search_path=app, public", allRoles: false },
+      { database: "orders", setting: "work_mem=64MB", allRoles: false },
     ]);
     expect(sampleRoleView("alice").settings).toEqual([]);
   });
 
   test("overrides replace single fields", () => {
-    expect(sampleRoleView("alice", { settings: [{ database: null, setting: "x=1" }] }).settings).toEqual([{ database: null, setting: "x=1" }]);
+    expect(sampleRoleView("alice", { settings: [{ database: null, setting: "x=1", allRoles: true }] }).settings).toEqual([{ database: null, setting: "x=1", allRoles: true }]);
     expect(sampleRoleView("alice", { sessions: [] }).summary.name).toBe("alice");
   });
 });

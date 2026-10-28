@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
-import { formatDateTime, formatDay } from "../iam/format";
+import { formatDateTime } from "../iam/format";
 import { renderWithClient } from "../test/utils";
 import { pgApi } from "./api";
 import { pgTarget, sampleDatabaseView, sampleRoleView } from "./fixtures";
@@ -201,7 +201,7 @@ describe("개요", () => {
   test("the expiry is the date, or 없음", async () => {
     const soon = setup("bob");
     await screen.findByRole("heading", { name: "bob" });
-    expect(attr("만료일")).toHaveTextContent(formatDay(sampleRoleView("bob").summary.attributes.validUntil));
+    expect(attr("만료일")).toHaveTextContent("2026-11-05");
     expect(attr("만료일").textContent).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     soon.unmount();
     setup("alice");
@@ -209,11 +209,49 @@ describe("개요", () => {
     expect(attr("만료일")).toHaveTextContent("없음");
   });
 
+  test("the expiry date is the UTC date, as 점검 prints it, also where the local date is already the next day", async () => {
+    // 한국에서는 UTC 20시가 이미 다음 날이다. 점검은 "2026-11-30에 만료돼요"라고 한다
+    vi.stubEnv("TZ", "Asia/Seoul");
+    try {
+      const view = sampleRoleView("bob");
+      m.role.mockResolvedValue({ ...view, summary: { ...view.summary, attributes: { ...view.summary.attributes, validUntil: "2026-11-30T20:00:00Z" } } });
+      setup("bob");
+      await screen.findByRole("heading", { name: "bob" });
+      expect(attr("만료일")).toHaveTextContent("2026-11-30");
+      expect(attr("만료일").textContent).toBe("2026-11-30");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   test("the settings of the role say where they apply", async () => {
     setup("app_owner");
     await screen.findByRole("heading", { name: "app_owner" });
     const items = within(screen.getByRole("list", { name: "역할별 설정" })).getAllByRole("listitem");
     expect(items.map((li) => li.textContent)).toEqual(["모든 데이터베이스search_path=app, public", "orderswork_mem=64MB"]);
+  });
+
+  test("a setting that applies to every role is marked 모든 역할, and a setting of the role itself is not", async () => {
+    const view = sampleRoleView("app_owner");
+    m.role.mockResolvedValue({
+      ...view,
+      settings: [
+        { database: null, setting: "log_statement=none", allRoles: true },
+        { database: null, setting: "search_path=app, public", allRoles: false },
+        { database: "orders", setting: "work_mem=64MB", allRoles: false },
+        // 같은 데이터베이스, 같은 값이라도 모든 역할에 거는 것과 이 역할에만 거는 것은 다른 줄이다
+        { database: "orders", setting: "work_mem=64MB", allRoles: true },
+      ],
+    });
+    setup("app_owner");
+    await screen.findByRole("heading", { name: "app_owner" });
+    const items = within(screen.getByRole("list", { name: "역할별 설정" })).getAllByRole("listitem");
+    expect(items.map((li) => li.textContent)).toEqual([
+      "모든 데이터베이스log_statement=none모든 역할",
+      "모든 데이터베이스search_path=app, public",
+      "orderswork_mem=64MB",
+      "orderswork_mem=64MB모든 역할",
+    ]);
   });
 
   test("says so when there are no settings", async () => {
@@ -743,6 +781,43 @@ describe("a refresh while the detail is open", () => {
     expect(await within(section("analytics")).findByRole("table")).toBeInTheDocument();
     expect(readsOf("analytics").slice(-1)[0]).toEqual([pgTarget, "analytics", false]);
     expect(m.role.mock.calls.length).toBeGreaterThan(rolesBefore);
+  });
+});
+
+describe("a database that was read only in part", () => {
+  const NOTE = "객체가 많아 일부만 읽었어요";
+  const cut = (name: string, database = "orders"): PgRoleView => {
+    const view = sampleRoleView(name);
+    return { ...view, databases: view.databases.map((d) => (d.database === database ? { ...d, truncated: true } : d)) };
+  };
+
+  test("says so in the section of that database, in the privileges and in the owned objects", async () => {
+    m.role.mockResolvedValue(cut("app_owner"));
+    setup("app_owner");
+    await openTab("권한");
+    expect(within(section("orders")).getByText(NOTE)).toBeInTheDocument();
+    expect(within(section("analytics")).queryByText(NOTE)).not.toBeInTheDocument();
+    expect(screen.getAllByText(NOTE)).toHaveLength(1);
+    await openTab("소유 객체");
+    expect(within(section("orders")).getByText(NOTE)).toBeInTheDocument();
+    expect(screen.getAllByText(NOTE)).toHaveLength(1);
+  });
+
+  test("says nothing about a database that was read whole", async () => {
+    setup("app_owner");
+    await openTab("권한");
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
+    await openTab("소유 객체");
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
+  });
+
+  test("says nothing about a database that was not read, whatever the flag says", async () => {
+    const view = cut("alice", "analytics");
+    m.role.mockResolvedValue(view);
+    setup("alice");
+    await openTab("권한");
+    expect(view.databases.find((d) => d.database === "analytics")).toMatchObject({ loaded: false, truncated: true });
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
   });
 });
 

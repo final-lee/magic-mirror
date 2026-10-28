@@ -329,8 +329,8 @@ export function sampleSessions(): PgSession[] {
 /** 역할별 설정(pg_db_role_setting). app_owner만 있다. database가 null이면 모든 데이터베이스에 적용된다. */
 const ROLE_SETTINGS: Record<string, PgRoleView["settings"]> = {
   app_owner: [
-    { database: null, setting: "search_path=app, public" },
-    { database: "orders", setting: "work_mem=64MB" },
+    { database: null, setting: "search_path=app, public", allRoles: false },
+    { database: "orders", setting: "work_mem=64MB", allRoles: false },
   ],
 };
 /** 소유 객체. app_owner가 orders의 스키마와 그 안의 객체를 모두 소유한다(위 권한 표·칸 상세와 같다). 다른 역할은 아무것도 소유하지 않는다. */
@@ -359,8 +359,15 @@ export function sampleRoleView(name = "alice", extra: Partial<PgRoleView> = {}):
       .map(
         (d): PgRoleDatabase =>
           d.name === read.database
-            ? { database: d.name, loaded: true, cells: read.cells.filter((c) => c.role === name && hasSomething(c)), owned: [...(OWNED[name] ?? [])], ownedOmitted: 0 }
-            : { database: d.name, loaded: false, cells: [], owned: [], ownedOmitted: 0 },
+            ? {
+                database: d.name,
+                loaded: true,
+                truncated: false,
+                cells: read.cells.filter((c) => c.role === name && hasSomething(c)),
+                owned: [...(OWNED[name] ?? [])],
+                ownedOmitted: 0,
+              }
+            : { database: d.name, loaded: false, truncated: false, cells: [], owned: [], ownedOmitted: 0 },
       ),
     sessions: sampleSessions().filter((s) => s.role === name),
     setRoleOnly: [...(SET_ROLE_ONLY[name] ?? [])],
@@ -411,6 +418,7 @@ export function sampleFindings(extra: Partial<PgFindings> = {}): PgFindings {
   return {
     groups,
     skipped: [{ database: "analytics", reason: 'analytics에 연결하지 못했어요: permission denied for database "analytics"' }],
+    truncated: [],
     fetchedAt: "2026-10-28T12:01:00Z",
     ...extra,
   };

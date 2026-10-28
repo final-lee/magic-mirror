@@ -32,7 +32,12 @@ const rowWith = (text: string) => screen.getByText(text).closest("tr") as HTMLEl
 
 const group = (kind: PgFindingGroup["kind"], level: PgFindingGroup["level"], title: string, items: PgFinding[]): PgFindingGroup => ({ kind, level, title, items });
 const item = (extra: Partial<PgFinding> & Pick<PgFinding, "detail">): PgFinding => ({ database: null, role: null, object: null, ...extra });
-const findingsOf = (groups: PgFindingGroup[], skipped: PgFindings["skipped"] = []): PgFindings => ({ groups, skipped, fetchedAt: "2026-10-28T12:01:00Z" });
+const findingsOf = (groups: PgFindingGroup[], skipped: PgFindings["skipped"] = [], truncated: string[] = []): PgFindings => ({
+  groups,
+  skipped,
+  truncated,
+  fetchedAt: "2026-10-28T12:01:00Z",
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -261,6 +266,33 @@ describe("the databases that were skipped", () => {
     setup();
     await loaded();
     expect(screen.queryByRole("heading", { name: /점검하지 못한 데이터베이스/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("the databases that were read only in part", () => {
+  const NOTE = "객체가 많아 일부만 읽었어요";
+
+  test("are named in a note above the groups, with the text of the constraints", async () => {
+    m.findings.mockResolvedValue(sampleFindings({ truncated: ["analytics", "orders"] }));
+    setup();
+    await loaded();
+    const note = screen.getByText(NOTE);
+    expect(note).toHaveTextContent(`${NOTE} (analytics, orders)`);
+    expect(note.compareDocumentPosition(heading("rds_superuser 멤버")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getAllByText(NOTE)).toHaveLength(1);
+  });
+
+  test("are told also when nothing was found, so that no finding does not read as nothing wrong", async () => {
+    m.findings.mockResolvedValue(findingsOf([], [], ["orders"]));
+    setup();
+    expect(await screen.findByText("발견된 문제가 없어요")).toBeInTheDocument();
+    expect(screen.getByText(NOTE)).toHaveTextContent(`${NOTE} (orders)`);
+  });
+
+  test("have no note when every database was read whole", async () => {
+    setup();
+    await loaded();
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
   });
 });
 

@@ -329,11 +329,14 @@ fn a_session_serializes_to_the_contract() {
 fn the_role_view_serializes_to_the_contract() {
     let view = PgRoleView {
         summary: role_summary(),
-        settings: vec![PgRoleSetting { database: None, setting: "search_path=app, public".into() }],
+        settings: vec![
+            PgRoleSetting { database: None, setting: "search_path=app, public".into(), all_roles: false },
+            PgRoleSetting { database: Some("orders".into()), setting: "work_mem=8MB".into(), all_roles: true },
+        ],
         members: vec![PgRoleMember { role: "alice".into(), inherit: false, set: true, admin: true }],
         databases: vec![
-            PgRoleDatabase { database: "orders".into(), loaded: true, cells: vec![], owned: vec![PgObjectRef::schema("app")], owned_omitted: 4 },
-            PgRoleDatabase { database: "analytics".into(), loaded: false, cells: vec![], owned: vec![], owned_omitted: 0 },
+            PgRoleDatabase { database: "orders".into(), loaded: true, truncated: true, cells: vec![], owned: vec![PgObjectRef::schema("app")], owned_omitted: 4 },
+            PgRoleDatabase { database: "analytics".into(), loaded: false, truncated: false, cells: vec![], owned: vec![], owned_omitted: 0 },
         ],
         sessions: vec![],
         set_role_only: vec!["app_read".into()],
@@ -342,14 +345,17 @@ fn the_role_view_serializes_to_the_contract() {
         to_json(&view),
         json!({
             "summary": role_summary_json(),
-            "settings": [{ "database": null, "setting": "search_path=app, public" }],
+            "settings": [
+                { "database": null, "setting": "search_path=app, public", "allRoles": false },
+                { "database": "orders", "setting": "work_mem=8MB", "allRoles": true }
+            ],
             "members": [{ "role": "alice", "inherit": false, "set": true, "admin": true }],
             "databases": [
                 {
-                    "database": "orders", "loaded": true, "cells": [],
+                    "database": "orders", "loaded": true, "truncated": true, "cells": [],
                     "owned": [{ "kind": "schema", "schema": null, "name": "app", "signature": null }], "ownedOmitted": 4
                 },
-                { "database": "analytics", "loaded": false, "cells": [], "owned": [], "ownedOmitted": 0 }
+                { "database": "analytics", "loaded": false, "truncated": false, "cells": [], "owned": [], "ownedOmitted": 0 }
             ],
             "sessions": [],
             "setRoleOnly": ["app_read"]
@@ -375,6 +381,7 @@ fn the_findings_serialize_to_the_contract() {
             ],
         }],
         skipped: vec![PgSkippedDatabase { database: "analytics".into(), reason: "analytics에 연결하지 못했어요: permission denied".into() }],
+        truncated: vec!["orders".into()],
         fetched_at: "2026-10-28T12:01:00Z".into(),
     };
     assert_eq!(
@@ -395,6 +402,7 @@ fn the_findings_serialize_to_the_contract() {
                 ]
             }],
             "skipped": [{ "database": "analytics", "reason": "analytics에 연결하지 못했어요: permission denied" }],
+            "truncated": ["orders"],
             "fetchedAt": "2026-10-28T12:01:00Z"
         })
     );
