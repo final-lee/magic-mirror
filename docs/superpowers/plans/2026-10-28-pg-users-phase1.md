@@ -387,7 +387,7 @@ LEFT JOIN LATERAL aclexplode(d.defaclacl) a ON true ORDER BY 1, 2, 3;
 
 **Files:**
 - Create: `src-tauri/src/pg/eval.rs`, `src-tauri/src/pg/eval/tests.rs`, `src-tauri/src/pg/fixtures.rs` (`#[cfg(test)]` builders).
-- Modify: `src-tauri/src/pg.rs`, `src-tauri/src/pg/live_tests.rs` (comparison tests).
+- Modify: `src-tauri/src/pg.rs`, `src-tauri/src/pg/live_tests.rs` (comparison tests), `src-tauri/src/pg/model.rs` and `src-tauri/src/pg/catalog.rs` (one shared `MEMBERSHIP_OPTIONS_SINCE` gate).
 
 **Interfaces:**
 - Consumes the `pg::model` types.
@@ -405,6 +405,8 @@ impl Ctx<'_> {
     pub fn sources(&self, role: &str, obj: Obj, p: Privilege) -> Vec<Source>;
     pub fn unusable(&self, role: &str, schema: &str) -> Option<&'static str>;  // "CONNECT 없음" first, then "USAGE 없음"
 }
+// Also a handle built once per command that owns the role graph: `Eval::new(&ctx)`, then `eval.role(name)` with the same four
+// questions on the per-role view. The `Ctx` methods are one-line wrappers over it.
 pub enum Coverage { All, Some, None }
 pub struct SchemaCell { pub role: String, pub schema: String, pub usage: bool, pub create: bool, pub read: Coverage, pub write: Coverage, pub inherited_only: bool, pub unusable: Option<&'static str> }
 pub fn schema_cells(ctx: &Ctx, roles: &[&str]) -> Vec<SchemaCell>;   // roles × schemas, in schema-name order inside role order
@@ -417,30 +419,32 @@ pub fn who_can(ctx: &Ctx, obj: Obj, p: Privilege) -> Vec<WhoCanRow>; // roles wi
   2. **Inheritance on PG16:** a membership with `inherit: Some(false)` blocks that edge even when the member has `rolinherit = true`. `inherit: Some(true)` passes even when the member is NOINHERIT.
   3. **Owner:** the ACL entry whose grantee is the object owner gives `Owner`. A role that inherits the owner gets `Owner` with `via = path`. An owner who revoked their own SELECT (no ACL entry) does not have it.
   4. **Direct, group and PUBLIC:** direct entries are `Direct`, entries for an inherited group are `Group`, and PUBLIC entries are `Public` for every role.
-  5. **Predefined roles:** for `version_num >= 140000`, a role inheriting `pg_read_all_data` gets `Predefined` SELECT on tables, views, matviews, foreign tables and sequences, and USAGE on schemas. `pg_write_all_data` gives INSERT, UPDATE and DELETE on tables, views and foreign tables, plus USAGE. Both are ignored below 140000.
-  6. **pg_database_owner:** on PG14 and later the database owner (`db.owner`) implicitly has the privileges granted to `pg_database_owner`. A role that inherits the owner gets them too, with `via` ending in `"pg_database_owner"`.
-  7. **Superuser:** a role with `superuser: true` gets `Superuser` for every privilege.
+  5. **Predefined roles:** for `version_num >= 140000`, a role inheriting `pg_read_all_data` gets `Predefined` SELECT on every relation, sequences included, and USAGE on every schema. `pg_write_all_data` gives INSERT, UPDATE and DELETE on tables, partitioned tables, views, matviews and foreign tables, UPDATE on sequences, and USAGE on every schema. Neither gives CREATE, TRUNCATE, REFERENCES, TRIGGER, sequence USAGE, EXECUTE or a database privilege. The predefined role itself holds what it grants. Both are ignored below 140000. From 170000, `pg_maintain` gives MAINTAIN on every relation except sequences. MAINTAIN exists only from 170000, so no object (not even for a superuser) offers it before.
+  6. **pg_database_owner:** on PG14 and later the database owner (`db.owner`) implicitly has the privileges granted to `pg_database_owner`. A role that inherits the owner gets them too, with `via` ending in `"pg_database_owner"`. Before PG16 this is gated by the owner's `rolinherit`: a NOINHERIT owner, and every role that reaches the database through that owner, does not get them.
+  7. **Superuser:** a role whose own `superuser` is true gets `Superuser` for every privilege its object type has. Superuser is never inherited: a member of a superuser role, inheriting or not, gets only the ACL entries granted to that role, as `Group`.
   8. **Unusable:**
      - Without CONNECT (direct, group or PUBLIC) on the database, `unusable` is "CONNECT 없음".
      - With CONNECT but without schema USAGE, it is "USAGE 없음".
      - With both, it is `None`.
+     - CREATE on a schema works without USAGE. So a cell whose only shown value is `create` gets "CONNECT 없음" or `None`, never "USAGE 없음". A who-can row for CREATE on a schema gets only "CONNECT 없음".
+     - For a database object, CONNECT is checked on that database, not on the snapshot's database.
   9. **Schema cells:**
      - `read` is `All` when the role has SELECT on every relation of kind table, view, matview, partitioned or foreign in the schema, `Some` when on some of them, and `None` when on none. An empty schema reads `None`.
      - `write` uses INSERT, UPDATE or DELETE on table, partitioned or foreign relations.
      - `usage` and `create` come from the schema ACL.
-     - `inherited_only` is true when every source behind the shown `true` or `All`/`Some` values is Group, Public or Predefined.
+     - `inherited_only` is true when the cell shows at least one value and every source behind the shown `true` or `All`/`Some` values is Group, Public or Predefined. A cell that shows nothing is false.
      - `unusable` holds `ctx.unusable(role, schema)` only when the cell has something to lose: `usage || create || read != None || write != None`. Otherwise it is `None`. Test both sides: a cell with privileges but no CONNECT, and an empty cell without CONNECT.
   10. **Who-can:** for `app.orders` SELECT, the rows are app_owner (Owner), app_read (Direct), app_write (Group via app_read), alice (Group via app_write → app_read) and carol (Predefined). Bob is absent because of NOINHERIT. Rows are in name order, and `unusable` is filled for roles that lack CONNECT.
 - [ ] **Step 2: Implement.**
   - Precompute each role's inherited set once (BFS over `members`, with the PG16 rule when `version_num >= 160000` and the `rolinherit` rule before).
-  - Treat `pg_database_owner` as a virtual membership `db.owner → pg_database_owner` with inherit true, for `version_num >= 140000`.
+  - Treat `pg_database_owner` as a virtual membership `db.owner → pg_database_owner`, added after the owner's real memberships, for `version_num >= 140000`. It always allows SET ROLE. From PG16 it is always inherited. Before PG16 it is inherited only when the owner has `rolinherit`, the same gate as the owner's other memberships.
   - `sources` walks the object's ACL entries and classifies each match:
     - grantee is `None` → `Public`;
     - grantee is the object owner and is the role itself or an inherited role → `Owner`;
     - grantee is the role itself → `Direct`;
     - grantee is an inherited role → `Group`;
     - the predefined rules from test 5 → `Predefined`;
-    - the role or an inherited role is a superuser → `Superuser`.
+    - the role's own `superuser` is true → `Superuser` (never through membership).
   - `schema_cells` must stay fast. Precompute per role a `HashSet<&str>` of the role and every inherited role (`effective set`), so each check is a set lookup. Budget: 200 roles × 20 000 relations in under 2 s in release mode. Add a `#[test] #[ignore]` benchmark-style test that builds that size and asserts it.
 - [ ] **Step 3: Live comparison tests** in `live_tests.rs`, on both versions:
   - For every non-system role × every relation in the seeded database × each of SELECT, INSERT, UPDATE, DELETE, the result of `!sources(..).is_empty()` equals `has_table_privilege(role, oid, priv)`.

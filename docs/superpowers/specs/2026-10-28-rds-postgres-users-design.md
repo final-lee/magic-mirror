@@ -60,7 +60,7 @@ RDS 목록에서 PostgreSQL 클러스터나 인스턴스를 더블클릭하면 "
   - 직접: O의 ACL에 R이 받는 역할로 있다.
   - 그룹: R이 상속받는 역할 G가 ACL에 있다. 경로(R ← G1 ← G2)를 함께 남긴다.
   - PUBLIC: ACL에 PUBLIC이 있다.
-  - 미리 정의된 역할: `pg_read_all_data`(모든 테이블·뷰·시퀀스 SELECT, 모든 스키마 USAGE), `pg_write_all_data`(모든 테이블 INSERT·UPDATE·DELETE, 모든 스키마 USAGE)를 상속받는다(PG14 이상).
+  - 미리 정의된 역할: `pg_read_all_data`(모든 테이블·뷰·시퀀스 SELECT, 모든 스키마 USAGE), `pg_write_all_data`(모든 테이블·뷰·시퀀스 INSERT·UPDATE·DELETE, 시퀀스는 UPDATE만, 모든 스키마 USAGE)를 상속받는다(PG14 이상). PG17부터는 `pg_maintain`(시퀀스를 뺀 모든 관계의 MAINTAIN)도 있다.
 - 상속
   - PG15 이하: 멤버 역할의 `rolinherit`가 참이면 그 구성원 관계로 권한을 상속한다.
   - PG16 이상: 구성원 관계마다 `inherit_option`을 따른다.
