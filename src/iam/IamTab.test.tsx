@@ -1022,6 +1022,23 @@ describe("assignments", () => {
       expect(screen.queryByText("변경 3개를 적용했어요")).not.toBeInTheDocument();
     });
 
+    test("a note the backend sends twice is listed twice, without a duplicate-key warning", async () => {
+      const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        await queueThree();
+        await waitFor(() => expect(applyBatchButton()).toBeEnabled());
+        // 되돌리기 묶음에서 원래 기록에 표시를 못 한 기록마다 같은 문구가 하나씩 온다
+        const same = "이전 기록에 '되돌림' 표시를 하지 못했어요: 디스크가 가득 찼어요";
+        m.applyBatch.mockResolvedValueOnce(batchResult({ logIds: ["l-1", "l-2", "l-3"], notes: [same, same, "다른 안내"] }));
+        fireEvent.click(applyBatchButton());
+        const list = await screen.findByRole("list", { name: "함께 알릴 일" });
+        expect(within(list).getAllByRole("listitem").map((li) => li.textContent)).toEqual([same, same, "다른 안내"]);
+        expect(errors).not.toHaveBeenCalled();
+      } finally {
+        errors.mockRestore();
+      }
+    });
+
     test("a batch that stops halfway says where, leaves only the changes that did not run in the tray, and its undo leads to a new preview", async () => {
       await queueThree();
       await waitFor(() => expect(applyBatchButton()).toBeEnabled());

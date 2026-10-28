@@ -1,22 +1,8 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback } from "react";
 import { errorMessage } from "../api/errors";
 import { iamApi } from "./api";
-import { iamKeys, refreshIam } from "./queries";
 import type { ChangePreview, IamChange, PreviewWarning } from "./types";
-
-/** 적용한 뒤 IAM이 반영될 때까지 기다렸다가 한 번 더 읽는 시간 */
-export const REFRESH_DELAY_MS = 3_000;
-/** 완료 안내가 저절로 사라지는 시간. 함께 알릴 일(notes)이 있는 안내는 닫을 때까지 남는다 */
-export const NOTICE_MS = 10_000;
-
-/** 적용을 마친 뒤의 안내 하나 */
-export interface ApplyNotice {
-  id: number;
-  summary: string;
-  /** IAM은 바꿨지만 하지 못한 일(변경 기록을 저장하지 못함 등). 있으면 사용자가 닫을 때까지 남기고, 다음 성공 안내가 덮지 않는다 */
-  notes: string[];
-}
+import { useApplyNotices, useIamRefresh, usePendingFlow } from "./useApplyFlow";
 
 export interface StartOptions {
   /** 되돌리기일 때 되돌리는 기록의 id. iam_apply에 그대로 넘겨서 기록에 "되돌림"으로 남긴다 */
@@ -65,26 +51,12 @@ export function applyGate(preview: { warnings: PreviewWarning[]; confirmText: st
  * 적용에 실패하면 창을 연 채 오류를 보여 주고, 미리보기를 다시 받기 전에는 적용하지 않는다.
  * 성공하면 IAM 쿼리를 바로 무효화하고 3초 뒤에 overview를 force=true로 한 번 더 읽는다(IAM 반영 지연).
  * 성공 안내(notices)는 10초 뒤 사라지지만, 백엔드가 함께 알린 일(변경 기록을 저장하지 못함 등)이 있으면 닫을 때까지 남는다.
+ * 안내, 다시 읽기, 열려 있는 흐름을 들고 있는 뼈대는 묶음 흐름(useIamBatch)과 함께 쓰는 useApplyFlow의 조각이다.
  */
 export function useIamChange(profile: string) {
-  const qc = useQueryClient();
-  const [pending, setPending] = useState<PendingChange | null>(null);
-  const [notices, setNotices] = useState<ApplyNotice[]>([]);
-  const noticeSeq = useRef(0);
-  // 여러 이벤트가 같은 렌더 안에서 연달아 와도 판단이 맞도록, 상태와 같은 값을 ref에도 바로 반영한다.
-  const pendingRef = useRef<PendingChange | null>(null);
-  const profileRef = useRef(profile);
-  profileRef.current = profile;
-  const seq = useRef(0);
-  const inFlight = useRef(false);
-  const onApplied = useRef<(() => void) | undefined>(undefined);
-  const refreshTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
-  const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-  const commit = useCallback((next: PendingChange | null) => {
-    pendingRef.current = next;
-    setPending(next);
-  }, []);
+  const { pending, pendingRef, profileRef, seq, inFlight, onApplied, commit, cancel } = usePendingFlow<PendingChange, () => void>(profile);
+  const { notices, announce, dismissNotice } = useApplyNotices();
+  const { invalidate, refreshLater } = useIamRefresh();
 
   const load = useCallback(
     async (p: string, change: IamChange, undoOf: string | null) => {
@@ -100,7 +72,7 @@ export function useIamChange(profile: string) {
       if (rev !== seq.current || !cur) return; // 그 사이 취소했거나 다른 변경을 시작했다
       commit({ ...cur, ...result, phase: "ready", stale: false });
     },
-    [commit],
+    [commit, pendingRef, seq],
   );
 
   const start = useCallback(
@@ -109,34 +81,13 @@ export function useIamChange(profile: string) {
       onApplied.current = opts?.onApplied;
       void load(profileRef.current, change, opts?.undoOf ?? null);
     },
-    [load],
+    [load, onApplied, pendingRef, profileRef],
   );
 
   const retryPreview = useCallback(() => {
     const cur = pendingRef.current;
     if (cur && cur.phase !== "applying") void load(cur.profile, cur.change, cur.undoOf);
-  }, [load]);
-
-  const cancel = useCallback(() => {
-    if (pendingRef.current?.phase === "applying") return; // 이미 보낸 요청은 되돌릴 수 없다
-    seq.current++;
-    onApplied.current = undefined;
-    commit(null);
-  }, [commit]);
-
-  const dismissNotice = useCallback((id: number) => {
-    setNotices((all) => all.filter((n) => n.id !== id));
-  }, []);
-
-  /** 성공 안내를 띄운다. 알릴 일이 남은 안내는 그대로 두고, 그렇지 않은 이전 안내만 새 안내로 바꾼다 */
-  const announce = useCallback((summary: string, notes: string[]) => {
-    const id = ++noticeSeq.current;
-    clearTimeout(noticeTimer.current);
-    setNotices((all) => [...all.filter((n) => n.notes.length > 0), { id, summary, notes }]);
-    if (notes.length === 0) {
-      noticeTimer.current = setTimeout(() => setNotices((all) => all.filter((n) => n.id !== id)), NOTICE_MS);
-    }
-  }, []);
+  }, [load, pendingRef]);
 
   const apply = useCallback(
     (typed: string): void => {
@@ -153,43 +104,22 @@ export function useIamChange(profile: string) {
           seq.current++;
           commit(null);
           announce(result.summary, result.notes ?? []);
-          void qc.invalidateQueries({ queryKey: iamKeys.root(cur.profile) });
-          void qc.invalidateQueries({ queryKey: iamKeys.changeLog });
-          const timer = setTimeout(() => {
-            refreshTimers.current.delete(timer);
-            void refreshIam(qc, cur.profile);
-          }, REFRESH_DELAY_MS);
-          refreshTimers.current.add(timer);
+          invalidate(cur.profile);
+          refreshLater(cur.profile);
           const done = onApplied.current;
           onApplied.current = undefined;
           done?.();
         } catch (e) {
           // 실패도 기록에 남는다. 앞의 호출이 이미 적용됐을 수 있어서(버전을 지운 뒤 새 버전 만들기가 실패 등) IAM 화면도 다시 읽는다.
           // 아무것도 쓰지 않은 거부였다면 백엔드는 캐시한 스냅숏을 그대로 주고, 썼다면 백엔드가 이미 그 스냅숏을 버렸다
-          void qc.invalidateQueries({ queryKey: iamKeys.root(cur.profile) });
-          void qc.invalidateQueries({ queryKey: iamKeys.changeLog });
+          invalidate(cur.profile);
           commit({ ...cur, phase: "ready", error: { kind: "apply", message: errorMessage(e) }, stale: true });
         } finally {
           inFlight.current = false;
         }
       })();
     },
-    [announce, commit, qc],
-  );
-
-  // 프로필이 바뀌면 열려 있던 변경을 버린다: 다른 계정에 낡은 미리보기를 적용하면 안 된다.
-  useEffect(() => {
-    seq.current++;
-    onApplied.current = undefined;
-    if (pendingRef.current?.phase !== "applying") commit(null);
-  }, [profile, commit]);
-
-  useEffect(
-    () => () => {
-      refreshTimers.current.forEach(clearTimeout);
-      clearTimeout(noticeTimer.current);
-    },
-    [],
+    [announce, commit, inFlight, invalidate, onApplied, pendingRef, refreshLater, seq],
   );
 
   return { pending, notices, start, apply, retryPreview, cancel, dismissNotice };

@@ -1,10 +1,9 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { errorMessage } from "../api/errors";
 import { iamApi } from "./api";
-import { CallList, ConfirmField, GATE_HINT, ImpactList, PreviewAlerts, ReversibleNote, WarningList } from "./previewParts";
+import { CallList, ConfirmField, GATE_HINT, ImpactList, PreviewAlerts, ReversibleNote, useSheetFocus, WarningList } from "./previewParts";
 import type { BatchItem, BatchPreview, BatchResult, IamChange } from "./types";
 import { batchGate, batchWarnings, stopMessage, type PendingBatch } from "./useIamBatch";
-import { useModal } from "./useModal";
 
 interface Props {
   pending: PendingBatch;
@@ -33,21 +32,7 @@ function Sheet({ pending, onApply, onRetry, onCancel, onStart }: Props) {
   const applying = phase === "applying";
   const failed = phase === "result" ? (result?.failed ?? null) : null;
   const [typed, setTyped] = useState("");
-  const cancelRef = useRef<HTMLButtonElement>(null);
-  const retryRef = useRef<HTMLButtonElement>(null);
-  const wasApplying = useRef(false);
-  const { sheetRef, trapTab } = useModal(() => {
-    if (!applying) onCancel();
-  });
-  useEffect(() => cancelRef.current?.focus(), []);
-  // 적용 중에는 버튼이 잠겨 초점이 사라진다. 끝나서 돌아오면 안전한 버튼(다시 받기, 없으면 취소·닫기)으로 초점을 돌려준다.
-  useEffect(() => {
-    if (phase === "applying") wasApplying.current = true;
-    else if (wasApplying.current) {
-      wasApplying.current = false;
-      (retryRef.current ?? cancelRef.current)?.focus();
-    }
-  }, [phase]);
+  const { sheetRef, trapTab, cancelRef, retryRef } = useSheetFocus(phase, onCancel);
 
   const undo = useUndoApplied(result, onStart);
 
@@ -72,7 +57,9 @@ function Sheet({ pending, onApply, onRetry, onCancel, onStart }: Props) {
             <>
               {phase === "loading" && <p>미리보기를 불러오는 중이에요…</p>}
               {preview && <BatchDetails preview={preview} />}
-              {preview?.confirmText && <ConfirmField required={preview.confirmText} typed={typed} onTyped={setTyped} locked={applying} />}
+              {preview?.confirmText && (
+                <ConfirmField required={preview.confirmText} typed={typed} onTyped={setTyped} locked={applying} mismatchHint="입력한 문구가 달라요" />
+              )}
             </>
           )}
           {undo.error && (
