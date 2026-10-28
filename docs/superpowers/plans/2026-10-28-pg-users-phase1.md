@@ -39,6 +39,7 @@
   - RLS: "행 수준 보안 켜짐"
   - SET ROLE only: "SET ROLE로만 쓸 수 있음"
   - Findings footnote: "역할별 비밀번호 해시 방식과 마지막 로그인은 RDS에서 볼 수 없어 점검하지 않아요"
+  - rds_superuser finding for a role that reaches it only through SET ROLE: "SET ROLE로 rds_superuser 권한을 쓸 수 있어요"
   - Manage reason: "이 사용자는 rds_superuser 멤버가 아니고 CREATEROLE도 없어서 바꿀 수 없어요"
   - Login prompt: title "DB 사용자", intro "IAM 인증으로 접속할 DB 사용자 이름을 입력하세요(예: iam_admin). 이 대상에 대해 기억해 둘게요", button "연결"
   - Nav: "점검", "역할", "권한", "기본 권한", "누가 할 수 있나", "세션"
