@@ -410,6 +410,14 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .cp .cp-rev.no { color: #ffb340; }
 .cp-confirm { margin: 14px 0 6px; font-size: 12px; color: var(--text); }
 .cp-confirm input { font-family: ui-monospace, Menlo, monospace; }
+.cp-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cp-item { border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 12px; }
+.cp-item-head { display: flex; align-items: baseline; gap: 8px; }
+.cp-item-no { flex: none; min-width: 18px; text-align: right; font-variant-numeric: tabular-nums; }
+.cp-item-sum { color: var(--text); font-size: 13px; word-break: break-word; }
+.cp-item .cp-warn { margin: 6px 0 0; }
+.cp-item-toggle { display: block; margin-top: 4px; font-size: 11px; text-align: left; }
+.cp-item .cp-calls { margin-top: 6px; }
 
 .sheet.pk { display: flex; flex-direction: column; max-width: calc(100vw - 32px); }
 .pk-search { width: 100%; margin-bottom: 8px; }
@@ -449,6 +457,8 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .cl-state .iam-chip + .iam-chip { margin-left: 4px; }
 .iam-log td.cl-act { width: 1%; white-space: nowrap; }
 .cl-why { white-space: normal; min-width: 210px; max-width: 230px; margin-top: 4px; font-size: 11px; }
+.iam-log tr.cl-batch td { background: #ffffff0d; font-weight: 600; }
+.iam-log tr.cl-in td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* IAM 할당 표: 모든 규칙은 .iam-asg 아래에만 둔다 */
 .iam-asg { min-height: 0; }

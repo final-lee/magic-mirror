@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ErrorState } from "../components/ErrorState";
 import { onMouseNav } from "../explorer/api";
 import { Assignments } from "./AssignmentsScreen";
+import { BatchPreviewDialog } from "./BatchPreviewDialog";
 import { ChangeLog } from "./ChangeLog";
 import { ChangePreviewDialog } from "./ChangePreviewDialog";
 import { Findings } from "./Findings";
@@ -16,7 +17,8 @@ import { policyNameFromId, policyRoute, principalRoute, routeForFocus, VIEW_LABE
 import type { IamOverview, PrincipalKind } from "./types";
 import { useAddedColumns } from "./useAddedColumns";
 import { useAssignmentDraft } from "./useAssignmentDraft";
-import { useIamChange } from "./useIamChange";
+import { useIamBatch } from "./useIamBatch";
+import { useIamChange, type ApplyNotice } from "./useIamChange";
 import { useIamHistory } from "./useIamHistory";
 import { WhoCan } from "./WhoCan";
 
@@ -56,8 +58,25 @@ function listCount(ov: IamOverview, view: IamView): number | null {
 
 const hasOpenDialog = () => !!document.querySelector(".modal");
 
-// 묶음 미리보기 흐름이 붙기 전까지 [미리보기]는 아무 일도 하지 않는다
-const noPreview = () => {};
+/** 적용을 마친 뒤의 안내 한 줄. 함께 알릴 일(notes)이 있으면 사용자가 닫을 때까지 남는다 */
+function DoneNotice({ notice, onDismiss }: { notice: ApplyNotice; onDismiss: () => void }) {
+  return (
+    <div className="iam-done" role="status">
+      <span aria-hidden="true">✓</span> <span>{notice.summary}</span> <span className="dim">반영까지 몇 초 걸릴 수 있어요</span>
+      <button className="icon" aria-label="알림 닫기" onClick={onDismiss}>
+        ✕
+      </button>
+      {/* 바꾸기는 했지만 하지 못한 일(변경 기록 저장 등). 이 안내는 닫을 때까지 남는다 */}
+      {notice.notes.length > 0 && (
+        <ul className="iam-done-notes" aria-label="함께 알릴 일">
+          {notice.notes.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export function IamTab({ profile, active, filter, focus, nonce }: Props) {
   const qc = useQueryClient();
@@ -66,6 +85,8 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
   const { route, canBack, canForward, navigate, replace, back, forward } = useIamHistory(HOME);
   // 모든 IAM 변경(버튼, 빠른 조치, 되돌리기)이 지나는 하나뿐인 길: 미리보기 → 확인 → 적용
   const change = useIamChange(profile);
+  // 장바구니의 변경 여러 개와 변경 기록의 묶음 되돌리기가 지나는 길. 하나짜리 변경과 섞지 않는다.
+  const batch = useIamBatch(profile);
   // 할당 표의 장바구니. 이 탭이 들고 있어서 IAM 안의 다른 화면을 보고 돌아와도 남고, 프로필을 바꾸면 비워진다.
   // 개요가 아직 없는 동안에도 부르므로 아래 early return보다 앞에 둔다.
   const draft = useAssignmentDraft(profile, ov);
@@ -210,7 +231,7 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
         tab={route.tab === "members" ? "members" : "policies"}
         onTab={(tab) => remember({ tab })}
         onOpen={navigate}
-        onPreview={noPreview}
+        onPreview={(changes) => batch.start(changes, { onApplied: draft.removeApplied })}
         filter={filter}
       />
     );
@@ -219,7 +240,7 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
   } else if (route.view === "whoCan") {
     body = <WhoCan profile={profile} overview={ov} onOpen={navigate} initial={route.search} onViewState={remember} />;
   } else {
-    body = <ChangeLog profile={profile} accountId={ov.accountId} onStart={change.start} />;
+    body = <ChangeLog profile={profile} accountId={ov.accountId} onStart={change.start} onStartBatch={batch.start} />;
   }
 
   return (
@@ -266,24 +287,15 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
         )}
         {overview.isError && <ErrorState compact error={overview.error} profile={profile} onRetry={() => void overview.refetch()} />}
         {change.notices.map((notice) => (
-          <div key={notice.id} className="iam-done" role="status">
-            <span aria-hidden="true">✓</span> <span>{notice.summary}</span> <span className="dim">반영까지 몇 초 걸릴 수 있어요</span>
-            <button className="icon" aria-label="알림 닫기" onClick={() => change.dismissNotice(notice.id)}>
-              ✕
-            </button>
-            {/* 바꾸기는 했지만 하지 못한 일(변경 기록 저장 등). 이 안내는 닫을 때까지 남는다 */}
-            {notice.notes.length > 0 && (
-              <ul className="iam-done-notes" aria-label="함께 알릴 일">
-                {notice.notes.map((note) => (
-                  <li key={note}>{note}</li>
-                ))}
-              </ul>
-            )}
-          </div>
+          <DoneNotice key={`change-${notice.id}`} notice={notice} onDismiss={() => change.dismissNotice(notice.id)} />
+        ))}
+        {batch.notices.map((notice) => (
+          <DoneNotice key={`batch-${notice.id}`} notice={notice} onDismiss={() => batch.dismissNotice(notice.id)} />
         ))}
         <div className="iam-main">{body}</div>
       </div>
       {change.pending && <ChangePreviewDialog pending={change.pending} onApply={change.apply} onRetry={change.retryPreview} onCancel={change.cancel} />}
+      {batch.pending && <BatchPreviewDialog pending={batch.pending} onApply={batch.apply} onRetry={batch.retryPreview} onCancel={batch.cancel} onStart={batch.start} />}
     </div>
   );
 }
