@@ -4,6 +4,7 @@ import { useSettings } from "../api/queries";
 import { useHistoryKeys } from "../lib/useHistoryKeys";
 import { useRouteHistory } from "../lib/useRouteHistory";
 import { DefaultPrivileges } from "./DefaultPrivileges";
+import { Findings } from "./Findings";
 import { LoginPrompt } from "./LoginPrompt";
 import { PgError } from "./PgError";
 import { PgNav } from "./PgNav";
@@ -12,8 +13,10 @@ import { refreshPg, refreshPgData, usePgFindings, usePgOverview, usePgTarget } f
 import { DEFAULT_KINDS } from "./RoleKinds";
 import { RoleDetail } from "./RoleDetail";
 import { RoleList } from "./RoleList";
-import { PG_VIEW_LABEL, roleRoute, samePgRoute, type PgRoute } from "./route";
+import { PG_VIEW_LABEL, roleRoute, samePgRoute, type PgRoute, type SchemaFocus } from "./route";
+import { Sessions } from "./Sessions";
 import type { PgOverview, PgTarget, PgTargetInfo, PgTargetKind } from "./types";
+import { WhoCan } from "./WhoCan";
 
 interface Props {
   target: PgTarget;
@@ -107,12 +110,14 @@ export function PgTab({ target, active, filter }: Props) {
   // 점검이 보이지 않는 동안의 새로 고침은, 이미 읽은 점검이면 표시와 무효화만 해 두었다가 다시 열 때 force로 읽는다(refreshPg). 한 번도 열지 않았으면 아무것도 하지 않는다.
   const findings = usePgFindings(target, !!ov && route.view === "findings");
   const [changing, setChanging] = useState(false);
-  // 역할 목록과 권한 표가 함께 쓰는 칩과 시스템 역할 토글, 역할 목록에서 고른 행. 상세를 보고 돌아와도 남는다.
+  // 역할 목록, 권한 표, 누가 할 수 있나가 함께 쓰는 칩과 시스템 역할 토글, 역할 목록에서 고른 행. 상세를 보고 돌아와도 남는다.
   const [kinds, setKinds] = useState(DEFAULT_KINDS);
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
   // 권한 표, 기본 권한(누가 할 수 있나도)이 함께 쓰는 데이터베이스 선택. 탭 하나에 하나이고, 기록(경로)이 아니라 여기에만 둔다.
   // 아직 안 골랐거나 고른 데이터베이스에 연결할 수 없게 되면 화면이 대상의 기본 데이터베이스를 보인다(pickDatabase).
   const [database, setDatabase] = useState<string | undefined>(undefined);
+  // 점검 항목이 권한 표를 열면서 부탁한 것(스키마와 역할). 표가 처음 그려지면서 한 번 쓰고 알리면 비운다.
+  const [pick, setPick] = useState<SchemaFocus | null>(null);
 
   // 로그인 사용자를 바꿔 새로 연결하면, 데이터베이스·역할·점검 …은 이전 사용자의 연결로 읽은 것이다. 새 개요가 오면 나머지를 다시 읽는다.
   // 첫 연결에서는 읽을 것이 없고, 개요를 다시 읽는 새로 고침은 사용자가 같아서 여기에 걸리지 않는다.
@@ -135,6 +140,12 @@ export function PgTab({ target, active, filter }: Props) {
   const go = (to: PgRoute) => {
     if (to.view === "roles" && to.id) setSelectedRole(to.id);
     navigate(to);
+  };
+  // 점검 항목의 객체를 누르면: 그 데이터베이스를 이 탭의 선택으로 하고, 권한 표를 그 스키마(와 역할)를 고른 채로 연다.
+  const openSchema = (to: SchemaFocus) => {
+    setDatabase(to.database);
+    setPick(to);
+    navigate({ view: "privileges" });
   };
   // 상세 화면이 보던 하위 탭을 현재 기록 항목에 남긴다. 뒤로 돌아오면 되살린다.
   const remember = (state: Partial<PgRoute>) => replace((r) => ({ ...r, ...state }));
@@ -183,12 +194,25 @@ export function PgTab({ target, active, filter }: Props) {
               onOpen={(name) => go(roleRoute(name))}
             />
           ) : route.view === "privileges" ? (
-            <PrivilegeGrid target={target} overview={o} database={database} onDatabase={setDatabase} filter={filter} kinds={kinds} onKinds={setKinds} />
+            <PrivilegeGrid
+              target={target}
+              overview={o}
+              database={database}
+              onDatabase={setDatabase}
+              filter={filter}
+              kinds={kinds}
+              onKinds={setKinds}
+              pick={pick}
+              onPickUsed={() => setPick(null)}
+            />
           ) : route.view === "defaults" ? (
             <DefaultPrivileges target={target} overview={o} database={database} onDatabase={setDatabase} />
+          ) : route.view === "whoCan" ? (
+            <WhoCan target={target} overview={o} database={database} onDatabase={setDatabase} kinds={kinds} onKinds={setKinds} />
+          ) : route.view === "sessions" ? (
+            <Sessions target={target} />
           ) : (
-            // 점검, 누가 할 수 있나, 세션은 다음 작업에서 이 자리에 들어온다
-            <div className="empty">{PG_VIEW_LABEL[route.view]} 화면은 아직 준비 중이에요</div>
+            <Findings target={target} overview={o} onOpenRole={(name) => go(roleRoute(name))} onOpenSchema={openSchema} />
           )}
         </div>
       </div>

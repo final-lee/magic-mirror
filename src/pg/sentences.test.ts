@@ -9,6 +9,7 @@ import {
   granteeLabel,
   noGrantSentence,
   objectPhrase,
+  reasonPath,
   sourceText,
 } from "./sentences";
 import type { PgDefaultAclRow, PgDefaultObjectType } from "./types";
@@ -146,5 +147,35 @@ describe("sourceText", () => {
 
   test("a superuser is just that", () => {
     expect(sourceText(source("superuser"), "postgres")).toBe("superuser");
+  });
+});
+
+describe("reasonPath", () => {
+  test("a direct grant is the role and how it got the privilege", () => {
+    expect(reasonPath("bob", source("direct", [], "app_owner"))).toBe("bob ← 직접 받음");
+  });
+
+  test("a group runs from the role to the group that was granted, and that group got it directly", () => {
+    expect(reasonPath("readonly", source("group", ["app_read"], "app_owner"))).toBe("readonly ← app_read ← 직접 받음");
+    expect(reasonPath("alice", source("group", ["app_write", "app_read"], "app_owner"))).toBe("alice ← app_write ← app_read ← 직접 받음");
+  });
+
+  test("the owner, and the roles that inherit the owner", () => {
+    expect(reasonPath("app_owner", source("owner", [], "app_owner"))).toBe("app_owner ← 소유자");
+    expect(reasonPath("alice", source("owner", ["app_owner"]))).toBe("alice ← app_owner ← 소유자");
+  });
+
+  test("PUBLIC reaches every role", () => {
+    expect(reasonPath("alice", source("public"))).toBe("alice ← 모든 역할(PUBLIC)");
+  });
+
+  test("a predefined role is on the way, and the predefined role itself has nothing before it", () => {
+    expect(reasonPath("iam_admin", source("predefined", ["pg_read_all_data"]))).toBe("iam_admin ← pg_read_all_data ← 미리 정의된 역할");
+    expect(reasonPath("alice", source("predefined", ["reporting", "pg_write_all_data"]))).toBe("alice ← reporting ← pg_write_all_data ← 미리 정의된 역할");
+    expect(reasonPath("pg_read_all_data", source("predefined"))).toBe("pg_read_all_data ← 미리 정의된 역할");
+  });
+
+  test("a superuser is just that", () => {
+    expect(reasonPath("postgres", source("superuser"))).toBe("postgres ← superuser");
   });
 });

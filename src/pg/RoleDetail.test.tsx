@@ -840,4 +840,27 @@ describe("세션", () => {
     expect(screen.getByText("이 역할의 세션이 없어요")).toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "세션 목록" })).not.toBeInTheDocument();
   });
+
+  describe("when the DB user cannot see the details of another user's session", () => {
+    const SESSIONS_FOOTNOTE = "빈 칸은 이 DB 사용자에게 보이지 않는 정보예요. 다른 사용자의 세션을 자세히 보려면 pg_read_all_stats 권한이 필요해요";
+
+    test("tells why the cells are blank, under the table", async () => {
+      m.role.mockResolvedValue(
+        sampleRoleView("alice", {
+          sessions: [{ pid: 7, role: "alice", database: "orders", clientAddr: null, applicationName: "psql", state: null, backendStart: null, queryStart: null, waitEvent: null, own: false }],
+        }),
+      );
+      setup("alice");
+      await openTab("세션");
+      const table = screen.getByRole("table", { name: "세션 목록" });
+      const note = screen.getByText(SESSIONS_FOOTNOTE);
+      expect(table.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    test("says nothing when every session shows its details", async () => {
+      setup("alice");
+      await openTab("세션");
+      expect(screen.queryByText(SESSIONS_FOOTNOTE)).not.toBeInTheDocument();
+    });
+  });
 });

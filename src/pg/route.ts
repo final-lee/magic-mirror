@@ -12,6 +12,16 @@ export interface PgRoute {
   tab?: string;
 }
 
+/**
+ * 점검 항목이 권한 표를 열 때 가리키는 곳: 데이터베이스와 그 안의 스키마(데이터베이스를 가리키는 항목이면 스키마는 없다).
+ * 항목이 역할도 가리키면 그 역할도 함께 와서, 표가 그 역할의 칸을 연다.
+ */
+export interface SchemaFocus {
+  database: string;
+  schema: string | null;
+  role: string | null;
+}
+
 export const PG_VIEW_LABEL: Record<PgView, string> = {
   findings: "점검",
   roles: "역할",

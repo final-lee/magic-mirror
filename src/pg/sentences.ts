@@ -1,5 +1,5 @@
 import { objectParticle } from "../iam/previewParts";
-import type { PgDefaultAclRow, PgDefaultObjectType, PgSource } from "./types";
+import type { PgDefaultAclRow, PgDefaultObjectType, PgSource, PgSourceKind } from "./types";
 
 /** 계약에서 모든 역할을 가리키는 받는 역할의 이름 */
 const PUBLIC_GRANTEE = "PUBLIC";
@@ -68,4 +68,22 @@ export function sourceText(source: PgSource, role: string): string {
     case "superuser":
       return "superuser";
   }
+}
+
+/** 이유 경로의 끝: 경로의 마지막 역할이 그 권한을 어떻게 갖는지. 그룹은 경로의 마지막 그룹이 ACL에 직접 올라 있다. */
+const REASON_END: Record<PgSourceKind, string> = {
+  direct: "직접 받음",
+  group: "직접 받음",
+  owner: "소유자",
+  public: PUBLIC_LABEL,
+  predefined: "미리 정의된 역할",
+  superuser: "superuser",
+};
+
+/**
+ * 누가 할 수 있나의 이유 경로 하나. 역할에서 시작해 권한을 받은 역할까지 가고(via, 역할 자신은 빠져 있다), 끝에 그 역할이 어떻게 받았는지를 붙인다.
+ * 예: "readonly ← app_read ← 직접 받음"은 readonly가 app_read의 권한을 상속하고, app_read가 그 권한을 직접 받았다는 뜻이다.
+ */
+export function reasonPath(role: string, source: PgSource): string {
+  return [role, ...source.via, REASON_END[source.kind]].join(" ← ");
 }

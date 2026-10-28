@@ -2,6 +2,12 @@ import type { PgCoverage, PgObjectKind, PgObjectRef, PgRoleKind } from "./types"
 
 export const ROLE_KIND_LABEL: Record<PgRoleKind, string> = { user: "사용자", group: "그룹" };
 
+/** 값이 없는 칸에 보이는 표시. 이 탭의 모든 표가 같은 것을 쓴다. */
+export const DASH = "—";
+
+/** 이름순. 역할 목록의 정렬과 같은 비교다(대소문자를 가리지 않는다). */
+export const collate = (a: string, b: string) => a.localeCompare(b, "ko", { sensitivity: "base" });
+
 export const OBJECT_KIND_LABEL: Record<PgObjectKind, string> = {
   database: "데이터베이스",
   schema: "스키마",
