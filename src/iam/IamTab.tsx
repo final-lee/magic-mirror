@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ErrorState } from "../components/ErrorState";
 import { onMouseNav } from "../explorer/api";
+import { Assignments } from "./AssignmentsScreen";
 import { ChangeLog } from "./ChangeLog";
 import { ChangePreviewDialog } from "./ChangePreviewDialog";
 import { Findings } from "./Findings";
@@ -13,6 +14,7 @@ import { PrincipalList } from "./PrincipalList";
 import { refreshIam, useIamOverview } from "./queries";
 import { policyNameFromId, policyRoute, principalRoute, routeForFocus, VIEW_LABEL, type IamRoute, type IamView } from "./route";
 import type { IamOverview, PrincipalKind } from "./types";
+import { useAssignmentDraft } from "./useAssignmentDraft";
 import { useIamChange } from "./useIamChange";
 import { useIamHistory } from "./useIamHistory";
 import { WhoCan } from "./WhoCan";
@@ -53,6 +55,9 @@ function listCount(ov: IamOverview, view: IamView): number | null {
 
 const hasOpenDialog = () => !!document.querySelector(".modal");
 
+// 묶음 미리보기 흐름이 붙기 전까지 [미리보기]는 아무 일도 하지 않는다
+const noPreview = () => {};
+
 export function IamTab({ profile, active, filter, focus, nonce }: Props) {
   const qc = useQueryClient();
   const overview = useIamOverview(profile);
@@ -60,6 +65,9 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
   const { route, canBack, canForward, navigate, replace, back, forward } = useIamHistory(HOME);
   // 모든 IAM 변경(버튼, 빠른 조치, 되돌리기)이 지나는 하나뿐인 길: 미리보기 → 확인 → 적용
   const change = useIamChange(profile);
+  // 할당 표의 장바구니. 이 탭이 들고 있어서 IAM 안의 다른 화면을 보고 돌아와도 남고, 프로필을 바꾸면 비워진다.
+  // 개요가 아직 없는 동안에도 부르므로 아래 early return보다 앞에 둔다.
+  const draft = useAssignmentDraft(profile, ov);
   // 목록마다 마지막으로 고른 행. 상세를 보고 돌아와도 그대로 남는다.
   const [selected, setSelected] = useState<Partial<Record<IamView, string>>>({});
 
@@ -120,7 +128,14 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
     );
   }
 
-  const counts: NavCounts = { findings: ov.findingCount, users: ov.users.length, groups: ov.groups.length, roles: ov.roles.length, policies: ov.policies.length };
+  const counts: NavCounts = {
+    findings: ov.findingCount,
+    users: ov.users.length,
+    groups: ov.groups.length,
+    roles: ov.roles.length,
+    policies: ov.policies.length,
+    assignments: draft.items.length || undefined,
+  };
   const select = (view: IamView, id: string) => setSelected((s) => ({ ...s, [view]: id }));
   // 행을 열면 그 행을 골라 둔다. 돌아왔을 때 어디서 왔는지 보이도록.
   const openRoute = (view: IamView, id: string, to: IamRoute) => {
@@ -178,6 +193,21 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
           onOpen={(id) => openRoute("policies", id, policyRoute(id))}
         />
       </section>
+    );
+  } else if (route.view === "assignments") {
+    // key: 열 추가로 더한 정책은 프로필마다 새로 시작한다
+    body = (
+      <Assignments
+        key={profile}
+        profile={profile}
+        overview={ov}
+        draft={draft}
+        tab={route.tab === "members" ? "members" : "policies"}
+        onTab={(tab) => remember({ tab })}
+        onOpen={navigate}
+        onPreview={noPreview}
+        filter={filter}
+      />
     );
   } else if (route.view === "findings") {
     body = <Findings profile={profile} overview={ov} onOpen={navigate} onFix={change.start} initialKind={route.tab} onViewState={remember} />;

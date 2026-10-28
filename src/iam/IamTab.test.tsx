@@ -12,6 +12,7 @@ import {
   bob,
   bobKeys,
   catalogActions,
+  ciBot,
   deactivateBobKey,
   deployPolicy,
   deployPolicyView,
@@ -740,5 +741,142 @@ describe("changing IAM", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(m.apply).not.toHaveBeenCalled();
+  });
+});
+
+describe("assignments", () => {
+  const openAssignments = async (extra: Partial<Props> = {}) => {
+    const utils = setup(extra);
+    fireEvent.click(await nav(/할당/));
+    await screen.findByRole("grid", { name: "할당 표" });
+    return utils;
+  };
+  const cell = (row: string, column: string) => screen.getByRole("button", { name: new RegExp(`^${row} · ${column}: `) });
+  const navCount = () => within(menu().getByRole("button", { name: /할당/ })).queryByTestId("nav-count");
+
+  test("the menu has 할당 right after 정책, and it opens the table", async () => {
+    setup();
+    await waitForMenu();
+    const labels = within(screen.getByRole("navigation", { name: "IAM 메뉴" }))
+      .getAllByRole("button")
+      .map((b) => b.textContent);
+    expect(labels.findIndex((l) => l?.includes("할당"))).toBe(labels.findIndex((l) => l?.includes("정책")) + 1);
+    fireEvent.click(menu().getByRole("button", { name: /할당/ }));
+    expect(await screen.findByRole("grid", { name: "할당 표" })).toBeInTheDocument();
+    expect(menu().getByRole("button", { name: /할당/ })).toHaveAttribute("aria-current", "page");
+    expect(within(screen.getByRole("navigation", { name: "현재 위치" })).getByText("할당")).toBeInTheDocument();
+  });
+
+  test("the menu shows how many changes are in the tray, and nothing while it is empty", async () => {
+    await openAssignments();
+    expect(navCount()).toBeNull();
+    fireEvent.click(cell("bob", "ReadOnlyAccess"));
+    expect(navCount()).toHaveTextContent("1");
+    fireEvent.click(cell("ci-bot", "ReadOnlyAccess"));
+    expect(navCount()).toHaveTextContent("2");
+    fireEvent.click(screen.getByRole("button", { name: "모두 취소" }));
+    expect(navCount()).toBeNull();
+  });
+
+  test("the tray is still there after a visit to another screen", async () => {
+    await openAssignments();
+    fireEvent.click(cell("bob", "ReadOnlyAccess"));
+    fireEvent.click(menu().getByRole("button", { name: /그룹/ }));
+    expect(screen.queryByRole("grid", { name: "할당 표" })).not.toBeInTheDocument();
+    expect(navCount()).toHaveTextContent("1");
+    fireEvent.click(menu().getByRole("button", { name: /할당/ }));
+    expect(await screen.findByRole("grid", { name: "할당 표" })).toBeInTheDocument();
+    expect(cell("bob", "ReadOnlyAccess")).toHaveAccessibleName("bob · ReadOnlyAccess: 붙일 예정");
+    expect(screen.getByText("변경 1개 · ReadOnlyAccess 붙이기 · bob")).toBeInTheDocument();
+  });
+
+  test("another profile starts with an empty tray", async () => {
+    const { update } = await openAssignments();
+    fireEvent.click(cell("bob", "ReadOnlyAccess"));
+    expect(navCount()).toHaveTextContent("1");
+    update({ profile: "dev" });
+    await waitFor(() => expect(m.overview).toHaveBeenCalledWith("dev", false));
+    expect(await screen.findByRole("grid", { name: "할당 표" })).toBeInTheDocument();
+    expect(navCount()).toBeNull();
+    expect(screen.queryByText(/^변경 \d+개 · /)).not.toBeInTheDocument();
+    expect(screen.queryByText(/찾을 수 없어서 뺐어요/)).not.toBeInTheDocument();
+    expect(cell("bob", "ReadOnlyAccess")).toHaveAccessibleName("bob · ReadOnlyAccess: 없음");
+  });
+
+  test("another profile does not keep the columns added in the first one", async () => {
+    m.listPolicies.mockResolvedValue([{ arn: "arn:aws:iam::123456789012:policy/legacy-unused", name: "legacy-unused", scope: "local", description: null, badges: [] }]);
+    const { update } = await openAssignments();
+    fireEvent.click(screen.getByRole("button", { name: "열 추가" }));
+    fireEvent.click(await screen.findByRole("option", { name: /legacy-unused/ }));
+    expect(cell("bob", "legacy-unused")).toBeInTheDocument();
+    update({ profile: "dev" });
+    expect(await screen.findByRole("grid", { name: "할당 표" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /· legacy-unused: / })).not.toBeInTheDocument();
+  });
+
+  test("going back to a profile that is already loaded does not bring the columns of the other one along", async () => {
+    m.listPolicies.mockResolvedValue([{ arn: "arn:aws:iam::123456789012:policy/legacy-unused", name: "legacy-unused", scope: "local", description: null, badges: [] }]);
+    const { update } = await openAssignments();
+    update({ profile: "dev" });
+    await waitFor(() => expect(m.overview).toHaveBeenCalledWith("dev", false));
+    expect(await screen.findByRole("grid", { name: "할당 표" })).toBeInTheDocument();
+    update({ profile: "prod" }); // 이미 불러온 개요라서 불러오는 화면을 거치지 않는다
+    expect(screen.getByRole("grid", { name: "할당 표" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "열 추가" }));
+    fireEvent.click(await screen.findByRole("option", { name: /legacy-unused/ }));
+    expect(cell("bob", "legacy-unused")).toBeInTheDocument();
+    update({ profile: "dev" });
+    expect(screen.getByRole("grid", { name: "할당 표" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /· legacy-unused: / })).not.toBeInTheDocument();
+  });
+
+  test("the headers open the policy and the principal, and back restores the tab that was open", async () => {
+    await openAssignments();
+    fireEvent.click(screen.getByRole("button", { name: "AdministratorAccess" }));
+    expect(await screen.findByRole("heading", { name: "app-deploy" })).toBeInTheDocument(); // policy 목은 어떤 id에도 app-deploy 상세를 돌려준다
+    expect(m.policy).toHaveBeenCalledWith("prod", adminPolicy.id);
+    fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
+    expect(await screen.findByRole("grid", { name: "할당 표" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "alice" }));
+    expect(await screen.findByRole("heading", { name: "alice" })).toBeInTheDocument();
+    expect(m.principal).toHaveBeenCalledWith("prod", alice.arn);
+    fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
+
+    fireEvent.click(await screen.findByRole("tab", { name: "그룹 구성원" }));
+    fireEvent.click(screen.getByRole("button", { name: "dev-team" }));
+    expect(await screen.findByRole("heading", { name: "dev-team" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
+    expect(await screen.findByRole("tab", { name: "그룹 구성원" })).toHaveAttribute("aria-selected", "true");
+    expect(cell("alice", "dev-team")).toHaveAccessibleName("alice · dev-team: 속함");
+  });
+
+  test("the toolbar filter narrows the rows", async () => {
+    const { update } = await openAssignments();
+    update({ filter: "ali" });
+    expect(screen.queryByRole("button", { name: /^bob · / })).not.toBeInTheDocument();
+    expect(cell("alice", "ReadOnlyAccess")).toBeInTheDocument();
+  });
+
+  test("reloading the overview drops a queued change that is already done, with a notice", async () => {
+    const { qc } = await openAssignments();
+    fireEvent.click(cell("bob", "ReadOnlyAccess"));
+    expect(navCount()).toHaveTextContent("1");
+    // 다른 곳에서 bob에 ReadOnlyAccess가 붙었다
+    const attached = sampleOverview({ users: [alice, { ...bob, attached: [readOnlyPolicy.arn] }, ciBot] });
+    m.overview.mockResolvedValue(attached);
+    await act(async () => {
+      await (qc as QueryClient).invalidateQueries({ queryKey: ["iam", "prod", "overview"] });
+    });
+    expect(await screen.findByText("이미 붙어 있어서 뺐어요: ReadOnlyAccess 붙이기 · bob")).toBeInTheDocument();
+    expect(navCount()).toBeNull();
+  });
+
+  test("the preview button hands the queued changes over without applying anything", async () => {
+    await openAssignments();
+    fireEvent.click(cell("bob", "ReadOnlyAccess"));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    expect(m.apply).not.toHaveBeenCalled();
+    expect(m.preview).not.toHaveBeenCalled();
   });
 });
