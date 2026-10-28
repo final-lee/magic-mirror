@@ -7,15 +7,10 @@ use super::*;
 use crate::iam::catalog::AccessLevel;
 use crate::iam::change::impact::PermDelta;
 use crate::iam::change::preview as preview_one;
-use crate::iam::change::scenarios::{account_arn, add_policy, add_to_group, attach, detach, group_rec, remove_from_group, set_status};
+use crate::iam::change::scenarios::{account_arn, add_policy, add_to_group, allowing, attach, detach, group_rec, remove_from_group, set_status};
 // 묶음을 쓰는 쪽이 보는 경로(`change`가 다시 내보내는 이름)로 가져온다
 use crate::iam::change::{application_order, ordered, preview_batch, BatchItem, BatchPreview, MAX_BATCH};
 use crate::iam::fixtures::*;
-
-/// 모든 리소스에 주어진 작업을 허용하는 정책 문장들.
-fn allowing(actions: &[&str]) -> Value {
-    json!([{ "Effect": "Allow", "Action": actions, "Resource": "*" }])
-}
 
 /// bob의 인라인 정책(prod-assets 읽기)을 걷어낸 스냅숏: 정책을 붙여 얻는 권한이 bob이 이미 가진 것에 가려지지 않는다.
 fn bare_bob() -> Snapshot {
@@ -218,7 +213,16 @@ fn batch_rules_block() {
     let fifty = preview_batch(&s, &many[..MAX_BATCH], &[]);
     assert!(every_warning(&fifty).all(|w| w.level != WarnLevel::Block), "{:?}", fifty.warnings);
     assert!(fifty.confirm_text.is_some() && !fifty.impacts.is_empty());
-    assert_blocked_by(&preview_batch(&s, &many, &[]), TOO_MANY);
+    // 너무 큰 묶음은 변경마다 계산하지 않는다(변경 목록이 비어 있다). 다른 묶음 규칙은 함께 나온다
+    let too_many = preview_batch(&s, &many, &[]);
+    assert_blocked_by(&too_many, TOO_MANY);
+    assert!(too_many.changes.is_empty());
+    let mut messy = many.clone();
+    messy.push(set_status("alice", "AKIA1", "Inactive"));
+    messy.push(makes_admin.clone());
+    let p = preview_batch(&s, &messy, &[]);
+    assert_eq!(messages(&p.warnings, WarnLevel::Block), vec![TOO_MANY, ONLY_ASSIGNMENTS, OVERLAP]);
+    assert!(p.changes.is_empty() && !p.reversible && p.confirm_text.is_none() && p.impacts.is_empty());
 
     // 붙이기·떼기·넣기·빼기가 아닌 변경. 앱이 쓰는 키를 끄는 변경이라 따로 보면 확인이 필요하다
     let stop_own_key = set_status("alice", "AKIA1", "Inactive");
@@ -422,4 +426,48 @@ fn impacts_omitted_is_sent_only_when_some_were_left_out() {
     let v = serde_json::to_value(&p).expect("직렬화");
     assert_eq!(v["impactsOmitted"], 1);
     assert_eq!(v["impacts"].as_array().map(Vec::len), Some(30));
+}
+
+// ── 큰 그룹 ─────────────────────────────────────────────────────────────
+
+/// 구성원이 60명인 그룹 `big`과 `s3:GetObject`만 허용하는 정책 `reader`가 든 스냅숏. (스냅숏, 그룹 ARN, 정책 ARN)
+fn with_big_group() -> (Snapshot, String, String) {
+    let mut s = snapshot();
+    s.groups.push(group_rec("big", &[]));
+    for i in 0..60 {
+        let mut member = user(&format!("m{i}"));
+        member.groups = vec!["big".into()];
+        s.users.push(member);
+    }
+    let reader = add_policy(&mut s, "reader", allowing(&["s3:GetObject"]));
+    (s, account_arn("group/big"), reader)
+}
+
+const NEW_ADMIN_BOB: &str = "관리자급 권한을 새로 얻는 주체: bob";
+
+#[test]
+fn a_big_group_change_does_not_push_a_later_target_out_of_the_analysis() {
+    let (s, big, reader) = with_big_group();
+
+    let p = preview_batch(&s, &[attach(&big, &reader), attach(BOB, ADMIN_POLICY)], &[]);
+
+    // 그룹과 구성원 60명만으로 계산 한도(50명)를 넘는다. 그래도 변경이 직접 바꾸는 주체(big, bob)가 먼저 계산돼서 bob이 관리자급이 되는 확인이 나온다
+    assert!(p.warnings.iter().any(|w| w.message.contains("처음 50개만 계산했어요")), "{:?}", p.warnings);
+    assert_eq!(messages(&p.warnings, WarnLevel::Confirm), vec![NEW_ADMIN_BOB]);
+    assert_eq!(p.confirm_text.as_deref(), Some("변경 2개 적용"));
+    assert_eq!(impact_names(&p)[..2], ["big", "bob"]);
+    assert!(impact_of(&p, "bob").lost.is_empty());
+}
+
+#[test]
+fn the_received_order_does_not_change_which_targets_are_analyzed() {
+    let (s, big, reader) = with_big_group();
+    let group_first = preview_batch(&s, &[attach(&big, &reader), attach(BOB, ADMIN_POLICY)], &[]);
+
+    let admin_first = preview_batch(&s, &[attach(BOB, ADMIN_POLICY), attach(&big, &reader)], &[]);
+
+    assert_eq!(messages(&admin_first.warnings, WarnLevel::Confirm), vec![NEW_ADMIN_BOB]);
+    assert_eq!(admin_first.confirm_text.as_deref(), Some("변경 2개 적용"));
+    assert_eq!(messages(&admin_first.warnings, WarnLevel::Confirm), messages(&group_first.warnings, WarnLevel::Confirm));
+    assert_eq!(admin_first.confirm_text, group_first.confirm_text);
 }

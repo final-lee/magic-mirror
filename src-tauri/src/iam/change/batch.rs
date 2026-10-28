@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use serde::Serialize;
 
 use super::facts::Facts;
-use super::impact::{affected, analyze, is_zero, shown};
+use super::impact::{affected, analyze, is_zero, shown, Ordered};
 use super::preview::rank;
 use super::text::{confirm_name, describe};
 use super::warnings;
@@ -94,15 +94,13 @@ fn batch_blocks(changes: &[IamChange]) -> Vec<Warning> {
     out
 }
 
-/// 변경이 바꾸는 주체. 사용자를 그룹에 넣고 빼는 변경도 그 사용자의 ARN으로 센다(같은 사용자에게 정책을 붙이는 변경과 한 대상이다).
+/// 변경이 바꾸는 주체(`warnings::principal_arn`). 사용자를 그룹에 넣고 빼는 변경도 그 사용자의 ARN으로 센다(같은 사용자에게 정책을 붙이는 변경과 한 대상이다).
+/// 주체를 알 수 없으면(스냅숏에 없는 사용자 등) 사용자 이름이나 변경 자체로 가른다.
 fn target_of(s: &Snapshot, c: &IamChange) -> String {
-    match c {
-        IamChange::AttachPolicy { target, .. } | IamChange::DetachPolicy { target, .. } => target.clone(),
-        IamChange::AddToGroup { user_name, .. } | IamChange::RemoveFromGroup { user_name, .. } => {
-            s.user(user_name).map_or_else(|| format!("user:{user_name}"), |u| u.arn.clone())
-        }
+    warnings::principal_arn(s, c).unwrap_or_else(|| match c {
+        IamChange::AddToGroup { user_name, .. } | IamChange::RemoveFromGroup { user_name, .. } => format!("user:{user_name}"),
         other => format!("{other:?}"),
-    }
+    })
 }
 
 /// 확인 문구: 묶음의 모든 변경이 한 대상에 몰려 있으면 그 이름, 아니면 "변경 N개 적용".
@@ -117,9 +115,17 @@ fn batch_confirm_text(s: &Snapshot, changes: &[IamChange]) -> String {
 /// 묶음 미리보기. `facts`는 `changes`와 같은 순서(받은 순서)로 변경마다 하나다.
 pub fn preview_batch(s: &Snapshot, changes: &[IamChange], facts: &[Facts]) -> BatchPreview {
     let mut batch_warnings = batch_blocks(changes);
+    if changes.len() > MAX_BATCH {
+        // 너무 큰 묶음은 적용할 수 없으니 변경마다 스냅숏을 복제해 가며 계산하지 않고 묶음 규칙의 막힘만 돌려준다
+        return BatchPreview { changes: Vec::new(), impacts: Vec::new(), impacts_omitted: 0, warnings: batch_warnings, confirm_text: None, reversible: false };
+    }
     let mut state = s.clone();
     let mut items: Vec<BatchItem> = Vec::with_capacity(changes.len());
-    let mut touched: Vec<String> = Vec::new();
+    // 영향을 계산할 주체. `analyze`는 앞에서부터 `MAX_AFFECTED`명만 계산하니, 변경마다 직접 바꾸는 주체(그룹은 그 자신)를 모두 먼저 넣고
+    // 그룹 구성원처럼 `affected`가 더 돌려준 주체는 그 뒤에 넣는다: 큰 그룹을 바꾸는 변경이 뒤의 변경의 대상을 한도 밖으로 밀어내지 못한다.
+    // 남는 틈: 직접 바꾸는 주체가 50명이고 앱의 자격 증명이 그룹을 거쳐서만 영향받으면, `analyze`가 앱의 자격 증명을 앞으로 옮기면서
+    // 마지막 주체가 빠진다(계산을 줄였다는 주의는 그대로 나온다).
+    let (mut touched, mut reached) = (Ordered::default(), Ordered::default());
     for i in application_order(changes) {
         let (c, f) = (&changes[i], facts.get(i).cloned().unwrap_or_default());
         let badges = warnings::target_badges(&state, c);
@@ -131,10 +137,11 @@ pub fn preview_batch(s: &Snapshot, changes: &[IamChange], facts: &[Facts]) -> Ba
             match apply_to_snapshot(&state, c) {
                 Err(reason) => found.push(Warning::new(WarnLevel::Block, reason)),
                 Ok(next) => {
+                    if let Some(arn) = warnings::principal_arn(&state, c) {
+                        touched.push(&arn);
+                    }
                     for arn in affected(&state, c) {
-                        if !touched.contains(&arn) {
-                            touched.push(arn);
-                        }
+                        reached.push(&arn);
                     }
                     state = next;
                 }
@@ -154,7 +161,10 @@ pub fn preview_batch(s: &Snapshot, changes: &[IamChange], facts: &[Facts]) -> Ba
             item.warnings.retain(|w| w.level != WarnLevel::Confirm);
         }
     } else {
-        let analysis = analyze(s, &state, touched, caller);
+        for arn in &reached.list {
+            touched.push(arn);
+        }
+        let analysis = analyze(s, &state, touched.list, caller);
         // 되돌리기는 적용의 반대 순서로 한다
         let inverses: Vec<IamChange> = items.iter().rev().filter_map(|i| i.inverse.clone()).collect();
         let (found, lost) = warnings::analysis_warnings(s, &state, &analysis, &inverses, false);
