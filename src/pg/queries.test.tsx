@@ -744,6 +744,22 @@ describe("refreshPgAfterChange", () => {
     expect(m.close).not.toHaveBeenCalled();
   });
 
+  test("the overview result is reported before the rest of the refresh has finished", async () => {
+    const { qc } = await mounted();
+    m.sessions.mockReturnValue(new Promise(() => {})); // a dead connection: the reads after the overview never come back
+    const seen: boolean[] = [];
+    void refreshPgAfterChange(qc, t, "orders", (read) => seen.push(read));
+    await waitFor(() => expect(seen).toEqual([true]));
+  });
+
+  test("a failed overview is reported as false", async () => {
+    const { qc } = await mounted();
+    m.overview.mockRejectedValue(new Error("x"));
+    const seen: boolean[] = [];
+    await expect(refreshPgAfterChange(qc, t, "orders", (read) => seen.push(read))).resolves.toBe(false);
+    expect(seen).toEqual([false]);
+  });
+
   test("the overview of a login nobody is connected as is not made up", async () => {
     const { qc } = await mounted();
     m.overview.mockResolvedValue(sampleOverview({ loginUser: "someone_else", fetchedAt: REREAD }));

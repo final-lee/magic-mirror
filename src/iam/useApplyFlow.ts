@@ -33,6 +33,17 @@ export function useApplyNotices() {
     setNotices((all) => all.filter((n) => n.id !== id));
   }, []);
 
+  /** 모든 안내에서 이 알릴 일을 뺀다. 알릴 일이 없어진 안내는 닫는다(화면이 다시 최신이 됐을 때 낡았다는 말을 거두는 데 쓴다) */
+  const dropNote = useCallback((note: string) => {
+    setNotices((all) =>
+      all.flatMap((n) => {
+        if (!n.notes.includes(note)) return [n];
+        const notes = n.notes.filter((x) => x !== note);
+        return notes.length > 0 ? [{ ...n, notes }] : [];
+      }),
+    );
+  }, []);
+
   /**
    * 안내를 띄우고 그 id를 돌려준다. 알릴 일이 남은 안내는 그대로 두고, 그렇지 않은 이전 안내만 새 안내로 바꾼다.
    * replaces에 앞서 띄운 안내의 id를 주면 그 안내도(알릴 일이 있어도) 이 안내로 바꾼다. 안내를 띄운 뒤에 알릴 일이 생겼을 때(적용은 했는데
@@ -48,7 +59,7 @@ export function useApplyNotices() {
     return id;
   }, []);
 
-  return { notices, announce, dismissNotice };
+  return { notices, announce, dismissNotice, dropNote };
 }
 
 /**

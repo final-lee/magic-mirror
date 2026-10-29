@@ -3,6 +3,9 @@ import type { PgOverview, PgTargetInfo } from "./types";
 /** 읽기 전용 복제본에는 아무것도 바꿀 수 없다 */
 export const READ_REPLICA_TEXT = "읽기 전용 복제본이라 바꿀 수 없어요";
 
+/** 시스템 역할(rdsadmin, rds_*, pg_* …)은 이 앱에서 바꿀 수 없다. 미리보기가 막힘으로 알리는 글과 같다 */
+export const systemRoleText = (role: string) => `시스템 역할이라 바꿀 수 없어요: ${role}`;
+
 /**
  * 이 대상에서 바꾸기 버튼을 끄는 이유. 바꿀 수 있으면 null이다.
  * 읽기 전용 복제본이 먼저이고(로그인한 DB 사용자와 상관없다), 그다음이 로그인한 DB 사용자가 역할을 관리할 수 없는 이유(1단계의 manageReason)다.

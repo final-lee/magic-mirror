@@ -6,17 +6,22 @@ import type { PgChange, PgGrantItem, PgGrantTarget } from "./types";
 /** 권한 이름의 순서. 백엔드 `Privilege`의 선언 순서와 같다(pg::model::Privilege). 읽기 전용이다: 제자리에서 정렬하면 모든 요약이 바뀐다 */
 export const PRIVILEGE_ORDER = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN", "EXECUTE", "USAGE", "CREATE", "CONNECT", "TEMPORARY"] as const;
 
-/**
- * 권한 목록의 글: 선언 순서로 한 번씩만 적고 ", "로 잇는다(pg::change::sql_text::privilege_list). 호출하는 쪽이 준 순서와 상관없이 같은 글이 나와야
- * 요약이 SQL이 주는 권한과 순서까지 같고 미리보기를 비교할 수 있다. 목록에 없는 이름(백엔드는 읽지 않는다)은 받은 순서대로 맨 뒤에 둔다.
- */
-export function privilegeList(privileges: string[]): string {
+/** 권한 이름을 선언 순서로 한 번씩만. 목록에 없는 이름(백엔드는 읽지 않는다)은 받은 순서대로 맨 뒤에 둔다. 받은 목록은 건드리지 않는다 */
+export function sortPrivileges(privileges: string[]): string[] {
   const order: readonly string[] = PRIVILEGE_ORDER;
   const rank = (name: string) => {
     const i = order.indexOf(name);
     return i === -1 ? order.length : i;
   };
-  return [...new Set(privileges)].sort((a, b) => rank(a) - rank(b)).join(", ");
+  return [...new Set(privileges)].sort((a, b) => rank(a) - rank(b));
+}
+
+/**
+ * 권한 목록의 글: 선언 순서로 한 번씩만 적고 ", "로 잇는다(pg::change::sql_text::privilege_list). 호출하는 쪽이 준 순서와 상관없이 같은 글이 나와야
+ * 요약이 SQL이 주는 권한과 순서까지 같고 미리보기를 비교할 수 있다.
+ */
+export function privilegeList(privileges: string[]): string {
+  return sortPrivileges(privileges).join(", ");
 }
 
 /** 받는 대상 하나의 이름. 함수는 서버가 적어 준 인자 목록까지 붙인다. */

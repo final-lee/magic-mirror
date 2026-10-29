@@ -216,8 +216,9 @@ async function rereadAfterOverview(qc: QueryClient, target: PgTarget) {
  * 1) 대상 정보와 개요(pg_open)  2) 데이터베이스 스냅숏과 점검(force=true로 다시 읽는다)  3) 나머지(역할, 칸, 검색, 세션 …)
  * 개요를 다시 연결하지 못했으면 뒤는 시도하지 않는다. 연결 제한 시간(10초)을 단계마다 기다리게 되기 때문이다.
  * 켜진 쿼리만 바로 다시 불리고, 나머지는 무효화만 되어 다시 열릴 때 읽는다.
+ * 개요를 다시 연결하지 못했으면 false다(화면은 아직 낡았다).
  */
-export async function refreshPg(qc: QueryClient, target: PgTarget): Promise<void> {
+async function refreshAll(qc: QueryClient, target: PgTarget): Promise<boolean> {
   markSnapshots(qc, target);
   await qc.invalidateQueries({ queryKey: pgKeys.root(target), predicate: (q) => BASE.has(kindOf(q)) });
   const overviewFailed = qc.getQueryCache().findAll({
@@ -225,9 +226,18 @@ export async function refreshPg(qc: QueryClient, target: PgTarget): Promise<void
     type: "active",
     predicate: (q) => kindOf(q) === "overview" && q.state.status === "error",
   });
-  if (overviewFailed.length > 0) return;
+  if (overviewFailed.length > 0) return false;
   await rereadAfterOverview(qc, target);
+  return true;
 }
+
+/** 새로 고침. 쿼리의 오류는 각 화면이 보인다 */
+export async function refreshPg(qc: QueryClient, target: PgTarget): Promise<void> {
+  await refreshAll(qc, target);
+}
+
+/** refreshPg와 같되, 개요를 다시 연결하지 못했으면 false를 돌려준다(화면이 아직 낡았다). 다시 읽기 버튼이 쓴다 */
+export const rereadPg = refreshAll;
 
 /**
  * refreshPg에서 연결(1단계)만 뺀 것. 로그인 사용자를 바꿔 새로 연결한 직후에 부른다.
@@ -286,10 +296,18 @@ async function replaceOverview(qc: QueryClient, target: PgTarget): Promise<boole
  *    켜진 쿼리는 바로 다시 불리고, 나머지는 무효화만 되어 다시 열릴 때 읽는다.
  * 어떤 단계가 실패해도 거부하지 않는다. 쿼리의 오류는 그 쿼리의 화면이 보인다. 다만 개요를 다시 읽지 못했으면 false를 돌려준다:
  * 개요를 보는 화면(역할 목록 …)은 오류 없이 낡은 값 그대로라서 알릴 곳이 따로 필요하다(REFRESH_FAILED_TEXT). 나머지 단계는 그래도 한다.
+ * onOverview는 개요를 읽자마자(나머지 단계 전에) 그 결과로 불린다. 돌려주는 값은 모든 단계가 끝난 뒤의 같은 결과다.
  */
-export async function refreshPgAfterChange(qc: QueryClient, target: PgTarget, database: string): Promise<boolean> {
+export async function refreshPgAfterChange(
+  qc: QueryClient,
+  target: PgTarget,
+  database: string,
+  onOverview?: (read: boolean) => void,
+): Promise<boolean> {
   const log = qc.invalidateQueries({ queryKey: pgKeys.changeLog });
   const overviewRead = await replaceOverview(qc, target);
+  // 개요의 결과는 나머지를 기다리지 않고 바로 알린다: 죽은 연결에서는 나머지 읽기마다 제한 시간을 기다리게 된다
+  onOverview?.(overviewRead);
 
   const executed = pgKeys.database(target, database);
   const query = qc.getQueryCache().find({ queryKey: executed, exact: true });
