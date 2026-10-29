@@ -1,7 +1,7 @@
 // 표 위에서 칸을 누른 채 끌어 칠하는 상태 기계. 할당 표(IAM)와 권한 표(PostgreSQL)가 함께 쓴다.
 // 행과 열이 무엇인지는 모른다: 칸을 번호(행, 열)로 가리키고, 칸이 칠할 수 있는지·무엇으로 칠할지·칠하는 일은 부르는 쪽이 정한다.
 import { useEffect, useRef, type MouseEvent, type PointerEvent } from "react";
-import { cellsBetween, posKey, type Pos } from "../iam/gridPos";
+import { cellsBetween, posKey, type Pos } from "./gridPos";
 
 /**
  * 버튼을 누르는 순간 버튼이 스스로 초점을 가져간다. WebKit은 눌러도 버튼에 초점을 주지 않아서, 그대로 두면 누른 칸에서 키보드를 이어 쓸 수 없다.
@@ -91,8 +91,8 @@ export function usePaintDrag<R, C>({ rows, columns, rowId, columnId, firstColumn
     if (!takeFocus(e)) return;
     onStart();
     const row = rows[r];
-    const column = columnAt(c) as C;
-    if (!editable(row, column)) {
+    const column = columnAt(c);
+    if (row === undefined || column === undefined || !editable(row, column)) {
       handled.current = null; // 칠할 수 없는 칸은 click에서 press가 맡는다
       return;
     }

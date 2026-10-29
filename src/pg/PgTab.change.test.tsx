@@ -436,6 +436,40 @@ describe("미리보기 and 적용 of the tray", () => {
     expect(screen.getByText("새로 만드는 테이블에는 적용되지 않아요")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "기본 권한도 담기" })).not.toBeInTheDocument();
   });
+
+  test("the dialog of a batch undo from the change log has no 기본 권한도 담기 either", async () => {
+    m.undoBatch.mockResolvedValue({ database: "orders", changes: [removeBobFromWriters], undoOf: ["b-1-2", "b-1-1"] });
+    m.previewBatch.mockImplementation(async (_t, database, changes) => batchPreview(database, changes, [{ level: "warn", message: "새로 만드는 테이블에는 적용되지 않아요", add: [defaultAuditRead] }]));
+    setup();
+    await connected();
+    openMenu("변경 기록");
+    await screen.findByRole("table", { name: "변경 기록" });
+    fireEvent.click(screen.getByRole("button", { name: "묶음 되돌리기" }));
+    await screen.findByRole("dialog", { name: "되돌리기 미리보기" });
+    expect(screen.getByText("새로 만드는 테이블에는 적용되지 않아요")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "기본 권한도 담기" })).not.toBeInTheDocument();
+  });
+});
+
+describe("where the tray and the notices sit", () => {
+  // styles.css gives .asg-tray and .asg-notice their layout under .pg; without this ancestor they would be unstyled
+  test("the tray bar is inside .pg", async () => {
+    setup();
+    await editPrivileges();
+    fireEvent.click(cellOf("alice", "audit"));
+    expect(document.querySelector(".asg-tray")?.closest(".pg")).not.toBeNull();
+  });
+
+  test("the draft notice is inside .pg", async () => {
+    setup();
+    await editPrivileges();
+    fireEvent.click(cellOf("alice", "audit"));
+    fireEvent.change(screen.getByRole("combobox", { name: "데이터베이스" }), { target: { value: "analytics" } });
+    await waitFor(() => expect(m.database).toHaveBeenCalledWith(pgTarget, "analytics", false));
+    await loadedGrid();
+    fireEvent.click(cellOf("bob", "audit"));
+    expect(document.querySelector(".asg-notice")?.closest(".pg")).not.toBeNull();
+  });
 });
 
 describe("what the tray refuses", () => {

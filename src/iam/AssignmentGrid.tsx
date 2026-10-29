@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { BadgeList } from "./Badges";
 import { isActual, isEditable, isShown, policyCell, rowKey, type AssignmentTab, type Column } from "./assignments";
 import { GridPopover } from "./GridPopover";
-import { parsePos, posKey, type Pos } from "./gridPos";
+import { parsePos, posKey, type Pos } from "../lib/gridPos";
 import { KIND_LABEL } from "./labels";
 import { SCOPE_LABEL } from "./PolicyList";
 import { changeBlockReason } from "./protect";

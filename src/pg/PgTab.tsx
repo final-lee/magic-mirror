@@ -326,7 +326,7 @@ export function PgTab({ target, active, filter }: Props) {
       ))}
       <div className="pg-main">{content}</div>
       {change.pending && <PgChangeDialog pending={change.pending} onApply={change.apply} onRetry={change.retryPreview} onCancel={change.cancel} />}
-      {batch.pending && <PgBatchDialog pending={batch.pending} onApply={batch.apply} onRetry={batch.retryPreview} onCancel={batch.cancel} onAddDefaults={draft.add} />}
+      {batch.pending && <PgBatchDialog pending={batch.pending} onApply={batch.apply} onRetry={batch.retryPreview} onCancel={batch.cancel} onAddDefaults={batch.pending.undoOf ? undefined : draft.add} />}
     </div>
   );
 }

@@ -479,7 +479,7 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .iam-log tr.cl-batch td { background: #ffffff0d; font-weight: 600; }
 .iam-log tr.cl-in td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
-/* IAM 할당 표: 모든 규칙은 .iam-asg 아래에만 둔다 */
+/* IAM 할당 표: 모든 규칙은 .iam-asg 아래에만 둔다. 장바구니(.asg-tray)와 안내(.asg-notice)는 PostgreSQL 탭(.pg)도 같은 규칙을 쓴다 */
 .iam-asg { min-height: 0; }
 .iam-asg .asg-bar { display: flex; align-items: center; gap: 12px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
 .iam-asg .asg-chips { display: flex; gap: 6px; }
@@ -487,8 +487,8 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .iam-asg .asg-chip.on { color: var(--text); border-color: var(--accent); background: #0a84ff1f; }
 .iam-asg .asg-chip:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
 .iam-asg .asg-chip input { margin: 0; accent-color: var(--accent); }
-.iam-asg .asg-notice { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); }
-.iam-asg .asg-notice .icon { margin-left: auto; width: 22px; height: 22px; color: inherit; }
+.iam-asg .asg-notice, .pg .asg-notice { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); }
+.iam-asg .asg-notice .icon, .pg .asg-notice .icon { margin-left: auto; width: 22px; height: 22px; color: inherit; }
 
 .iam-asg .asg-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 /* scroll-padding: 초점이 머리 행과 머리 열에 가린 채 스크롤이 멈추지 않게 한다 */
@@ -549,13 +549,13 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .iam-asg .asg-menuitem:hover:not(:disabled), .iam-asg .asg-menuitem:focus-visible { background: var(--accent); color: #fff; outline: none; }
 .iam-asg .asg-menuitem:disabled { color: var(--dim); cursor: default; }
 
-.iam-asg .asg-tray { flex: none; border-top: 1px solid var(--line); background: #232325; }
-.iam-asg .asg-tray-list { list-style: none; margin: 0; padding: 4px 12px; max-height: 160px; overflow: auto; border-bottom: 1px solid var(--line); font-size: 12px; }
-.iam-asg .asg-tray-list li { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
-.iam-asg .asg-tray-list .icon { margin-left: auto; width: 22px; height: 22px; }
-.iam-asg .asg-tray-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; }
-.iam-asg .asg-tray-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 4px 0; border: 0; background: none; color: var(--text); text-align: left; cursor: pointer; }
-.iam-asg .asg-tray-toggle span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iam-asg .asg-tray, .pg .asg-tray { flex: none; border-top: 1px solid var(--line); background: #232325; }
+.iam-asg .asg-tray-list, .pg .asg-tray-list { list-style: none; margin: 0; padding: 4px 12px; max-height: 160px; overflow: auto; border-bottom: 1px solid var(--line); font-size: 12px; }
+.iam-asg .asg-tray-list li, .pg .asg-tray-list li { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.iam-asg .asg-tray-list .icon, .pg .asg-tray-list .icon { margin-left: auto; width: 22px; height: 22px; }
+.iam-asg .asg-tray-bar, .pg .asg-tray-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; }
+.iam-asg .asg-tray-toggle, .pg .asg-tray-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 4px 0; border: 0; background: none; color: var(--text); text-align: left; cursor: pointer; }
+.iam-asg .asg-tray-toggle span:last-child, .pg .asg-tray-toggle span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .iam-asg .asg-match h4 { margin: 12px 0 4px; font-size: 12px; font-weight: 600; color: var(--dim); }
 .iam-asg .asg-match-list { list-style: none; margin: 0; padding: 0; max-height: 24vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
@@ -652,6 +652,20 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .pg-mark.pg-all { color: var(--green); }
 .pg-mark.pg-some { color: #8fd9a4; }
 .pg-mark.pg-none { color: #66666b; }
+/* 바꾸기 모드: 칠할 권한 고르기. 칩은 .pg-chip을 쓰고, 스키마 칸의 권한(앞 넷)과 데이터베이스 칸의 권한(뒤 셋) 사이에 선을 긋는다 */
+.pg-brushes { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pg-brush-sep { width: 1px; height: 14px; margin: 0 4px; background: var(--line); }
+/* 바꾸기 모드의 칸: 고른 권한 하나만 보인다(.pg-solo). 그 권한을 칠할 수 없는 칸(.pg-idle)은 흐리고, 칠할 수 있는 데이터베이스 칸(.pg-live)은 그대로 둔다 */
+
+.pg-cell.pg-solo { padding-right: 8px; }
+.pg-idle .pg-mark { opacity: .35; }
+.pg-live { background: #0a84ff0f; }
+/* 담아 둔 변경: 줄 예정(＋)과 뺄 예정(－)은 칸 바탕과 표시를 물들인다(IAM 할당 표의 .asg-add, .asg-del과 같은 색) */
+.pg-cell.pg-add, .pg-marks.pg-add { background: #30d15826; }
+.pg-cell.pg-del, .pg-marks.pg-del { background: #ff453a26; }
+.pg-mark.pg-add, .pg-mark.pg-del { font-size: 17px; font-weight: 700; opacity: 1; }
+.pg-mark.pg-add { color: var(--green); }
+.pg-mark.pg-del { color: #ff6b62; }
 /* 출처가 그룹이나 PUBLIC뿐인 칸은 흐리게 */
 .pg-dimmed .pg-mark { opacity: .45; }
 /* 못 쓰는 칸의 이유는 키보드로 왔을 때 표시 자리를 덮어 보인다(마우스는 title). ⚠ 자리는 남겨 둔다 */
