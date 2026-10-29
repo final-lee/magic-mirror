@@ -22,8 +22,8 @@ interface Props {
   overview: PgOverview;
   /** 닫기. 적용 중에는 닫을 수 없다 */
   onClose: () => void;
-  /** 역할을 모두 지웠다(창은 이 호출 뒤에 닫힌다). refreshed가 false면 목록을 다시 읽지 못했다 */
-  onDropped: (role: string, refreshed: boolean) => void;
+  /** 역할을 모두 지웠다(창은 이 호출 뒤에 닫힌다). refreshed가 false면 목록을 다시 읽지 못했다. notes는 백엔드가 함께 알린 일(변경 기록 저장 실패 등) */
+  onDropped: (role: string, refreshed: boolean, notes: string[]) => void;
 }
 
 const counts = (s: PgDropPlan["steps"][number]) => `객체 ${s.owned}개 · 권한 ${s.privileges}개 · 기본 권한 ${s.defaults}개`;
@@ -76,7 +76,7 @@ export function DropRoleDialog({ target, role, overview, onClose, onDropped }: P
       const refreshed = await refresh(plan.steps);
       if (!alive.current) return;
       if (result.stopped === null) {
-        onDropped(role, refreshed);
+        onDropped(role, refreshed, result.notes ?? []);
         return;
       }
       setStopped({ plan, result, refreshed });
@@ -160,6 +160,9 @@ export function DropRoleDialog({ target, role, overview, onClose, onDropped }: P
           {stopped && (
             <div className="cp-error" role="alert">
               <div>{stopped.result.stopped}</div>
+              {(stopped.result.notes ?? []).map((note, i) => (
+                <div key={i}>{note}</div>
+              ))}
               {!stopped.refreshed && <div>{REFRESH_FAILED_TEXT}</div>}
             </div>
           )}

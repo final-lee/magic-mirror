@@ -189,9 +189,9 @@ export function PgTab({ target, active, filter }: Props) {
     navigate({ view: "privileges" });
   };
   // 역할을 지웠다: 안내하고, 그 역할을 보고 있었다면 상세를 목록으로 바꾼다(지운 역할로 뒤로 돌아오지 않도록 기록 항목을 바꿔 둔다)
-  const dropped = (role: string, refreshed: boolean) => {
+  const dropped = (role: string, refreshed: boolean, notes: string[]) => {
     setDropping(null);
-    dropNotices.announce(droppedSummary(role), refreshed ? [] : [REFRESH_FAILED_TEXT]);
+    dropNotices.announce(droppedSummary(role), refreshed ? notes : [...notes, REFRESH_FAILED_TEXT]);
     setSelectedRole((current) => (current === role ? null : current));
     replace((r) => (r.view === "roles" && r.id === role ? { view: "roles" } : r));
   };
