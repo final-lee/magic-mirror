@@ -23,19 +23,17 @@ pub mod catalog;
 pub mod checks;
 pub mod connect;
 pub mod eval;
+pub mod exec;
 pub mod model;
 pub mod pool;
 pub mod summary;
 pub mod target;
 pub mod view;
 
-// 2단계의 부품들은 아직 제품 코드가 부르지 않는다(변경 명령과 `exec`는 QB4가 잇는다). 쓰이지 않는 코드로 경고가 나지 않게(`allow`를 쓰지 않고)
-// 그때까지는 시험 빌드에서만 컴파일한다. QB4가 명령을 잇는 대로 이 세 `#[cfg(test)]`를 뗀다.
-#[cfg(test)]
 pub mod change;
-#[cfg(test)]
+pub mod commit;
+pub mod log;
 pub mod password;
-#[cfg(test)]
 pub mod sql;
 
 #[cfg(test)]

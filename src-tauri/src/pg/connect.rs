@@ -6,6 +6,11 @@ use std::error::Error as StdError;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::future::poll_fn;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio_postgres::AsyncMessage;
+
 use aws_config::SdkConfig;
 use aws_credential_types::provider::ProvideCredentials;
 use aws_sdk_rds::auth_token::{AuthTokenGenerator, Config as TokenConfig};
@@ -46,9 +51,49 @@ const CERTIFICATE_UNVERIFIED: &str = "서버 인증서를 확인하지 못했어
 pub struct Connected {
     pub(in crate::pg) client: tokio_postgres::Client,
     pub backend_pid: i32,
+    /// 서버가 보낸 알림(NOTICE·WARNING …)이 도착한 순서대로 쌓인다(`spawn_connection`). 문장을 보내기 전에 비운다(`drain_notices`):
+    /// 앞선 문장의 알림이 다음 문장의 것으로 읽히지 않게, 그리고 쌓이기만 하지 않게
+    pub notices: UnboundedReceiver<Notice>,
     /// 읽다가 응답이 끊겨 더 쓰지 않기로 한 연결이다(`catalog::read`가 정한다). 서버가 연결을 닫지 않았으면 `client.is_closed()`는 계속 false라서,
     /// 연결 보관함은 이 표시로 이 연결을 버리고 다음에 새로 연결한다
     pub(in crate::pg) broken: bool,
+}
+
+/// 서버가 문장 도중에 보낸 알림 하나. `severity`는 현지화되지 않은 이름(`WARNING` …)이다
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Notice {
+    pub code: String,
+    pub severity: String,
+    pub message: String,
+}
+
+/// 연결을 돌리는 일을 띄운다. 이 앱에서 연결 작업을 띄우는 곳은 여기 하나다(`open`, 시험의 가짜 서버, live 시험이 쓴다).
+/// 서버가 보낸 알림은 하나도 빠짐없이 도착 순서대로 돌려주는 수신기로 보낸다: 알림을 받으면 다음 메시지를 읽기 전에 그 자리에서 보낸다.
+/// 알림은 그 문장의 응답(`CommandComplete`)보다 먼저 오므로, 문장의 `await`가 끝났을 때 그 문장의 알림은 이미 수신기에 있다.
+/// 서버가 닫거나 오류가 나면 작업은 끝나고(끝난 연결은 `client.is_closed()`로 알 수 있고, 오류는 다음 문장이 받는다) 수신기는 비어 있는 채로 닫힌다.
+pub fn spawn_connection<S, T>(mut connection: tokio_postgres::Connection<S, T>) -> UnboundedReceiver<Notice>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let (sender, receiver) = unbounded_channel();
+    tokio::spawn(async move {
+        while let Some(Ok(message)) = poll_fn(|cx| connection.poll_message(cx)).await {
+            if let AsyncMessage::Notice(notice) = message {
+                let severity = notice.parsed_severity().map_or_else(|| notice.severity().to_string(), |severity| severity.to_string());
+                // 받는 쪽이 없어졌으면 알림을 보낼 곳이 없을 뿐이다. 연결은 계속 돌린다
+                let _ = sender.send(Notice { code: notice.code().code().to_string(), severity, message: notice.message().to_string() });
+            }
+        }
+    });
+    receiver
+}
+
+impl Connected {
+    /// 쌓인 알림을 모두 버린다. 문장을 보내기 전에 부른다: 앞선 문장의 알림이 이번 것으로 읽히지 않게, 쌓이기만 하지 않게
+    pub(in crate::pg) fn drain_notices(&mut self) {
+        while self.notices.try_recv().is_ok() {}
+    }
 }
 
 /// 접속이 실패한 이유. 사용자 문구는 `describe_failure`가 정한다.
@@ -265,13 +310,10 @@ where
 {
     let attempt = async {
         let (mut client, connection) = config.connect(tls).await.map_err(|e| failure_of(&e))?;
-        tokio::spawn(async move {
-            // 클라이언트를 놓거나 서버가 닫으면 끝난다. 끝난 연결은 `client.is_closed()`로 알 수 있고, 오류는 다음 질의가 받는다
-            let _ = connection.await;
-        });
+        let notices = spawn_connection(connection);
         // 질의와 트랜잭션은 `catalog`에만 둔다. 서버 쪽 pid도 거기서 읽기 전용 트랜잭션으로 읽는다
         let backend_pid = catalog::backend_pid(&mut client).await.map_err(|e| failure_of(&e))?;
-        Ok(Connected { client, backend_pid, broken: false })
+        Ok(Connected { client, backend_pid, notices, broken: false })
     };
     tokio::time::timeout(limit, attempt).await.unwrap_or(Err(ConnFailure::Timeout))
 }

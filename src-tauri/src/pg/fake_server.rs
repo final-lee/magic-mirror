@@ -21,15 +21,41 @@ use tokio_postgres::config::SslMode;
 use tokio_postgres::NoTls;
 use tokio_rustls::TlsAcceptor;
 
-use super::connect::Connected;
+use super::connect::{spawn_connection, Connected};
 
 /// `SELECT pg_backend_pid()`에 돌려주는 값
 pub const FAKE_PID: i32 = 4242;
 const SSL_REQUEST: u32 = 80_877_103;
 
+/// 단순 질의 하나에 대한 서버의 반응. 문장에 `contains`가 들어 있으면(대소문자 구분 없이) 규칙 가운데 처음 맞는 것의 `reply`를 차례로 따른다.
+/// 맞는 규칙이 없는 문장은 그냥 끝났다고 답한다. 모든 반응은 문장의 응답 안에서 일어난다: 알림은 `CommandComplete`보다 먼저 간다
+#[derive(Clone, Copy)]
+pub struct Rule {
+    pub contains: &'static str,
+    pub reply: &'static [Reply],
+}
+
+#[derive(Clone, Copy)]
+pub enum Reply {
+    /// `NoticeResponse`: 심각도(`WARNING` …), SQLSTATE, 문구
+    Notice { severity: &'static str, code: &'static str, message: &'static str },
+    /// `ErrorResponse`(`ERROR`)로 끝낸다. 연결은 이어 쓸 수 있다
+    Error { code: &'static str, message: &'static str },
+    /// `ErrorResponse`(`FATAL`)를 보내고 연결을 닫는다
+    Fatal { code: &'static str, message: &'static str },
+    /// 문자열 칸 하나로 된 줄 하나를 보낸다
+    Row(&'static str),
+    /// 답 없이 연결을 닫는다
+    HangUp,
+    /// 답하지 않고 연결을 열어 둔다
+    Stall,
+}
+
 /// 클라이언트에게 어떻게 구는지
 #[derive(Clone, Copy)]
 pub enum Script {
+    /// `Ready`처럼 굴되, 단순 질의에는 규칙대로 답한다(`Rule`). 변경을 돌리는 `exec`를 시험한다
+    Writes(&'static [Rule]),
     /// 시작 메시지를 받아들이고 질의(`SELECT pg_backend_pid()`)에 답한다. 단순 질의(`START TRANSACTION …`, `SET …`, `COMMIT`)는 아무것이나 받아 준다.
     /// 연결은 클라이언트가 닫거나 `close_connections`가 불릴 때까지 열려 있다
     Ready,
@@ -192,10 +218,8 @@ impl FakeServer {
     /// 이 서버에 TLS 없이 연결해 `Connected`를 만든다(풀 테스트용)
     pub async fn connected(&self, backend_pid: i32) -> Connected {
         let (client, connection) = plain_config(self.port).connect(NoTls).await.expect("가짜 서버에 연결하지 못했어요");
-        tokio::spawn(async move {
-            let _ = connection.await;
-        });
-        Connected { client, backend_pid, broken: false }
+        let notices = spawn_connection(connection);
+        Connected { client, backend_pid, notices, broken: false }
     }
 }
 
@@ -369,8 +393,38 @@ where
                         // 단순 질의: 문장을 적어 두고 바로 끝났다고 답한다. 명령 태그는 문장의 첫 낱말이면 된다
                         let sql = String::from_utf8_lossy(body.strip_suffix(&[0]).unwrap_or(&body)).into_owned();
                         let command = sql.split_whitespace().next().unwrap_or_default().to_uppercase();
+                        let rule = match script {
+                            Script::Writes(rules) => rules.iter().find(|rule| sql.to_uppercase().contains(&rule.contains.to_uppercase())),
+                            _ => None,
+                        };
                         lock(&seen.queries).push(sql);
-                        let mut reply = message(b'C', format!("{command}\0").as_bytes());
+                        let mut reply = Vec::new();
+                        let mut errored = false;
+                        for step in rule.map_or(&[][..], |rule| rule.reply) {
+                            match *step {
+                                Reply::Notice { severity, code, message: text } => reply.extend(notice_response(severity, code, text)),
+                                Reply::Error { code, message: text } => {
+                                    reply.extend(error_response("ERROR", code, text));
+                                    errored = true;
+                                }
+                                Reply::Fatal { code, message: text } => {
+                                    reply.extend(error_response("FATAL", code, text));
+                                    let _ = stream.write_all(&reply).await;
+                                    return;
+                                }
+                                Reply::Row(value) => reply.extend(text_row(value)),
+                                Reply::HangUp => return,
+                                Reply::Stall => {
+                                    // 지금까지의 답은 보내고(알림 …) 그다음은 말이 없다. 서버가 닫을 때까지 열어 둔다
+                                    let _ = stream.write_all(&reply).await;
+                                    let _ = closing.changed().await;
+                                    return;
+                                }
+                            }
+                        }
+                        if !errored {
+                            reply.extend(message(b'C', format!("{command}\0").as_bytes()));
+                        }
                         reply.extend(message(b'Z', b"I"));
                         if stream.write_all(&reply).await.is_err() {
                             return;
@@ -456,6 +510,36 @@ fn data_row(script: Script) -> Vec<u8> {
         body.extend_from_slice(&value);
     }
     message(b'D', &body)
+}
+
+/// 문자열 칸 하나(`value`)로 된 줄 하나: `RowDescription`과 `DataRow`
+fn text_row(value: &str) -> Vec<u8> {
+    let mut description = 1u16.to_be_bytes().to_vec();
+    description.extend_from_slice(b"value\0");
+    description.extend_from_slice(&0u32.to_be_bytes());
+    description.extend_from_slice(&0u16.to_be_bytes());
+    description.extend_from_slice(&25u32.to_be_bytes());
+    description.extend_from_slice(&(-1i16).to_be_bytes());
+    description.extend_from_slice(&(-1i32).to_be_bytes());
+    description.extend_from_slice(&0u16.to_be_bytes());
+    let mut out = message(b'T', &description);
+    let mut row = 1u16.to_be_bytes().to_vec();
+    row.extend_from_slice(&(value.len() as i32).to_be_bytes());
+    row.extend_from_slice(value.as_bytes());
+    out.extend(message(b'D', &row));
+    out
+}
+
+/// `NoticeResponse`: `ErrorResponse`와 같은 칸들이고 태그만 다르다
+fn notice_response(severity: &str, code: &str, text: &str) -> Vec<u8> {
+    let mut body = Vec::new();
+    for (field, value) in [(b'S', severity), (b'V', severity), (b'C', code), (b'M', text)] {
+        body.push(field);
+        body.extend_from_slice(value.as_bytes());
+        body.push(0);
+    }
+    body.push(0);
+    message(b'N', &body)
 }
 
 /// `ErrorResponse`: 심각도(`FATAL`이면 서버가 연결을 끊는 오류, `ERROR`면 이어 쓸 수 있는 오류), 오류 코드, 문구

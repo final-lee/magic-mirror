@@ -121,8 +121,8 @@ fn warns(out: &mut Vec<PgWarning>, change: &PgChange, resolved: &Resolved, befor
         PgChange::Password { role } if in_rds_iam(role) => warn(IAM_USER_TEXT.to_string()),
         PgChange::CreateRole { login: true, groups, .. } if groups.iter().any(|g| g == RDS_IAM) => warn(IAM_USER_TEXT.to_string()),
         PgChange::Attributes { role, set } if !set.login && role_rec(before, role).is_some_and(|r| r.login) => warn(LOGIN_OFF_TEXT.to_string()),
-        PgChange::DefaultPrivilege { creator, schema: Some(schema), object_type, grantee, privileges, add: false, .. }
-            if resolved.blocks.is_empty() && global_holds(before, creator, schema, *object_type, grantee, privileges) =>
+        PgChange::DefaultPrivilege { creator, schema: Some(_), object_type, grantee, privileges, add: false, .. }
+            if resolved.blocks.is_empty() && global_holds(before, creator, *object_type, grantee, privileges) =>
         {
             warn(GLOBAL_DEFAULT_TEXT.to_string())
         }
@@ -131,19 +131,18 @@ fn warns(out: &mut Vec<PgWarning>, change: &PgChange, resolved: &Resolved, befor
 }
 
 fn default_acl<'a>(ctx: &Ctx<'a>, creator: &str, schema: Option<&str>, object_type: DefaultObjType) -> Option<&'a DefaultAclRec> {
-    ctx.db.default_acls.iter().find(|d| d.creator == creator && d.schema.as_deref() == schema && d.obj_type == object_type)
+    ctx.db.default_acl(creator, schema, object_type)
 }
 
 fn grants(acl: &[AclEntry], creator: &str, grantee: Option<&str>, privilege: Privilege) -> bool {
     acl.iter().any(|e| e.grantor == creator && e.grantee.as_deref() == grantee && e.privilege == privilege)
 }
 
-/// 스키마별 기록에는 없는데 모든 스키마의 기록(없으면 서버 내장 기본값)에 있는 권한이 하나라도 있는가: 스키마별로 빼도 달라지지 않는다
-fn global_holds(before: &Ctx, creator: &str, schema: &str, object_type: DefaultObjType, grantee: &str, privileges: &[Privilege]) -> bool {
+/// 모든 스키마의 기록(없으면 서버 내장 기본값)에 있는 권한이 하나라도 있는가. 스키마별 기록에도 있든 없든 스키마별로 빼도 새 객체가 받는 권한은 달라지지 않는다
+fn global_holds(before: &Ctx, creator: &str, object_type: DefaultObjType, grantee: &str, privileges: &[Privilege]) -> bool {
     let grantee = (grantee != "PUBLIC").then_some(grantee);
-    let per_schema = default_acl(before, creator, Some(schema), object_type).map(|d| d.acl.as_slice()).unwrap_or_default();
     let global = default_acl(before, creator, None, object_type).map(|d| d.acl.clone()).unwrap_or_else(|| built_in(before.cluster.version_num, creator, object_type));
-    privileges.iter().any(|&p| !grants(per_schema, creator, grantee, p) && grants(&global, creator, grantee, p))
+    privileges.iter().any(|&p| grants(&global, creator, grantee, p))
 }
 
 /// 변경 전과 변경 뒤(변경 하나 또는 묶음 전체)의 스냅숏을 견줘 알 수 있는 경고

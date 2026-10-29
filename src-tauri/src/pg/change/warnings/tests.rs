@@ -312,10 +312,14 @@ fn a_schema_default_revoke_held_by_the_global_default_warns() {
     assert!(fires(&s, &revoke, Warn, text));
     // 모든 스키마에서 빼는 것은 된다
     assert!(!fires(&s, &default_change("app_owner", None, DefaultObjType::Tables, "app_read", &[Select], false), Warn, text));
-    // 스키마별 기록이 가진 것을 빼는 것은 된다
+    // 스키마별 기록도 같은 권한을 가졌어도 모든 스키마의 기록이 가졌으면 경고한다: 스키마별 항목을 빼도 새 객체가 받는 권한은 그대로다
     let mut held = s.clone();
     held.db.default_acls.push(default_rec("app_owner", Some("app"), DefaultObjType::Tables, Some("app_read"), &[Select]));
-    assert!(!fires(&held, &revoke, Warn, text));
+    assert!(fires(&held, &revoke, Warn, text));
+    // 모든 스키마의 기록에는 없고 스키마별 기록만 가진 것을 빼는 것은 된다
+    let mut only_schema = admin(PG16);
+    only_schema.db.default_acls.push(default_rec("app_owner", Some("app"), DefaultObjType::Tables, Some("app_read"), &[Select]));
+    assert!(!fires(&only_schema, &revoke, Warn, text));
     // 아무 데도 없는 것은 서버 내장 기본값도 아니다
     assert!(!fires(&admin(PG16), &revoke, Warn, text));
     // 내장 기본값이 가진 것(소유자 자신)

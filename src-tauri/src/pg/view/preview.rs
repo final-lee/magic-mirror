@@ -117,3 +117,43 @@ pub struct PgBatchPreview {
     pub confirm_text: Option<String>,
     pub reversible: bool,
 }
+
+/// 변경 하나의 적용 결과. 새 비밀번호의 평문은 만들거나 다시 정한 이 결과에만, 한 번 들어간다.
+/// `Debug`를 파생하지 않는다: 로그나 오류에 찍혀도 비밀번호가 새지 않게 가려서 찍는다(검사 테스트 `pg::hygiene`이 본다)
+#[derive(PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PgApplyResult {
+    pub log_id: String,
+    pub summary: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    /// 적용은 됐지만 그 뒤에 하지 못한 일, 알아둘 일. 비면 보내지 않는다
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+}
+
+impl std::fmt::Debug for PgApplyResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let password = self.password.as_ref().map(|_| crate::pg::password::MASK);
+        f.debug_struct("PgApplyResult").field("log_id", &self.log_id).field("summary", &self.summary).field("password", &password).field("notes", &self.notes).finish()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PgBatchResult {
+    pub batch_id: String,
+    pub log_ids: Vec<String>,
+    pub summary: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+}
+
+/// 기록을 되돌리는 변경들과 되돌리는 기록의 id
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PgUndo {
+    pub database: String,
+    pub changes: Vec<PgChange>,
+    pub undo_of: Vec<String>,
+}

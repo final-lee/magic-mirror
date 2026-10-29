@@ -8,8 +8,9 @@
 
 use std::collections::HashMap;
 use std::future::Future;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex as AsyncMutex;
@@ -17,12 +18,21 @@ use tokio::sync::Mutex as AsyncMutex;
 use crate::commands::AppState;
 use crate::error::AppError;
 use crate::iam::clock::now_secs;
+use crate::iam::commit::{new_log_id, PlanStore};
+use crate::pg::change::model::PgChange;
+use crate::pg::change::preview::{evaluate, evaluate_batch, PreviewCtx};
+use crate::pg::commit::{self, PgChanges, PgCommitResult, PgPlan, PgRequest};
 use crate::pg::connect::{self, Connected};
+use crate::pg::exec::{self, ExecError};
+use crate::pg::log as change_log;
 use crate::pg::model::{ClusterSnapshot, DbSnapshot};
 use crate::pg::pool::{ConnKey, Pool, NOT_OPENED};
 use crate::pg::summary::{self, parse_privilege};
 use crate::pg::target::{resolve as resolve_target, PgTarget, PgTargetInfo};
-use crate::pg::view::{PgCellDetail, PgDatabaseView, PgFindings, PgObjectRef, PgOverview, PgRoleView, PgSession, PgSkippedDatabase, PgWhoCan};
+use crate::pg::view::{
+    PgApplyResult, PgBatchPreview, PgBatchResult, PgCellDetail, PgDatabaseView, PgFindings, PgObjectRef, PgOverview, PgPreview, PgRoleView, PgSession,
+    PgSkippedDatabase, PgUndo, PgWhoCan,
+};
 use crate::pg::{catalog, checks};
 
 /// 연결 보관함에서 오래 안 쓴 연결을 닫는 주기
@@ -51,6 +61,10 @@ pub struct PgState {
     clusters: Mutex<HashMap<PgTarget, Arc<ClusterSnapshot>>>,
     /// (대상, 데이터베이스) → 데이터베이스 스냅숏
     dbs: Mutex<HashMap<(PgTarget, String), Arc<DbSnapshot>>>,
+    /// 변경 기록 파일(`db-changes.jsonl`)의 경로
+    log_path: PathBuf,
+    /// 미리보기에서 사용자가 본 계획. 적용할 때 다시 계산한 계획과 견준다(한 번 쓰면 버린다)
+    plans: Mutex<PlanStore<PgPlan>>,
     /// 대상 → 열기 번호. 대상을 닫아도 지우지 않는다: 번호는 계속 커져야 한다(닫기 전에 시작한 열기는 `epoch`가 거른다)
     opens: Mutex<HashMap<PgTarget, OpenNumbers>>,
 }
@@ -81,6 +95,10 @@ struct Opened {
 }
 
 impl PgState {
+    pub fn new(log_path: PathBuf) -> PgState {
+        PgState { log_path, ..Default::default() }
+    }
+
     /// 열린 대상의 상태. 아직 열리지 않았거나 닫혔으면 "먼저 연결해 주세요".
     /// 닫힌 횟수를 상태보다 먼저 읽는다: 그 사이에 닫히면 상태가 없거나 연결할 때 걸러진다.
     fn opened(&self, target: &PgTarget) -> Result<Opened, AppError> {
@@ -153,6 +171,16 @@ impl PgState {
             return;
         }
         locked(&self.dbs).insert((target.clone(), database.to_string()), snapshot);
+    }
+
+    /// 새로 읽은 클러스터 스냅숏을 담는다. `keep_db`처럼 읽는 사이에 탭이 닫혔으면(닫고 다시 열었어도) 담지 않는다.
+    /// 다른 데이터베이스의 스냅숏은 그대로 둔다
+    fn keep_cluster(&self, target: &PgTarget, epoch: u64, cluster: Arc<ClusterSnapshot>) {
+        let mut clusters = locked(&self.clusters);
+        if !clusters.contains_key(target) || self.pool.epoch(target) != epoch {
+            return;
+        }
+        clusters.insert(target.clone(), cluster);
     }
 
     /// 읽어 둔 데이터베이스 스냅숏들(이름순)
@@ -362,6 +390,148 @@ impl PgState {
     }
 }
 
+// ───────────────────────── 변경 ─────────────────────────
+
+const DATABASE_NOT_CHANGEABLE: &str = "이 데이터베이스에서는 바꿀 수 없어요";
+
+/// 변경이 도는 데이터베이스가 클러스터 스냅숏에 있고 연결할 수 있어야 한다(템플릿과 `rdsadmin`은 스냅숏에 없다). 연결하기 전에 본다
+fn check_execution_database(cluster: &ClusterSnapshot, database: &str) -> Result<(), AppError> {
+    if cluster.databases.iter().any(|d| d.name == database && d.allow_conn) {
+        Ok(())
+    } else {
+        Err(AppError::other(format!("{DATABASE_NOT_CHANGEABLE}: {database}")))
+    }
+}
+
+/// 미리보기와 적용이 똑같이 읽는 재료: 방금 `force`로 읽은 클러스터와 실행 데이터베이스의 스냅숏
+struct Gathered {
+    opened: Opened,
+    cluster: Arc<ClusterSnapshot>,
+    db: Arc<DbSnapshot>,
+    own_pids: Vec<i32>,
+}
+
+impl PgState {
+    /// 기본 데이터베이스의 연결로 클러스터 스냅숏을 새로 읽어 담는다
+    async fn read_cluster(&self, app: &AppState, target: &PgTarget, opened: &Opened) -> Result<Arc<ClusterSnapshot>, AppError> {
+        let conn = connection(app, self, target, opened, &opened.info.default_database).await?;
+        let cluster = Arc::new(catalog::cluster_snapshot(&mut *conn.lock().await, &opened.login).await?);
+        self.keep_cluster(target, opened.epoch, cluster.clone());
+        Ok(cluster)
+    }
+
+    /// 클러스터와 실행 데이터베이스를 `force`로 다시 읽어 담는다(다른 데이터베이스의 스냅숏은 그대로 둔다)
+    async fn refresh(&self, app: &AppState, target: &PgTarget, database: &str) -> Result<(Opened, Arc<ClusterSnapshot>, Arc<DbSnapshot>), AppError> {
+        let opened = self.opened(target)?;
+        check_execution_database(&opened.cluster, database)?;
+        let cluster = self.read_cluster(app, target, &opened).await?;
+        check_execution_database(&cluster, database)?;
+        let opened = Opened { cluster: cluster.clone(), ..opened };
+        let db = snapshot_of(self, target, opened.epoch, database, true, |name| read_database(app, self, target, &opened, name)).await?;
+        Ok((opened, cluster, db))
+    }
+
+    async fn gather(&self, app: &AppState, target: &PgTarget, database: &str) -> Result<Gathered, AppError> {
+        let (opened, cluster, db) = self.refresh(app, target, database).await?;
+        Ok(Gathered { opened, cluster, db, own_pids: self.pool.backend_pids(target) })
+    }
+
+    /// 클러스터 스냅숏을 새로 읽어 담고 개요를 만든다. RDS API는 부르지 않고 데이터베이스 스냅숏은 그대로 둔다
+    async fn overview(&self, app: &AppState, target: &PgTarget) -> Result<PgOverview, AppError> {
+        let opened = self.opened(target)?;
+        let cluster = self.read_cluster(app, target, &opened).await?;
+        let info = opened.info;
+        blocking(move || summary::overview(&info, &cluster, now_secs())).await
+    }
+
+    async fn preview(&self, app: &AppState, target: &PgTarget, change: PgChange) -> Result<PgPreview, AppError> {
+        let default_db = self.opened(target)?.info.default_database;
+        let g = self.gather(app, target, change.execution_database(&default_db)).await?;
+        let (read_replica, now) = (g.opened.info.read_replica, now_secs());
+        let shown = blocking({
+            let change = change.clone();
+            move || {
+                let ctx = PreviewCtx { cluster: &g.cluster, db: &g.db, own_pids: &g.own_pids, read_replica, default_db: &default_db, now };
+                evaluate(&ctx, &change).preview
+            }
+        })
+        .await?;
+        locked(&self.plans).remember(&target.profile, &(target, &change), PgPlan::One(shown.clone()), now);
+        Ok(shown)
+    }
+
+    async fn preview_batch(&self, app: &AppState, target: &PgTarget, database: String, changes: Vec<PgChange>) -> Result<PgBatchPreview, AppError> {
+        let g = self.gather(app, target, &database).await?;
+        let (read_replica, now, default_db) = (g.opened.info.read_replica, now_secs(), g.opened.info.default_database.clone());
+        let shown = blocking({
+            let (database, changes) = (database.clone(), changes.clone());
+            move || {
+                let ctx = PreviewCtx { cluster: &g.cluster, db: &g.db, own_pids: &g.own_pids, read_replica, default_db: &default_db, now };
+                evaluate_batch(&ctx, &database, &changes).preview
+            }
+        })
+        .await?;
+        locked(&self.plans).remember(&target.profile, &(target, (&database, &changes)), PgPlan::Batch(shown.clone()), now);
+        Ok(shown)
+    }
+
+    /// 미리보기에서 본 계획을 꺼내(꺼낸 계획은 맞든 틀리든 다시 쓰지 않는다) `commit`에 넘긴다. 문장을 돌려 봤으면 읽어 둔 스냅숏을 새로 읽는다.
+    /// 문장을 돌리는 `exec::run`은 이 파일에서 `commit::commit`에 넘기는 이 닫힘 하나에서만 부른다
+    async fn apply(&self, app: &AppState, target: &PgTarget, changes: PgChanges, confirm_text: Option<String>, undo_of: Vec<String>) -> Result<PgCommitResult, AppError> {
+        let default_db = self.opened(target)?.info.default_database;
+        let database = match &changes {
+            PgChanges::One(change) => change.execution_database(&default_db).to_string(),
+            PgChanges::Batch { database, .. } => database.clone(),
+        };
+        let g = self.gather(app, target, &database).await?;
+        let now = now_secs();
+        let seen = match &changes {
+            PgChanges::One(change) => locked(&self.plans).take(&target.profile, &(target, change), now),
+            PgChanges::Batch { database, changes } => locked(&self.plans).take(&target.profile, &(target, (database, changes)), now),
+        };
+        let request = PgRequest {
+            profile: target.profile.clone(),
+            target_arn: g.opened.info.arn.clone(),
+            login_user: g.opened.login.clone(),
+            cluster: g.cluster.clone(),
+            db: g.db.clone(),
+            own_pids: g.own_pids.clone(),
+            read_replica: g.opened.info.read_replica,
+            default_db: g.opened.info.default_database.clone(),
+            now,
+            changes,
+            confirm_text,
+            undo_of,
+            seen,
+            log_path: self.log_path.clone(),
+            log_id: new_log_id(SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis())),
+        };
+        let (opened, database) = (&g.opened, database.as_str());
+        let committed = commit::commit(
+            request,
+            |steps| async move {
+                let conn = connection(app, self, target, opened, database).await.map_err(ExecError::Failed)?;
+                let mut conn = conn.lock().await;
+                exec::run(&mut conn, &steps).await
+            },
+            || async { self.refresh(app, target, database).await.map(|(_, cluster, db)| (cluster, db)) },
+        )
+        .await;
+        if committed.ran {
+            // 읽지 못해도 괜찮다: 화면이 다시 읽는다(`pg_overview`)
+            let _ = self.refresh(app, target, database).await;
+        }
+        committed.result
+    }
+
+    async fn log(&self) -> Result<Vec<change_log::PgLogEntry>, AppError> {
+        let path = self.log_path.clone();
+        let mut entries = tokio::task::spawn_blocking(move || change_log::read_all(&path)).await.map_err(|e| AppError::other(format!("변경 기록을 읽지 못했어요: {e}")))?;
+        entries.reverse();
+        Ok(entries)
+    }
+}
+
 /// live 시험(`pg::live_tests`)이 AWS 없이 열린 상태를 만들고 명령의 몸통을 부르는 길. 제품 빌드에는 없다:
 /// `begin_open`과 `finish_open`은 `open`이 로그인 이름과 대상을 확인한 뒤에만 부르는 것이라 크레이트 안의 다른 코드에 열어 두지 않는다.
 #[cfg(test)]
@@ -432,6 +602,70 @@ pub async fn pg_sessions(app: State<'_, AppState>, pg: State<'_, PgState>, targe
 #[tauri::command]
 pub async fn pg_findings(app: State<'_, AppState>, pg: State<'_, PgState>, target: PgTarget, force: bool) -> Result<PgFindings, AppError> {
     pg.findings(&app, &target, force).await
+}
+
+/// 최신 클러스터 스냅숏으로 만든 개요. 적용한 뒤 화면이 부른다
+#[tauri::command]
+pub async fn pg_overview(app: State<'_, AppState>, pg: State<'_, PgState>, target: PgTarget) -> Result<PgOverview, AppError> {
+    pg.overview(&app, &target).await
+}
+
+#[tauri::command]
+pub async fn pg_preview(app: State<'_, AppState>, pg: State<'_, PgState>, target: PgTarget, change: PgChange) -> Result<PgPreview, AppError> {
+    pg.preview(&app, &target, change).await
+}
+
+#[tauri::command]
+pub async fn pg_apply(
+    app: State<'_, AppState>,
+    pg: State<'_, PgState>,
+    target: PgTarget,
+    change: PgChange,
+    confirm_text: Option<String>,
+    undo_of: Option<String>,
+) -> Result<PgApplyResult, AppError> {
+    match pg.apply(&app, &target, PgChanges::One(change), confirm_text, undo_of.into_iter().collect()).await? {
+        PgCommitResult::One(result) => Ok(result),
+        PgCommitResult::Batch(_) => Err(AppError::other("적용 결과를 읽지 못했어요")),
+    }
+}
+
+#[tauri::command]
+pub async fn pg_preview_batch(app: State<'_, AppState>, pg: State<'_, PgState>, target: PgTarget, database: String, changes: Vec<PgChange>) -> Result<PgBatchPreview, AppError> {
+    pg.preview_batch(&app, &target, database, changes).await
+}
+
+#[tauri::command]
+pub async fn pg_apply_batch(
+    app: State<'_, AppState>,
+    pg: State<'_, PgState>,
+    target: PgTarget,
+    database: String,
+    changes: Vec<PgChange>,
+    confirm_text: Option<String>,
+    undo_of: Option<Vec<String>>,
+) -> Result<PgBatchResult, AppError> {
+    match pg.apply(&app, &target, PgChanges::Batch { database, changes }, confirm_text, undo_of.unwrap_or_default()).await? {
+        PgCommitResult::Batch(result) => Ok(result),
+        PgCommitResult::One(_) => Err(AppError::other("적용 결과를 읽지 못했어요")),
+    }
+}
+
+/// 변경 기록, 최신순. 연결이 필요 없다
+#[tauri::command]
+pub async fn pg_change_log(pg: State<'_, PgState>) -> Result<Vec<change_log::PgLogEntry>, AppError> {
+    pg.log().await
+}
+
+/// 기록 하나의 되돌리기. 적용은 이 값을 미리보기로 확인한 뒤 `pg_apply(undo_of = 기록 id)`로 한다
+#[tauri::command]
+pub async fn pg_undo(pg: State<'_, PgState>, log_id: String) -> Result<PgUndo, AppError> {
+    commit::undo_of(&pg.log().await?, &log_id)
+}
+
+#[tauri::command]
+pub async fn pg_undo_batch(pg: State<'_, PgState>, batch_id: String) -> Result<PgUndo, AppError> {
+    commit::undo_batch_of(&pg.log().await?, &batch_id)
 }
 
 /// 탭을 닫을 때: 이 대상의 연결을 모두 닫고 읽어 둔 것과 기억해 둔 로그인을 버린다.

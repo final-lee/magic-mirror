@@ -5,13 +5,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::after::built_in;
 use super::model::{AttributesSet, GrantItem, GrantTarget, PgChange};
-use super::preview::PreviewCtx;
-use super::resolve::{resolve, ObjKey, OnTarget, Op, ResolveCtx, Resolved};
+use super::resolve::{ObjKey, OnTarget, Op, Resolved};
 use super::rights::Rights;
 use crate::pg::eval::Ctx;
 use crate::pg::model::{AclEntry, DefaultObjType, MemberRec, Privilege, RelKind, MEMBERSHIP_OPTIONS_SINCE};
 
-pub fn inverse(ctx: &PreviewCtx, change: &PgChange) -> Option<Vec<PgChange>> {
+// 시험이 변경 하나의 되돌림만 볼 때 쓴다(제품 코드는 `preview::evaluate`가 함께 받는다)
+#[cfg(test)]
+pub fn inverse(ctx: &super::preview::PreviewCtx, change: &PgChange) -> Option<Vec<PgChange>> {
+    use super::resolve::{resolve, ResolveCtx};
     let resolved = resolve(&ResolveCtx { cluster: ctx.cluster, db: ctx.db, own_pids: ctx.own_pids, read_replica: ctx.read_replica }, change);
     let (mut cluster, mut db) = (ctx.cluster.clone(), ctx.db.clone());
     super::after::apply(&mut cluster, &mut db, &resolved.ops);
@@ -26,14 +28,7 @@ pub(super) fn of(before: &Ctx, after: &Ctx, change: &PgChange, resolved: &Resolv
         PgChange::Attributes { role, .. } => {
             let altered = resolved.ops.iter().any(|op| matches!(op, Op::AlterRole { role: r, .. } if r == role));
             let rec = before.cluster.roles.iter().find(|r| &r.name == role)?;
-            let set = AttributesSet {
-                login: rec.login,
-                create_db: rec.create_db,
-                create_role: rec.create_role,
-                inherit: rec.inherit,
-                connection_limit: rec.conn_limit,
-                valid_until: rec.valid_until.clone(),
-            };
+            let set = AttributesSet::of(rec);
             Some(if altered { vec![PgChange::Attributes { role: role.clone(), set }] } else { Vec::new() })
         }
         PgChange::Grant { database, grantee, add, .. } => grant(before, database, grantee, *add, &resolved.ops),
@@ -221,7 +216,7 @@ fn grant(before: &Ctx, database: &str, grantee: &str, add: bool, ops: &[Op]) -> 
 
 /// 기록이 없을 때의 효과 있는 항목: 모든 스키마는 서버 내장 기본값, 스키마별은 비어 있다
 fn effective_default(ctx: &Ctx, creator: &str, schema: Option<&str>, object_type: DefaultObjType) -> Vec<AclEntry> {
-    match ctx.db.default_acls.iter().find(|d| d.creator == creator && d.schema.as_deref() == schema && d.obj_type == object_type) {
+    match ctx.db.default_acl(creator, schema, object_type) {
         Some(rec) => rec.acl.clone(),
         None if schema.is_none() => built_in(ctx.cluster.version_num, creator, object_type),
         None => Vec::new(),

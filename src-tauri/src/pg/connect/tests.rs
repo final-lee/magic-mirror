@@ -523,3 +523,39 @@ async fn connect_never_puts_the_token_in_an_error() {
         }
     }
 }
+
+// ───────────────────────── 서버의 알림 ─────────────────────────
+
+use crate::pg::fake_server::{Reply, Rule};
+
+const NOISY: &[Rule] = &[Rule { contains: "noisy", reply: &[Reply::Notice { severity: "WARNING", code: "01007", message: "no privileges were granted" }] }];
+
+#[tokio::test]
+async fn a_notice_is_on_the_channel_by_the_time_the_statement_returns() {
+    let server = FakeServer::start(Script::Writes(NOISY)).await;
+    let mut conn = server.connected(1).await;
+    conn.client.simple_query("noisy").await.unwrap();
+    // `try_recv`다: 기다리지 않아도 이미 와 있어야 한다
+    assert_eq!(conn.notices.try_recv().ok(), Some(Notice { code: "01007".into(), severity: "WARNING".into(), message: "no privileges were granted".into() }));
+    assert!(conn.notices.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn the_notices_of_several_statements_arrive_in_order_and_can_be_dropped() {
+    let server = FakeServer::start(Script::Writes(NOISY)).await;
+    let mut conn = server.connected(1).await;
+    for _ in 0..3 {
+        conn.client.simple_query("noisy").await.unwrap();
+    }
+    conn.drain_notices();
+    assert!(conn.notices.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn a_catalog_read_drops_the_notices_left_over_from_earlier_statements() {
+    let server = FakeServer::start(Script::Writes(NOISY)).await;
+    let mut conn = server.connected(1).await;
+    conn.client.simple_query("noisy").await.unwrap();
+    crate::pg::catalog::read(&mut conn, async |tx| tx.batch_execute("SELECT 1").await).await.unwrap();
+    assert!(conn.notices.try_recv().is_err(), "읽기가 시작되기 전에 쌓인 알림은 버려져야 해요");
+}

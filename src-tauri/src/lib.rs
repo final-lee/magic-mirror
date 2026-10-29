@@ -6,6 +6,7 @@ mod explorer;
 mod explorer_commands;
 mod iam;
 mod iam_commands;
+mod jsonl;
 mod model;
 mod mouse_nav;
 mod pg;
@@ -36,7 +37,7 @@ pub fn run() {
             });
             app.manage(explorer_commands::ExplorerState::default());
             app.manage(iam_commands::IamState::new(dir.join("iam-changes.jsonl")));
-            app.manage(pg_commands::PgState::default());
+            app.manage(pg_commands::PgState::new(dir.join("db-changes.jsonl")));
             pg_commands::spawn_sweeper(app.handle().clone());
             std::thread::spawn(explorer::external::sweep_stale);
             mouse_nav::install(app.handle().clone());
@@ -95,6 +96,14 @@ pub fn run() {
             pg_commands::pg_sessions,
             pg_commands::pg_findings,
             pg_commands::pg_close,
+            pg_commands::pg_overview,
+            pg_commands::pg_preview,
+            pg_commands::pg_apply,
+            pg_commands::pg_preview_batch,
+            pg_commands::pg_apply_batch,
+            pg_commands::pg_change_log,
+            pg_commands::pg_undo,
+            pg_commands::pg_undo_batch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

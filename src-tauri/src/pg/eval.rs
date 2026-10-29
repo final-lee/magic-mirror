@@ -22,7 +22,6 @@
 //! 데이터베이스 스냅숏 없이 클러스터 스냅숏만 있을 때는 `Eval::for_cluster`다.
 
 use std::cell::OnceCell;
-#[cfg(test)]
 use std::collections::HashSet;
 use std::collections::{BTreeSet, HashMap};
 
@@ -99,7 +98,6 @@ pub struct Inherited {
 }
 
 /// `Eval::privilege_order`가 훑은 역할 하나와 시작한 역할에서 거기까지 상속하는 걸음의 수
-#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reached {
     pub role: String,
@@ -220,8 +218,6 @@ struct Edge<'a> {
     /// 이 관계로 그룹에 `SET ROLE`을 할 수 있다
     can_set: bool,
     /// 이 쌍의 부여 가운데 ADMIN OPTION이 있는 것이 하나라도 있다(부여자가 누구든). 변경의 권한 판단(`change::rights`)만 읽는다.
-    /// QB4가 `change`를 제품 코드로 잇는 대로 `cfg(test)`를 뗀다
-    #[cfg(test)]
     admin: bool,
 }
 
@@ -263,7 +259,6 @@ impl<'a> Graph<'a> {
                 group: &m.group,
                 inherits,
                 can_set,
-                #[cfg(test)]
                 admin: m.admin || m.grants.iter().any(|g| g.admin),
             });
         }
@@ -274,7 +269,6 @@ impl<'a> Graph<'a> {
                 group: DATABASE_OWNER,
                 inherits,
                 can_set: true,
-                #[cfg(test)]
                 admin: false,
             });
         }
@@ -395,7 +389,6 @@ impl<'a> Eval<'a> {
     /// 같은 깊이의 역할이라도 어느 쪽 부모에서 먼저 닿았는지가 앞서므로 깊이 안의 순서가 OID 순과 늘 같지는 않다. 객체 권한을 줄 부여자
     /// (`select_best_grantor`)와 구성원 관계를 줄 부여자(`select_best_admin`)가 이 순서의 첫 후보를 고른다.
     /// 스냅숏에 없는 역할의 OID는 가장 크게 본다. `RoleView::inherited`의 순서는 이름순 구성원 관계를 따르니 이 순서와 다를 수 있다.
-    #[cfg(test)]
     pub fn privilege_order(&self, start: &str) -> Vec<Reached> {
         let graph = &self.graph;
         let oid_of = |name: &str| graph.roles.get(name).map_or(u32::MAX, |r| r.oid);
@@ -417,13 +410,11 @@ impl<'a> Eval<'a> {
     }
 
     /// `start`와, 상속하는지와 상관없이 구성원 관계를 어떻게든 따라 닿는 모든 역할(`ROLERECURSE_MEMBERS`). `start`가 먼저다
-    #[cfg(test)]
     pub fn member_closure(&self, start: &str) -> Vec<String> {
         self.graph.reach(start, |_| true).nodes.iter().map(|n| n.role.to_string()).collect()
     }
 
     /// `member`가 `group`의 구성원으로서 ADMIN OPTION이 있는 부여를 하나라도 가졌는가(부여자가 누구든). 다른 역할을 거친 것은 세지 않는다
-    #[cfg(test)]
     pub fn membership_admin(&self, member: &str, group: &str) -> bool {
         self.graph.edges.get(member).is_some_and(|edges| edges.iter().any(|e| e.group == group && e.admin))
     }

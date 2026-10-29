@@ -12,6 +12,7 @@
 //! - `rights`: 로그인한 DB 사용자가 무엇을 할 수 있나(서버 규칙대로), 서버가 부여자로 적는 역할
 
 pub mod after;
+pub mod digest;
 pub mod impact;
 pub mod inverse;
 pub mod model;
@@ -23,4 +24,4 @@ pub mod text;
 pub mod warnings;
 
 #[cfg(test)]
-mod support;
+pub(crate) mod support;

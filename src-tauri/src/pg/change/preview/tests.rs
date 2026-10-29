@@ -362,26 +362,72 @@ fn the_login_losing_access_is_judged_on_the_snapshot_after_the_batch() {
     assert_eq!(p.confirm_text.as_deref(), Some("mm"));
 }
 
+/// 묶음의 변경마다 (변경, 되돌림), 도는 차례대로
+fn item_inverses(scene: &Scene, changes: &[PgChange]) -> Vec<(PgChange, Option<Vec<PgChange>>)> {
+    evaluate_batch(&ctx(scene), "appdb", changes).items.into_iter().map(|item| (item.change, item.inverse)).collect()
+}
+
 #[test]
-fn a_batch_is_reversible_with_the_item_inverses_in_reverse_order() {
+fn a_batch_keeps_each_items_inverse_in_run_order() {
     let s = admin_of(PG16, &["app_read"]);
     let changes = vec![grant("app_read", true, vec![item(rel("audit", "events"), &[Select])]), membership("app_read", "carol", true, false)];
     let p = batch_of(&s, &changes);
     assert!(p.reversible);
-    // 실행 순서는 구성원 넣기, 권한 주기다: 되돌림은 그 반대다
+    // 도는 차례는 구성원 넣기, 권한 주기다. 변경마다의 되돌림이 그 차례로 나온다
     assert_eq!(
-        inverse_batch(&ctx(&s), "appdb", &changes),
-        Some(vec![grant("app_read", false, vec![item(rel("audit", "events"), &[Select])]), membership("app_read", "carol", false, false)])
+        item_inverses(&s, &changes),
+        vec![
+            (changes[1].clone(), Some(vec![membership("app_read", "carol", false, false)])),
+            (changes[0].clone(), Some(vec![grant("app_read", false, vec![item(rel("audit", "events"), &[Select])])])),
+        ]
     );
-    // 되돌릴 수 없는 항목이 하나라도 있으면 되돌릴 수 없다
+    // 되돌릴 수 없는 항목이 하나라도 있으면 묶음은 되돌릴 수 없다
     let with_drop = admin_of(PG16, &["app_read", "tmp"]).add_role(role("tmp"));
     let mixed = vec![changes[0].clone(), PgChange::DropRole { role: "tmp".into() }];
     assert!(!batch_of(&with_drop, &mixed).reversible);
-    assert_eq!(inverse_batch(&ctx(&with_drop), "appdb", &mixed), None);
+    assert!(item_inverses(&with_drop, &mixed).iter().any(|(_, inverse)| inverse.is_none()));
     // 아무것도 바꾸지 않는 묶음은 되돌릴 게 없다
     let nothing = vec![grant("app_read", true, vec![item(rel("app", "customers"), &[Select])])];
     assert!(!batch_of(&s, &nothing).reversible);
-    assert_eq!(inverse_batch(&ctx(&s), "appdb", &nothing), Some(Vec::new()));
+    assert_eq!(item_inverses(&s, &nothing), vec![(nothing[0].clone(), Some(Vec::new()))]);
+}
+
+#[test]
+fn a_later_items_inverse_is_judged_on_the_snapshot_after_the_earlier_ones() {
+    // 같은 그룹에 둘을 넣는다: 뒤의 구성원 변경은 앞의 변경을 적용한 스냅숏 위에서 되돌림이 정해진다
+    let s = admin_of(PG16, &["app_read"]);
+    let changes = vec![membership("app_read", "carol", true, false), membership("app_read", "dave", true, false)];
+    let s = s.add_role(login("dave"));
+    let inverses = item_inverses(&s, &changes);
+    assert_eq!(inverses[1].1, Some(vec![membership("app_read", "dave", false, false)]));
+}
+
+#[test]
+fn the_evaluation_hands_back_the_statements_and_the_state_after_each_change() {
+    let s = admin_of(PG16, &["app_read"]);
+    let change = membership("app_read", "carol", true, false);
+    let evaluated = evaluate(&ctx(&s), &change);
+    assert_eq!(evaluated.statements.iter().map(|st| st.shown()).collect::<Vec<_>>(), evaluated.preview.sql);
+    assert_eq!(evaluated.inverse, Some(vec![membership("app_read", "carol", false, false)]));
+    assert!(evaluated.after.0.members.iter().any(|m| m.member == "carol" && m.group == "app_read"));
+    assert_eq!(evaluated.preview, preview(&ctx(&s), &change));
+
+    let batch = evaluate_batch(&ctx(&s), "appdb", std::slice::from_ref(&change));
+    assert_eq!(batch.items.len(), 1);
+    assert_eq!(batch.items[0].statements.iter().map(|st| st.shown()).collect::<Vec<_>>(), batch.preview.sql);
+    assert!(batch.after.0.members.iter().any(|m| m.member == "carol" && m.group == "app_read"));
+}
+
+#[test]
+fn a_single_change_for_a_different_database_than_its_snapshot_is_blocked() {
+    let s = admin(PG16);
+    // 권한은 자기 `database`에서 돈다: 스냅숏이 appdb의 것인데 other의 권한이다
+    let change = PgChange::Grant { database: "other".into(), grantee: "app_read".into(), add: true, items: vec![item(rel("app", "customers"), &[Select])] };
+    let p = run(&s, &change);
+    assert!(block_texts(&p.warnings).contains(&"이 데이터베이스에서는 바꿀 수 없어요: other"), "{:?}", p.warnings);
+    assert!(!p.reversible);
+    // 올바른 스냅숏이면 막히지 않는다
+    assert!(!block_texts(&run(&s, &grant("app_read", true, vec![item(rel("app", "customers"), &[Select])])).warnings).iter().any(|t| t.starts_with("이 데이터베이스에서는")));
 }
 
 #[test]

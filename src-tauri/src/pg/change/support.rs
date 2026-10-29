@@ -55,14 +55,7 @@ pub fn default_change(creator: &str, schema: Option<&str>, object_type: DefaultO
 /// 속성을 `rec`와 같게 두고 `edit`로 바꾼 변경
 pub fn attributes(scene: &Scene, role: &str, edit: impl FnOnce(&mut AttributesSet)) -> PgChange {
     let rec = scene.cluster.roles.iter().find(|r| r.name == role).expect("역할이 없어요");
-    let mut set = AttributesSet {
-        login: rec.login,
-        create_db: rec.create_db,
-        create_role: rec.create_role,
-        inherit: rec.inherit,
-        connection_limit: rec.conn_limit,
-        valid_until: rec.valid_until.clone(),
-    };
+    let mut set = AttributesSet::of(rec);
     edit(&mut set);
     PgChange::Attributes { role: role.into(), set }
 }
