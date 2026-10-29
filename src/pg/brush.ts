@@ -1,6 +1,6 @@
 // 권한 표의 바꾸기 모드: 한 번에 하나의 권한("칠할 권한")만 골라 칸을 누르거나 끌어서 담는다.
 // 칠할 권한이 무슨 변경을 만들고(brushChange), 칸이 그 권한을 어떻게 가졌는지(Levels, baseState)와 어떻게 보이고 무엇을 하는지(brushView)를 정한다.
-import { systemRoleText } from "./canChange";
+import { OWNER_HELD_TEXT, systemRoleText } from "./canChange";
 import { draftItem, draftKey, type PgDraftItem } from "./draft";
 import { INHERITED_ONLY_TEXT } from "./labels";
 import type { PgChange, PgCoverage, PgDbPrivilegeRow, PgGrantTarget, PgSchemaCell } from "./types";
@@ -120,9 +120,6 @@ export function baseState({ shown, direct, owned }: Levels): BaseState {
   if (direct === "some" || owned === "some") return "some";
   return shown === "none" ? "off" : "inherited";
 }
-
-/** 소유자라서 가진 권한 칸의 설명 */
-export const OWNER_HELD_TEXT = "소유자라서 가진 권한이에요";
 
 export interface BrushView {
   base: BaseState;

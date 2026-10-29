@@ -655,9 +655,9 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 /* 바꾸기 모드: 칠할 권한 고르기. 칩은 .pg-chip을 쓰고, 스키마 칸의 권한(앞 넷)과 데이터베이스 칸의 권한(뒤 셋) 사이에 선을 긋는다 */
 .pg-brushes { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pg-brush-sep { width: 1px; height: 14px; margin: 0 4px; background: var(--line); }
-/* 바꾸기 모드의 칸: 고른 권한 하나만 보인다(.pg-solo). 그 권한을 칠할 수 없는 칸(.pg-idle)은 흐리고, 칠할 수 있는 데이터베이스 칸(.pg-live)은 그대로 둔다 */
+/* 바꾸기 모드의 칸: 고른 권한 하나만 보인다(.pg-solo). 그 권한을 칠할 수 없는 칸(.pg-idle)은 흐리고, 칠할 수 있는 데이터베이스 칸(.pg-live)은 바탕을 옅게 물들인다(줄무늬와 마우스를 올린 줄 위에서도) */
 .pg-cell.pg-solo { padding-right: 8px; }
-.pg-grid .pg-table .pg-row .pg-live { background: #0a84ff0f; }
+.pg-grid .pg-table .pg-row .pg-live, .pg-grid .pg-table .pg-row:hover .pg-live { background: #0a84ff0f; }
 /* 담아 둔 변경: 줄 예정(＋)과 뺄 예정(－)은 칸 바탕과 표시를 물들인다(IAM 할당 표의 .asg-add, .asg-del과 같은 색) */
 .pg-cell.pg-add, .pg-marks.pg-add { background: #30d15826; }
 .pg-cell.pg-del, .pg-marks.pg-del { background: #ff453a26; }

@@ -2,10 +2,9 @@ import { useMemo, useState } from "react";
 import { DefaultPrivilegeForm } from "./DefaultPrivilegeForm";
 import { DatabaseScreen } from "./DatabaseScreen";
 import { PgError } from "./PgError";
-import { putChange } from "./putChange";
+import { RevokeButton } from "./RevokeButton";
 import { usePgDatabase } from "./queries";
 import { ALL_SCHEMAS, BUILTIN_NOTE, DEFAULT_OBJECT_LABEL, DEFAULT_OBJECT_ORDER, GRANT_OPTION_NOTE, defaultPrivilegeSentence, granteeLabel, noGrantSentence } from "./sentences";
-import { draftKey } from "./draft";
 import type { PgChange, PgDefaultAclRow, PgDefaultObjectType, PgOverview, PgTarget } from "./types";
 import type { GridDraft } from "./useChangeMode";
 
@@ -145,7 +144,7 @@ function GroupRows({ group, database, edit }: { group: Group; database: string; 
                     <li key={`${g.grantee}:${i}`}>
                       <span className="pg-grantee">{granteeLabel(g.grantee)}</span> <span className="mono">{g.privileges.join(", ")}</span>
                       {g.grantable && <span className="dim">{GRANT_OPTION_NOTE}</span>}
-                      {edit && <RevokeLine draft={edit.draft} change={revokeOf(database, group, type, g)} />}
+                      {edit && <RevokeButton draft={edit.draft} change={revokeOf(database, group, type, g)} label="빼기" />}
                     </li>
                   ))}
                 </ul>
@@ -178,23 +177,3 @@ const revokeOf = (database: string, group: Group, objectType: PgDefaultObjectTyp
   privileges: grant.privileges,
   add: false,
 });
-
-/** 줄의 [빼기]. 담아 둔 뺄 변경이 있으면 눌린 모양이고, 다시 누르면 거둔다 */
-function RevokeLine({ draft, change }: { draft: GridDraft; change: PgChange }) {
-  const key = draftKey(change);
-  const queued = draft.items.find((d) => d.key === key);
-  const pressed = !!queued && queued.change.kind === "defaultPrivilege" && !queued.change.add;
-  return (
-    <button
-      type="button"
-      className={`link pg-revoke${pressed ? " on" : ""}`}
-      aria-pressed={pressed}
-      onClick={() => {
-        if (pressed && key !== null) draft.remove(key);
-        else putChange(draft, change);
-      }}
-    >
-      빼기
-    </button>
-  );
-}

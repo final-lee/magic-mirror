@@ -266,6 +266,7 @@ function DatabasePrivileges({ target, overview, database, filter, kinds, pick, o
             schema={open.schema}
             unusable={index.cell(open.role, open.schema).unusable}
             bypassRls={summary.attributes.bypassRls}
+            system={summary.system}
             draft={change?.draft}
             cell={index.cell(open.role, open.schema)}
             onClose={close}

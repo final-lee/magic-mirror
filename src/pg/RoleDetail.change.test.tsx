@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { renderWithClient } from "../test/utils";
 import { pgApi } from "./api";
-import { pgTarget, sampleDatabaseView, sampleOverview, sampleRoleView } from "./fixtures";
+import { membership, pgTarget, role, sampleDatabaseView, sampleOverview, sampleRoleView } from "./fixtures";
 import { RoleDetail } from "./RoleDetail";
 import type { PgChange } from "./types";
 import { usePgDraft, type PgDraft } from "./usePgDraft";
@@ -80,6 +80,37 @@ describe("구성원 tab", () => {
     expect(changes()).toEqual([{ kind: "membership", group: "app_write", member: "alice", add: true, admin: true }]);
     expect(admin).toBeChecked();
     expect(within(row).getByText("넣기 예정")).toBeInTheDocument();
+  });
+
+  test("ADMIN OPTION is off while the removal of that membership is queued, and the removal stays", async () => {
+    setup();
+    await openTab("구성원");
+    fireEvent.click(box("app_write"));
+    const row = (await screen.findByRole("list", { name: "속한 그룹" })).querySelectorAll("li")[0] as HTMLElement;
+    const admin = within(row).getByRole("checkbox", { name: /ADMIN OPTION/ });
+    expect(admin).toBeDisabled();
+    expect(admin.closest("label")).toHaveAttribute("title", "그룹에서 빼기가 담겨 있어서 ADMIN OPTION은 바꿀 수 없어요");
+    fireEvent.click(admin);
+    expect(changes()).toEqual([{ kind: "membership", group: "app_write", member: "alice", add: false, admin: false }]);
+  });
+
+  test("ADMIN OPTION of a membership in a system group that cannot be changed says which group", async () => {
+    const extension = role("rds_extension");
+    const view = sampleRoleView("alice");
+    m.role.mockResolvedValue({ ...view, summary: { ...view.summary, memberOf: [membership("rds_extension")] } });
+    setup({ roles: [...overview.roles, extension] });
+    await openTab("구성원");
+    const row = (await screen.findByText("rds_extension", { selector: "button" })).closest("li") as HTMLElement;
+    expect(within(row).getByRole("checkbox", { name: /ADMIN OPTION/ }).closest("label")).toHaveAttribute("title", "이 시스템 역할에는 구성원을 넣거나 뺄 수 없어요: rds_extension");
+  });
+
+  test("ADMIN OPTION of a system role's membership names that role, not the group", async () => {
+    const view = sampleRoleView("rds_iam");
+    m.role.mockResolvedValue({ ...view, summary: { ...view.summary, memberOf: [membership("app_read")] } });
+    setup({ role: "rds_iam" });
+    await openTab("구성원");
+    const row = (await screen.findByText("app_read", { selector: "button" })).closest("li") as HTMLElement;
+    expect(within(row).getByRole("checkbox", { name: /ADMIN OPTION/ }).closest("label")).toHaveAttribute("title", "시스템 역할이라 바꿀 수 없어요: rds_iam");
   });
 
   test("the draft's 50-item limit applies", async () => {
