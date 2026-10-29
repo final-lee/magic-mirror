@@ -610,7 +610,7 @@ export function samplePresetSuggestion(extra: Partial<PgPresetSuggestion> = {}):
   return {
     matching: ["app_read"],
     proposedName: "audit_read",
-    creators: ["app_owner"],
+    creators: ["app_owner", "postgres"],
     blockedCreators: [{ role: "postgres", reason: "postgres 역할의 기본 권한을 바꿀 수 없어요. 로그인한 역할이 postgres 역할의 권한을 물려받아야 해요" }],
     ...extra,
   };
@@ -625,9 +625,10 @@ export function sampleDropPlan(extra: Partial<PgDropPlan> = {}): PgDropPlan {
   return {
     role: "alice",
     reassignTo: LOGIN_USER,
+    loginUser: LOGIN_USER,
     steps: [
       { database: "analytics", sql: clean, owned: 0, privileges: 1, defaults: 0 },
-      { database: null, sql: clean, owned: 0, privileges: 2, defaults: 0 },
+      { database: "orders", sql: clean, owned: 0, privileges: 2, defaults: 0 },
       { database: "postgres", sql: clean, owned: 0, privileges: 0, defaults: 0 },
       { database: null, sql: ['DROP ROLE "alice"'], owned: 0, privileges: 0, defaults: 0 },
     ],

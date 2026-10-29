@@ -106,7 +106,7 @@ export function DropRoleDialog({ target, role, overview, onClose, onDropped }: P
       <div className="sheet wide cp" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} ref={sheetRef} onKeyDown={trapTab}>
         <div className="cp-body">
           <h3 id={`${id}-title`}>역할 삭제</h3>
-          <p className="cp-user">{`적용할 DB 사용자: ${overview.loginUser}`}</p>
+          <p className="cp-user">{`적용할 DB 사용자: ${shown?.loginUser ?? overview.loginUser}`}</p>
           <p className="cp-sum">{droppedSummary(role)}</p>
           <label className="pg-form-field" htmlFor={`${id}-heir`}>
             넘겨받을 역할
@@ -129,7 +129,7 @@ export function DropRoleDialog({ target, role, overview, onClose, onDropped }: P
                     <div className="pg-drop-head">
                       <b>{step.database ?? overview.target.defaultDatabase}</b>
                       <span className="dim">{counts(step)}</span>
-                      {stopped && (i < done ? <span className="iam-chip allowed">✓</span> : <span className="dim">{NOT_RUN_TEXT}</span>)}
+                      {stopped && (i < done ? <span className="iam-chip allowed">✓</span> : i > done ? <span className="dim">{NOT_RUN_TEXT}</span> : null)}
                     </div>
                     <ol className="cp-sql" role="list" aria-label={`${step.database ?? overview.target.defaultDatabase} 실행할 SQL`}>
                       {step.sql.map((statement, j) => (
@@ -186,6 +186,7 @@ export function DropRoleDialog({ target, role, overview, onClose, onDropped }: P
             onRetry={retry}
             onCancel={onClose}
             applyLabel="삭제"
+            busyLabel="삭제 중…"
             blockReason={blockReason}
           />
         )}

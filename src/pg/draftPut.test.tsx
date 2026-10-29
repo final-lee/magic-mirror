@@ -189,3 +189,25 @@ describe("draft.add (기본 권한도 담기) trims like put", () => {
     expect(result.current.notices).toContain(FULL_NOTICE);
   });
 });
+
+describe("a queued ADMIN OPTION change and removing the member from the group", () => {
+  const admin: PgChange = { kind: "membership", group: "app_write", member: "alice", add: true, admin: true };
+  const remove: PgChange = { kind: "membership", group: "app_write", member: "alice", add: false, admin: false };
+
+  test("is refused with the overlap notice and leaves the tray as it was", () => {
+    const result = open();
+    act(() => result.current.put(admin));
+    const before = result.current.items;
+    act(() => result.current.put(remove));
+    expect(result.current.items).toBe(before);
+    expect(result.current.notices).toEqual([OVERLAP_NOTICE]);
+  });
+
+  test("after the ADMIN OPTION change is taken out the removal goes in", () => {
+    const result = open();
+    act(() => result.current.put(admin));
+    act(() => result.current.remove(result.current.items[0].key));
+    act(() => result.current.put(remove));
+    expect(result.current.items.map((d) => d.change)).toEqual([remove]);
+  });
+});

@@ -161,9 +161,9 @@ export interface PgChangeLogEntry {
 }
 export interface PgUndo { database: string; changes: PgChange[]; undoOf: string[] }
 export interface PgPresetSuggestion { matching: string[]; proposedName: string; creators: string[]; blockedCreators: { role: string; reason: string }[] }   // blockedCreators: 로그인한 역할이 기본 권한을 바꿀 수 없는 만드는 역할과 그 막힘 문구
-export interface PgDropStep { database: string | null; sql: string[]; owned: number; privileges: number; defaults: number }  // database null = 기본 데이터베이스
+export interface PgDropStep { database: string | null; sql: string[]; owned: number; privileges: number; defaults: number }  // database null은 마지막 단계(DROP ROLE)뿐이고, 기본 데이터베이스에서 돈다
 export interface PgDropPlan {
-  role: string; reassignTo: string; steps: PgDropStep[]; warnings: PgWarning[]; confirmText: string; sessions: number;
+  role: string; reassignTo: string; loginUser: string; steps: PgDropStep[]; warnings: PgWarning[]; confirmText: string; sessions: number;
   grantedMemberships: { member: string; group: string; lost: boolean }[];   // 160000부터: 이 역할이 준 구성원 관계(DROP OWNED가 지운다). lost = 다른 부여가 없다
 }
 export interface PgDropResult { logId: string; total: number; done: number; stopped: string | null; notes?: string[] }   // stopped = 삭제 결과 문구

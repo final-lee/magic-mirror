@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { renderWithClient } from "../test/utils";
 import { pgApi } from "./api";
 import { DropRoleDialog } from "./DropRoleDialog";
@@ -68,6 +68,7 @@ describe("the plan", () => {
     expect(within(second).getByText("객체 0개 · 권한 2개 · 기본 권한 0개")).toBeInTheDocument();
     expect(within(third).getByText("postgres")).toBeInTheDocument();
     expect(within(last).getByText('DROP ROLE "alice"')).toBeInTheDocument();
+    expect(within(last).getByText("orders")).toBeInTheDocument(); // 마지막 단계(database null)는 기본 데이터베이스의 이름
   });
 
   test("a step that has objects shows them in the counts", async () => {
@@ -188,7 +189,7 @@ describe("applying", () => {
     const { onClose, onDropped } = setup();
     await typeName();
     await user().click(screen.getByRole("button", { name: "삭제" }));
-    expect(await screen.findByRole("button", { name: "적용 중…" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "삭제 중…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "취소" })).toBeDisabled();
     expect(heir()).toBeDisabled();
     await user().keyboard("{Escape}");
@@ -202,7 +203,7 @@ describe("applying", () => {
     setup();
     await typeName();
     await user().click(screen.getByRole("button", { name: "삭제" }));
-    await user().click(await screen.findByRole("button", { name: "적용 중…" }));
+    await user().click(await screen.findByRole("button", { name: "삭제 중…" }));
     expect(m.applyDrop).toHaveBeenCalledTimes(1);
   });
 
@@ -216,7 +217,10 @@ describe("applying", () => {
     expect(m.overview).toHaveBeenCalledTimes(1);
     const [first, second, third, last] = steps();
     expect(within(first).getByText("✓")).toBeInTheDocument();
-    for (const row of [second, third, last]) {
+    // 멈춘 단계(done번째)는 표시가 없다: 멈춘 까닭을 위의 글이 말한다. 그 뒤만 실행하지 않은 단계다
+    expect(within(second).queryByText("✓")).not.toBeInTheDocument();
+    expect(within(second).queryByText("실행하지 않음")).not.toBeInTheDocument();
+    for (const row of [third, last]) {
       expect(within(row).getByText("실행하지 않음")).toBeInTheDocument();
       expect(within(row).queryByText("✓")).not.toBeInTheDocument();
     }
@@ -267,10 +271,9 @@ describe("applying", () => {
     const { onDropped, unmount } = setup();
     await typeName();
     await user().click(screen.getByRole("button", { name: "삭제" }));
-    await screen.findByRole("button", { name: "적용 중…" });
+    await screen.findByRole("button", { name: "삭제 중…" });
     unmount();
-    resolve(okResult);
-    await new Promise((r) => setTimeout(r, 20));
+    await act(async () => resolve(okResult));
     expect(onDropped).not.toHaveBeenCalled();
     expect(m.overview).not.toHaveBeenCalled();
   });
@@ -302,7 +305,8 @@ describe("fix round 1", () => {
     await typeName();
     await user().click(screen.getByRole("button", { name: "삭제" }));
     await waitFor(() => expect(m.overview).toHaveBeenCalled());
-    await new Promise((r) => setTimeout(r, 30));
+    // 표시를 마친 데이터베이스는 무효화돼 있다(표시가 무효화보다 먼저다)
+    for (const name of names) await waitFor(() => expect(qc.getQueryState(pgKeys.database(pgTarget, name))?.isInvalidated).toBe(true));
     m.database.mockClear();
     for (const name of names) renderHook(() => usePgDatabase(pgTarget, name), { wrapper: ({ children }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider> });
     await waitFor(() => expect(m.database).toHaveBeenCalledTimes(names.length));
@@ -370,5 +374,14 @@ describe("notes of the result", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(stoppedResult.stopped!);
     expect(within(alert).getByText(NOTE)).toBeInTheDocument();
+  });
+});
+
+describe("the DB user comes from the plan", () => {
+  test("the header names the user the drop runs as, from the plan", async () => {
+    m.dropPlan.mockResolvedValue(sampleDropPlan({ loginUser: "plan_user" }));
+    setup();
+    await loaded();
+    expect(screen.getByText("적용할 DB 사용자: plan_user")).toBeInTheDocument();
   });
 });
