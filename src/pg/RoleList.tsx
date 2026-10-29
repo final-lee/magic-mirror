@@ -43,15 +43,26 @@ interface Props {
   selectedId: string | null;
   onSelect: (name: string) => void;
   onOpen: (name: string) => void;
+  /** [역할 만들기]. 주지 않으면 버튼이 없다 */
+  onCreate?: () => void;
+  /** 바꿀 수 없는 이유(changeBlockReason). 있으면 [역할 만들기]가 꺼지고 이 글이 제목이다 */
+  blockReason?: string | null;
 }
 
-export function RoleList({ roles, filter, kinds, onKinds, selectedId, onSelect, onOpen }: Props) {
+export function RoleList({ roles, filter, kinds, onKinds, selectedId, onSelect, onOpen, onCreate, blockReason = null }: Props) {
   // 툴바 필터는 이름에만 적용한다(대소문자 무시). 권한 표와 같은 규칙이다.
   const rows = filterRoles(roles, kinds, filter);
   return (
     <section className="center">
       <div className="pg-bar">
         <RoleKinds value={kinds} onChange={onKinds} />
+        {onCreate && (
+          <span className="pg-bar-end">
+            <button type="button" className="btn small primary" disabled={blockReason !== null} title={blockReason ?? undefined} aria-description={blockReason ?? undefined} onClick={onCreate}>
+              역할 만들기
+            </button>
+          </span>
+        )}
       </div>
       <ListTable
         label="역할 목록"

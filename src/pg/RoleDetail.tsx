@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { MEMBERSHIP_SYSTEM_GROUPS, systemGroupText, systemRoleText } from "./canChange";
 import { draftKey } from "./draft";
 import { BadgeList } from "./Badges";
-import { COVERAGE_LABEL, INHERITED_ONLY_TEXT, OBJECT_KIND_LABEL, ROLE_KIND_LABEL, TRUNCATED_TEXT, collate, objectName, unusableText, utcDay } from "./labels";
+import { COVERAGE_LABEL, INHERITED_ONLY_TEXT, OBJECT_KIND_LABEL, ROLE_KIND_LABEL, TRUNCATED_TEXT, collate, dayToIso, objectName, unusableText, utcDay } from "./labels";
 import { PgError } from "./PgError";
 import { usePgDatabase, usePgRole } from "./queries";
 import { roleRoute, type PgRoute } from "./route";
@@ -35,6 +35,12 @@ interface Props {
   draft?: GridDraft;
   /** 클러스터의 모든 역할(개요). 구성원 탭이 넣을 수 있는 그룹을 고른다 */
   roles?: PgRoleSummary[];
+  /** 바꾸기 버튼([비밀번호 재설정], [삭제])을 끄는 이유(changeBlockReason). 있으면 두 버튼이 꺼지고 이 글이 제목이다 */
+  blockReason?: string | null;
+  /** [비밀번호 재설정]이 부른다. 주지 않으면 버튼이 없다 */
+  onChange?: (change: PgChange) => void;
+  /** [삭제]가 부른다(역할 삭제 창을 연다). 주지 않으면 버튼이 없다 */
+  onDrop?: (role: string) => void;
 }
 
 /** 아직 읽지 않은 데이터베이스를 [불러오기]로 읽는 일. 권한 탭과 소유 객체 탭이 함께 쓴다. */
@@ -45,7 +51,7 @@ interface Load {
   onRequest: (database: string) => void;
 }
 
-export function RoleDetail({ target, role, onOpen, initialTab, onViewState, editing = false, draft, roles = [] }: Props) {
+export function RoleDetail({ target, role, onOpen, initialTab, onViewState, editing = false, draft, roles = [], blockReason = null, onChange, onDrop }: Props) {
   const q = usePgRole(target, role);
   const [tab, setTab] = useState<Tab>(TABS.find((t) => t.id === initialTab)?.id ?? "overview");
   const [requested, setRequested] = useState<ReadonlySet<string>>(new Set());
@@ -88,6 +94,20 @@ export function RoleDetail({ target, role, onOpen, initialTab, onViewState, edit
           <span className="iam-kind">{ROLE_KIND_LABEL[view.summary.kind]}</span>
         </div>
         <BadgeList badges={view.summary.badges} />
+        {(onChange || onDrop) && (
+          <span className="pg-head-actions">
+            {onChange && view.summary.attributes.login && (
+              <button type="button" className="btn small" disabled={blockReason !== null} title={blockReason ?? undefined} aria-description={blockReason ?? undefined} onClick={() => onChange({ kind: "password", role: view.summary.name })}>
+                비밀번호 재설정
+              </button>
+            )}
+            {onDrop && (
+              <button type="button" className="btn small danger" disabled={blockReason !== null} title={blockReason ?? undefined} aria-description={blockReason ?? undefined} onClick={() => onDrop(view.summary.name)}>
+                삭제
+              </button>
+            )}
+          </span>
+        )}
       </header>
       <div className="iam-tabs" role="tablist" aria-label="상세 항목">
         {TABS.map((t) => (
@@ -469,9 +489,6 @@ function queuedAttributes(draft: GridDraft, role: string): PgAttributesSet | und
   for (const { change } of draft.items) if (change.kind === "attributes" && change.role === role) return change.set;
   return undefined;
 }
-
-/** 폼의 날짜(YYYY-MM-DD)를 UTC 그날 0시의 ISO 시각으로 */
-const dayToIso = (day: string) => `${day}T00:00:00Z`;
 
 /**
  * 개요 탭의 바꾸기: LOGIN, CREATEDB, CREATEROLE, INHERIT, 연결 수 제한, 만료일. [담기]는 이 역할의 속성 변경 하나를 담거나 이미 담긴 것을 바꾼다.
