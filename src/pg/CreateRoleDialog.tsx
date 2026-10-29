@@ -91,7 +91,9 @@ export function CreateRoleDialog({ target, overview, database, onPreview, onClos
   const usesExisting = isUser && suggestion !== undefined && choice === "existing" && matching.length > 0;
   const showCreators = hasCreators(preset) && suggestion !== undefined && !usesExisting;
   const blocked = suggestion?.blockedCreators ?? [];
-  const creators = (suggestion?.creators ?? []).filter((c) => !creatorsOff.includes(c));
+  // 기본 권한을 바꿀 수 없는 역할은 보내지 않는다(목록에는 있어도 꺼진 채 이유와 함께 보인다)
+  const blockedRoles = blocked.map((b) => b.role);
+  const creators = (suggestion?.creators ?? []).filter((c) => !blockedRoles.includes(c) && !creatorsOff.includes(c));
 
   // 이름은 있는 그대로 쓴다(앞뒤 공백도 이름의 일부다). 아직 비어 있는 칸은 탓하지 않는다
   const nameProblem = name === "" ? null : roleNameProblem(name, overview.roles);
@@ -270,16 +272,22 @@ export function CreateRoleDialog({ target, overview, database, onPreview, onClos
                 <fieldset className="pg-form-checks pg-group-checks">
                   <legend>기본 권한을 줄 역할</legend>
                   <p className="dim">앞으로 이 역할들이 만드는 테이블과 시퀀스에도 같은 권한을 줘요</p>
-                  {(suggestion?.creators ?? []).map((c) => (
-                    <label key={c} className="pg-form-check">
-                      <input type="checkbox" checked={!creatorsOff.includes(c)} onChange={() => setCreatorsOff(toggle(creatorsOff, c))} /> {c}
-                    </label>
-                  ))}
-                  {blocked.map((b) => (
-                    <label key={b.role} className="pg-form-check">
-                      <input type="checkbox" checked={false} disabled readOnly /> {b.role} <span className="dim">{b.reason}</span>
-                    </label>
-                  ))}
+                  {(suggestion?.creators ?? []).map((c) => {
+                    const why = blocked.find((b) => b.role === c)?.reason;
+                    return (
+                      <label key={c} className="pg-form-check">
+                        {why ? <input type="checkbox" checked={false} disabled readOnly /> : <input type="checkbox" checked={!creatorsOff.includes(c)} onChange={() => setCreatorsOff(toggle(creatorsOff, c))} />} {c}
+                        {why && <span className="dim"> {why}</span>}
+                      </label>
+                    );
+                  })}
+                  {blocked
+                    .filter((b) => !(suggestion?.creators ?? []).includes(b.role))
+                    .map((b) => (
+                      <label key={b.role} className="pg-form-check">
+                        <input type="checkbox" checked={false} disabled readOnly /> {b.role} <span className="dim">{b.reason}</span>
+                      </label>
+                    ))}
                 </fieldset>
               )}
             </>

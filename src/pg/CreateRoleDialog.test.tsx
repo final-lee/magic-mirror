@@ -288,13 +288,16 @@ describe("the suggestion for a user", () => {
 
 describe("the creators", () => {
   test("start ticked, blocked ones start unticked and disabled with their reason, and unticking leaves a creator out", async () => {
-    const { onPreview } = await readyUser("읽기·쓰기", { matching: [], creators: ["app_owner", "legacy"] });
+    // 백엔드의 모양: 막힌 역할도 creators에 들어 있고 blockedCreators가 이유를 말한다
+    const { onPreview } = await readyUser("읽기·쓰기", { matching: [], creators: ["app_owner", "legacy", "postgres"] });
     const box = within(screen.getByRole("group", { name: "기본 권한을 줄 역할" }));
     expect(box.getByText("앞으로 이 역할들이 만드는 테이블과 시퀀스에도 같은 권한을 줘요")).toBeInTheDocument();
     expect(box.getByRole("checkbox", { name: "app_owner" })).toBeChecked();
     expect(box.getByRole("checkbox", { name: /^postgres/ })).not.toBeChecked();
     expect(box.getByRole("checkbox", { name: /^postgres/ })).toBeDisabled();
     expect(box.getByText("postgres 역할의 기본 권한을 바꿀 수 없어요. 로그인한 역할이 postgres 역할의 권한을 물려받아야 해요")).toBeInTheDocument();
+    expect(box.getAllByRole("checkbox", { name: /^postgres/ })).toHaveLength(1);
+    expect(box.getAllByRole("checkbox")).toHaveLength(3);
     await user().click(box.getByRole("checkbox", { name: "legacy" }));
     await user().click(previewButton());
     expect(onPreview).toHaveBeenCalledWith({ ...base, name: "carol", preset: { preset: "readWrite", ...preset({ creators: ["app_owner"], group: "audit_read", createGroup: true }) } });

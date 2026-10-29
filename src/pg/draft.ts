@@ -165,7 +165,12 @@ function put(step: DraftStep, item: PgDraftItem, roles: PgRoleSummary[]): DraftS
   if (same >= 0) return step;
   if (change.kind === "membership") {
     const pair = items.findIndex((d) => d.change.kind === "membership" && d.change.group === change.group && d.change.member === change.member);
-    if (pair >= 0) return { ...step, items: replaceAt(items, pair, item) };
+    if (pair >= 0) {
+      // 담긴 ADMIN OPTION 변경이 있는 관계를 그룹에서 빼면 그 변경이 말없이 사라진다: 거둔 뒤에 빼도록 알린다
+      const queued = items[pair].change;
+      if (queued.kind === "membership" && queued.admin && !change.add && !change.admin) return { ...step, overlap: true };
+      return { ...step, items: replaceAt(items, pair, item) };
+    }
   }
   return append(step, item);
 }
