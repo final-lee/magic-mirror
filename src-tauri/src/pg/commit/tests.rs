@@ -547,3 +547,111 @@ fn an_apply_result_prints_without_its_password() {
     let none = serde_json::to_value(PgApplyResult { log_id: "x".into(), summary: "s".into(), password: None, notes: Vec::new() }).unwrap();
     assert!(none.get("password").is_none() && none.get("notes").is_none());
 }
+
+// ───────────────────────── 수정 1 ─────────────────────────
+
+fn preset_create(group: Option<&str>, create_group: bool, kind: PresetKind) -> PgChange {
+    let preset = PresetChoice { preset: kind, database: Some("appdb".into()), schemas: vec!["app".into()], creators: Vec::new(), group: group.map(Into::into), create_group };
+    PgChange::CreateRole { name: "newbie".into(), login: false, groups: Vec::new(), connection_limit: -1, valid_until: None, preset: Some(preset) }
+}
+
+async fn undo_drop(scene: Scene, create: PgChange) -> PgCommitted {
+    let h = Harness::new(scene);
+    log::append(&h.path(), &entry_of("c1", create, Some(vec![drop_role("newbie")]))).unwrap();
+    let mut req = h.request(one(drop_role("newbie")));
+    req.undo_of = vec!["c1".into()];
+    req.confirm_text = Some("newbie".into());
+    commit(req, exec_with(&Steps::default(), Ok(())), never_reread()).await
+}
+
+#[tokio::test]
+async fn undoing_a_create_that_joined_an_existing_group_or_rds_superuser_is_allowed() {
+    // 이미 있는 그룹에 넣는 프리셋
+    let scene = admin_of(PG16, &["newbie"]).add_role(role("newbie")).add_member(member("newbie", "app_read"));
+    let committed = undo_drop(scene, preset_create(Some("app_read"), false, PresetKind::ReadOnly)).await;
+    assert!(committed.result.is_ok(), "{:?}", committed.result.err());
+    // 관리자 프리셋은 rds_superuser에 넣는다
+    let scene = admin_of(PG16, &["newbie"]).add_role(role("newbie")).add_role(role("rds_superuser")).add_member(member("newbie", "rds_superuser"));
+    let committed = undo_drop(scene, preset_create(None, false, PresetKind::Admin)).await;
+    assert!(committed.result.is_ok(), "{:?}", committed.result.err());
+    // 만든 변경에 없던 그룹에 들어갔으면 여전히 거부한다
+    let scene = admin_of(PG16, &["newbie"]).add_role(role("newbie")).add_member(member("newbie", "app_read")).add_member(member("newbie", "app_write"));
+    let committed = undo_drop(scene, preset_create(Some("app_read"), false, PresetKind::ReadOnly)).await;
+    assert_eq!(error_text(committed.result.as_ref().err().unwrap()), UNDO_AFTER_MORE);
+}
+
+#[tokio::test]
+async fn an_undo_of_several_entries_writes_undo_of_on_each_new_entry_in_run_order() {
+    let h = Harness::new(admin_of(PG16, &["app_read"]));
+    let remove = membership("app_read", "carol", false, false);
+    let revoke = PgChange::Grant { database: "appdb".into(), grantee: "app_read".into(), add: false, items: vec![item(rel("audit", "events"), &[Select])] };
+    log::append(&h.path(), &entry_of("a", add_carol(), Some(vec![remove.clone()]))).unwrap();
+    log::append(&h.path(), &entry_of("b", two_changes()[1].clone(), Some(vec![revoke.clone()]))).unwrap();
+    let calls = Steps::default();
+    let committed = commit(undoing(&h, &["a", "b"], batch(vec![remove.clone(), revoke.clone()])), exec_with(&calls, Ok(())), never_reread()).await;
+    assert!(committed.result.is_ok(), "{:?}", committed.result.err());
+    let log = h.log();
+    let new: Vec<(&str, &PgChange, Option<&str>)> = log.iter().filter(|e| e.id.starts_with("log-1")).map(|e| (e.id.as_str(), &e.change, e.undo_of.as_deref())).collect();
+    // 도는 차례는 권한 빼기, 구성원 빼기다. 각 기록은 자기가 되돌리는 기록을 가리킨다
+    assert_eq!(new, vec![("log-1-1", &revoke, Some("b")), ("log-1-2", &remove, Some("a"))]);
+}
+
+#[tokio::test]
+async fn undoing_a_create_with_a_preset_group_marks_every_new_entry_with_the_created_entry() {
+    let preset = PresetChoice { preset: PresetKind::ReadOnly, database: Some("appdb".into()), schemas: vec!["app".into()], creators: Vec::new(), group: Some("newbie_grp".into()), create_group: true };
+    let create = PgChange::CreateRole { name: "newbie".into(), login: false, groups: Vec::new(), connection_limit: -1, valid_until: None, preset: Some(preset) };
+    let scene = admin_of(PG16, &["newbie", "newbie_grp"]).add_role(role("newbie")).add_role(role("newbie_grp")).add_member(member("newbie", "newbie_grp"));
+    let h = Harness::new(scene);
+    log::append(&h.path(), &entry_of("c1", create, Some(vec![drop_role("newbie"), drop_role("newbie_grp")]))).unwrap();
+    let mut req = h.request(batch(vec![drop_role("newbie"), drop_role("newbie_grp")]));
+    req.undo_of = vec!["c1".into()];
+    req.confirm_text = Some("변경 2개 적용".into());
+    let committed = commit(req, exec_with(&Steps::default(), Ok(())), never_reread()).await;
+    assert!(committed.result.is_ok(), "{:?}", committed.result.err());
+    let marked: Vec<Option<String>> = h.log().iter().filter(|e| e.id.starts_with("log-1")).map(|e| e.undo_of.clone()).collect();
+    assert_eq!(marked, vec![Some("c1".to_string()), Some("c1".to_string())]);
+}
+
+#[tokio::test]
+async fn a_single_undo_entry_marks_the_new_entry() {
+    let h = created_newbie();
+    let mut req = h.request(one(drop_role("newbie")));
+    req.undo_of = vec!["c1".into()];
+    req.confirm_text = Some("newbie".into());
+    applied(commit(req, exec_with(&Steps::default(), Ok(())), never_reread()).await);
+    assert_eq!(h.log().last().unwrap().undo_of.as_deref(), Some("c1"));
+}
+
+#[tokio::test]
+async fn a_log_write_failure_keeps_the_variant_of_the_apply_error() {
+    let h = Harness::new(admin_of(PG16, &["app_read"]));
+    let mut req = h.request(one(add_carol()));
+    // 파일 밑에는 폴더를 만들 수 없어서 기록이 실패한다
+    fs::write(h.dir.path().join("blocker"), "x").unwrap();
+    req.log_path = h.dir.path().join("blocker").join("db-changes.jsonl");
+    let committed = commit(req, exec_with(&Steps::default(), Err(ExecError::Failed(AppError::Network { message: "끊겼어요".into() }))), never_reread()).await;
+    match committed.result {
+        Err(AppError::Network { message }) => assert!(message.starts_with("끊겼어요 (변경 기록을 저장하지 못했어요"), "{message}"),
+        other => panic!("Network 오류여야 해요: {:?}", other.err()),
+    }
+}
+
+#[tokio::test]
+async fn an_unknown_create_with_a_password_asks_for_a_reset_too() {
+    let hint = format!("{UNKNOWN} 비밀번호를 다시 재설정해 주세요");
+    let h = Harness::new(admin(PG16));
+    let committed = commit(h.request(one(create_login("newbie"))), exec_with(&Steps::default(), Err(ExecError::CommitUnknown)), reread_with(Err(AppError::other("읽지 못했어요")))).await;
+    assert_eq!(failure(&committed), hint);
+    assert_eq!(h.log()[0].error.as_deref(), Some(hint.as_str()));
+    // 세 번째 상태도 같다
+    let h = Harness::new(admin(PG16));
+    let mut other = h.scene.cluster.clone();
+    other.roles.push(role("stranger"));
+    let committed = commit(h.request(one(create_login("newbie"))), exec_with(&Steps::default(), Err(ExecError::CommitUnknown)), reread_with(Ok((Arc::new(other), Arc::new(h.scene.db.clone()))))).await;
+    assert_eq!(failure(&committed), hint);
+    // 비밀번호 없는 역할 만들기는 힌트가 없다
+    let h = Harness::new(admin(PG16));
+    let plain = PgChange::CreateRole { name: "grp".into(), login: false, groups: Vec::new(), connection_limit: -1, valid_until: None, preset: None };
+    let committed = commit(h.request(one(plain)), exec_with(&Steps::default(), Err(ExecError::CommitUnknown)), reread_with(Err(AppError::other("읽지 못했어요")))).await;
+    assert_eq!(failure(&committed), UNKNOWN);
+}

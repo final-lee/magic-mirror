@@ -47,6 +47,8 @@ pub enum Reply {
     Row(&'static str),
     /// 답 없이 연결을 닫는다
     HangUp,
+    /// 문장에는 정상으로 답한 다음 연결을 닫는다
+    CloseAfter,
     /// 답하지 않고 연결을 열어 둔다
     Stall,
 }
@@ -400,6 +402,7 @@ where
                         lock(&seen.queries).push(sql);
                         let mut reply = Vec::new();
                         let mut errored = false;
+                        let mut closes_after = false;
                         for step in rule.map_or(&[][..], |rule| rule.reply) {
                             match *step {
                                 Reply::Notice { severity, code, message: text } => reply.extend(notice_response(severity, code, text)),
@@ -414,6 +417,7 @@ where
                                 }
                                 Reply::Row(value) => reply.extend(text_row(value)),
                                 Reply::HangUp => return,
+                                Reply::CloseAfter => closes_after = true,
                                 Reply::Stall => {
                                     // 지금까지의 답은 보내고(알림 …) 그다음은 말이 없다. 서버가 닫을 때까지 열어 둔다
                                     let _ = stream.write_all(&reply).await;
@@ -426,7 +430,7 @@ where
                             reply.extend(message(b'C', format!("{command}\0").as_bytes()));
                         }
                         reply.extend(message(b'Z', b"I"));
-                        if stream.write_all(&reply).await.is_err() {
+                        if stream.write_all(&reply).await.is_err() || closes_after {
                             return;
                         }
                         quiet |= matches!(script, Script::SilentAfterPid) && command == "COMMIT";

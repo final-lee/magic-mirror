@@ -16,6 +16,7 @@ use tokio_postgres::Client;
 
 use super::*;
 use crate::pg::change::after::apply;
+use crate::pg::change::digest::digest;
 use crate::pg::connect::{spawn_connection, Notice};
 use crate::pg::change::model::{AttributesSet, GrantItem, GrantTarget, PgChange, PresetChoice, PresetKind};
 use crate::pg::change::resolve::{resolve, ResolveCtx, Resolved};
@@ -79,47 +80,6 @@ fn describe(error: &tokio_postgres::Error) -> String {
 }
 
 // ───────────────────────── 스냅숏 비교 ─────────────────────────
-
-fn acl_lines(owner: &str, label: &str, acl: &[AclEntry]) -> Vec<String> {
-    let mut lines: Vec<String> =
-        acl.iter().map(|e| format!("{label} acl {} -> {} {} grantable={}", e.grantor, e.grantee.as_deref().unwrap_or("PUBLIC"), e.privilege.as_str(), e.grantable)).collect();
-    lines.push(format!("{label} owner {owner}"));
-    lines
-}
-
-/// 스냅숏을 순서와 OID와 읽은 시각에 상관없이 비교할 수 있는 줄들로 바꾼다
-fn digest(cluster: &ClusterSnapshot, db: &DbSnapshot) -> BTreeSet<String> {
-    let mut lines = BTreeSet::new();
-    for r in &cluster.roles {
-        lines.insert(format!(
-            "role {} login={} inherit={} createrole={} createdb={} repl={} bypassrls={} super={} limit={} until={:?} comment={:?}",
-            r.name, r.login, r.inherit, r.create_role, r.create_db, r.replication, r.bypass_rls, r.superuser, r.conn_limit, r.valid_until, r.comment
-        ));
-    }
-    for m in &cluster.members {
-        lines.insert(format!("member {} -> {} admin={} inherit={:?} set={:?}", m.member, m.group, m.admin, m.inherit, m.set));
-        for g in &m.grants {
-            lines.insert(format!("grant {} -> {} by {} admin={} inherit={:?} set={:?}", m.member, m.group, g.grantor, g.admin, g.inherit, g.set));
-        }
-    }
-    for d in &cluster.databases {
-        lines.extend(acl_lines(&d.owner, &format!("database {}", d.name), &d.acl));
-    }
-    for s in &db.schemas {
-        lines.extend(acl_lines(&s.owner, &format!("schema {}", s.name), &s.acl));
-    }
-    for r in &db.relations {
-        lines.extend(acl_lines(&r.owner, &format!("relation {}.{} {:?}", r.schema, r.name, r.kind), &r.acl));
-    }
-    for f in &db.functions {
-        lines.extend(acl_lines(&f.owner, &format!("function {}.{}({})", f.schema, f.name, f.signature), &f.acl));
-    }
-    for d in &db.default_acls {
-        lines.extend(acl_lines("-", &format!("default {} {:?} {:?}", d.creator, d.schema, d.obj_type), &d.acl));
-        lines.insert(format!("default record {} {:?} {:?}", d.creator, d.schema, d.obj_type));
-    }
-    lines
-}
 
 fn assert_same(label: &str, predicted: &BTreeSet<String>, actual: &BTreeSet<String>) {
     let only_predicted: Vec<_> = predicted.difference(actual).collect();

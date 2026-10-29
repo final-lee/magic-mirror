@@ -237,6 +237,8 @@ pub fn preview_batch(ctx: &PreviewCtx, database: &str, changes: &[PgChange]) -> 
 
 /// 묶음 안에서 변경 하나가 도는 자리: 어떤 변경이, 어떤 문장으로, 어떻게 되돌려지나
 pub struct RunItem {
+    /// 받은 변경 목록에서의 자리(되돌리기가 어느 기록의 되돌림인지 짝지을 때 쓴다)
+    pub index: usize,
     pub change: PgChange,
     pub statements: Vec<Statement>,
     /// 이 변경 하나를 되돌리는 변경들. 앞선 변경들을 적용한 스냅숏 위에서 판단한 것이다. `None`은 되돌릴 수 없다는 뜻이다
@@ -275,25 +277,25 @@ pub fn evaluate_batch(ctx: &PreviewCtx, database: &str, changes: &[PgChange]) ->
     }
 
     // 문장이 나가는 차례대로 변경마다 풀고 적용한다
-    let mut order: Vec<&PgChange> = changes.iter().collect();
-    order.sort_by_key(|change| rank(change));
+    let mut order: Vec<(usize, &PgChange)> = changes.iter().enumerate().collect();
+    order.sort_by_key(|(_, change)| rank(change));
     let (mut cluster, mut db) = (ctx.cluster.clone(), ctx.db.clone());
-    let steps: Vec<(&PgChange, Step)> = order.into_iter().map(|change| (change, step(ctx, &mut cluster, &mut db, change))).collect();
+    let steps: Vec<(usize, &PgChange, Step)> = order.into_iter().map(|(index, change)| (index, change, step(ctx, &mut cluster, &mut db, change))).collect();
     let (before, after) = (Ctx { cluster: ctx.cluster, db: ctx.db }, Ctx { cluster: &cluster, db: &db });
-    let ops: Vec<_> = steps.iter().flat_map(|(_, step)| step.resolved.ops.iter().cloned()).collect();
+    let ops: Vec<_> = steps.iter().flat_map(|(_, _, step)| step.resolved.ops.iter().cloned()).collect();
 
-    let blocked = !structural.is_empty() || steps.iter().any(|(_, step)| !step.resolved.blocks.is_empty());
+    let blocked = !structural.is_empty() || steps.iter().any(|(_, _, step)| !step.resolved.blocks.is_empty());
     let mut all: Vec<PgWarning> = structural.iter().map(|t| block_warning(t)).collect();
     all.extend(warnings::closing(&before, &after, &ops, ctx.now));
     let batch_warnings = warnings::ordered(all, blocked);
 
     let mut confirm = has_confirm(&batch_warnings);
     // 되돌릴 수 없는 항목이 하나라도 있으면 묶음은 되돌릴 수 없다
-    let reversible_items = steps.iter().all(|(_, step)| step.inverse.is_some());
-    let inverse_len: usize = steps.iter().map(|(_, step)| step.inverse.as_ref().map_or(0, Vec::len)).sum();
+    let reversible_items = steps.iter().all(|(_, _, step)| step.inverse.is_some());
+    let inverse_len: usize = steps.iter().map(|(_, _, step)| step.inverse.as_ref().map_or(0, Vec::len)).sum();
     preview.items = steps
         .iter()
-        .map(|(change, step)| {
+        .map(|(_, change, step)| {
             let item_warnings = warnings::ordered(step.warnings.clone(), blocked);
             confirm |= has_confirm(&item_warnings);
             PgBatchItem { change: (*change).clone(), summary: summary(change), sql: step.resolved.statements.iter().map(|s| s.shown()).collect(), warnings: item_warnings }
@@ -308,7 +310,7 @@ pub fn evaluate_batch(ctx: &PreviewCtx, database: &str, changes: &[PgChange]) ->
     preview.warnings = batch_warnings;
     preview.confirm_text = confirm.then(|| batch_confirm_text(changes));
     preview.reversible = !blocked && reversible_items && inverse_len > 0;
-    let items = steps.into_iter().map(|(change, step)| RunItem { change: change.clone(), statements: step.resolved.statements, inverse: step.inverse }).collect();
+    let items = steps.into_iter().map(|(index, change, step)| RunItem { index, change: change.clone(), statements: step.resolved.statements, inverse: step.inverse }).collect();
     EvaluatedBatch { preview, items, after: (cluster, db) }
 }
 
