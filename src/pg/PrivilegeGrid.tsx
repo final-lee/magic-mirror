@@ -24,7 +24,7 @@ import { usePgDatabase } from "./queries";
 import { RoleKinds, filterRoles, type RoleKindsValue } from "./RoleKinds";
 import type { SchemaFocus } from "./route";
 import type { PgCoverage, PgDatabaseView, PgDbPrivilegeRow, PgOverview, PgRoleKind, PgRoleSummary, PgSchemaCell, PgTarget } from "./types";
-import { DB_COL, useChangeMode, type ChangeMode, type GridDraft } from "./useChangeMode";
+import { DB_COL, useChangeMode, type ChangeMode, type GridDraft, type ViewIndex } from "./useChangeMode";
 import type { PgDraft } from "./usePgDraft";
 
 /** 데이터 행의 높이. 고정이라서 보이는 행만 그릴 수 있다 */
@@ -88,14 +88,6 @@ function openedFrom(pick: SchemaFocus | null, rows: PgRoleSummary[]): { marked: 
   if (!pick?.schema) return { marked: null, focusReq: null };
   if (pick.role !== null && rows.some((r) => r.name === pick.role)) return { marked: null, focusReq: { role: pick.role, schema: pick.schema, n: 1, open: true } };
   return { marked: pick.schema, focusReq: rows.length > 0 ? { role: rows[0].name, schema: pick.schema, n: 1 } : null };
-}
-
-/** 데이터베이스 보기를 칸과 데이터베이스 권한으로 바로 찾을 수 있게 정리한다. 보기에 없는 역할의 칸은 비어 있는 것으로 본다. */
-export interface ViewIndex {
-  /** 이름순 */
-  schemas: string[];
-  cell: (role: string, schema: string) => PgSchemaCell;
-  database: (role: string) => PgDbPrivilegeRow;
 }
 
 function indexOf(view: PgDatabaseView): ViewIndex {
@@ -274,6 +266,8 @@ function DatabasePrivileges({ target, overview, database, filter, kinds, pick, o
             schema={open.schema}
             unusable={index.cell(open.role, open.schema).unusable}
             bypassRls={summary.attributes.bypassRls}
+            draft={change?.draft}
+            cell={index.cell(open.role, open.schema)}
             onClose={close}
           />
         )}

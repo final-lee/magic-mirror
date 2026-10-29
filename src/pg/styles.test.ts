@@ -19,11 +19,25 @@ describe("styles of the 바꾸기 mode", () => {
     },
   );
 
-  test.each([".pg-brushes", ".pg-brush-sep", ".pg-cell.pg-solo", ".pg-idle .pg-mark", ".pg-live", ".pg-cell.pg-add", ".pg-marks.pg-add", ".pg-cell.pg-del", ".pg-marks.pg-del", ".pg-mark.pg-add", ".pg-mark.pg-del"])(
+  test.each([".pg-brushes", ".pg-brush-sep", ".pg-cell.pg-solo", ".pg-idle .pg-mark", ".pg-grid .pg-table .pg-row .pg-live", ".pg-cell.pg-add", ".pg-marks.pg-add", ".pg-cell.pg-del", ".pg-marks.pg-del", ".pg-mark.pg-add", ".pg-mark.pg-del"])(
     "has a rule for %s",
     (sel) => {
       expect(hasRule(sel)).toBe(true);
     },
   );
+
+  const at = (selector: string) => css.split("\n").findIndex((line) => line.includes("{") && line.split("{")[0].split(",").some((part) => part.trim() === selector));
+
+  test("the tint of the live database column is as specific as the row stripe and comes after it, so it shows on every row", () => {
+    expect(at(".pg-grid .pg-table .pg-row .pg-live")).toBeGreaterThan(at(".pg-grid .pg-table .pg-even .pg-td"));
+  });
+
+  test("an idle cell that is also dimmed stays at the idle opacity: the idle rule comes after the dimmed one", () => {
+    expect(at(".pg-idle .pg-mark")).toBeGreaterThan(at(".pg-dimmed .pg-mark"));
+  });
+
+  test.each([".pg-revoke.on", ".pg-priv-edit", ".sheet.pg-form", ".pg-form-checks", ".pg-attr-form", ".pg-schema-privs"])("has a rule for %s", (sel) => {
+    expect(hasRule(sel)).toBe(true);
+  });
 });
 export {};

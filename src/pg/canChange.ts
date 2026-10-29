@@ -15,3 +15,21 @@ export function changeBlockReason(info: PgTargetInfo, ov: PgOverview): string | 
   if (info.readReplica) return READ_REPLICA_TEXT;
   return ov.canManage ? null : ov.manageReason;
 }
+
+/** 소유자라서 가진 권한은 바꾸기 모드에서 켜고 끌 수 없다 */
+export const OWNER_HELD_TEXT = "소유자라서 가진 권한이에요";
+
+/** 구성원을 넣거나 뺄 수 있는 시스템 그룹. 나머지 시스템 역할은 구성원을 바꿀 수 없다 */
+export const MEMBERSHIP_SYSTEM_GROUPS: readonly string[] = [
+  "rds_superuser",
+  "rds_iam",
+  "rds_password",
+  "rds_replication",
+  "pg_read_all_data",
+  "pg_write_all_data",
+  "pg_monitor",
+  "pg_read_all_settings",
+  "pg_read_all_stats",
+  "pg_stat_scan_tables",
+  "pg_signal_backend",
+];

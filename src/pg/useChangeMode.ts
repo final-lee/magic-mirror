@@ -3,12 +3,19 @@ import type { Pos } from "../lib/gridPos";
 import { usePaintDrag } from "../lib/usePaintDrag";
 import { brushItem, brushKey, brushView, databaseLevels, schemaLevels, type Brush, type BrushView, type Levels } from "./brush";
 import type { PgDraftItem } from "./draft";
-import type { ViewIndex } from "./PrivilegeGrid";
-import type { PgRoleSummary } from "./types";
+import type { PgDbPrivilegeRow, PgRoleSummary, PgSchemaCell } from "./types";
 import type { PgDraft } from "./usePgDraft";
 
 /** 데이터베이스 열의 열 번호. 스키마 열은 0부터 센다 */
 export const DB_COL = -1;
+
+/** 데이터베이스 보기를 칸과 데이터베이스 권한으로 바로 찾을 수 있게 정리한다. 보기에 없는 역할의 칸은 비어 있는 것으로 본다. */
+export interface ViewIndex {
+  /** 이름순 */
+  schemas: string[];
+  cell: (role: string, schema: string) => PgSchemaCell;
+  database: (role: string) => PgDbPrivilegeRow;
+}
 
 /** 바꾸기 모드에서 표가 장바구니에 대해 쓰는 것 */
 export type GridDraft = Pick<PgDraft, "items" | "toggle" | "paint" | "remove">;
