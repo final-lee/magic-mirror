@@ -13,7 +13,7 @@ use super::sql_text::{self, privilege_list, AttrClause, OnClause, Statement};
 use super::text::target_label;
 use crate::iam::clock::parse_iso;
 use crate::pg::eval::{offers, Ctx, Eval, Obj, PrivKind};
-use crate::pg::model::{MEMBERSHIP_OPTIONS_SINCE, AclEntry, ClusterSnapshot, DbSnapshot, DefaultObjType, MemberRec, Privilege, RelKind, RoleRec, SessionRec};
+use crate::pg::model::{AclEntry, ClusterSnapshot, DbSnapshot, DefaultObjType, MemberRec, Privilege, RelKind, RoleRec, SessionRec, MEMBERSHIP_OPTIONS_SINCE};
 use crate::pg::summary::{is_system_role, RDS_SUPERUSER};
 
 /// 구성원을 넣고 뺄 수 있는 시스템 그룹
@@ -42,6 +42,7 @@ const SCHEMAS_WITH_SCHEMA: &str = "스키마의 기본 권한은 모든 스키�
 const UNDO_AFTER_MORE: &str = "만든 뒤에 객체나 권한이 생겨서 되돌릴 수 없어요";
 const OWN_PASSWORD: &str = "지금 로그인한 역할이라 여기서 비밀번호를 바꿀 수 없어요";
 const DROP_LOGIN: &str = "앱이 로그인한 역할은 삭제할 수 없어요";
+const SESSION_GONE: &str = "세션이 이미 끝났어요";
 const TRUNCATED: &str = "객체가 많아 일부만 읽었어요. 영향에 없는 객체에도 적용돼요";
 
 fn system_role_text(role: &str) -> String {

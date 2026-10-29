@@ -462,9 +462,13 @@ pub(super) async fn blocked_rights_fail_on_the_server_too(server: Server) {
         ),
         ("권한 없이 세션 끊기", PgChange::Terminate { pid: alice.pid, role: "alice".into(), backend_start: None }),
     ];
+    // 막힘의 글을 못 박아 두는 경우: 다른 막힘으로 통과하지 못하게 한다
+    let mut texts: Vec<(&str, &str)> = Vec::new();
     if server.has_membership_options() {
         cases.push(("ADMIN OPTION이 상속하지 않는 관계 끝에만 있을 때", membership("mm_chg_g9", "carol", true, false)));
         cases.push(("같이 거두는 ADMIN 줄이 마지막 줄일 때", membership("mm_chg_g11", "mm_chg_mgr11", false, false)));
+        texts.push(("ADMIN OPTION이 상속하지 않는 관계 끝에만 있을 때", "mm_chg_g9 역할의 구성원을 바꿀 수 없어요. ADMIN OPTION을 가진 역할의 권한을 물려받아야 해요"));
+        texts.push(("같이 거두는 ADMIN 줄이 마지막 줄일 때", "mm_chg_mgr11 역할이 mm_chg_g11 역할을 다른 역할에 줬어요. 그 구성원 관계부터 빼야 해요"));
     }
     for (label, change) in cases {
         let (cluster, db) = {
@@ -474,6 +478,9 @@ pub(super) async fn blocked_rights_fail_on_the_server_too(server: Server) {
         };
         let resolved = resolve(&ResolveCtx { cluster: &cluster, db: &db, own_pids: &[plain.pid], read_replica: false }, &change);
         assert!(!resolved.blocks.is_empty(), "{label}: 막혀야 해요");
+        if let Some((_, text)) = texts.iter().find(|(name, _)| *name == label) {
+            assert_eq!(resolved.blocks, vec![text.to_string()], "{label}");
+        }
         let outcome = run_in_transaction(&plain, &resolved.statements).await;
         match outcome {
             Err(error) => assert!(!error.is_empty(), "{label}"),

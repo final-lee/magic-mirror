@@ -106,7 +106,10 @@ impl Resolver<'_> {
         // 변경이 든 시각이 스냅숏의 것과 다르면 pid를 이어받은 다른 세션이니 그 시각 그대로 둬서 문장이 "세션이 이미 끝났어요"로 실패하게 한다
         let guard_start = match &known_start {
             Some(Some(seen)) => match backend_start {
-                Some(wanted) if !same_time(Some(seen), Some(wanted)) => Some(wanted.to_string()),
+                Some(wanted) if !same_time(Some(seen), Some(wanted)) => {
+                    self.block(SESSION_GONE);
+                    Some(wanted.to_string())
+                }
                 _ => Some(seen.clone()),
             },
             Some(None) => None,
@@ -115,7 +118,6 @@ impl Resolver<'_> {
         let statement = sql_text::terminate(pid, role, guard_start.as_deref());
         self.push(Op::Terminate { pid, role: role.into(), backend_start: guard_start }, statement);
     }
-
 }
 
 /// 같은 시각인가. 초 아래는 서버가 읽어 줄 때 버려지니 초까지만 본다
