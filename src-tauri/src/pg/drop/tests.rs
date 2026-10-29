@@ -150,12 +150,12 @@ fn the_counts_are_per_database_what_the_role_owns_the_entries_naming_it_and_the_
 }
 
 #[test]
-fn a_database_the_role_owns_counts_as_an_owned_object_of_its_step() {
+fn a_database_the_role_owns_counts_as_an_owned_object_of_the_first_step() {
     let mut world = World::new(PG16);
     world.db("other").owner = ROLE.into();
     world.cluster.databases[1].owner = ROLE.into();
     let plan = world.plan();
-    assert_eq!((plan.steps[0].owned, plan.steps[1].owned), (0, 1));
+    assert_eq!((plan.steps[0].owned, plan.steps[1].owned), (1, 0), "공유 객체인 데이터베이스의 소유권은 첫 단계가 넘겨요");
 }
 
 // ───────────────────────── 남는 권한 ─────────────────────────
@@ -639,4 +639,106 @@ fn the_log_entry_holds_every_steps_sql_and_cannot_be_undone() {
 #[test]
 fn the_stopped_text_is_the_contract_text() {
     assert_eq!(stopped_text(4, 2, "이유"), "4개 데이터베이스 중 2개를 정리하고 멈췄어요: 이유");
+}
+
+// ───────────────────────── 고침 1 ─────────────────────────
+
+fn no_inherit_of_app_owner(world: &mut World) {
+    world.cluster.members.retain(|m| m.member != "mm" || m.group == ROLE);
+}
+
+#[test]
+fn a_function_the_role_owns_needs_set_role_to_the_target_too() {
+    let mut world = World::new(PG16);
+    world.db("appdb").functions.push(function("app", "f", "a integer", ROLE));
+    world.cluster.members.retain(|m| m.member != "mm" || m.group == ROLE);
+    world.cluster.members.push(member_with("mm", "app_owner", true, false));
+    assert_eq!(blocks(&world.plan_to(ROLE, "app_owner")), vec!["app_owner 역할에게 넘길 수 없어요: app.f(a integer). 로그인한 역할이 app_owner 역할로 SET ROLE 할 수 있어야 해요"]);
+    // 로그인한 역할 자신에게 넘기면 SET ROLE이 필요 없다
+    assert!(blocks(&world.plan_to(ROLE, "mm")).is_empty());
+}
+
+#[test]
+fn a_database_the_role_owns_needs_set_role_to_the_target_and_no_createdb_and_is_counted_in_the_first_step() {
+    let mut world = World::new(PG16);
+    world.cluster.databases[1].owner = ROLE.into();
+    // 서버는 데이터베이스를 넘길 때 CREATEDB를 보지 않는다(live 시험으로 확인)
+    assert!(blocks(&world.plan_to(ROLE, "mm")).is_empty());
+    assert_eq!(world.plan().steps[0].owned, 1);
+    // 다른 역할에게 넘기면 SET ROLE을 본다
+    world.cluster.members.retain(|m| m.member != "mm" || m.group == ROLE);
+    world.cluster.members.push(member_with("mm", "app_owner", true, false));
+    assert_eq!(blocks(&world.plan_to(ROLE, "app_owner")), vec!["app_owner 역할에게 넘길 수 없어요: 데이터베이스 other. 로그인한 역할이 app_owner 역할로 SET ROLE 할 수 있어야 해요"]);
+}
+
+#[test]
+fn a_role_that_is_a_member_of_the_login_cannot_be_dropped_with_the_temporary_grant() {
+    for version in [PG14, PG16] {
+        let mut world = World::new(version);
+        world.cluster.members.push(if version >= PG16 { member_with(ROLE, "mm", true, true) } else { member(ROLE, "mm") });
+        assert_eq!(blocks(&world.plan()), vec!["mm_drop 역할이 로그인한 역할의 구성원이라 삭제할 수 없어요"], "{version}");
+    }
+    // 사슬로 이어져도 같다
+    let mut chain = World::new(PG16);
+    chain.cluster.roles.push(role("mid"));
+    chain.cluster.members.push(member_with(ROLE, "mid", true, true));
+    chain.cluster.members.push(member_with("mid", "mm", true, true));
+    assert!(blocks(&chain.plan()).contains(&"mm_drop 역할이 로그인한 역할의 구성원이라 삭제할 수 없어요".to_string()));
+}
+
+#[test]
+fn from_160000_an_existing_membership_from_the_grantor_the_temporary_grant_uses_blocks() {
+    let mut world = World::new(PG16);
+    world.cluster.members.retain(|m| m.group != ROLE);
+    world.cluster.members.push(member_grants("mm", ROLE, &[(BOOTSTRAP, true, Some(false), Some(false)), ("mm", false, Some(false), Some(true))]));
+    assert_eq!(blocks(&world.plan()), vec!["로그인한 역할이 이미 mm_drop 역할의 구성원이라 삭제 중에 그 관계가 바뀔 수 있어요. 먼저 그 구성원 관계를 정리해 주세요"]);
+    // 다른 부여자의 줄만 있으면 괜찮다
+    assert!(blocks(&World::new(PG16).plan()).is_empty());
+}
+
+#[test]
+fn the_result_carries_a_note_only_when_the_log_was_not_saved() {
+    let saved = result("log-1", 2, 2, None, None);
+    assert!(saved.notes.is_empty());
+    assert!(serde_json::to_value(&saved).unwrap().get("notes").is_none());
+    let unsaved = result("log-1", 2, 1, Some("멈췄어요".into()), Some("디스크가 가득 찼어요"));
+    assert_eq!(unsaved.notes, vec!["변경 기록을 저장하지 못했어요: 디스크가 가득 찼어요"]);
+    assert_eq!(serde_json::to_value(&unsaved).unwrap()["notes"][0], "변경 기록을 저장하지 못했어요: 디스크가 가득 찼어요");
+    assert_eq!(unsaved.stopped.as_deref(), Some("멈췄어요"), "멈춘 이유에는 덧붙이지 않아요");
+}
+
+#[test]
+fn the_same_object_in_two_databases_is_told_apart_in_the_stays_sample() {
+    let mut world = World::new(PG16);
+    no_inherit_of_app_owner(&mut world);
+    for name in ["appdb", "other"] {
+        world.db(name).relations.push(table("app", "t", "app_owner").grant(ROLE, &[Select]));
+    }
+    let text = blocks(&world.plan()).remove(0);
+    assert!(text.contains("(2개, 예: appdb: app.t SELECT, other: app.t SELECT)"), "{text}");
+    // 하나뿐이면 앞에 붙이지 않는다
+    let mut single = World::new(PG16);
+    no_inherit_of_app_owner(&mut single);
+    single.db("appdb").relations.push(table("app", "t", "app_owner").grant(ROLE, &[Select]));
+    assert!(blocks(&single.plan())[0].contains("(1개, 예: app.t SELECT)"));
+}
+
+#[test]
+fn with_no_member_leaving_the_confirm_has_only_the_first_sentence() {
+    let mut world = World::new(PG16);
+    world.cluster.roles.extend([role("g2"), role("m2")]);
+    world.cluster.members.push(member_grants("m2", "g2", &[(ROLE, false, Some(true), Some(true)), ("mm", false, Some(true), Some(true))]));
+    let confirms = messages(&world.plan(), PgWarnLevel::Confirm);
+    assert_eq!(confirms[1], "이 역할이 준 구성원 관계 1개가 함께 지워져요");
+}
+
+#[test]
+fn the_statements_that_run_are_the_plain_text_the_plan_shows() {
+    let plan = World::new(PG16).plan();
+    let mut sent = Vec::new();
+    for step in &plan.steps {
+        sent.extend(step.sql.iter().cloned());
+    }
+    // 마스크 글자가 든 문장은 없다
+    assert!(sent.iter().all(|sql| !sql.contains(crate::pg::password::MASK)), "{sent:?}");
 }

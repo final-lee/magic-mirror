@@ -62,7 +62,8 @@ fn cut(name: &str, limit: usize) -> String {
 
 // ───────────────────────── 만드는 역할 ─────────────────────────
 
-/// 고른 스키마의 테이블과 시퀀스(관계 전부)를 가진 역할들. 시스템 역할은 뺀다. 이름순
+/// 고른 스키마의 테이블과 시퀀스를 가진 역할들. 뷰와 구체화 뷰의 소유자도 넣는다: 기본 권한의 TABLES가 그것들도 덮는다(`defaults_ok`가 시퀀스가 아닌 관계를 모두 테이블로 보는 것과 같다).
+/// 시스템 역할은 뺀다. 이름순
 fn creators_of(db: &DbSnapshot, schemas: &[String]) -> Vec<String> {
     let owners: BTreeSet<&str> = db.relations.iter().filter(|r| schemas.contains(&r.schema) && !is_system_role(&r.owner)).map(|r| r.owner.as_str()).collect();
     owners.into_iter().map(str::to_string).collect()

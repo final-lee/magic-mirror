@@ -168,10 +168,32 @@ fn a_step_prints_without_its_statement() {
     assert!(printed.contains(crate::pg::password::MASK));
 }
 
+/// 닫힘을 기다린 뒤의 결정은 결정적이다: 마지막 문장의 답과 함께 서버가 연결을 닫았고 클라이언트가 그것을 안 다음에는 `COMMIT`을 보내지 않고 평범한 실패다
 #[tokio::test]
 async fn a_connection_closed_after_the_last_step_is_a_plain_failure_not_an_unknown_commit() {
     const RULES: &[Rule] = &[Rule { contains: "GRANT", reply: &[Reply::CloseAfter] }];
     let (server, mut conn) = connect(RULES).await;
-    assert_eq!(run(&mut conn, &[step("GRANT x TO a")]).await, failed_with(LOST_BEFORE_COMMIT));
+    let Connected { client, notices, .. } = &mut conn;
+    let tx = client.build_transaction().start().await.expect("BEGIN");
+    body(&tx, notices, &[step("GRANT x TO a")]).await.unwrap_or_else(|stop| panic!("본문이 실패했어요: {:?}", stop.error));
+    for _ in 0..100 {
+        if tx.client().is_closed() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(tx.client().is_closed(), "서버가 연결을 닫았는데 클라이언트가 알지 못했어요");
+    let committing = AtomicBool::new(false);
+    assert_eq!(finish(tx, &committing).await, failed_with(LOST_BEFORE_COMMIT));
+    assert!(!committing.load(Ordering::SeqCst));
     assert!(!server.simple_queries().contains(&"COMMIT".to_string()), "{:?}", server.simple_queries());
+}
+
+/// `run` 전체로는 클라이언트가 닫힘을 아는 때에 따라 둘 중 하나다. 어느 쪽이든 성공으로 보이지 않는다
+#[tokio::test]
+async fn a_connection_closed_after_the_last_step_never_reports_success() {
+    const RULES: &[Rule] = &[Rule { contains: "GRANT", reply: &[Reply::CloseAfter] }];
+    let (_server, mut conn) = connect(RULES).await;
+    let outcome = run(&mut conn, &[step("GRANT x TO a")]).await;
+    assert!(outcome == failed_with(LOST_BEFORE_COMMIT) || outcome == Err(ExecError::CommitUnknown), "{outcome:?}");
 }

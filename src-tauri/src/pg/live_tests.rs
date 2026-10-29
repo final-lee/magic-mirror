@@ -49,7 +49,7 @@ use writes::{a_grant_commits_and_the_server_agrees, a_run_that_fails_midway_leav
 mod drops;
 use drops::{
     a_lock_stops_the_drop_at_its_database_and_the_role_stays, a_privilege_that_would_stay_blocks_the_plan_and_the_server_stops_too, a_role_is_dropped_in_every_database_and_leaves_no_trace,
-    a_session_is_ended_through_the_commit_flow,
+    a_session_is_ended_through_the_commit_flow, a_role_that_is_a_member_of_the_login_blocks_the_plan_and_the_server_refuses, a_database_owned_by_the_role_is_handed_over_without_createdb,
 };
 #[cfg(test)]
 mod statements;
@@ -329,6 +329,8 @@ on_both_servers!(
     a_privilege_that_would_stay_blocks_the_plan_and_the_server_stops_too,
     a_lock_stops_the_drop_at_its_database_and_the_role_stays,
     a_session_is_ended_through_the_commit_flow,
+    a_role_that_is_a_member_of_the_login_blocks_the_plan_and_the_server_refuses,
+    a_database_owned_by_the_role_is_handed_over_without_createdb,
 );
 
 async fn cluster_snapshot_reads_the_seeded_roles_and_memberships(server: Server) {
