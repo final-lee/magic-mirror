@@ -20,6 +20,7 @@ use crate::error::AppError;
 use crate::iam::clock::now_secs;
 use crate::iam::commit::{new_log_id, PlanStore};
 use crate::pg::change::model::{PgChange, PresetKind};
+use crate::pg::change::resolve::not_changeable;
 use crate::pg::change::preview::{evaluate, evaluate_batch, PreviewCtx};
 use crate::pg::commit::{self, PgChanges, PgCommitResult, PgPlan, PgRequest};
 use crate::pg::connect::{self, Connected};
@@ -400,14 +401,12 @@ impl PgState {
 
 // ───────────────────────── 변경 ─────────────────────────
 
-const DATABASE_NOT_CHANGEABLE: &str = "이 데이터베이스에서는 바꿀 수 없어요";
-
 /// 변경이 도는 데이터베이스가 클러스터 스냅숏에 있고 연결할 수 있어야 한다(템플릿과 `rdsadmin`은 스냅숏에 없다). 연결하기 전에 본다
 fn check_execution_database(cluster: &ClusterSnapshot, database: &str) -> Result<(), AppError> {
     if cluster.databases.iter().any(|d| d.name == database && d.allow_conn) {
         Ok(())
     } else {
-        Err(AppError::other(format!("{DATABASE_NOT_CHANGEABLE}: {database}")))
+        Err(AppError::other(not_changeable(database)))
     }
 }
 

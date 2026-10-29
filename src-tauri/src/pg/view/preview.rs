@@ -210,6 +210,8 @@ pub struct PgGrantedMembership {
 pub struct PgDropPlan {
     pub role: String,
     pub reassign_to: String,
+    /// 삭제를 돌리는 DB 사용자. 계획에 들어 있어서 미리보기와 적용 사이에 로그인이 바뀌면 달라진 계획이다
+    pub login_user: String,
     /// 데이터베이스마다 하나(이름순), 마지막이 `DROP ROLE`
     pub steps: Vec<PgDropStep>,
     pub warnings: Vec<PgWarning>,

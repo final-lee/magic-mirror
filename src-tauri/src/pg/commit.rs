@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use super::change::digest::digest;
 use super::change::model::{PgChange, PresetKind};
+use super::change::resolve::UNDO_AFTER_MORE;
 use super::change::preview::{evaluate, evaluate_batch, PreviewCtx};
 use super::change::sql_text::{Part, Statement};
 use super::exec::{ExecError, Step, LOST_BEFORE_COMMIT, UNKNOWN_OUTCOME};
@@ -24,7 +25,6 @@ pub const STALE: &str = "미리보기 뒤에 바뀌었어요. 미리보기를 �
 pub const NOT_FOUND: &str = "변경 기록을 찾을 수 없어요";
 pub const NOT_UNDOABLE: &str = "되돌릴 수 없는 변경이에요";
 pub const ALREADY_UNDONE: &str = "이미 되돌린 변경이에요";
-const UNDO_AFTER_MORE: &str = "만든 뒤에 객체나 권한이 생겨서 되돌릴 수 없어요";
 const UNDO_MISMATCH: &str = "되돌리려는 변경이 기록과 달라요";
 const RESET_PASSWORD: &str = " 비밀번호를 다시 재설정해 주세요";
 const CONFIRMED_AFTER_LOSS: &str = "연결이 끊겼지만 적용된 것을 확인했어요";

@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use super::after;
 use super::model::{AttributesSet, GrantItem, GrantTarget, PgChange, PresetChoice, PresetKind};
 use super::rights::Rights;
-use super::sql_text::{self, privilege_list, AttrClause, OnClause, Statement};
+use super::sql_text::{self, privilege_list, AttrClause, OnClause, Statement, SESSION_GONE};
 use super::text::target_label;
 use crate::iam::clock::parse_iso;
 use crate::pg::eval::{offers, Ctx, Eval, Obj, PrivKind};
@@ -39,11 +39,15 @@ const PUBLIC_ROLE: &str = "PUBLIC이라는 이름의 역할은 이 앱에서 바
 const NO_PRIVILEGES: &str = "권한을 하나 이상 골라야 해요";
 const NO_ITEMS: &str = "바꿀 객체가 없어요";
 const SCHEMAS_WITH_SCHEMA: &str = "스키마의 기본 권한은 모든 스키마에만 줄 수 있어요";
-const UNDO_AFTER_MORE: &str = "만든 뒤에 객체나 권한이 생겨서 되돌릴 수 없어요";
+pub(crate) const UNDO_AFTER_MORE: &str = "만든 뒤에 객체나 권한이 생겨서 되돌릴 수 없어요";
 const OWN_PASSWORD: &str = "지금 로그인한 역할이라 여기서 비밀번호를 바꿀 수 없어요";
 pub(crate) const DROP_LOGIN: &str = "앱이 로그인한 역할은 삭제할 수 없어요";
-const SESSION_GONE: &str = "세션이 이미 끝났어요";
 const TRUNCATED: &str = "객체가 많아 일부만 읽었어요. 영향에 없는 객체에도 적용돼요";
+
+/// 변경이 돌 수 없는 데이터베이스의 막힘 글
+pub(crate) fn not_changeable(database: &str) -> String {
+    format!("이 데이터베이스에서는 바꿀 수 없어요: {database}")
+}
 
 pub(crate) fn system_role_text(role: &str) -> String {
     format!("시스템 역할이라 바꿀 수 없어요: {role}")
@@ -230,7 +234,7 @@ impl Resolver<'_> {
             && !matches!(name, "template0" | "template1" | "rdsadmin")
             && self.cluster.databases.iter().find(|d| d.name == name).is_some_and(|d| d.allow_conn);
         if !usable {
-            self.block(format!("이 데이터베이스에서는 바꿀 수 없어요: {name}"));
+            self.block(not_changeable(name));
         }
     }
 
