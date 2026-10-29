@@ -6,14 +6,14 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use super::eval::{schema_cells, who_can, Coverage, Ctx, Eval, Obj, RoleView, SchemaCell};
+use super::eval::{schema_cells, who_can, Coverage, Ctx, Eval, Obj, RoleView, SchemaCell, SourceKind};
 use super::model::{
     AclEntry, ClusterSnapshot, DbSnapshot, DefaultAclRec, DefaultObjType, FunctionRec, MemberRec, Privilege, RelKind, RelationRec, RoleRec, SessionRec,
 };
 use super::target::PgTargetInfo;
 use super::view::{
-    PgAttributes, PgBadge, PgBadgeKind, PgBadgeLevel, PgCellDetail, PgCellObject, PgDatabaseInfo, PgDatabaseView, PgDbPrivilegeRow, PgDefaultAclRow,
-    PgDefaultGrant, PgDefaultObjectType, PgMembership, PgObjectKind, PgObjectRef, PgOverview, PgPrivilegeGrant, PgRoleDatabase, PgRoleKind,
+    PgAttributes, PgBadge, PgBadgeKind, PgBadgeLevel, PgCellDetail, PgCellObject, PgDatabaseInfo, PgDatabaseView, PgDbPrivilegeRow, PgDbValues,
+    PgDefaultAclRow, PgDefaultGrant, PgDefaultObjectType, PgMembership, PgObjectKind, PgObjectRef, PgOverview, PgPrivilegeGrant, PgRoleDatabase, PgRoleKind,
     PgRoleMember, PgRoleSetting, PgRoleSummary, PgRoleView, PgSchemaInfo, PgSession, PgWhoCan, PgWhoCanRow,
 };
 use crate::error::AppError;
@@ -290,13 +290,27 @@ pub fn database_view(cluster: &ClusterSnapshot, db: &DbSnapshot) -> PgDatabaseVi
     let database = cluster.databases.iter().find(|d| d.name == db.database);
     let names: Vec<&str> = cluster.roles.iter().map(|r| r.name.as_str()).collect();
 
-    // 클러스터에 없는 데이터베이스는 권한을 판단할 수 없다: 만들어 낸 답 대신 모두 false다
+    // 클러스터에 없는 데이터베이스는 권한을 판단할 수 없다: 만들어 낸 답 대신 모두 false다.
+    // `direct`와 `owned`는 같은 출처 가운데 직접 받은 것과 소유자로서 가진 것만 센다(칸의 `direct`, `owned`와 같은 규칙)
     let db_privileges = names
         .iter()
         .map(|&name| {
             let view = eval.role(name);
-            let holds = |p| database.is_some_and(|d| !view.sources(Obj::Database(d), p).is_empty());
-            PgDbPrivilegeRow { role: name.to_string(), connect: holds(Privilege::Connect), create: holds(Privilege::Create), temp: holds(Privilege::Temporary) }
+            let sources = [Privilege::Connect, Privilege::Create, Privilege::Temporary].map(|p| database.map_or_else(Vec::new, |d| view.sources(Obj::Database(d), p)));
+            // `kind`가 None이면 출처가 하나라도 있는가, 아니면 그 종류의 출처가 있는가
+            let values = |kind: Option<SourceKind>| {
+                let [connect, create, temp] = sources.each_ref().map(|found| found.iter().any(|s| kind.is_none_or(|kind| s.kind == kind)));
+                PgDbValues { connect, create, temp }
+            };
+            let shown = values(None);
+            PgDbPrivilegeRow {
+                role: name.to_string(),
+                connect: shown.connect,
+                create: shown.create,
+                temp: shown.temp,
+                direct: values(Some(SourceKind::Direct)),
+                owned: values(Some(SourceKind::Owner)),
+            }
         })
         .collect();
 

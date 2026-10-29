@@ -69,6 +69,22 @@ pub fn member_options(member: &str, group: &str, inherit: Option<bool>, set: Opt
     MemberRec { member: member.into(), group: group.into(), admin: false, inherit, set, grants: vec![grant] }
 }
 
+/// 부여자마다 옵션이 다른 구성원 관계. 부여는 `(부여자, ADMIN, INHERIT, SET)`이고 부여자 이름순으로 들어간다.
+/// 합친 값은 서버를 읽을 때와 같다: ADMIN은 하나라도 있으면 있고, INHERIT·SET은 하나라도 켜져 있으면 켜진 것(모두 None이면 None)
+pub fn member_grants(member: &str, group: &str, grants: &[(&str, bool, Option<bool>, Option<bool>)]) -> MemberRec {
+    let mut grants: Vec<MemberGrant> = grants.iter().map(|&(grantor, admin, inherit, set)| MemberGrant { grantor: grantor.into(), admin, inherit, set }).collect();
+    grants.sort_by(|a, b| a.grantor.cmp(&b.grantor));
+    let merged = |pick: fn(&MemberGrant) -> Option<bool>| grants.iter().any(|g| pick(g).is_some()).then(|| grants.iter().any(|g| pick(g) == Some(true)));
+    MemberRec {
+        member: member.into(),
+        group: group.into(),
+        admin: grants.iter().any(|g| g.admin),
+        inherit: merged(|g| g.inherit),
+        set: merged(|g| g.set),
+        grants,
+    }
+}
+
 pub fn entry(grantor: &str, grantee: Option<&str>, privilege: Privilege) -> AclEntry {
     AclEntry { grantor: grantor.into(), grantee: grantee.map(Into::into), privilege, grantable: false }
 }
@@ -212,6 +228,7 @@ pub fn db(database: &str, owner: &str, schemas: Vec<SchemaRec>, relations: Vec<R
 }
 
 /// 클러스터와 데이터베이스 하나의 스냅숏
+#[derive(Clone)]
 pub struct Scene {
     pub cluster: ClusterSnapshot,
     pub db: DbSnapshot,
@@ -239,6 +256,31 @@ impl Scene {
     /// 이 장면의 데이터베이스
     pub fn database(&self) -> &DatabaseRec {
         self.cluster.databases.iter().find(|d| d.name == self.db.database).expect("데이터베이스가 클러스터에 없어요")
+    }
+
+    /// 앱이 로그인한 DB 사용자를 바꾼다
+    pub fn login_as(mut self, name: &str) -> Scene {
+        self.cluster.login_user = name.into();
+        self
+    }
+
+    /// 역할을 더한다. OID는 가장 큰 OID의 다음이다(특정 OID가 필요하면 `oid`로 고친다)
+    pub fn add_role(mut self, mut role: RoleRec) -> Scene {
+        role.oid = self.cluster.roles.iter().map(|r| r.oid).max().unwrap_or(FIRST_ROLE_OID - 1) + 1;
+        self.cluster.roles.push(role);
+        self
+    }
+
+    pub fn oid(mut self, name: &str, oid: u32) -> Scene {
+        self.role_mut(name).oid = oid;
+        self
+    }
+
+    /// 구성원 관계를 더한다. 같은 쌍이 있으면 바꾼다
+    pub fn add_member(mut self, rec: MemberRec) -> Scene {
+        self.cluster.members.retain(|m| !(m.member == rec.member && m.group == rec.group));
+        self.cluster.members.push(rec);
+        self
     }
 
     pub fn role_mut(&mut self, name: &str) -> &mut RoleRec {

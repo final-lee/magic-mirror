@@ -134,38 +134,51 @@ fn thinned(mut scene: Scene) -> Scene {
 const READ_KINDS: [RelKind; 5] = [Table, View, MatView, Partitioned, Foreign];
 const WRITE_KINDS: [RelKind; 3] = [Table, Partitioned, Foreign];
 
-/// 칸의 정의를 `sources`와 `unusable`만으로 그대로 옮긴 계산. 느리지만 읽는 대로다
-fn defined_cell(ctx: &Ctx, role: &str, schema: &SchemaRec) -> SchemaCell {
-    let mut own = false;
-    let mut note = |sources: &[Source]| own |= sources.iter().any(|s| matches!(s.kind, Owner | Direct | Superuser));
-    let has = |obj: Obj, p: Privilege, note: &mut dyn FnMut(&[Source])| {
-        let sources = ctx.sources(role, obj, p);
-        note(&sources);
-        !sources.is_empty()
-    };
-    let usage = has(Obj::Schema(schema), Usage, &mut note);
-    let create = has(Obj::Schema(schema), Create, &mut note);
+fn coverage(have: usize, total: usize) -> Coverage {
+    match (have, total) {
+        (0, _) => Coverage::None,
+        (h, t) if h == t => Coverage::All,
+        _ => Coverage::Some,
+    }
+}
+
+/// 칸의 네 값을 `sources`만으로 그대로 옮긴 계산. `kind`가 None이면 모든 출처로, 아니면 그 종류의 출처만으로 센다
+fn defined_values(ctx: &Ctx, role: &str, schema: &SchemaRec, kind: Option<SourceKind>) -> DirectCell {
+    let has = |obj: Obj, p: Privilege| ctx.sources(role, obj, p).iter().any(|s| kind.is_none_or(|kind| s.kind == kind));
+    let usage = has(Obj::Schema(schema), Usage);
+    let create = has(Obj::Schema(schema), Create);
     let (mut read_have, mut read_total, mut write_have, mut write_total) = (0, 0, 0, 0);
     for rel in ctx.db.relations.iter().filter(|r| r.schema == schema.name) {
         if READ_KINDS.contains(&rel.kind) {
             read_total += 1;
-            read_have += usize::from(has(Obj::Relation(rel), Select, &mut note));
+            read_have += usize::from(has(Obj::Relation(rel), Select));
         }
         if WRITE_KINDS.contains(&rel.kind) {
             write_total += 1;
-            let mut any = false;
-            for p in [Insert, Update, Delete] {
-                any |= has(Obj::Relation(rel), p, &mut note);
-            }
-            write_have += usize::from(any);
+            write_have += usize::from([Insert, Update, Delete].into_iter().any(|p| has(Obj::Relation(rel), p)));
         }
     }
-    let coverage = |have: usize, total: usize| match (have, total) {
-        (0, _) => Coverage::None,
-        (h, t) if h == t => Coverage::All,
-        _ => Coverage::Some,
-    };
-    let (read, write) = (coverage(read_have, read_total), coverage(write_have, write_total));
+    DirectCell { usage, create, read: coverage(read_have, read_total), write: coverage(write_have, write_total) }
+}
+
+/// 칸이 보여 주는 값 가운데 하나라도 소유·직접·superuser 출처에서 온 것이 있는가
+fn defined_own(ctx: &Ctx, role: &str, schema: &SchemaRec) -> bool {
+    let own = |obj: Obj, p: Privilege| ctx.sources(role, obj, p).iter().any(|s| matches!(s.kind, Owner | Direct | Superuser));
+    let mut any = own(Obj::Schema(schema), Usage) || own(Obj::Schema(schema), Create);
+    for rel in ctx.db.relations.iter().filter(|r| r.schema == schema.name) {
+        if READ_KINDS.contains(&rel.kind) {
+            any |= own(Obj::Relation(rel), Select);
+        }
+        if WRITE_KINDS.contains(&rel.kind) {
+            any |= [Insert, Update, Delete].into_iter().any(|p| own(Obj::Relation(rel), p));
+        }
+    }
+    any
+}
+
+/// 칸의 정의를 `sources`와 `unusable`만으로 그대로 옮긴 계산. 느리지만 읽는 대로다
+fn defined_cell(ctx: &Ctx, role: &str, schema: &SchemaRec) -> SchemaCell {
+    let DirectCell { usage, create, read, write } = defined_values(ctx, role, schema, None);
     let shown = usage || create || read != Coverage::None || write != Coverage::None;
     // 보이는 것이 CREATE뿐인 칸은 USAGE 없이도 쓸 수 있어서 USAGE가 없다는 이유를 달지 않는다
     let create_only = create && !usage && read == Coverage::None && write == Coverage::None;
@@ -180,8 +193,10 @@ fn defined_cell(ctx: &Ctx, role: &str, schema: &SchemaRec) -> SchemaCell {
         create,
         read,
         write,
-        inherited_only: shown && !own,
+        inherited_only: shown && !defined_own(ctx, role, schema),
         unusable: if shown { unusable } else { None },
+        direct: defined_values(ctx, role, schema, Some(Direct)),
+        owned: defined_values(ctx, role, schema, Some(Owner)),
     }
 }
 
@@ -214,6 +229,13 @@ fn the_cells_equal_their_definition_on_generated_snapshots() {
                     ("no_connect", got.unusable == Some("CONNECT 없음")),
                     ("no_usage", got.unusable == Some("USAGE 없음")),
                     ("create_only", got.create && !got.usage && got.read == Coverage::None && got.write == Coverage::None),
+                    ("direct_usage", got.direct.usage),
+                    ("direct_read_some", got.direct.read == Coverage::Some),
+                    ("direct_write_some", got.direct.write == Coverage::Some),
+                    ("owned_usage", got.owned.usage),
+                    ("owned_read_some", got.owned.read == Coverage::Some),
+                    ("owned_write_some", got.owned.write == Coverage::Some),
+                    ("direct_differs_from_shown", got.direct != DirectCell { usage: got.usage, create: got.create, read: got.read, write: got.write }),
                 ] {
                     *seen.entry(name).or_default() += usize::from(hit);
                 }

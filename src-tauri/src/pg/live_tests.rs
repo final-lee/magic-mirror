@@ -35,6 +35,13 @@ use comparison::{a_noinherit_database_owner_matches_postgres, effective_privileg
 mod views;
 use views::{a_statement_timeout_reads_as_the_read_timeout_text, the_builders_read_the_seeded_database, the_sessions_command_marks_the_connection_the_app_holds};
 #[cfg(test)]
+mod changes;
+use changes::{
+    a_preset_that_creates_a_group_matches_the_server, attribute_changes_match_the_server, blocked_rights_fail_on_the_server_too,
+    default_privileges_match_the_server, grants_on_owned_and_inherited_tables_match_the_server, memberships_match_the_server,
+    revokes_that_leave_other_grantors_and_bulk_grants_match_the_server,
+};
+#[cfg(test)]
 mod statements;
 use statements::{
     membership_statements_grant_and_revoke, ownership_and_session_statements, privilege_statements_change_the_acls, role_statements_create_alter_and_reset_roles,
@@ -294,6 +301,13 @@ on_both_servers!(
     membership_statements_grant_and_revoke,
     privilege_statements_change_the_acls,
     ownership_and_session_statements,
+    grants_on_owned_and_inherited_tables_match_the_server,
+    revokes_that_leave_other_grantors_and_bulk_grants_match_the_server,
+    default_privileges_match_the_server,
+    memberships_match_the_server,
+    attribute_changes_match_the_server,
+    a_preset_that_creates_a_group_matches_the_server,
+    blocked_rights_fail_on_the_server_too,
 );
 
 async fn cluster_snapshot_reads_the_seeded_roles_and_memberships(server: Server) {

@@ -4,7 +4,7 @@
 use serde_json::{json, Value};
 
 use super::*;
-use crate::pg::eval::{Coverage, SchemaCell, SourceKind};
+use crate::pg::eval::{Coverage, DirectCell, SchemaCell, SourceKind};
 use crate::pg::model::{FunctionRec, RelKind};
 use crate::pg::target::{PgTargetInfo, TargetKind};
 
@@ -185,7 +185,14 @@ fn the_database_view_serializes_to_the_contract() {
         database: "orders".into(),
         fetched_at: "2026-10-28T12:00:00Z".into(),
         truncated: false,
-        db_privileges: vec![PgDbPrivilegeRow { role: "alice".into(), connect: true, create: false, temp: true }],
+        db_privileges: vec![PgDbPrivilegeRow {
+            role: "alice".into(),
+            connect: true,
+            create: false,
+            temp: true,
+            direct: PgDbValues { connect: false, create: false, temp: true },
+            owned: PgDbValues { connect: false, create: false, temp: false },
+        }],
         schemas: vec![PgSchemaInfo { name: "app".into(), owner: "app_owner".into(), table_count: 3 }],
         cells: vec![PgSchemaCell {
             role: "alice".into(),
@@ -196,6 +203,8 @@ fn the_database_view_serializes_to_the_contract() {
             write: PgCoverage::Some,
             inherited_only: true,
             unusable: None,
+            direct: PgCellValues { usage: false, create: false, read: PgCoverage::None, write: PgCoverage::Some },
+            owned: PgCellValues { usage: false, create: false, read: PgCoverage::None, write: PgCoverage::None },
         }],
         default_privileges: vec![
             PgDefaultAclRow {
@@ -213,11 +222,17 @@ fn the_database_view_serializes_to_the_contract() {
             "database": "orders",
             "fetchedAt": "2026-10-28T12:00:00Z",
             "truncated": false,
-            "dbPrivileges": [{ "role": "alice", "connect": true, "create": false, "temp": true }],
+            "dbPrivileges": [{
+                "role": "alice", "connect": true, "create": false, "temp": true,
+                "direct": { "connect": false, "create": false, "temp": true },
+                "owned": { "connect": false, "create": false, "temp": false }
+            }],
             "schemas": [{ "name": "app", "owner": "app_owner", "tableCount": 3 }],
             "cells": [{
                 "role": "alice", "schema": "app", "usage": true, "create": false, "read": "all", "write": "some",
-                "inheritedOnly": true, "unusable": null
+                "inheritedOnly": true, "unusable": null,
+                "direct": { "usage": false, "create": false, "read": "none", "write": "some" },
+                "owned": { "usage": false, "create": false, "read": "none", "write": "none" }
             }],
             "defaultPrivileges": [
                 {
@@ -241,12 +256,16 @@ fn a_cell_of_the_evaluator_becomes_the_cell_of_the_contract() {
         write: Coverage::None,
         inherited_only: false,
         unusable: Some("CONNECT 없음"),
+        direct: DirectCell { usage: false, create: true, read: Coverage::Some, write: Coverage::None },
+        owned: DirectCell { usage: true, create: false, read: Coverage::All, write: Coverage::Some },
     };
     assert_eq!(
         to_json(&PgSchemaCell::from(cell)),
         json!({
             "role": "bob", "schema": "app", "usage": false, "create": false, "read": "some", "write": "none",
-            "inheritedOnly": false, "unusable": "CONNECT 없음"
+            "inheritedOnly": false, "unusable": "CONNECT 없음",
+            "direct": { "usage": false, "create": true, "read": "some", "write": "none" },
+            "owned": { "usage": true, "create": false, "read": "all", "write": "some" }
         })
     );
 }

@@ -22,6 +22,8 @@
 //! 데이터베이스 스냅숏 없이 클러스터 스냅숏만 있을 때는 `Eval::for_cluster`다.
 
 use std::cell::OnceCell;
+#[cfg(test)]
+use std::collections::HashSet;
 use std::collections::{BTreeSet, HashMap};
 
 use serde::Serialize;
@@ -96,6 +98,15 @@ pub struct Inherited {
     pub path: Vec<String>,
 }
 
+/// `Eval::privilege_order`가 훑은 역할 하나와 시작한 역할에서 거기까지 상속하는 걸음의 수
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reached {
+    pub role: String,
+    /// 시작한 역할은 0
+    pub depth: usize,
+}
+
 /// 계산에 쓰는 스냅숏 한 쌍: 클러스터 전체의 것과, 권한을 볼 데이터베이스의 것
 #[derive(Debug, Clone, Copy)]
 pub struct Ctx<'a> {
@@ -112,8 +123,32 @@ pub enum Obj<'a> {
     Function(&'a FunctionRec),
 }
 
+/// 권한의 목록이 같은 객체 종류. 시퀀스는 관계지만 권한 목록이 다르다
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrivKind {
+    Database,
+    Schema,
+    /// 시퀀스를 뺀 관계: 테이블, 뷰, 구체화 뷰, 파티션 테이블, 외부 테이블
+    Table,
+    Sequence,
+    Function,
+}
+
+/// 서버 버전 `version`에서 `kind`에 있는 권한인가. 테이블에 USAGE, 스키마에 SELECT, 시퀀스에 INSERT 같은 것은 없고,
+/// MAINTAIN은 PG17부터 시퀀스를 뺀 관계에만 있다. 변경이 권한 이름을 거를 때도 이 표를 쓴다
+pub fn offers(kind: PrivKind, p: Privilege, version: i32) -> bool {
+    use Privilege::*;
+    match kind {
+        PrivKind::Database => matches!(p, Connect | Create | Temporary),
+        PrivKind::Schema => matches!(p, Usage | Create),
+        PrivKind::Sequence => matches!(p, Usage | Select | Update),
+        PrivKind::Table => matches!(p, Select | Insert | Update | Delete | Truncate | References | Trigger) || (p == Maintain && version >= MAINTAIN_SINCE),
+        PrivKind::Function => matches!(p, Execute),
+    }
+}
+
 impl<'a> Obj<'a> {
-    fn owner(self) -> &'a str {
+    pub fn owner(self) -> &'a str {
         match self {
             Obj::Database(d) => &d.owner,
             Obj::Schema(s) => &s.owner,
@@ -122,12 +157,22 @@ impl<'a> Obj<'a> {
         }
     }
 
-    fn acl(self) -> &'a [AclEntry] {
+    pub fn acl(self) -> &'a [AclEntry] {
         match self {
             Obj::Database(d) => &d.acl,
             Obj::Schema(s) => &s.acl,
             Obj::Relation(r) => &r.acl,
             Obj::Function(f) => &f.acl,
+        }
+    }
+
+    pub fn priv_kind(self) -> PrivKind {
+        match self {
+            Obj::Database(_) => PrivKind::Database,
+            Obj::Schema(_) => PrivKind::Schema,
+            Obj::Relation(r) if r.kind == RelKind::Sequence => PrivKind::Sequence,
+            Obj::Relation(_) => PrivKind::Table,
+            Obj::Function(_) => PrivKind::Function,
         }
     }
 
@@ -141,17 +186,9 @@ impl<'a> Obj<'a> {
         }
     }
 
-    /// 서버 버전 `version`에서 이 객체에 있는 권한인가. 테이블에 USAGE, 스키마에 SELECT, 시퀀스에 INSERT 같은 것은 없고,
-    /// MAINTAIN은 PG17부터 시퀀스를 뺀 관계에만 있다
+    /// 서버 버전 `version`에서 이 객체에 있는 권한인가(`offers`)
     fn offers(self, p: Privilege, version: i32) -> bool {
-        use Privilege::*;
-        match self {
-            Obj::Database(_) => matches!(p, Connect | Create | Temporary),
-            Obj::Schema(_) => matches!(p, Usage | Create),
-            Obj::Relation(r) if r.kind == RelKind::Sequence => matches!(p, Usage | Select | Update),
-            Obj::Relation(_) => matches!(p, Select | Insert | Update | Delete | Truncate | References | Trigger) || (p == Maintain && version >= MAINTAIN_SINCE),
-            Obj::Function(_) => matches!(p, Execute),
-        }
+        offers(self.priv_kind(), p, version)
     }
 }
 
@@ -182,6 +219,10 @@ struct Edge<'a> {
     inherits: bool,
     /// 이 관계로 그룹에 `SET ROLE`을 할 수 있다
     can_set: bool,
+    /// 이 쌍의 부여 가운데 ADMIN OPTION이 있는 것이 하나라도 있다(부여자가 누구든). 변경의 권한 판단(`change::rights`)만 읽는다.
+    /// QB4가 `change`를 제품 코드로 잇는 대로 `cfg(test)`를 뗀다
+    #[cfg(test)]
+    admin: bool,
 }
 
 /// 구성원 → 그룹 관계들. 스냅숏의 `members` 순서를 지킨다
@@ -218,12 +259,24 @@ impl<'a> Graph<'a> {
             // PG16부터 관계마다의 옵션이 정한다(비어 있으면 구성원 속성, SET은 허용). 그 전에는 구성원의 속성이 정하고 SET ROLE은 늘 된다
             let (inherits, can_set) =
                 if version >= MEMBERSHIP_OPTIONS_SINCE { (m.inherit.unwrap_or(attribute), m.set.unwrap_or(true)) } else { (attribute, true) };
-            edges.entry(&m.member).or_default().push(Edge { group: &m.group, inherits, can_set });
+            edges.entry(&m.member).or_default().push(Edge {
+                group: &m.group,
+                inherits,
+                can_set,
+                #[cfg(test)]
+                admin: m.admin || m.grants.iter().any(|g| g.admin),
+            });
         }
         if let Some(owner) = database_owner.filter(|_| version >= PREDEFINED_ROLES_SINCE) {
             // 소유자 → pg_database_owner. 실제 관계들 뒤에 둔다. PG16은 늘 상속하고, PG15 이하는 소유자의 속성을 따른다
             let inherits = version >= MEMBERSHIP_OPTIONS_SINCE || inherit_attribute(owner);
-            edges.entry(owner).or_default().push(Edge { group: DATABASE_OWNER, inherits, can_set: true });
+            edges.entry(owner).or_default().push(Edge {
+                group: DATABASE_OWNER,
+                inherits,
+                can_set: true,
+                #[cfg(test)]
+                admin: false,
+            });
         }
         Graph { version, roles, edges }
     }
@@ -337,6 +390,44 @@ impl<'a> Eval<'a> {
         self.graph.edges.get(member).is_some_and(|edges| edges.iter().any(|e| e.group == group && e.can_set))
     }
 
+    /// 서버가 `start`의 권한을 모을 때 역할을 훑는 순서(`roles_is_member_of`의 `ROLERECURSE_PRIVS`): `start`가 먼저고, 상속하는 구성원 관계를
+    /// 너비 우선으로 따라 처음 만나는 차례다. 한 역할이 속한 그룹들은 OID 순으로 보고, 그 역할이 데이터베이스 소유자면 `pg_database_owner`는 그 뒤다.
+    /// 같은 깊이의 역할이라도 어느 쪽 부모에서 먼저 닿았는지가 앞서므로 깊이 안의 순서가 OID 순과 늘 같지는 않다. 객체 권한을 줄 부여자
+    /// (`select_best_grantor`)와 구성원 관계를 줄 부여자(`select_best_admin`)가 이 순서의 첫 후보를 고른다.
+    /// 스냅숏에 없는 역할의 OID는 가장 크게 본다. `RoleView::inherited`의 순서는 이름순 구성원 관계를 따르니 이 순서와 다를 수 있다.
+    #[cfg(test)]
+    pub fn privilege_order(&self, start: &str) -> Vec<Reached> {
+        let graph = &self.graph;
+        let oid_of = |name: &str| graph.roles.get(name).map_or(u32::MAX, |r| r.oid);
+        let mut order = vec![Reached { role: start.to_string(), depth: 0 }];
+        let mut seen: HashSet<String> = HashSet::from([start.to_string()]);
+        let mut next = 0;
+        while next < order.len() {
+            let (role, depth) = (order[next].role.clone(), order[next].depth);
+            let mut groups: Vec<&str> = graph.edges.get(role.as_str()).into_iter().flatten().filter(|e| e.inherits).map(|e| e.group).collect();
+            groups.sort_by_key(|&group| (group == DATABASE_OWNER, oid_of(group), group));
+            for group in groups {
+                if seen.insert(group.to_string()) {
+                    order.push(Reached { role: group.to_string(), depth: depth + 1 });
+                }
+            }
+            next += 1;
+        }
+        order
+    }
+
+    /// `start`와, 상속하는지와 상관없이 구성원 관계를 어떻게든 따라 닿는 모든 역할(`ROLERECURSE_MEMBERS`). `start`가 먼저다
+    #[cfg(test)]
+    pub fn member_closure(&self, start: &str) -> Vec<String> {
+        self.graph.reach(start, |_| true).nodes.iter().map(|n| n.role.to_string()).collect()
+    }
+
+    /// `member`가 `group`의 구성원으로서 ADMIN OPTION이 있는 부여를 하나라도 가졌는가(부여자가 누구든). 다른 역할을 거친 것은 세지 않는다
+    #[cfg(test)]
+    pub fn membership_admin(&self, member: &str, group: &str) -> bool {
+        self.graph.edges.get(member).is_some_and(|edges| edges.iter().any(|e| e.group == group && e.admin))
+    }
+
     /// 역할 하나의 계산. 스냅숏에 없는 역할도 자기 자신과 PUBLIC이 주는 것은 갖는다
     pub fn role<'x>(&'x self, name: &'x str) -> RoleView<'x> {
         let superuser = self.graph.roles.get(name).is_some_and(|r| r.superuser);
@@ -440,14 +531,16 @@ impl RoleView<'_> {
         }
     }
 
-    /// `ps` 가운데 하나라도 갖는지와, 그 출처에 소유·직접·superuser가 있는지
-    fn access(&self, obj: Obj, ps: &[Privilege]) -> (bool, bool) {
-        let (mut any, mut own) = (false, false);
+    /// `ps` 가운데 하나라도 갖는지와, 그 출처의 종류
+    fn access(&self, obj: Obj, ps: &[Privilege]) -> Held {
+        let mut held = Held::default();
         self.each_source(obj, ps, |found| {
-            any = true;
-            own |= found.kind.is_own();
+            held.any = true;
+            held.own |= found.kind.is_own();
+            held.direct |= found.kind == SourceKind::Direct;
+            held.owned |= found.kind == SourceKind::Owner;
         });
-        (any, own)
+        held
     }
 
     /// 이 서버 버전에서 `obj`에 `p`가 있는가
@@ -456,7 +549,7 @@ impl RoleView<'_> {
     }
 
     fn holds(&self, obj: Obj, p: Privilege) -> bool {
-        self.offers(obj, p) && self.access(obj, &[p]).0
+        self.offers(obj, p) && self.access(obj, &[p]).any
     }
 
     /// 못 쓰는 이유. 데이터베이스 CONNECT가 먼저고 스키마 USAGE가 다음이다.
@@ -473,42 +566,79 @@ impl RoleView<'_> {
 
     /// 이 역할과 스키마 하나의 칸. `relations`는 그 스키마의 관계들이다
     fn cell(&self, schema: &SchemaRec, relations: &[&RelationRec]) -> SchemaCell {
-        // 보이는 값 가운데 하나라도 소유·직접·superuser 출처에서 온 것이 있는가
-        let mut own = false;
-        let (usage, usage_own) = self.access(Obj::Schema(schema), &[Privilege::Usage]);
-        let (create, create_own) = self.access(Obj::Schema(schema), &[Privilege::Create]);
-        own |= usage_own | create_own;
-
-        let (mut read_have, mut read_total, mut write_have, mut write_total) = (0, 0, 0, 0);
+        let usage = self.access(Obj::Schema(schema), &[Privilege::Usage]);
+        let create = self.access(Obj::Schema(schema), &[Privilege::Create]);
+        let (mut read, mut write) = (Tally::default(), Tally::default());
         for &rel in relations {
             if READ_KINDS.contains(&rel.kind) {
-                let (any, from_own) = self.access(Obj::Relation(rel), &READ);
-                read_total += 1;
-                read_have += usize::from(any);
-                own |= from_own;
+                read.add(self.access(Obj::Relation(rel), &READ));
             }
             if WRITE_KINDS.contains(&rel.kind) {
-                let (any, from_own) = self.access(Obj::Relation(rel), &WRITE);
-                write_total += 1;
-                write_have += usize::from(any);
-                own |= from_own;
+                write.add(self.access(Obj::Relation(rel), &WRITE));
             }
         }
-        let (read, write) = (Coverage::of(read_have, read_total), Coverage::of(write_have, write_total));
+        let (read_all, write_all) = (Coverage::of(read.any, read.total), Coverage::of(write.any, write.total));
+        // 보이는 값 가운데 하나라도 소유·직접·superuser 출처에서 온 것이 있는가
+        let own = usage.own | create.own | read.own | write.own;
         // 잃을 것이 있는 칸만 못 쓰는 이유를 붙인다. 보이는 값이 없는 칸은 출처를 내세우지 않는다
-        let shown = usage || create || read != Coverage::None || write != Coverage::None;
+        let shown = usage.any || create.any || read_all != Coverage::None || write_all != Coverage::None;
         // 보이는 것이 CREATE뿐인 칸은 USAGE 없이도 쓸 수 있어서 USAGE가 없다는 이유를 달지 않는다. CONNECT는 그대로 본다
-        let create_only = create && !usage && read == Coverage::None && write == Coverage::None;
+        let create_only = create.any && !usage.any && read_all == Coverage::None && write_all == Coverage::None;
         SchemaCell {
             role: self.holder.reach.nodes[0].role.to_string(),
             schema: schema.name.clone(),
-            usage,
-            create,
-            read,
-            write,
+            usage: usage.any,
+            create: create.any,
+            read: read_all,
+            write: write_all,
             inherited_only: shown && !own,
             unusable: if shown { self.unusable_in(self.eval.database, (!create_only).then_some(schema)) } else { None },
+            direct: DirectCell {
+                usage: usage.direct,
+                create: create.direct,
+                read: Coverage::of(read.direct, read.total),
+                write: Coverage::of(write.direct, write.total),
+            },
+            owned: DirectCell {
+                usage: usage.owned,
+                create: create.owned,
+                read: Coverage::of(read.owned, read.total),
+                write: Coverage::of(write.owned, write.total),
+            },
         }
+    }
+}
+
+/// 권한 하나(또는 한 묶음)를 가진 출처의 종류
+#[derive(Debug, Clone, Copy, Default)]
+struct Held {
+    /// 어떤 출처로든 가졌다
+    any: bool,
+    /// 그 출처에 소유·직접·superuser가 있다
+    own: bool,
+    /// 그 출처에 직접(`Direct`)이 있다
+    direct: bool,
+    /// 그 출처에 소유자(`Owner`)가 있다
+    owned: bool,
+}
+
+/// 한 스키마의 관계들에 대한 `Held`를 센 것
+#[derive(Debug, Clone, Copy, Default)]
+struct Tally {
+    total: usize,
+    any: usize,
+    direct: usize,
+    owned: usize,
+    own: bool,
+}
+
+impl Tally {
+    fn add(&mut self, held: Held) {
+        self.total += 1;
+        self.any += usize::from(held.any);
+        self.direct += usize::from(held.direct);
+        self.owned += usize::from(held.owned);
+        self.own |= held.own;
     }
 }
 
@@ -579,6 +709,20 @@ pub struct SchemaCell {
     /// 잃을 것이 있는 칸(`usage || create || read != None || write != None`)에 `Ctx::unusable`의 결과.
     /// 보이는 값이 `create`뿐이면 스키마의 USAGE 없이도 쓸 수 있어서 "USAGE 없음"이 아니라 "CONNECT 없음"이거나 None이다
     pub unusable: Option<&'static str>,
+    /// 위의 네 값을 이 역할 앞으로 직접 부여된 항목(`SourceKind::Direct`)만으로 센 것. 편집하는 권한 표가 켜고 끄는 값이다
+    pub direct: DirectCell,
+    /// 위의 네 값을 소유자로서 가진 항목(`SourceKind::Owner`)만으로 센 것. 소유자 자신의 항목이라 표가 건드리지 않는다
+    pub owned: DirectCell,
+}
+
+/// 칸의 네 값(`SchemaCell`의 `usage`, `create`, `read`, `write`)을 한 종류의 출처만으로 센 것. 규칙은 보이는 값과 같다:
+/// 읽기는 SELECT가 있는 읽는 관계의 비율, 쓰기는 INSERT·UPDATE·DELETE 가운데 하나라도 있는 쓰는 관계의 비율이고, 대상 관계가 없으면 None이다
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DirectCell {
+    pub usage: bool,
+    pub create: bool,
+    pub read: Coverage,
+    pub write: Coverage,
 }
 
 /// 역할 × 스키마의 칸들. 주어진 역할 순서대로, 각 역할 안에서는 스키마 이름순이다. `eval`은 같은 `ctx`로 만든 것이어야 한다.
