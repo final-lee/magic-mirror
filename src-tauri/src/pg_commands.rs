@@ -603,15 +603,11 @@ impl PgState {
         });
         let path = self.log_path.clone();
         let saved = tokio::task::spawn_blocking(move || change_log::append(&path, &entry)).await;
-        // 지운 결과는 이미 서버에 있다. 기록을 저장하지 못한 것은 멈춘 이유에 덧붙여 알린다(끝까지 갔다면 알릴 자리가 없다)
+        // 지운 결과는 이미 서버에 있다. 기록을 저장하지 못한 것은 결과의 알림으로 알린다
         let unsaved = match saved {
             Ok(Ok(())) => None,
             Ok(Err(e)) => Some(e.to_string()),
             Err(e) => Some(e.to_string()),
-        };
-        let stopped = match (stopped, unsaved) {
-            (Some(text), Some(why)) => Some(format!("{text} (변경 기록을 저장하지 못했어요: {why})")),
-            (stopped, _) => stopped,
         };
 
         // 건드린 모든 데이터베이스의 읽어 둔 스냅숏을 버린다. 클러스터는 읽지 못해도 괜찮다: 화면이 다시 읽는다(`pg_overview`)
@@ -619,7 +615,7 @@ impl PgState {
         self.forget_databases(target, &touched);
         let _ = self.read_cluster(app, target, &opened).await;
         let total = plan.steps.iter().filter(|s| s.database.is_some()).count();
-        Ok(PgDropResult { log_id, total, done, stopped })
+        Ok(drop::result(&log_id, total, done, stopped, unsaved.as_deref()))
     }
 
     async fn log(&self) -> Result<Vec<change_log::PgLogEntry>, AppError> {

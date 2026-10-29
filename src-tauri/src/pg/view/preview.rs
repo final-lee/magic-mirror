@@ -229,4 +229,7 @@ pub struct PgDropResult {
     pub done: usize,
     /// 멈췄으면 삭제 결과의 글
     pub stopped: Option<String>,
+    /// 삭제는 됐지만 그 뒤에 하지 못한 일(변경 기록을 저장하지 못함). 비면 보내지 않는다
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }

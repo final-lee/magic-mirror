@@ -171,6 +171,11 @@ async fn transact(client: &mut Client, notices: &mut UnboundedReceiver<Notice>, 
         }
         return Err(stop.error);
     }
+    finish(tx, committing).await
+}
+
+/// 마지막 문장 뒤: 연결이 닫혔는지 보고 `COMMIT`한다(시험이 닫힌 뒤의 이 결정만 따로 본다)
+async fn finish(tx: tokio_postgres::Transaction<'_>, committing: &AtomicBool) -> Result<(), ExecError> {
     // 마지막 문장 뒤에 연결이 이미 닫혔으면 COMMIT은 가지도 못했다: 알 수 없는 것이 아니라 적용되지 않은 것이다
     if tx.client().is_closed() {
         return Err(lost_before_commit());

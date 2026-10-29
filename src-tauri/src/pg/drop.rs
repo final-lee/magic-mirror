@@ -26,7 +26,7 @@ use super::exec::{ExecError, Step, UNKNOWN_OUTCOME};
 use super::log::PgLogEntry;
 use super::model::{AclEntry, ClusterSnapshot, DbSnapshot, MemberGrant, MemberRec, Privilege, MEMBERSHIP_OPTIONS_SINCE};
 use super::summary::is_system_role;
-use super::view::{PgDropPlan, PgDropStep, PgGrantedMembership, PgWarnLevel, PgWarning};
+use super::view::{PgDropPlan, PgDropResult, PgDropStep, PgGrantedMembership, PgWarnLevel, PgWarning};
 use crate::error::AppError;
 use crate::iam::clock::iso;
 
@@ -63,6 +63,21 @@ fn stays_text(role: &str, count: usize, sample: &[String], grantors: &[String]) 
 
 fn reassign_check_text(heir: &str, object: &str, reason: &str) -> String {
     format!("{heir} 역할에게 넘길 수 없어요: {object}. {reason}")
+}
+
+fn circular_text(role: &str) -> String {
+    format!("{role} 역할이 로그인한 역할의 구성원이라 삭제할 수 없어요")
+}
+
+fn existing_membership_text(role: &str) -> String {
+    format!("로그인한 역할이 이미 {role} 역할의 구성원이라 삭제 중에 그 관계가 바뀔 수 있어요. 먼저 그 구성원 관계를 정리해 주세요")
+}
+
+/// 서버에 보낼 문장의 글. 삭제 단계는 계획에 담긴 글을 그대로 돌리므로 보이는 글과 돌리는 글이 같아야 한다(가려진 조각이 있는 문장은 쓰지 않는다)
+fn plain(statement: sql_text::Statement) -> String {
+    let text = statement.shown();
+    debug_assert_eq!(text, statement.run(None), "삭제 단계의 문장은 보이는 글이 곧 돌리는 글이어야 해요");
+    text
 }
 
 fn unreachable_text(names: &[String]) -> String {
@@ -261,8 +276,7 @@ pub fn drop_plan(cluster: &ClusterSnapshot, dbs: &[Arc<DbSnapshot>], unreachable
         let mut tally = Tally {
             owned: db.schemas.iter().filter(|s| s.owner == role).count()
                 + db.relations.iter().filter(|r| r.owner == role).count()
-                + db.functions.iter().filter(|f| f.owner == role).count()
-                + usize::from(db.owner == role),
+                + db.functions.iter().filter(|f| f.owner == role).count(),
             privileges: 0,
             defaults: db.default_acls.iter().filter(|d| d.creator == role || d.acl.iter().any(|e| e.grantee.as_deref() == Some(role) || e.grantor == role)).count(),
             stays: Vec::new(),
@@ -275,7 +289,11 @@ pub fn drop_plan(cluster: &ClusterSnapshot, dbs: &[Arc<DbSnapshot>], unreachable
             .chain(db.functions.iter().map(|f| (function_label(&f.schema, &f.name, &f.signature), Obj::Function(f))));
         tally_objects(objects, &actor, name, &mut tally);
         if index == 0 {
-            // 데이터베이스의 ACL은 공유 객체라서 첫 단계의 `DROP OWNED`가 모든 데이터베이스에서 거둔다
+            // 데이터베이스는 공유 객체라서 첫 단계가 모든 데이터베이스의 소유권(`REASSIGN OWNED`)과 ACL(`DROP OWNED`)을 맡는다
+            tally.owned += cluster.databases.iter().filter(|d| d.owner == role).count();
+            if heir_ok {
+                reassign_blocks.extend(database_checks(&step_rights, cluster, role, reassign_to, login));
+            }
             let databases = cluster.databases.iter().map(|d| (format!("데이터베이스 {}", d.name), Obj::Database(d)));
             tally_objects(databases, &actor, name, &mut tally);
         }
@@ -287,19 +305,19 @@ pub fn drop_plan(cluster: &ClusterSnapshot, dbs: &[Arc<DbSnapshot>], unreachable
 
         let mut sql = Vec::new();
         if needs_membership {
-            sql.push(sql_text::grant_role(role, login, false, since_16).shown());
+            sql.push(plain(sql_text::grant_role(role, login, false, since_16)));
         }
-        sql.push(sql_text::reassign_owned(role, reassign_to).shown());
-        sql.push(sql_text::drop_owned(role).shown());
+        sql.push(plain(sql_text::reassign_owned(role, reassign_to)));
+        sql.push(plain(sql_text::drop_owned(role)));
         if needs_membership {
             // 줬던 구성원 관계를 거둔다. 160000부터는 부여자까지 대서 방금 준 줄만 지운다
             let revocable = step_rights.membership_revocations(role, login).rows;
             let granted_by = if since_16 { revocable.iter().find(|row| **row == grantor).cloned() } else { None };
-            sql.push(sql_text::revoke_role(role, login, false, granted_by.as_deref()).shown());
+            sql.push(plain(sql_text::revoke_role(role, login, false, granted_by.as_deref())));
         }
         steps.push(PgDropStep { database: Some(name.to_string()), sql, owned: tally.owned, privileges: tally.privileges, defaults: tally.defaults });
     }
-    steps.push(PgDropStep { database: None, sql: vec![sql_text::drop_role(role).shown()], owned: 0, privileges: 0, defaults: 0 });
+    steps.push(PgDropStep { database: None, sql: vec![plain(sql_text::drop_role(role))], owned: 0, privileges: 0, defaults: 0 });
 
     let granted = granted_memberships(cluster, role);
     let sessions = cluster.sessions.iter().filter(|s| s.role.as_deref() == Some(role)).count();
@@ -347,11 +365,24 @@ pub fn drop_plan(cluster: &ClusterSnapshot, dbs: &[Arc<DbSnapshot>], unreachable
         if let Err(text) = grantor_choice {
             block(text);
         }
+        // 삭제할 역할이 로그인한 역할의 구성원이면 임시 부여가 순환이 된다(서버가 "is a member of role"로 거절한다)
+        if Eval::for_cluster(cluster).member_closure(role).iter().any(|r| r == login) {
+            block(circular_text(role));
+        }
+        // 160000부터: 임시 부여가 쓸 부여자의 줄이 이미 있으면 부여가 그 줄을 고치고 거두기가 지워 버린다
+        let existing = cluster.members.iter().any(|m| m.member == login && m.group == role && m.grants.iter().any(|g| g.grantor == grantor));
+        if since_16 && existing {
+            block(existing_membership_text(role));
+        }
     }
     stays.sort();
     stays.dedup();
     if !stays.is_empty() {
-        let sample: Vec<String> = stays.iter().map(|s| s.shown.clone()).take(3).collect();
+        // 같은 객체가 여러 데이터베이스에 있으면 데이터베이스를 앞에 붙여 구분하고, 그래도 같은 글은 한 번만 보인다
+        let repeated = |stay: &Stay| stays.iter().any(|other| other.shown == stay.shown && other.database != stay.database);
+        let mut sample: Vec<String> = stays.iter().map(|s| if repeated(s) { format!("{}: {}", s.database, s.shown) } else { s.shown.clone() }).collect();
+        sample.dedup();
+        sample.truncate(3);
         let grantors: BTreeSet<String> = stays.iter().map(|s| s.grantor.clone()).collect();
         block(stays_text(role, stays.len(), &sample, &grantors.into_iter().collect::<Vec<_>>()));
     }
@@ -398,14 +429,34 @@ fn reassign_checks(rights: &Rights, eval: &Eval, cluster: &ClusterSnapshot, db: 
             }
         }
         if heir != login && !rights.can_set_role(heir) {
-            texts.push(reassign_check_text(heir, &object, &format!("로그인한 역할이 {heir} 역할로 SET ROLE 할 수 있어야 해요")));
+            texts.push(reassign_check_text(heir, &object, &set_role_reason(heir)));
         }
     }
     for function in db.functions.iter().filter(|f| f.owner == role) {
+        if heir != login && !rights.can_set_role(heir) {
+            let object = function_label(&function.schema, &function.name, &function.signature);
+            texts.push(reassign_check_text(heir, &object, &set_role_reason(heir)));
+        }
         let Some(schema) = db.schemas.iter().find(|s| s.name == function.schema) else { continue };
         if schema.owner != role && eval.role(heir).sources(Obj::Schema(schema), Privilege::Create).is_empty() {
             let object = function_label(&function.schema, &function.name, &function.signature);
             texts.push(reassign_check_text(heir, &object, &format!("스키마 {}에 CREATE 권한이 있어야 해요", function.schema)));
+        }
+    }
+    texts
+}
+
+fn set_role_reason(heir: &str) -> String {
+    format!("로그인한 역할이 {heir} 역할로 SET ROLE 할 수 있어야 해요")
+}
+
+/// 역할이 소유한 데이터베이스를 넘길 때: `REASSIGN OWNED`는 넘겨받을 역할로 `SET ROLE` 할 수 있어야 한다. 서버는 데이터베이스를 넘길 때 CREATEDB를 보지 않는다
+/// (PG14·PG16에서 CREATEDB가 없는 로그인한 역할로 확인했다: 소유자가 바뀐다). 그래서 `CREATEDB가 있어야 해요`의 막힘은 만들지 않는다
+fn database_checks(rights: &Rights, cluster: &ClusterSnapshot, role: &str, heir: &str, login: &str) -> Vec<String> {
+    let mut texts = Vec::new();
+    for database in cluster.databases.iter().filter(|d| d.owner == role) {
+        if heir != login && !rights.can_set_role(heir) {
+            texts.push(reassign_check_text(heir, &format!("데이터베이스 {}", database.name), &set_role_reason(heir)));
         }
     }
     texts
@@ -459,6 +510,11 @@ fn error_text(error: &AppError) -> String {
         AppError::Other { message } | AppError::Network { message } => message.clone(),
         other => other.to_string(),
     }
+}
+
+/// 삭제 결과. 기록을 저장하지 못했으면(`unsaved`: 이유) 알림에 싣는다. 삭제는 이미 서버에 있다
+pub fn result(log_id: &str, total: usize, done: usize, stopped: Option<String>, unsaved: Option<&str>) -> PgDropResult {
+    PgDropResult { log_id: log_id.to_string(), total, done, stopped, notes: unsaved.map(|why| format!("변경 기록을 저장하지 못했어요: {why}")).into_iter().collect() }
 }
 
 /// 삭제 기록 하나: 모든 단계의 문장을 담고 되돌릴 수 없다(`inverse`가 없다)

@@ -325,3 +325,45 @@ pub(super) async fn a_session_is_ended_through_the_commit_flow(server: Server) {
     assert_eq!(outcome, Err(ExecError::Failed(AppError::other("세션이 이미 끝났어요"))));
     env.cleanup(&[]).await;
 }
+
+/// 삭제할 역할이 로그인한 역할의 구성원이면 임시 구성원 부여가 순환이다: 계획이 막고, 그 문장을 돌리면 서버도 거절한다
+pub(super) async fn a_role_that_is_a_member_of_the_login_blocks_the_plan_and_the_server_refuses(server: Server) {
+    // 160000부터는 로그인한 역할이 ADMIN으로 역할에 닿으려면 이미 그 역할의 구성원 사슬 위에 있어서, 서버가 반대 방향 부여를 처음부터 막는다. 이 경우는 그 전 버전에만 있다
+    if server.has_membership_options() {
+        return;
+    }
+    let mut env = Env::start(server, &[ROLE], &format!("{}\nGRANT mm_chg_admin TO mm_drop;", setup(server))).await;
+    let rig = Rig::open(&mut env, server).await;
+    let plan = rig.state.drop_plan_for_tests(&rig.app, &rig.target, ROLE, ADMIN).await.expect("계획");
+    assert_eq!(blocks(&plan), vec!["mm_drop 역할이 로그인한 역할의 구성원이라 삭제할 수 없어요".to_string()]);
+    let step = plan.steps.iter().find(|s| s.database.as_deref() == Some(env.scene.database.as_str())).expect("시험 데이터베이스의 단계");
+    let mut conn = connected(&env.scene.config_as(ADMIN, ADMIN, "mm-live-drop-run")).await;
+    let steps: Vec<exec::Step> = step.sql.iter().map(|run| exec::Step { run: run.clone(), expect: None }).collect();
+    match exec::run(&mut conn, &steps).await {
+        Err(ExecError::Failed(AppError::Other { message })) => assert!(message.contains("member of role"), "{message}"),
+        other => panic!("서버가 거절해야 해요: {other:?}"),
+    }
+    rig.state.close(&rig.target);
+    drop(conn);
+    env.cleanup(&[ROLE]).await;
+}
+
+/// 역할이 데이터베이스를 소유해도 로그인한 역할에 CREATEDB가 없어도 된다: 계획은 막지 않고 첫 단계가 소유권을 넘기며, 끝까지 지워진다
+pub(super) async fn a_database_owned_by_the_role_is_handed_over_without_createdb(server: Server) {
+    let mut env = Env::start(server, &[ROLE], &setup(server)).await;
+    let owned = format!("{}_o", env.scene.database);
+    env.admin.client.batch_execute(&format!("CREATE DATABASE {owned} OWNER mm_drop")).await.unwrap();
+    env.admin.client.batch_execute(&format!("GRANT CONNECT ON DATABASE {owned} TO mm_chg_admin")).await.unwrap();
+    let rig = Rig::open(&mut env, server).await;
+    let plan = rig.state.drop_plan_for_tests(&rig.app, &rig.target, ROLE, ADMIN).await.expect("계획");
+    assert!(blocks(&plan).is_empty(), "{:?}", blocks(&plan));
+    assert_eq!(plan.steps[0].owned, 1, "공유 객체인 데이터베이스의 소유권은 첫 단계가 넘겨요");
+    let result = rig.state.apply_drop_for_tests(&rig.app, &rig.target, ROLE, ADMIN, Some(ROLE.into())).await.expect("삭제");
+    assert_eq!(result.stopped, None, "{result:?}");
+    let owner: String = env.admin.client.query_one("SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = $1", &[&owned]).await.unwrap().get(0);
+    assert_eq!(owner, ADMIN);
+    assert!(!role_exists(&env, ROLE).await);
+    rig.state.close(&rig.target);
+    env.admin.client.batch_execute(&format!("DROP DATABASE {owned} WITH (FORCE)")).await.unwrap();
+    env.cleanup(&[ROLE]).await;
+}
