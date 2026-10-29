@@ -3,9 +3,11 @@ import { useCallback, useRef, useState } from "react";
 import {
   FULL_NOTICE,
   OTHER_DATABASE_NOTICE,
+  OVERLAP_NOTICE,
   defaultsAddedNotice,
   draftDatabase,
   draftItem,
+  putChangeItem,
   putItems,
   removeApplied as dropApplied,
   toggleItem,
@@ -33,6 +35,7 @@ const notify = (notices: string[], text: string) => (notices.includes(text) ? no
 function noticesAfter(current: string[], step: DraftStep, announceAdded: boolean): string[] {
   let notices = current;
   if (announceAdded && step.added > 0) notices = [...notices, defaultsAddedNotice(step.added)];
+  if (step.overlap) notices = notify(notices, OVERLAP_NOTICE);
   if (step.elsewhere) notices = notify(notices, OTHER_DATABASE_NOTICE);
   if (step.full) notices = notify(notices, FULL_NOTICE);
   return notices;
@@ -83,6 +86,9 @@ export function usePgDraft(target: PgTarget, ov: PgOverview | undefined) {
 
   const paint = useCallback((incoming: PgDraftItem[]) => run((roles, items) => putItems(items, incoming, roles)), [run]);
 
+  /** 폼이 만든 변경 하나를 담는다. 같은 칸에 담긴 변경은 겹치는 권한을 걷어 내고 바뀐다(draft.ts putChangeItem) */
+  const put = useCallback((change: PgChange) => run((roles, items) => putChangeItem(items, change, roles)), [run]);
+
   /** 경고가 담아 둔 변경(기본 권한도 담기)을 담는다. 장바구니에 담지 않는 변경은 건너뛰고, 몇 개를 담았는지 알린다 */
   const add = useCallback(
     (changes: PgChange[]) =>
@@ -129,7 +135,7 @@ export function usePgDraft(target: PgTarget, ov: PgOverview | undefined) {
     [commit],
   );
 
-  return { items: tray.items, notices: tray.notices, database: draftDatabase(tray.items), toggle, paint, add, remove, clear, removeApplied, dismissNotice };
+  return { items: tray.items, notices: tray.notices, database: draftDatabase(tray.items), toggle, paint, put, add, remove, clear, removeApplied, dismissNotice };
 }
 
 export type PgDraft = ReturnType<typeof usePgDraft>;

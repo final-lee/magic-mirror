@@ -1,5 +1,4 @@
-import { draftKey } from "./draft";
-import { putChange } from "./putChange";
+import { queuedRevoke } from "./draft";
 import type { PgChange } from "./types";
 import type { GridDraft } from "./useChangeMode";
 
@@ -14,9 +13,9 @@ interface Props {
 
 /** 담아 둔 뺄 변경이 있으면 눌린 모양이고, 다시 누르면 거둔다. 아니면 누를 때 뺄 변경을 담는다(같은 칸의 다른 변경은 바뀐다) */
 export function RevokeButton({ draft, change, label, disabled, title }: Props) {
-  const key = change ? draftKey(change) : null;
-  const queued = key === null ? undefined : draft.items.find((d) => d.key === key);
-  const pressed = !!queued && "add" in queued.change && !queued.change.add;
+  // 일부 권한만 남은 뺄 변경(다른 변경이 겹치는 권한을 걷어 낸 뒤)도 눌린 모양이다
+  const queued = change ? queuedRevoke(draft.items, change) : undefined;
+  const pressed = !!queued;
   return (
     <button
       type="button"
@@ -25,9 +24,9 @@ export function RevokeButton({ draft, change, label, disabled, title }: Props) {
       disabled={disabled || !change}
       title={title}
       onClick={() => {
-        if (!change || key === null) return;
-        if (pressed) draft.remove(key);
-        else putChange(draft, change);
+        if (!change) return;
+        if (queued) draft.remove(queued.key);
+        else draft.put(change);
       }}
     >
       {label}

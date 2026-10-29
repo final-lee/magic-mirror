@@ -1,7 +1,6 @@
 import { useId, useState } from "react";
 import { useModal } from "../iam/useModal";
 import { PrivilegeChecks } from "./PrivilegeChecks";
-import { putChange } from "./putChange";
 import { ALL_SCHEMAS, DEFAULT_OBJECT_LABEL, DEFAULT_OBJECT_ORDER, PUBLIC_LABEL } from "./sentences";
 import type { PgDefaultObjectType } from "./types";
 import type { GridDraft } from "./useChangeMode";
@@ -52,7 +51,7 @@ export function DefaultPrivilegeForm({ database, creators, grantees, schemas, dr
   const ready = creator !== "" && privileges.length > 0;
   const submit = () => {
     if (!ready) return;
-    putChange(draft, { kind: "defaultPrivilege", database, creator, schema: fixed || schema === EVERY_SCHEMA ? null : schema, objectType, grantee, privileges, add: true });
+    draft.put({ kind: "defaultPrivilege", database, creator, schema: fixed || schema === EVERY_SCHEMA ? null : schema, objectType, grantee, privileges, add: true });
     onClose();
   };
 

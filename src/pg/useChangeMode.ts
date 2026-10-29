@@ -18,7 +18,7 @@ export interface ViewIndex {
 }
 
 /** 바꾸기 모드에서 표가 장바구니에 대해 쓰는 것 */
-export type GridDraft = Pick<PgDraft, "items" | "toggle" | "paint" | "remove">;
+export type GridDraft = Pick<PgDraft, "items" | "toggle" | "paint" | "put" | "remove">;
 /** 바꾸기 모드: 지금 칠할 권한과 칠한 변경을 담는 장바구니 */
 export interface ChangeMode {
   brush: Brush;

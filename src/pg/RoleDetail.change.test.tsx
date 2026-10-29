@@ -89,7 +89,7 @@ describe("구성원 tab", () => {
     const row = (await screen.findByRole("list", { name: "속한 그룹" })).querySelectorAll("li")[0] as HTMLElement;
     const admin = within(row).getByRole("checkbox", { name: /ADMIN OPTION/ });
     expect(admin).toBeDisabled();
-    expect(admin.closest("label")).toHaveAttribute("title", "그룹에서 빼기가 담겨 있어서 ADMIN OPTION은 바꿀 수 없어요");
+    expect(admin.closest("label")).toHaveAttribute("title", "그룹에서 빼는 변경이 담겨 있어요. ADMIN OPTION을 바꾸려면 먼저 그 변경을 거둬 주세요");
     fireEvent.click(admin);
     expect(changes()).toEqual([{ kind: "membership", group: "app_write", member: "alice", add: false, admin: false }]);
   });
