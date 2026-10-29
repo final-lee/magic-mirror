@@ -1,6 +1,6 @@
 //! PostgreSQL 탭의 명령. 대상(클러스터·인스턴스)마다 로그인 사용자, 접속 정보, 클러스터 스냅숏, 데이터베이스 스냅숏을 한 번 읽어 두고
-//! 명령은 그것으로 계산한다(`pg::summary`, `pg::checks`). 1단계라서 이 파일의 모든 읽기는 데이터베이스에 아무것도 쓰지 않는다.
-//! 질의도 트랜잭션도 여기에 없다: 읽는 일은 `pg::catalog`만 한다(검사 테스트 `pg::hygiene`이 지킨다).
+//! 명령은 그것으로 계산한다(`pg::summary`, `pg::checks`). 읽기 명령은 데이터베이스에 아무것도 쓰지 않는다.
+//! 질의도 트랜잭션도 여기에 없다: 읽는 일은 `pg::catalog`이, 쓰는 일은 `pg::exec`가 하고, 여기서는 `commit::commit`에 넘기는 닫힘 하나에서만 `exec`를 부른다(검사 테스트 `pg::hygiene`이 지킨다).
 //!
 //! 연결은 `pg::pool`이 (대상, DB 사용자, 데이터베이스)마다 하나씩 보관한다. 명령은 시작할 때 대상의 닫힌 횟수(`epoch`)를 읽어 두고
 //! 연결을 열 때마다 넘긴다: 명령이 도는 중에 탭이 닫히면 새 연결을 열지도 보관하지도 않는다.
@@ -541,6 +541,18 @@ impl PgState {
         let start = self.begin_open(target);
         self.finish_open(target, start, login, info, cluster)?;
         Ok(start.epoch)
+    }
+
+    pub(crate) async fn preview_for_tests(&self, app: &AppState, target: &PgTarget, change: PgChange) -> Result<PgPreview, AppError> {
+        self.preview(app, target, change).await
+    }
+
+    pub(crate) async fn apply_for_tests(&self, app: &AppState, target: &PgTarget, change: PgChange, confirm_text: Option<String>) -> Result<PgCommitResult, AppError> {
+        self.apply(app, target, PgChanges::One(change), confirm_text, Vec::new()).await
+    }
+
+    pub(crate) fn kept_db_for_tests(&self, target: &PgTarget, database: &str) -> Option<Arc<DbSnapshot>> {
+        self.cached_db(target, database)
     }
 
     pub(crate) async fn sessions_for_tests(&self, app: &AppState, target: &PgTarget) -> Result<Vec<PgSession>, AppError> {

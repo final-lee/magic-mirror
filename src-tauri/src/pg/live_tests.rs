@@ -44,7 +44,7 @@ use changes::{
 };
 #[cfg(test)]
 mod writes;
-use writes::{a_grant_commits_and_the_server_agrees, a_run_that_fails_midway_leaves_nothing, a_warning_notice_fails_the_run, a_created_login_gets_a_working_scram_password, a_lock_wait_fails_with_the_lock_text, a_membership_revoke_removes_only_the_named_grantors_row};
+use writes::{a_grant_commits_and_the_server_agrees, a_run_that_fails_midway_leaves_nothing, a_warning_notice_fails_the_run, a_created_login_gets_a_working_scram_password, a_lock_wait_fails_with_the_lock_text, a_membership_revoke_removes_only_the_named_grantors_row, preview_then_apply_runs_through_the_state};
 #[cfg(test)]
 mod statements;
 use statements::{
@@ -318,6 +318,7 @@ on_both_servers!(
     a_warning_notice_fails_the_run,
     a_created_login_gets_a_working_scram_password,
     a_membership_revoke_removes_only_the_named_grantors_row,
+    preview_then_apply_runs_through_the_state,
 );
 
 async fn cluster_snapshot_reads_the_seeded_roles_and_memberships(server: Server) {

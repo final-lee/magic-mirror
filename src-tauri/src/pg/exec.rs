@@ -171,6 +171,10 @@ async fn transact(client: &mut Client, notices: &mut UnboundedReceiver<Notice>, 
         }
         return Err(stop.error);
     }
+    // 마지막 문장 뒤에 연결이 이미 닫혔으면 COMMIT은 가지도 못했다: 알 수 없는 것이 아니라 적용되지 않은 것이다
+    if tx.client().is_closed() {
+        return Err(lost_before_commit());
+    }
     committing.store(true, Ordering::SeqCst);
     tx.commit().await.map_err(|e| match fault_of(&e) {
         Fault::Rejected(app) => ExecError::Failed(app),

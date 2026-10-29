@@ -167,3 +167,11 @@ fn a_step_prints_without_its_statement() {
     assert!(!printed.contains("SCRAM") && !printed.contains("ALTER"), "{printed}");
     assert!(printed.contains(crate::pg::password::MASK));
 }
+
+#[tokio::test]
+async fn a_connection_closed_after_the_last_step_is_a_plain_failure_not_an_unknown_commit() {
+    const RULES: &[Rule] = &[Rule { contains: "GRANT", reply: &[Reply::CloseAfter] }];
+    let (server, mut conn) = connect(RULES).await;
+    assert_eq!(run(&mut conn, &[step("GRANT x TO a")]).await, failed_with(LOST_BEFORE_COMMIT));
+    assert!(!server.simple_queries().contains(&"COMMIT".to_string()), "{:?}", server.simple_queries());
+}

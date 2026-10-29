@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::change::digest::digest;
-use super::change::model::PgChange;
+use super::change::model::{PgChange, PresetKind};
 use super::change::preview::{evaluate, evaluate_batch, PreviewCtx};
 use super::change::sql_text::{Part, Statement};
 use super::exec::{ExecError, Step, LOST_BEFORE_COMMIT, UNKNOWN_OUTCOME};
@@ -17,6 +17,7 @@ use super::model::{ClusterSnapshot, DbSnapshot};
 use super::password::NewPassword;
 use super::view::{PgApplyResult, PgBatchPreview, PgBatchResult, PgPreview, PgUndo, PgWarnLevel, PgWarning};
 use crate::error::AppError;
+use crate::pg::summary::RDS_SUPERUSER;
 use crate::iam::clock::iso;
 
 pub const STALE: &str = "미리보기 뒤에 바뀌었어요. 미리보기를 다시 받아 주세요";
@@ -183,7 +184,11 @@ fn check_drop_roles(req: &PgRequest, entries: &[PgLogEntry]) -> Result<(), AppEr
         let allowed_groups: Vec<&str> = creates
             .iter()
             .flat_map(|c| match c {
-                PgChange::CreateRole { name, groups, .. } if name == role => groups.iter().map(String::as_str).chain(created_group(c)).collect::<Vec<_>>(),
+                // `resolve`가 새 역할을 넣는 곳: `groups`, 프리셋의 그룹(새로 만들었든 이미 있든), 관리자 프리셋의 `rds_superuser`
+                PgChange::CreateRole { name, groups, preset, .. } if name == role => {
+                    let preset_groups = preset.iter().flat_map(|p| p.group.as_deref().into_iter().chain((p.preset == PresetKind::Admin).then_some(RDS_SUPERUSER)));
+                    groups.iter().map(String::as_str).chain(preset_groups).collect::<Vec<_>>()
+                }
                 _ => Vec::new(),
             })
             .collect();
@@ -220,6 +225,8 @@ fn gate_of<'a>(mut warnings: impl Iterator<Item = &'a PgWarning> + Clone, confir
 
 /// 풀린 변경 하나(묶음이면 도는 차례의 하나)
 struct Item {
+    /// 받은 변경 목록에서의 자리
+    index: usize,
     change: PgChange,
     summary: String,
     statements: Vec<Statement>,
@@ -228,6 +235,8 @@ struct Item {
 
 struct Prepared {
     items: Vec<Item>,
+    /// 항목마다(도는 차례) 그 변경이 되돌리는 기록의 id. 되돌리기가 아니면 모두 None
+    sources: Vec<Option<String>>,
     plan: PgPlan,
     after: (ClusterSnapshot, DbSnapshot),
 }
@@ -243,7 +252,7 @@ async fn recompute(req: &PgRequest) -> Result<Prepared, AppError> {
                 let evaluated = evaluate(&ctx, &change);
                 let summary = evaluated.preview.summary.clone();
                 let inverse = evaluated.inverse.filter(|inverse| !inverse.is_empty());
-                Prepared { items: vec![Item { change, summary, statements: evaluated.statements, inverse }], plan: PgPlan::One(evaluated.preview), after: evaluated.after }
+                Prepared { sources: Vec::new(), items: vec![Item { index: 0, change, summary, statements: evaluated.statements, inverse }], plan: PgPlan::One(evaluated.preview), after: evaluated.after }
             }
             PgChanges::Batch { database, changes } => {
                 let evaluated = evaluate_batch(&ctx, &database, &changes);
@@ -252,9 +261,9 @@ async fn recompute(req: &PgRequest) -> Result<Prepared, AppError> {
                     .items
                     .into_iter()
                     .zip(summaries)
-                    .map(|(item, summary)| Item { change: item.change, summary, statements: item.statements, inverse: item.inverse.filter(|inverse| !inverse.is_empty()) })
+                    .map(|(item, summary)| Item { index: item.index, change: item.change, summary, statements: item.statements, inverse: item.inverse.filter(|inverse| !inverse.is_empty()) })
                     .collect();
-                Prepared { items, plan: PgPlan::Batch(evaluated.preview), after: evaluated.after }
+                Prepared { sources: Vec::new(), items, plan: PgPlan::Batch(evaluated.preview), after: evaluated.after }
             }
         }
     })
@@ -276,15 +285,14 @@ async fn prepare(req: &PgRequest) -> Result<Prepared, AppError> {
     if !req.undo_of.is_empty() {
         check_undo(&entries, &req.undo_of, &req.changes.list(), &req.target_arn)?;
     }
-    let prepared = recompute(req).await?;
-    let matches_plan = match (&req.seen, &prepared.plan, &req.changes) {
-        (Some(seen), plan, PgChanges::One(_) | PgChanges::Batch { .. }) => seen == plan,
-        _ => false,
-    };
-    if !matches_plan {
+    let mut prepared = recompute(req).await?;
+    if req.seen.as_ref() != Some(&prepared.plan) {
         return Err(AppError::other(STALE));
     }
     gate(&prepared.plan, req.confirm_text.as_deref())?;
+    // `check_undo`가 받은 변경이 기록들의 되돌림을 `undo_of` 순서로 이은 것임을 확인했다: 받은 자리 i의 변경은 이은 목록의 i번째 되돌림이다
+    let source_of: Vec<&String> = req.undo_of.iter().flat_map(|id| entries.iter().find(|e| &e.id == id).into_iter().flat_map(move |e| e.inverse.iter().flatten().map(move |_| id))).collect();
+    prepared.sources = prepared.items.iter().map(|item| source_of.get(item.index).map(|id| (*id).clone())).collect();
     Ok(prepared)
 }
 
@@ -305,9 +313,8 @@ struct Recorded {
 }
 
 /// 변경마다 기록 하나를 덧붙이고, 성공했으면 되돌린 기록에 표시한다
-async fn record(req: &PgRequest, items: &[Item], outcome: &Outcome) -> Recorded {
+async fn record(req: &PgRequest, items: &[Item], sources: &[Option<String>], outcome: &Outcome) -> Recorded {
     let batch = matches!(req.changes, PgChanges::Batch { .. });
-    let single_undo = if req.undo_of.len() == 1 { req.undo_of.first().cloned() } else { None };
     let entries: Vec<PgLogEntry> = items
         .iter()
         .enumerate()
@@ -324,7 +331,7 @@ async fn record(req: &PgRequest, items: &[Item], outcome: &Outcome) -> Recorded 
             ok: outcome.ok,
             error: outcome.error.clone(),
             inverse: if outcome.ok { item.inverse.clone() } else { None },
-            undo_of: single_undo.clone(),
+            undo_of: sources.get(index).cloned().flatten(),
             undone: false,
             batch_id: batch.then(|| req.log_id.clone()),
         })
@@ -380,7 +387,7 @@ where
         Ok(prepared) => prepared,
         Err(error) => return refused(error),
     };
-    let Prepared { items, after, .. } = prepared;
+    let Prepared { items, after, sources, .. } = prepared;
     // 비밀번호는 문장을 돌릴 때 만든다. 평문은 결과에만 나가고 문장에는 검증값만 들어간다
     let password = items.iter().flat_map(|item| &item.statements).any(|s| s.parts.contains(&Part::Password)).then(NewPassword::generate);
     let hash = password.as_ref().map(NewPassword::scram);
@@ -392,7 +399,7 @@ where
         Err(ExecError::Failed(error)) => (Outcome { ok: false, error: Some(error_text(&error)), confirmed_after_loss: false }, Some(error)),
         Err(ExecError::CommitUnknown) => settle_unknown(&req, &items, &after, reread).await,
     };
-    let recorded = record(&req, &items, &outcome).await;
+    let recorded = record(&req, &items, &sources, &outcome).await;
     let result = if outcome.ok {
         let mut notes = recorded.notes;
         if outcome.confirmed_after_loss {
@@ -411,7 +418,11 @@ where
         let text = outcome.error.unwrap_or_default();
         Err(match failure {
             Some(error) if recorded.notes.is_empty() => error,
-            _ => AppError::other(noted(text, &recorded.notes)),
+            // 기록을 저장하지 못한 것도 알리되 오류의 종류는 그대로 둔다
+            Some(AppError::Network { message }) => AppError::Network { message: noted(message, &recorded.notes) },
+            Some(AppError::Other { message }) => AppError::Other { message: noted(message, &recorded.notes) },
+            Some(error) => error,
+            None => AppError::other(noted(text, &recorded.notes)),
         })
     };
     PgCommitted { result, ran: true }
@@ -428,19 +439,21 @@ where
         (Outcome { ok: false, error: Some(text.clone()), confirmed_after_loss: false }, Some(AppError::other(text)))
     };
     let has_password = items.iter().any(|item| matches!(item.change, PgChange::Password { .. }));
+    // 비밀번호를 정한 변경(`password`, 비밀번호가 있는 `createRole`): 알 수 없을 때 누구도 비밀번호를 모를 수 있다
+    let sets_password = items.iter().flat_map(|item| &item.statements).any(|s| s.parts.contains(&Part::Password));
     let before = digest(&req.cluster, &req.db);
     let predicted = digest(&after.0, &after.1);
     if has_password || before == predicted {
-        return unknown(has_password);
+        return unknown(sets_password);
     }
-    let Ok((cluster, db)) = reread().await else { return unknown(false) };
+    let Ok((cluster, db)) = reread().await else { return unknown(sets_password) };
     let now = digest(&cluster, &db);
     if now == predicted {
         (Outcome { ok: true, error: None, confirmed_after_loss: true }, None)
     } else if now == before {
         (Outcome { ok: false, error: Some(LOST_BEFORE_COMMIT.to_string()), confirmed_after_loss: false }, Some(AppError::other(LOST_BEFORE_COMMIT)))
     } else {
-        unknown(false)
+        unknown(sets_password)
     }
 }
 

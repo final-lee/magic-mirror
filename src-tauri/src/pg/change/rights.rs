@@ -229,7 +229,7 @@ impl<'a> Rights<'a> {
 
     /// `member`를 `group`에서 거둘 때 어느 부여를 거둘 수 있나
     // QB5(안전한 삭제)가 쓴다. 그때까지는 시험 빌드에서만 컴파일한다(`allow`를 쓰지 않으려고)
-#[cfg(test)]
+    #[cfg(test)]
     pub fn membership_revocations(&self, group: &str, member: &str) -> Revocations {
         self.revocations(group, member, false)
     }

@@ -72,7 +72,7 @@ pub(super) async fn a_lock_wait_fails_with_the_lock_text(server: Server) {
     let waited = started.elapsed();
     other.client.batch_execute("ROLLBACK").await.unwrap();
     assert_eq!(outcome, Err(ExecError::Failed(AppError::other(LOCK_TEXT))));
-    assert!((Duration::from_secs(4)..Duration::from_secs(9)).contains(&waited), "{waited:?}");
+    assert!((Duration::from_secs(5)..Duration::from_secs(8)).contains(&waited), "{waited:?}");
     assert!(!can_select(&env, "app_read").await);
     env.cleanup(&[]).await;
 }
@@ -168,4 +168,68 @@ pub(super) async fn a_membership_revoke_removes_only_the_named_grantors_row(serv
     exec::run(&mut conn, &steps).await.expect("거두기");
     assert_eq!(rows(&env).await, vec!["postgres".to_string()], "다른 부여자의 줄은 남아야 해요");
     env.cleanup(&roles).await;
+}
+
+/// `PgState::preview` 다음 `PgState::apply`: 미리보기가 기억한 계획을 적용이 꺼내 쓰고, 닫힘이 `exec`를 돌리고, 끝나면 읽어 둔 스냅숏이 새로고침된다.
+/// AWS에는 닿지 않는다: 연결을 보관함에 미리 넣어 두면 명령은 새로 연결하지 않는다
+pub(super) async fn preview_then_apply_runs_through_the_state(server: Server) {
+    use crate::commands::AppState;
+    use crate::aws::context::AwsContext;
+    use crate::pg::pool::ConnKey;
+    use crate::pg::target::{PgTarget, PgTargetInfo, TargetKind};
+    use crate::pg_commands::PgState;
+
+    let mut env = Env::start(server, &[], SETUP).await;
+    let (cluster, _) = env.snapshots().await;
+    let target = PgTarget { profile: "dev".into(), region: "ap-northeast-2".into(), kind: TargetKind::Cluster, id: "live-writes".into() };
+    let info = PgTargetInfo {
+        arn: "arn:aws:rds:ap-northeast-2:123456789012:cluster:live-writes".into(),
+        identifier: "live-writes".into(),
+        kind: TargetKind::Cluster,
+        engine: "aurora-postgresql".into(),
+        engine_version: format!("{}.0", server.major()),
+        endpoint: "127.0.0.1".into(),
+        port: 5432,
+        default_database: env.scene.database.clone(),
+        iam_auth: true,
+        read_replica: false,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let state = PgState::new(dir.path().join("db-changes.jsonl"));
+    let epoch = state.open_for_tests(&target, ADMIN.into(), info, std::sync::Arc::new(cluster)).expect("열기");
+    let held = app_connection(&env, ADMIN, ADMIN).await;
+    let key = ConnKey { target: target.clone(), user: ADMIN.into(), database: env.scene.database.clone() };
+    state.pool.get_or_connect_at_epoch(key, epoch, || async { Ok(held) }).await.expect("보관함에 넣지 못했어요");
+    let app = AppState { ctx: AwsContext::default(), adapters: Vec::new(), settings_path: std::path::PathBuf::new(), sso: Default::default() };
+
+    let change = PgChange::Grant {
+        database: env.scene.database.clone(),
+        grantee: "app_read".into(),
+        add: true,
+        items: vec![crate::pg::change::model::GrantItem {
+            target: crate::pg::change::model::GrantTarget::Relation { schema: "mm_w1".into(), name: "t1".into() },
+            privileges: vec![Privilege::Select],
+        }],
+    };
+    // 미리보기 없이는 적용하지 않는다
+    let refused = state.apply_for_tests(&app, &target, change.clone(), None).await;
+    assert_eq!(refused.err(), Some(AppError::other("미리보기 뒤에 바뀌었어요. 미리보기를 다시 받아 주세요")));
+    assert!(!can_select(&env, "app_read").await);
+
+    let shown = state.preview_for_tests(&app, &target, change.clone()).await.expect("미리보기");
+    assert_eq!(shown.login_user, ADMIN);
+    assert!(!can_select(&env, "app_read").await, "미리보기는 아무것도 바꾸지 않아요");
+    let Ok(PgCommitResult::One(result)) = state.apply_for_tests(&app, &target, change.clone(), None).await else { panic!("적용돼야 해요") };
+    assert!(can_select(&env, "app_read").await);
+    assert_eq!(result.summary, shown.summary);
+    // 끝난 뒤 읽어 둔 데이터베이스 스냅숏이 새로고침됐다
+    let kept = state.kept_db_for_tests(&target, &env.scene.database).expect("읽어 둔 스냅숏");
+    let rel = kept.relations.iter().find(|r| r.schema == "mm_w1" && r.name == "t1").expect("t1");
+    assert!(rel.acl.iter().any(|e| e.grantee.as_deref() == Some("app_read") && e.privilege == Privilege::Select), "{:?}", rel.acl);
+    // 계획은 한 번만 쓴다
+    assert!(state.apply_for_tests(&app, &target, change, None).await.is_err());
+    let entries = crate::pg::log::read_all(&dir.path().join("db-changes.jsonl"));
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].ok);
+    env.cleanup(&[]).await;
 }
