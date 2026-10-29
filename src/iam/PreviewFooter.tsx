@@ -18,6 +18,10 @@ interface Props {
   onApply: (typed: string) => void;
   onRetry: () => void;
   onCancel: () => void;
+  /** [적용] 버튼의 글. 주지 않으면 "적용" */
+  applyLabel?: string;
+  /** 지금은 바꿀 수 없는 이유(changeBlockReason). 있으면 [적용]이 꺼지고 이 글이 제목이다. 주지 않으면 IAM처럼 막지 않는다 */
+  blockReason?: string | null;
 }
 
 /**
@@ -27,10 +31,10 @@ interface Props {
  * - 확인 문구나 막힘이 아닌 경고가 있으면 위험한 변경이라 버튼을 danger로 칠한다.
  * 오류는 스크롤되는 본문 밖, 버튼 바로 위에 둔다: 미리보기가 길어도 가려지지 않는다.
  */
-export function PreviewFooter({ gated, phase, error, stale, typed, cancelRef, retryRef, onApply, onRetry, onCancel }: Props) {
+export function PreviewFooter({ gated, phase, error, stale, typed, cancelRef, retryRef, onApply, onRetry, onCancel, applyLabel = "적용", blockReason = null }: Props) {
   const applying = phase === "applying";
   const gate = gated ? applyGate(gated, typed) : null;
-  const canApply = gate?.ok === true && phase === "ready" && !stale;
+  const canApply = gate?.ok === true && phase === "ready" && !stale && blockReason === null;
   const needsRetry = (error?.kind === "preview" || stale) && !applying;
   const danger = !!gated && (!!gated.confirmText || gated.warnings.some((w) => w.level !== "block"));
   const hint = gate && !gate.ok && gate.reason !== "text" ? GATE_HINT[gate.reason] : null;
@@ -48,8 +52,8 @@ export function PreviewFooter({ gated, phase, error, stale, typed, cancelRef, re
             미리보기 다시 받기
           </button>
         )}
-        <button className={`btn ${danger ? "danger" : "primary"}`} disabled={!canApply} onClick={() => onApply(typed)}>
-          {applying ? "적용 중…" : "적용"}
+        <button className={`btn ${danger ? "danger" : "primary"}`} disabled={!canApply} title={blockReason ?? undefined} aria-description={blockReason ?? undefined} onClick={() => onApply(typed)}>
+          {applying ? "적용 중…" : applyLabel}
         </button>
       </div>
     </>

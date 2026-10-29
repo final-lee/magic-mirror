@@ -247,6 +247,13 @@ describe("비밀번호 재설정 and 삭제", () => {
     expect(onDrop).not.toHaveBeenCalled();
   });
 
+  test("삭제 is off for a system role, with the system-role text (the block reason comes first)", async () => {
+    actions({ role: "rds_iam" });
+    await screen.findByRole("heading", { name: "rds_iam" });
+    expect(dropButton()).toBeDisabled();
+    expect(dropButton()).toHaveAttribute("title", "시스템 역할이라 바꿀 수 없어요: rds_iam");
+  });
+
   test("they show without the 바꾸기 mode and not at all without handlers", async () => {
     setup({ editing: false, draft: undefined });
     await screen.findByRole("heading", { name: "alice" });

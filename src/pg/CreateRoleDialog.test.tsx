@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { renderWithClient } from "../test/utils";
 import { pgApi } from "./api";
 import { CreateRoleDialog, PRESET_DELAY_MS } from "./CreateRoleDialog";
-import { pgTarget, sampleDatabaseView, sampleOverview, samplePresetSuggestion } from "./fixtures";
+import { pgTarget, sampleDatabaseView, sampleOverview, samplePresetSuggestion, sampleTargetInfo } from "./fixtures";
 import type { PgChange, PgPresetSuggestion } from "./types";
 
 vi.mock("./api", () => ({ pgApi: { database: vi.fn(), preset: vi.fn() } }));
@@ -325,5 +325,57 @@ describe("the suggestion for a group", () => {
     await readyGroup({ matching: [] });
     await screen.findByRole("group", { name: "기본 권한을 줄 역할" });
     expect(screen.queryByText(/같은 권한을 가진 그룹이 이미 있어요/)).not.toBeInTheDocument();
+  });
+});
+
+describe("fix round 1", () => {
+  test("a new suggestion without matching groups resets the choice to the new group, so the change never carries group null with creators for a user", async () => {
+    const { onPreview } = await readyUser("읽기 전용", { matching: ["app_read"] });
+    // 이미 선택된 라디오는 눌러도 바뀌지 않으니, 새 그룹을 거쳐 사용자가 직접 고른 것으로 만든다
+    await user().click(screen.getByRole("radio", { name: "새 그룹을 만들어요" }));
+    await user().click(screen.getByRole("radio", { name: "같은 권한을 가진 그룹에 넣어요" }));
+    expect(screen.getByRole("radio", { name: "같은 권한을 가진 그룹에 넣어요" })).toBeChecked();
+    m.preset.mockResolvedValue(samplePresetSuggestion({ matching: [] }));
+    await pickSchemas("audit");
+    expect(await screen.findByRole("radio", { name: "새 그룹을 만들어요" })).toBeChecked();
+    expect(screen.queryByRole("radio", { name: "같은 권한을 가진 그룹에 넣어요" })).not.toBeInTheDocument();
+    await waitFor(() => expect(previewButton()).toBeEnabled());
+    await user().click(previewButton());
+    expect(onPreview).toHaveBeenCalledWith({ ...base, name: "carol", preset: { preset: "readOnly", database: "orders", schemas: ["app", "audit"], creators: ["app_owner"], group: "audit_read", createGroup: true } });
+  });
+
+  test("the schemas are in name order in the pg_preset call and in the change, whatever order they were ticked in", async () => {
+    m.database.mockResolvedValue(sampleDatabaseView({ schemas: [{ name: "zeta", owner: "x", tableCount: 1 }, { name: "Alpha", owner: "x", tableCount: 1 }, { name: "beta", owner: "x", tableCount: 1 }] }));
+    const { onPreview } = setup();
+    await type("carol");
+    await pickPreset("읽기 전용");
+    await pickSchemas("zeta", "beta", "Alpha");
+    await waitForSuggestion();
+    expect(m.preset).toHaveBeenCalledWith(pgTarget, "orders", "readOnly", ["Alpha", "beta", "zeta"]);
+    await waitFor(() => expect(previewButton()).toBeEnabled());
+    await user().click(previewButton());
+    expect((onPreview.mock.calls[0][0] as { preset: { schemas: string[] } }).preset.schemas).toEqual(["Alpha", "beta", "zeta"]);
+  });
+
+  test("switching between presets that pick schemas keeps the ticked schemas; to or from 관리자 or 없음 clears them", async () => {
+    setup();
+    await pickPreset("읽기 전용");
+    await pickSchemas("app");
+    await pickPreset("읽기·쓰기");
+    expect(screen.getByRole("checkbox", { name: "app" })).toBeChecked();
+    await pickPreset("관리자");
+    await pickPreset("읽기 전용");
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "app" })).not.toBeChecked());
+    await pickSchemas("app");
+    await pickPreset("없음");
+    await pickPreset("소유자\\(마이그레이션\\)");
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "app" })).not.toBeChecked());
+  });
+
+  test("미리보기 honours the block reason while open", async () => {
+    setup({ overview: sampleOverview({ target: sampleTargetInfo({ readReplica: true }) }) });
+    await type("carol");
+    expect(previewButton()).toBeDisabled();
+    expect(previewButton()).toHaveAttribute("title", "읽기 전용 복제본이라 바꿀 수 없어요");
   });
 });

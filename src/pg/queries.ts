@@ -334,7 +334,7 @@ async function replaceOverview(qc: QueryClient, target: PgTarget): Promise<boole
 export async function refreshPgAfterChange(
   qc: QueryClient,
   target: PgTarget,
-  database: string,
+  database: string | string[],
   onOverview?: (read: boolean) => void,
 ): Promise<boolean> {
   const log = qc.invalidateQueries({ queryKey: pgKeys.changeLog });
@@ -342,13 +342,16 @@ export async function refreshPgAfterChange(
   // 개요의 결과는 나머지를 기다리지 않고 바로 알린다: 죽은 연결에서는 나머지 읽기마다 제한 시간을 기다리게 된다
   onOverview?.(overviewRead);
 
-  const executed = pgKeys.database(target, database);
-  const query = qc.getQueryCache().find({ queryKey: executed, exact: true });
-  if (query && query.state.data !== undefined) markForce(qc, query.queryHash);
-  await qc.invalidateQueries({ queryKey: executed, exact: true });
+  // 실행한 데이터베이스들(역할 삭제는 단계마다 다른 데이터베이스다)의 보기를 모두 force로 다시 읽는다
+  const executed = [...new Set(typeof database === "string" ? [database] : database)].map((name) => pgKeys.database(target, name));
+  for (const key of executed) {
+    const query = qc.getQueryCache().find({ queryKey: key, exact: true });
+    if (query && query.state.data !== undefined) markForce(qc, query.queryHash);
+    await qc.invalidateQueries({ queryKey: key, exact: true });
+  }
 
-  const executedHash = hashKey(executed);
-  await qc.invalidateQueries({ queryKey: pgKeys.root(target), predicate: (q) => !BASE.has(kindOf(q)) && q.queryHash !== executedHash });
+  const executedHashes = new Set(executed.map((key) => hashKey(key)));
+  await qc.invalidateQueries({ queryKey: pgKeys.root(target), predicate: (q) => !BASE.has(kindOf(q)) && !executedHashes.has(q.queryHash) });
   await log;
   return overviewRead;
 }

@@ -81,6 +81,8 @@ export function RoleDetail({ target, role, onOpen, initialTab, onViewState, edit
   const followed = view.databases.filter((d) => requested.has(d.database));
   const reread = () => void q.refetch();
   const edit = editing && draft ? draft : null;
+  // 시스템 역할은 지울 수 없다. 바꿀 수 없는 이유가 먼저다
+  const dropOff = blockReason ?? (view.summary.system ? systemRoleText(view.summary.name) : null);
 
   return (
     <section className="center iam-detail">
@@ -102,7 +104,7 @@ export function RoleDetail({ target, role, onOpen, initialTab, onViewState, edit
               </button>
             )}
             {onDrop && (
-              <button type="button" className="btn small danger" disabled={blockReason !== null} title={blockReason ?? undefined} aria-description={blockReason ?? undefined} onClick={() => onDrop(view.summary.name)}>
+              <button type="button" className="btn small danger" disabled={dropOff !== null} title={dropOff ?? undefined} aria-description={dropOff ?? undefined} onClick={() => onDrop(view.summary.name)}>
                 삭제
               </button>
             )}
