@@ -33,3 +33,6 @@ export const MEMBERSHIP_SYSTEM_GROUPS: readonly string[] = [
   "pg_stat_scan_tables",
   "pg_signal_backend",
 ];
+
+/** 구성원을 넣거나 뺄 수 없는 시스템 그룹 */
+export const systemGroupText = (group: string) => `이 시스템 역할에는 구성원을 넣거나 뺄 수 없어요: ${group}`;

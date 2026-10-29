@@ -23,7 +23,7 @@ export interface PgDraftItem {
  */
 const part = (text: string) => text.replace(/[\\|:.,;*]/g, "\\$&");
 
-function targetKey(target: PgGrantTarget): string {
+export function targetKey(target: PgGrantTarget): string {
   switch (target.kind) {
     case "database":
     case "schema":

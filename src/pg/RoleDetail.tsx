@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { MEMBERSHIP_SYSTEM_GROUPS, systemRoleText } from "./canChange";
+import { MEMBERSHIP_SYSTEM_GROUPS, systemGroupText, systemRoleText } from "./canChange";
 import { draftKey } from "./draft";
 import { BadgeList } from "./Badges";
-import { COVERAGE_LABEL, INHERITED_ONLY_TEXT, OBJECT_KIND_LABEL, ROLE_KIND_LABEL, TRUNCATED_TEXT, objectName, unusableText, utcDay } from "./labels";
+import { COVERAGE_LABEL, INHERITED_ONLY_TEXT, OBJECT_KIND_LABEL, ROLE_KIND_LABEL, TRUNCATED_TEXT, collate, objectName, unusableText, utcDay } from "./labels";
 import { PgError } from "./PgError";
 import { usePgDatabase, usePgRole } from "./queries";
 import { roleRoute, type PgRoute } from "./route";
@@ -182,7 +182,7 @@ function Members({ view, onOpen, draft, roles }: { view: PgRoleView; onOpen: (ro
               {m.name}
             </button>
             <Marks inherit={m.inherit} set={m.set} admin={m.admin} />
-            {withAdmin && draft && <AdminOption draft={draft} group={m.name} member={view.summary.name} admin={m.admin} locked={view.summary.system || !groupAllowed(m.name, roles)} />}
+            {withAdmin && draft && <AdminOption draft={draft} group={m.name} member={view.summary.name} admin={m.admin} lock={view.summary.system ? systemRoleText(view.summary.name) : !groupAllowed(m.name, roles) ? systemGroupText(m.name) : null} />}
           </li>
         ))}
       </ul>
@@ -367,6 +367,8 @@ function Sessions({ sessions }: { sessions: PgSession[] }) {
   return <SessionTable sessions={sessions} />;
 }
 
+/** 그룹에서 빼기가 담긴 구성원 관계의 ADMIN OPTION은 바꿀 수 없다 */
+const REMOVING_TEXT = "그룹에서 빼기가 담겨 있어서 ADMIN OPTION은 바꿀 수 없어요";
 const pendingText = (add: boolean) => (add ? "넣기 예정" : "빼기 예정");
 
 /** 이 앱이 구성원을 넣고 뺄 수 있는 그룹인가: 시스템이 아닌 그룹과, 허용한 시스템 그룹. roles에 없는 역할은 알 수 없어 false다 */
@@ -392,7 +394,7 @@ function GroupChecks({ view, draft, roles }: { view: PgRoleView; draft: GridDraf
   const locked = view.summary.system;
   const groups = roles
     .filter((r) => r.name !== member && r.kind === "group" && (r.system ? MEMBERSHIP_SYSTEM_GROUPS.includes(r.name) : true))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => collate(a.name, b.name));
   const now = new Set(view.summary.memberOf.map((m) => m.group));
   return (
     <fieldset className="pg-form-checks pg-group-checks" disabled={locked} title={locked ? systemRoleText(member) : undefined}>
@@ -421,17 +423,23 @@ function GroupChecks({ view, draft, roles }: { view: PgRoleView; draft: GridDraf
   );
 }
 
-/** 속한 그룹 한 줄의 ADMIN OPTION 체크박스. 담아 둔 변경이 있으면 그 뜻이 체크 상태가 된다 */
-function AdminOption({ draft, group, member, admin, locked }: { draft: GridDraft; group: string; member: string; admin: boolean; locked: boolean }) {
+/**
+ * 속한 그룹 한 줄의 ADMIN OPTION 체크박스. 담아 둔 변경이 있으면 그 뜻이 체크 상태가 된다.
+ * 잠긴 까닭(lock)이 있으면 그 글이 제목이다. 그 그룹에서 빼기가 담겨 있으면 체크박스는 꺼 두고 담긴 빼기를 그대로 둔다(구성원 관계 하나에 변경은 하나라서, 켜면 빼기가 말없이 바뀐다).
+ */
+function AdminOption({ draft, group, member, admin, lock }: { draft: GridDraft; group: string; member: string; admin: boolean; lock: string | null }) {
   const queued = queuedMembership(draft, group, member, true);
+  const removing = queuedMembership(draft, group, member, false)?.add === false;
   const checked = queued ? queued.add : admin;
+  const title = lock ?? (removing ? REMOVING_TEXT : undefined);
   return (
-    <label className="pg-form-check pg-admin-option" title={locked ? systemRoleText(group) : undefined}>
+    <label className="pg-form-check pg-admin-option" title={title}>
       <input
         type="checkbox"
-        disabled={locked}
+        disabled={!!title}
         checked={checked}
         onChange={() => {
+          if (title) return;
           const change: PgChange = { kind: "membership", group, member, add: !checked, admin: true };
           if (queued) draft.remove(draftKey(change) ?? "");
           else putChange(draft, change);

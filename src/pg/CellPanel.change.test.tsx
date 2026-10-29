@@ -1,12 +1,13 @@
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderWithClient } from "../test/utils";
 import { pgApi } from "./api";
 import { CellPanel } from "./CellPanel";
 import { object, ordersIdSeq, ordersTable, pgTarget, privilege, sampleCellDetail, sampleDatabaseView, sampleOverview, source, touchOrderFn } from "./fixtures";
-import type { PgCellDetail, PgChange, PgGrantTarget, PgObjectRef, PgSchemaCell } from "./types";
+import type { PgCellDetail, PgChange, PgGrantTarget, PgObjectRef, PgSchemaCell, PgSource, PgWhoCan } from "./types";
 import { usePgDraft, type PgDraft } from "./usePgDraft";
 
-vi.mock("./api", () => ({ pgApi: { cell: vi.fn(), objects: vi.fn() } }));
+vi.mock("./api", () => ({ pgApi: { cell: vi.fn(), objects: vi.fn(), whoCan: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 
 const m = vi.mocked(pgApi);
@@ -59,8 +60,17 @@ const grantOf = (grantee: string, target: PgGrantTarget, privileges: string[], a
   items: [{ target, privileges }],
 });
 
+/** pg_who_can on the schema: the sources alice has for USAGE and for CREATE */
+const schemaSources = (usage: PgSource[], create: PgSource[]) =>
+  m.whoCan.mockImplementation(async (_t, _database, obj, privilege): Promise<PgWhoCan> => ({
+    object: obj,
+    privilege,
+    allowed: [{ role: "alice", kind: "user", system: false, sources: privilege === "USAGE" ? usage : create, unusable: null }],
+  }));
+
 beforeEach(() => {
   vi.clearAllMocks();
+  schemaSources([source("direct", [], "app_owner")], [source("owner")]);
   m.cell.mockResolvedValue(detail());
   m.objects.mockResolvedValue([ordersTable, ordersIdSeq, touchOrderFn, object("table", "audit", "events"), { kind: "schema", schema: null, name: "app", signature: null }]);
 });
@@ -126,14 +136,82 @@ describe("바꾸기 mode: held privileges", () => {
 });
 
 describe("바꾸기 mode: the schema's 사용 and 만들기", () => {
-  test("show as chips with their sources; a direct one can be revoked, an owner one cannot", async () => {
+  const chips = async () => {
+    await screen.findByText("app.orders");
+    await waitFor(() => expect(m.whoCan).toHaveBeenCalledTimes(2));
+    return screen.getAllByTestId("schema-privilege");
+  };
+
+  test("asks who can USAGE and CREATE the schema in this database", async () => {
+    setup();
+    await chips();
+    const schema = { kind: "schema", schema: null, name: "app", signature: null };
+    expect(m.whoCan).toHaveBeenCalledWith(pgTarget, "orders", schema, "USAGE");
+    expect(m.whoCan).toHaveBeenCalledWith(pgTarget, "orders", schema, "CREATE");
+  });
+
+  test("a direct source is revoked from the cell's role; an owner source cannot be revoked", async () => {
+    setup();
+    const [usage, create] = await chips();
+    await waitFor(() => expect(usage).toHaveTextContent("사용 직접 받음"));
+    expect(create).toHaveTextContent("만들기 소유자");
+    expect(within(create).getByRole("button", { name: "빼기" })).toBeDisabled();
+    expect(within(create).getByRole("button", { name: "빼기" })).toHaveAttribute("title", "소유자라서 가진 권한이에요");
+    fireEvent.click(within(usage).getByRole("button", { name: "빼기" }));
+    expect(changes()).toEqual([grantOf("alice", { kind: "schema", name: "app" }, ["USAGE"])]);
+  });
+
+  test("a PUBLIC source gets 'PUBLIC에서 빼기', which revokes from PUBLIC", async () => {
+    schemaSources([source("public")], [source("public")]);
+    setup();
+    const [usage] = await chips();
+    await waitFor(() => expect(usage).toHaveTextContent("사용 모든 역할(PUBLIC)"));
+    expect(within(usage).queryByRole("button", { name: "빼기" })).not.toBeInTheDocument();
+    fireEvent.click(within(usage).getByRole("button", { name: "PUBLIC에서 빼기" }));
+    expect(changes()).toEqual([grantOf("PUBLIC", { kind: "schema", name: "app" }, ["USAGE"])]);
+  });
+
+  test("a group source is shown with its path and cannot be revoked here", async () => {
+    schemaSources([source("group", ["app_write", "app_read"], "app_owner")], []);
+    setup();
+    const [usage, create] = await chips();
+    await waitFor(() => expect(usage).toHaveTextContent("사용 app_write ← app_read 그룹에서 받음"));
+    expect(within(usage).getByRole("button", { name: "빼기" })).toBeDisabled();
+    expect(create).toHaveTextContent("만들기 없음");
+  });
+
+  test("until the answer comes (or when it fails) the chips show what the cell itself knows", async () => {
+    m.whoCan.mockRejectedValue({ kind: "other", message: "x" });
     setup();
     await screen.findByText("app.orders");
-    const chips = screen.getAllByTestId("schema-privilege");
-    expect(chips.map((c) => c.textContent)).toEqual(["사용 직접 받음빼기", "만들기 소유자빼기"]);
-    expect(within(chips[1]).getByRole("button", { name: "빼기" })).toBeDisabled();
-    fireEvent.click(within(chips[0]).getByRole("button", { name: "빼기" }));
+    const [usage, create] = screen.getAllByTestId("schema-privilege");
+    expect(usage).toHaveTextContent("사용 직접 받음");
+    expect(create).toHaveTextContent("만들기 소유자");
+    fireEvent.click(within(usage).getByRole("button", { name: "빼기" }));
     expect(changes()).toEqual([grantOf("alice", { kind: "schema", name: "app" }, ["USAGE"])]);
+  });
+});
+
+describe("a system role's cell", () => {
+  const system = { role: "pg_read_all_data", system: true } as const;
+  test("cannot be revoked from or granted to, with the system-role text as the reason", async () => {
+    setup(system);
+    const text = "시스템 역할이라 바꿀 수 없어요: pg_read_all_data";
+    const grant = await screen.findByRole("button", { name: "객체에 권한 주기" });
+    expect(grant).toBeDisabled();
+    expect(grant).toHaveAttribute("title", text);
+    expect(grant).toHaveAttribute("aria-description", text);
+  });
+
+  test("a direct 빼기 is disabled with that text, while 'PUBLIC에서 빼기' still works", async () => {
+    setup(system);
+    await screen.findByText("app.orders");
+    const select = within(privilegeGroup("app.orders", "SELECT")).getByRole("button", { name: "빼기" });
+    expect(select).toBeDisabled();
+    expect(select).toHaveAttribute("title", "시스템 역할이라 바꿀 수 없어요: pg_read_all_data");
+    await tab("함수");
+    fireEvent.click(within(privilegeGroup("app.touch_order(order_id integer)", "EXECUTE")).getByRole("button", { name: "PUBLIC에서 빼기" }));
+    expect(changes()).toEqual([grantOf("PUBLIC", { kind: "function", schema: "app", name: "touch_order", signature: "order_id integer" }, ["EXECUTE"])]);
   });
 });
 
@@ -190,6 +268,21 @@ describe("객체에 권한 주기", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "취소" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(changes()).toEqual([]);
+  });
+});
+
+describe("the sheet", () => {
+  test("closes when 바꾸기 mode is turned off", async () => {
+    const utils = setup();
+    await screen.findByText("app.orders");
+    fireEvent.click(screen.getByRole("button", { name: "객체에 권한 주기" }));
+    expect(await screen.findByRole("dialog", { name: "객체에 권한 주기" })).toBeInTheDocument();
+    utils.rerender(
+      <QueryClientProvider client={utils.qc as QueryClient}>
+        <Harness draft={undefined} />
+      </QueryClientProvider>,
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });
 

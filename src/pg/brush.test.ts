@@ -1,7 +1,6 @@
 import {
   BRUSHES,
   DEFAULT_BRUSH,
-  OWNER_HELD_TEXT,
   baseState,
   brushChange,
   brushItem,
@@ -14,7 +13,7 @@ import {
   type BrushId,
   type Levels,
 } from "./brush";
-import { systemRoleText } from "./canChange";
+import { OWNER_HELD_TEXT, systemRoleText } from "./canChange";
 import { draftItem, draftKey, type PgDraftItem } from "./draft";
 import { dbAspects, grantAuditRead, schemaAspects } from "./fixtures";
 import { INHERITED_ONLY_TEXT } from "./labels";

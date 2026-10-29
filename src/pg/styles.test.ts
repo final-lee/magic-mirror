@@ -32,6 +32,11 @@ describe("styles of the 바꾸기 mode", () => {
     expect(at(".pg-grid .pg-table .pg-row .pg-live")).toBeGreaterThan(at(".pg-grid .pg-table .pg-even .pg-td"));
   });
 
+  test("the live tint also wins on a hovered row: a rule for it comes after the row hover rule", () => {
+    expect(hasRule(".pg-grid .pg-table .pg-row:hover .pg-live")).toBe(true);
+    expect(at(".pg-grid .pg-table .pg-row:hover .pg-live")).toBeGreaterThan(at(".pg-grid .pg-table .pg-row:hover .pg-td"));
+  });
+
   test("an idle cell that is also dimmed stays at the idle opacity: the idle rule comes after the dimmed one", () => {
     expect(at(".pg-idle .pg-mark")).toBeGreaterThan(at(".pg-dimmed .pg-mark"));
   });
