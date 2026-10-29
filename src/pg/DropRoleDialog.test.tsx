@@ -169,7 +169,7 @@ describe("applying", () => {
     const { onDropped } = setup();
     await typeName();
     await user().click(screen.getByRole("button", { name: "삭제" }));
-    await waitFor(() => expect(onDropped).toHaveBeenCalledWith("alice", true));
+    await waitFor(() => expect(onDropped).toHaveBeenCalledWith("alice", true, []));
     expect(m.applyDrop).toHaveBeenCalledWith(pgTarget, "alice", LOGIN_USER, "alice");
     expect(m.overview).toHaveBeenCalledWith(pgTarget);
   });
@@ -179,7 +179,7 @@ describe("applying", () => {
     const { onDropped } = setup();
     await typeName();
     await user().click(screen.getByRole("button", { name: "삭제" }));
-    await waitFor(() => expect(onDropped).toHaveBeenCalledWith("alice", false));
+    await waitFor(() => expect(onDropped).toHaveBeenCalledWith("alice", false, []));
   });
 
   test("while it runs the dialog can not be closed and the controls are locked", async () => {
@@ -345,5 +345,30 @@ describe("fix round 1", () => {
     expect(button).toHaveAttribute("title", reason);
     await user().click(button);
     expect(m.applyDrop).not.toHaveBeenCalled();
+  });
+});
+
+describe("notes of the result", () => {
+  const NOTE = "변경 기록을 저장하지 못했어요: 디스크가 가득 찼어요";
+  const run = async () => {
+    await screen.findByRole("list", { name: "삭제 단계" });
+    await userEvent.setup().type(screen.getByLabelText("확인하려면 입력하세요: alice"), "alice");
+    await userEvent.setup().click(screen.getByRole("button", { name: "삭제" }));
+  };
+
+  test("a finished drop hands the notes on with the drop", async () => {
+    m.applyDrop.mockResolvedValue({ ...okResult, notes: [NOTE] });
+    const { onDropped } = setup();
+    await run();
+    await waitFor(() => expect(onDropped).toHaveBeenCalledWith("alice", true, [NOTE]));
+  });
+
+  test("a stopped drop shows the notes under the stop text", async () => {
+    m.applyDrop.mockResolvedValue({ ...stoppedResult, notes: [NOTE] });
+    setup();
+    await run();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(stoppedResult.stopped!);
+    expect(within(alert).getByText(NOTE)).toBeInTheDocument();
   });
 });

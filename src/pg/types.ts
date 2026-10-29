@@ -166,4 +166,4 @@ export interface PgDropPlan {
   role: string; reassignTo: string; steps: PgDropStep[]; warnings: PgWarning[]; confirmText: string; sessions: number;
   grantedMemberships: { member: string; group: string; lost: boolean }[];   // 160000부터: 이 역할이 준 구성원 관계(DROP OWNED가 지운다). lost = 다른 부여가 없다
 }
-export interface PgDropResult { logId: string; total: number; done: number; stopped: string | null }   // stopped = 삭제 결과 문구
+export interface PgDropResult { logId: string; total: number; done: number; stopped: string | null; notes?: string[] }   // stopped = 삭제 결과 문구

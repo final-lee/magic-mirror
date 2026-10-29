@@ -159,6 +159,18 @@ describe("역할 삭제", () => {
     expect(m.overview).toHaveBeenCalled();
   });
 
+  test("the notes of a finished drop stay on its notice until dismissed", async () => {
+    const NOTE = "변경 기록을 저장하지 못했어요: 디스크가 가득 찼어요";
+    m.applyDrop.mockResolvedValue({ logId: "l3", total: 3, done: 3, stopped: null, notes: [NOTE] });
+    setup();
+    const dialog = await openDrop();
+    await user().type(await within(dialog).findByLabelText("확인하려면 입력하세요: alice"), "alice");
+    await user().click(within(dialog).getByRole("button", { name: "삭제" }));
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent("역할 삭제: alice");
+    expect(within(notice).getByText(NOTE)).toBeInTheDocument();
+  });
+
   test("the back button does not return to the role that is gone", async () => {
     m.applyDrop.mockResolvedValue({ logId: "l3", total: 3, done: 3, stopped: null });
     setup();
