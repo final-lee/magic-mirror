@@ -685,3 +685,115 @@ fn default_privilege_statements_follow_the_scope() {
     let unknown_schema = run(&s, &default_change("app_owner", Some("nope"), DefaultObjType::Tables, "alice", &[Select], true));
     assert_eq!(unknown_schema.blocks, strings(&["객체를 찾을 수 없어요: 스키마 nope"]));
 }
+
+// ───────────────────────── 수정 1차 ─────────────────────────
+
+#[test]
+fn removing_every_admin_row_of_a_member_who_granted_onward_is_blocked() {
+    // mgr의 ADMIN 줄이 둘(mm과 x가 줬다)이고 mgr가 bob에게 app_read를 줬다. superuser는 둘 다 거둘 수 있다: 마지막 문장이 서버에서 걸린다
+    let mut s = plain(PG16)
+        .add_role(role("mgr"))
+        .add_role(role("x"))
+        .add_member(member_grants("mgr", "app_read", &[("mm", true, Some(false), Some(true)), ("x", true, Some(false), Some(true))]))
+        .add_member(member_grants("bob", "app_read", &[("mgr", false, Some(false), Some(true))]));
+    s.role_mut("mm").superuser = true;
+    let text = "mgr 역할이 app_read 역할을 다른 역할에 줬어요. 그 구성원 관계부터 빼야 해요";
+    assert_eq!(blocks(&s, &membership("app_read", "mgr", false, false)), strings(&[text]));
+    assert_eq!(blocks(&s, &membership("app_read", "mgr", false, true)), strings(&[text]));
+    // 거둘 수 없는 줄에 ADMIN이 남으면 괜찮다
+    let mut t = plain(PG16)
+        .add_role(role("mgr"))
+        .add_member(member_grants("mgr", "app_read", &[("mm", true, Some(false), Some(true)), ("x", true, Some(false), Some(true))]))
+        .add_member(member_grants("bob", "app_read", &[("mgr", false, Some(false), Some(true))]))
+        .add_member(member_grants("mm", "app_read", &[(BOOTSTRAP, true, Some(true), Some(true))]));
+    t.role_mut("mm").create_role = true;
+    assert_eq!(blocks(&t, &membership("app_read", "mgr", false, false)), Vec::<String>::new());
+}
+
+#[test]
+fn a_revoke_needs_admin_in_any_chain_but_no_grantor_to_find() {
+    // mm은 mgr에 상속하지 않는 관계로 속하고 mgr가 app_read의 ADMIN을 가졌다. 가입은 부여자를 못 찾아 막히고, 자기 줄을 거두는 것은 된다
+    let s = plain(PG16)
+        .add_role(role("mgr"))
+        .add_member(member_grants("mm", "mgr", &[(BOOTSTRAP, false, Some(false), Some(true))]))
+        .add_member(member_grants("mgr", "app_read", &[(BOOTSTRAP, true, Some(true), Some(true))]))
+        .add_member(member_grants("bob", "app_read", &[("mm", false, Some(false), Some(true))]));
+    let leave = run(&s, &membership("app_read", "bob", false, false));
+    assert_eq!(leave.blocks, Vec::<String>::new());
+    assert_eq!(sql(&leave), strings(&[r#"REVOKE "app_read" FROM "bob" GRANTED BY "mm""#]));
+    let join = blocks(&s, &membership("app_read", "carol", true, false));
+    assert_eq!(join, strings(&["app_read 역할의 구성원을 바꿀 수 없어요. ADMIN OPTION을 가진 역할의 권한을 물려받아야 해요"]));
+    // ADMIN이 아예 없으면 거두기도 막힌다
+    let none = plain(PG16).add_member(member_grants("bob", "app_read", &[("mm", false, Some(false), Some(true))]));
+    assert_eq!(blocks(&none, &membership("app_read", "bob", false, false)).len(), 1);
+}
+
+#[test]
+fn ops_and_statements_pair_one_to_one_whenever_nothing_is_blocked() {
+    let changes = vec![
+        create("alice2", true, &["app_write"], Some(choice(PresetKind::ReadWrite, Some("app_rw"), true))),
+        membership("app_read", "carol", true, true),
+        grant_change("alice", true, vec![item(orders(), &[Select]), item(AllTables { schema: "app".into() }, &[Select])]),
+        default_change("app_owner", None, DefaultObjType::Tables, "alice", &[Select], true),
+        PgChange::Password { role: "alice".into() },
+    ];
+    for version in [PG15, PG16] {
+        let s = admin(version).add_member(member_grants("mm", "app_write", &[(BOOTSTRAP, true, Some(true), Some(true))])).add_member(member_grants("mm", "app_read", &[(BOOTSTRAP, true, Some(true), Some(true))])).add_member(member_grants("mm", "alice", &[(BOOTSTRAP, true, Some(true), Some(true))]));
+        for change in &changes {
+            let r = run(&s, change);
+            if r.blocks.is_empty() {
+                assert_eq!(r.ops.len(), r.statements.len(), "{change:?}");
+            }
+        }
+    }
+    // 이름이 막힌 새 역할은 SQL을 보이려고 연산 없는 문장을 둔다
+    let r = run(&admin(PG16), &create("alice", false, &[], None));
+    assert!(!r.blocks.is_empty() && r.ops.len() < r.statements.len());
+}
+
+fn alice_session(start: Option<&str>) -> SessionRec {
+    SessionRec {
+        pid: 41,
+        role: Some("alice".into()),
+        database: None,
+        client_addr: None,
+        application_name: String::new(),
+        state: None,
+        backend_start: start.map(Into::into),
+        query_start: None,
+        wait_event: None,
+    }
+}
+
+#[test]
+fn the_terminate_guard_follows_the_snapshots_start_time() {
+    let terminate = |start: Option<&str>| PgChange::Terminate { pid: 41, role: "alice".into(), backend_start: start.map(Into::into) };
+    let guard = |r: &Resolved| match &r.ops[0] {
+        Op::Terminate { backend_start, .. } => backend_start.clone(),
+        _ => unreachable!(),
+    };
+    let base = || admin(PG16).add_member(member("mm", "alice"));
+    // 스냅숏이 시작 시각을 알면 그 값
+    let mut known = base();
+    known.cluster.sessions.push(alice_session(Some("2026-10-29T01:02:03Z")));
+    for given in [None, Some("2026-10-29T01:02:03.000Z")] {
+        let r = run(&known, &terminate(given));
+        assert_eq!(guard(&r), Some("2026-10-29T01:02:03Z".to_string()));
+        assert!(sql(&r)[0].contains("date_trunc('second', backend_start) = '2026-10-29T01:02:03Z'"));
+    }
+    // 스냅숏은 세션을 보지만 시작 시각을 못 보면 확인을 뺀다
+    let mut hidden = base();
+    hidden.cluster.sessions.push(alice_session(None));
+    let r = run(&hidden, &terminate(Some("2026-10-29T01:02:03Z")));
+    assert_eq!(guard(&r), None);
+    assert!(!sql(&r)[0].contains("backend_start"));
+    // 변경의 시각이 스냅숏과 다르면 pid를 이어받은 세션이다: 그 시각 그대로 둬서 문장이 못 찾는다
+    let r = run(&known, &terminate(Some("2026-10-29T09:09:09Z")));
+    assert_eq!(guard(&r), Some("2026-10-29T09:09:09Z".to_string()));
+}
+
+#[test]
+fn resetting_the_logins_own_password_is_blocked_with_its_own_text() {
+    let s = admin(PG16);
+    assert_eq!(blocks(&s, &PgChange::Password { role: "mm".into() }), strings(&["지금 로그인한 역할이라 여기서 비밀번호를 바꿀 수 없어요"]));
+}
