@@ -3,14 +3,13 @@
 //! 실제 서버에서 다시 읽은 스냅숏과 같아야 한다: `live_tests`가 대조한다.
 
 use super::resolve::{ObjKey, Op};
+use crate::pg::eval::MAINTAIN_SINCE;
 use super::sql_text::AttrClause;
 use crate::iam::clock::{iso, parse_iso};
 use crate::pg::model::{
     AclEntry, ClusterSnapshot, DbSnapshot, DefaultAclRec, DefaultObjType, MemberGrant, MemberRec, Privilege, RoleRec, MEMBERSHIP_OPTIONS_SINCE,
 };
 
-/// PG17부터 테이블에 있는 MAINTAIN의 첫 서버 버전
-const MAINTAIN_SINCE: i32 = 170_000;
 
 pub fn apply(cluster: &mut ClusterSnapshot, db: &mut DbSnapshot, ops: &[Op]) {
     for op in ops {

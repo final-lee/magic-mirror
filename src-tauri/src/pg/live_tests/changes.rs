@@ -419,12 +419,23 @@ pub(super) async fn blocked_rights_fail_on_the_server_too(server: Server) {
         GRANT USAGE ON SCHEMA mm_chg9 TO mm_chg_plain;
         GRANT SELECT ON mm_chg9.t9 TO alice;
     "#;
-    let roles = ["mm_chg_plain", "mm_chg_owner9", "mm_chg_g9", "mm_chg_mgr9"];
+    let roles = ["mm_chg_plain", "mm_chg_owner9", "mm_chg_g9", "mm_chg_mgr9", "mm_chg_g11", "mm_chg_gra", "mm_chg_grb", "mm_chg_mgr11", "mm_chg_bob11"];
     let mut env = Env::start(server, &roles, setup).await;
     let plain = session(&env.scene, "mm_chg_plain", "plain").await;
     if server.has_membership_options() {
         // ADMIN OPTION이 상속하지 않는 관계 끝에만 있다
         env.admin.client.batch_execute("GRANT mm_chg_mgr9 TO mm_chg_plain WITH INHERIT FALSE; GRANT mm_chg_g9 TO mm_chg_mgr9 WITH ADMIN OPTION").await.expect("부여하지 못했어요");
+        // mgr11는 ADMIN 줄이 둘(gra와 grb가 줬다)이고 g11을 bob11에게 줬다. 로그인한 역할은 둘 다 상속해서 두 줄을 모두 거둘 수 있지만, 마지막 REVOKE가 걸린다
+        let dependent = r#"
+            CREATE ROLE mm_chg_g11 NOLOGIN; CREATE ROLE mm_chg_gra NOLOGIN; CREATE ROLE mm_chg_grb NOLOGIN;
+            CREATE ROLE mm_chg_mgr11 NOLOGIN; CREATE ROLE mm_chg_bob11 NOLOGIN;
+            GRANT mm_chg_g11 TO mm_chg_gra WITH ADMIN OPTION; GRANT mm_chg_g11 TO mm_chg_grb WITH ADMIN OPTION;
+            GRANT mm_chg_gra, mm_chg_grb TO mm_chg_plain;
+            GRANT mm_chg_g11 TO mm_chg_mgr11 WITH ADMIN OPTION GRANTED BY mm_chg_gra;
+            GRANT mm_chg_g11 TO mm_chg_mgr11 WITH ADMIN OPTION GRANTED BY mm_chg_grb;
+            SET ROLE mm_chg_mgr11; GRANT mm_chg_g11 TO mm_chg_bob11; RESET ROLE;
+        "#;
+        env.admin.client.batch_execute(dependent).await.expect("장면을 차리지 못했어요");
     }
     let alice = session(&env.scene, "alice", "alice").await;
 
@@ -453,6 +464,7 @@ pub(super) async fn blocked_rights_fail_on_the_server_too(server: Server) {
     ];
     if server.has_membership_options() {
         cases.push(("ADMIN OPTION이 상속하지 않는 관계 끝에만 있을 때", membership("mm_chg_g9", "carol", true, false)));
+        cases.push(("같이 거두는 ADMIN 줄이 마지막 줄일 때", membership("mm_chg_g11", "mm_chg_mgr11", false, false)));
     }
     for (label, change) in cases {
         let (cluster, db) = {

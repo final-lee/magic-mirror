@@ -38,7 +38,7 @@ const READ_ALL_DATA: &str = "pg_read_all_data";
 const WRITE_ALL_DATA: &str = "pg_write_all_data";
 const DATABASE_OWNER: &str = "pg_database_owner";
 /// MAINTAIN 권한과 `pg_maintain`이 있는 첫 서버 버전
-const MAINTAIN_SINCE: i32 = 170_000;
+pub const MAINTAIN_SINCE: i32 = 170_000;
 const MAINTAIN_ROLE: &str = "pg_maintain";
 
 /// 권한은 있어도 쓸 수 없는 이유(화면에 그대로 나간다)

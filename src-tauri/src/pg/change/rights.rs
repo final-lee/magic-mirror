@@ -189,10 +189,10 @@ impl<'a> Rights<'a> {
         Ok(())
     }
 
-    /// `group`의 구성원 관계를 주거나 거둘 권한과, 서버가 부여자로 적는 역할(`check_role_grantor`).
-    /// 160000부터는 superuser면 부트스트랩 superuser, 아니면 자기 부여에 ADMIN이 있으면 자기 자신, 아니면 상속으로 닿는 첫 ADMIN 역할이다.
-    /// 160000 전에는 부여자가 늘 로그인한 역할이다
-    pub fn membership_grantor(&self, group: &str) -> Result<String, String> {
+    /// `group`의 구성원 관계를 바꿀 권한(`check_role_membership_authorization`): superuser 그룹은 superuser가, 그 밖에는 superuser이거나
+    /// 구성원 관계 사슬(상속하든 말든) 어디에선가 ADMIN OPTION이 닿아야 한다. 160000 전에는 로그인한 역할 자신의 CREATEROLE도 된다.
+    /// 부여자를 찾지는 않는다: 거두는 쪽은 `GRANTED BY`로 부여자를 직접 대서 이것만 통과하면 된다
+    pub fn membership_authorization(&self, group: &str) -> Result<(), String> {
         let version = self.version();
         if group == PG_DATABASE_OWNER {
             return Err(membership_text(group, version));
@@ -200,18 +200,23 @@ impl<'a> Rights<'a> {
         if self.role_rec(group).is_some_and(|g| g.superuser) && !self.superuser() {
             return Err(superuser_target_text(group));
         }
+        if self.superuser() || self.admin_reachable(group) || (!self.since_16() && self.own(|r| r.create_role)) {
+            Ok(())
+        } else {
+            Err(membership_text(group, version))
+        }
+    }
+
+    /// 구성원 관계를 줄 권한과, 서버가 부여자로 적는 역할(`check_role_grantor`).
+    /// 160000부터는 superuser면 부트스트랩 superuser, 아니면 자기 부여에 ADMIN이 있으면 자기 자신, 아니면 상속으로 닿는 첫 ADMIN 역할이다.
+    /// 160000 전에는 부여자가 늘 로그인한 역할이다
+    pub fn membership_grantor(&self, group: &str) -> Result<String, String> {
+        self.membership_authorization(group)?;
         if !self.since_16() {
-            return if self.superuser() || self.own(|r| r.create_role) || self.admin_reachable(group) {
-                Ok(self.login.to_string())
-            } else {
-                Err(membership_text(group, version))
-            };
+            return Ok(self.login.to_string());
         }
         if self.superuser() {
             return Ok(self.cluster.bootstrap_superuser.clone());
-        }
-        if !self.admin_reachable(group) {
-            return Err(membership_text(group, version));
         }
         // 서버가 부여자를 찾는 길(`select_best_admin`)은 상속하는 사슬만 따른다. 상속하지 않는 관계로만 ADMIN에 닿으면 허락은 되는데 부여자가 없다
         self.eval
