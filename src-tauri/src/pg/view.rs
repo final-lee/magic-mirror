@@ -267,7 +267,7 @@ pub struct PgDatabaseView {
 
 // ───────────────────────── 객체, 칸 상세, 누가 할 수 있나 ─────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PgObjectKind {
     Database,
@@ -504,6 +504,12 @@ pub struct PgFindings {
     pub truncated: Vec<String>,
     pub fetched_at: String,
 }
+
+// 변경(2단계)의 미리보기 계약. `change`와 같은 이유로(`pg.rs` 참고) QB4가 명령을 잇는 대로 이 `#[cfg(test)]` 둘을 뗀다.
+#[cfg(test)]
+mod preview;
+#[cfg(test)]
+pub use preview::*;
 
 #[cfg(test)]
 mod tests;

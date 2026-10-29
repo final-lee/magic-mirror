@@ -268,7 +268,7 @@ fn default_grants(acl: &[AclEntry]) -> Vec<PgDefaultGrant> {
 }
 
 /// 기본 권한 행들: (만드는 역할, 스키마(모든 스키마는 뒤), 객체 종류) 순서
-fn default_rows(default_acls: &[DefaultAclRec]) -> Vec<PgDefaultAclRow> {
+pub(crate) fn default_rows(default_acls: &[DefaultAclRec]) -> Vec<PgDefaultAclRow> {
     let mut rows: Vec<PgDefaultAclRow> = default_acls
         .iter()
         .map(|d| PgDefaultAclRow {

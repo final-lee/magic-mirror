@@ -729,6 +729,18 @@ fn a_revoke_needs_admin_in_any_chain_but_no_grantor_to_find() {
 }
 
 #[test]
+fn a_revoke_through_a_non_inheriting_admin_chain_blocks_only_for_the_other_grantor() {
+    // 도달할 수 있는 상태: mm은 mgr에 상속하지 않는 관계로 속하고, mgr가 app_read의 ADMIN을 가졌으며, bob의 줄은 mm이 권한을 못 물려받는 부트스트랩이 줬다
+    let s = plain(PG16)
+        .add_role(role("mgr"))
+        .add_member(member_grants("mm", "mgr", &[(BOOTSTRAP, false, Some(false), Some(true))]))
+        .add_member(member_grants("mgr", "app_read", &[(BOOTSTRAP, true, Some(true), Some(true))]))
+        .add_member(member_grants("bob", "app_read", &[(BOOTSTRAP, false, Some(false), Some(true))]));
+    let leave = blocks(&s, &membership("app_read", "bob", false, false));
+    assert_eq!(leave, strings(&["bob 역할을 app_read 역할에서 뺄 수 없어요. 이 구성원 관계는 rdsadmin 역할이 줬어요"]));
+}
+
+#[test]
 fn ops_and_statements_pair_one_to_one_whenever_nothing_is_blocked() {
     let changes = vec![
         create("alice2", true, &["app_write"], Some(choice(PresetKind::ReadWrite, Some("app_rw"), true))),
@@ -736,16 +748,27 @@ fn ops_and_statements_pair_one_to_one_whenever_nothing_is_blocked() {
         grant_change("alice", true, vec![item(orders(), &[Select]), item(AllTables { schema: "app".into() }, &[Select])]),
         default_change("app_owner", None, DefaultObjType::Tables, "alice", &[Select], true),
         PgChange::Password { role: "alice".into() },
+        PgChange::Attributes { role: "alice".into(), set: AttributesSet { login: true, create_db: false, create_role: false, inherit: true, connection_limit: 5, valid_until: None } },
+        PgChange::DropRole { role: "scratch_role".into() },
+        PgChange::Terminate { pid: 41, role: "alice".into(), backend_start: None },
+        membership("app_read", "carol", false, false),
     ];
+    let mut kinds = std::collections::HashSet::new();
     for version in [PG15, PG16] {
-        let s = admin(version).add_member(member_grants("mm", "app_write", &[(BOOTSTRAP, true, Some(true), Some(true))])).add_member(member_grants("mm", "app_read", &[(BOOTSTRAP, true, Some(true), Some(true))])).add_member(member_grants("mm", "alice", &[(BOOTSTRAP, true, Some(true), Some(true))]));
+        let mut s = admin(version).add_role(role("scratch_role")).add_member(member_grants("mm", "app_write", &[(BOOTSTRAP, true, Some(true), Some(true))])).add_member(member_grants("mm", "app_read", &[(BOOTSTRAP, true, Some(true), Some(true))])).add_member(member_grants("mm", "alice", &[(BOOTSTRAP, true, Some(true), Some(true))]));
+        s.role_mut("mm").superuser = false;
+        s.cluster.sessions.push(alice_session(None));
+        s = s.add_member(member_grants("carol", "app_read", &[("mm", false, Some(true), Some(true))])).add_member(member_grants("mm", "scratch_role", &[(BOOTSTRAP, true, Some(true), Some(true))]));
         for change in &changes {
             let r = run(&s, change);
-            if r.blocks.is_empty() {
-                assert_eq!(r.ops.len(), r.statements.len(), "{change:?}");
-            }
+            assert_eq!(r.blocks, Vec::<String>::new(), "{change:?}");
+            assert_eq!(r.ops.len(), r.statements.len(), "{change:?}");
+            assert!(!r.ops.is_empty(), "{change:?}");
+            kinds.insert(std::mem::discriminant(change));
         }
     }
+    // 변경 종류마다 막히지 않은 경우가 하나 이상 있어야 이 시험이 빈 껍데기가 되지 않는다
+    assert_eq!(kinds.len(), 8);
     // 이름이 막힌 새 역할은 SQL을 보이려고 연산 없는 문장을 둔다
     let r = run(&admin(PG16), &create("alice", false, &[], None));
     assert!(!r.blocks.is_empty() && r.ops.len() < r.statements.len());
@@ -790,6 +813,9 @@ fn the_terminate_guard_follows_the_snapshots_start_time() {
     // 변경의 시각이 스냅숏과 다르면 pid를 이어받은 세션이다: 그 시각 그대로 둬서 문장이 못 찾는다
     let r = run(&known, &terminate(Some("2026-10-29T09:09:09Z")));
     assert_eq!(guard(&r), Some("2026-10-29T09:09:09Z".to_string()));
+    assert_eq!(r.blocks, strings(&["세션이 이미 끝났어요"]));
+    // 같은 시각이면(초 아래만 다르면) 막히지 않는다
+    assert_eq!(run(&known, &terminate(Some("2026-10-29T01:02:03.500Z"))).blocks, Vec::<String>::new());
 }
 
 #[test]

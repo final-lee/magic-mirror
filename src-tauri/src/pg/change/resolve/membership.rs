@@ -100,5 +100,4 @@ impl Resolver<'_> {
         let keeps_admin = self.cluster.members.iter().filter(rows).any(|m| m.member == member && m.grants.iter().any(|g| !revoked.contains(&g.grantor) && g.admin));
         removed_admin && grants_others && !keeps_admin
     }
-
 }

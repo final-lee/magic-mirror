@@ -3,13 +3,12 @@
 //! 실제 서버에서 다시 읽은 스냅숏과 같아야 한다: `live_tests`가 대조한다.
 
 use super::resolve::{ObjKey, Op};
-use crate::pg::eval::MAINTAIN_SINCE;
 use super::sql_text::AttrClause;
 use crate::iam::clock::{iso, parse_iso};
+use crate::pg::eval::MAINTAIN_SINCE;
 use crate::pg::model::{
     AclEntry, ClusterSnapshot, DbSnapshot, DefaultAclRec, DefaultObjType, MemberGrant, MemberRec, Privilege, RoleRec, MEMBERSHIP_OPTIONS_SINCE,
 };
-
 
 pub fn apply(cluster: &mut ClusterSnapshot, db: &mut DbSnapshot, ops: &[Op]) {
     for op in ops {
@@ -196,7 +195,7 @@ fn revoke_role(cluster: &mut ClusterSnapshot, group: &str, member: &str, admin_o
 // ───────────────────────── 기본 권한 ─────────────────────────
 
 /// 서버가 만드는 객체의 기본 ACL(`acldefault`)에서 `creator`가 갖는 권한들
-fn built_in(version: i32, creator: &str, object_type: DefaultObjType) -> Vec<AclEntry> {
+pub(super) fn built_in(version: i32, creator: &str, object_type: DefaultObjType) -> Vec<AclEntry> {
     use Privilege::*;
     let own: Vec<Privilege> = match object_type {
         DefaultObjType::Tables => {
