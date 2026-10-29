@@ -655,3 +655,122 @@ async fn an_unknown_create_with_a_password_asks_for_a_reset_too() {
     let committed = commit(h.request(one(plain)), exec_with(&Steps::default(), Err(ExecError::CommitUnknown)), reread_with(Err(AppError::other("읽지 못했어요")))).await;
     assert_eq!(failure(&committed), UNKNOWN);
 }
+
+#[tokio::test]
+async fn a_log_write_failure_is_told_for_the_errors_without_a_message_field_too() {
+    for (error, text) in [(AppError::SsoExpired, "SSO 세션이 만료됐어요"), (AppError::Throttled, "요청이 너무 많아요")] {
+        let h = Harness::new(admin_of(PG16, &["app_read"]));
+        let mut req = h.request(one(add_carol()));
+        fs::write(h.dir.path().join("blocker"), "x").unwrap();
+        req.log_path = h.dir.path().join("blocker").join("db-changes.jsonl");
+        let committed = commit(req, exec_with(&Steps::default(), Err(ExecError::Failed(error))), never_reread()).await;
+        match committed.result {
+            Err(AppError::Other { message }) => assert!(message.starts_with(&format!("{text} (변경 기록을 저장하지 못했어요")), "{message}"),
+            other => panic!("기록을 저장하지 못했다는 말이 실려야 해요: {:?}", other.err()),
+        }
+    }
+    // 기록이 저장되면 오류의 종류는 그대로다: 화면이 다시 로그인하게 한다
+    let h = Harness::new(admin_of(PG16, &["app_read"]));
+    let committed = commit(h.request(one(add_carol())), exec_with(&Steps::default(), Err(ExecError::Failed(AppError::SsoExpired))), never_reread()).await;
+    assert_eq!(committed.result.err(), Some(AppError::SsoExpired));
+}
+
+// ───────────────────────── 세션 끊기 ─────────────────────────
+
+const OWN_PID: i32 = 4242;
+const OTHER_PID: i32 = 777;
+
+fn live_session(pid: i32, role: &str) -> crate::pg::model::SessionRec {
+    crate::pg::model::SessionRec {
+        pid,
+        role: Some(role.into()),
+        database: Some("appdb".into()),
+        client_addr: None,
+        application_name: "psql".into(),
+        state: Some("idle".into()),
+        backend_start: Some("2026-10-29T00:00:00Z".into()),
+        query_start: None,
+        wait_event: None,
+    }
+}
+
+/// `mm`은 `pg_signal_backend`의 구성원이고, `alice`의 세션과 이 앱의 세션이 있다
+fn terminate_scene() -> Scene {
+    let mut scene = admin(PG16).add_member(member_with("mm", "pg_signal_backend", true, true));
+    scene.cluster.sessions = vec![live_session(OTHER_PID, "alice"), live_session(OWN_PID, "mm")];
+    scene
+}
+
+fn terminate(pid: i32, role: &str) -> PgChange {
+    PgChange::Terminate { pid, role: role.into(), backend_start: Some("2026-10-29T00:00:00Z".into()) }
+}
+
+/// 미리보기(`pg_preview`)와 같은 길로 계획을 만들고 `pg_apply`와 같은 길로 적용을 요청한다
+fn terminate_request(h: &Harness, change: PgChange) -> PgRequest {
+    let own = [OWN_PID];
+    let context = PreviewCtx { cluster: &h.scene.cluster, db: &h.scene.db, own_pids: &own, read_replica: false, default_db: "appdb", now: NOW };
+    let seen = Some(PgPlan::One(evaluate(&context, &change).preview));
+    PgRequest { own_pids: own.to_vec(), seen, ..h.request(one(change)) }
+}
+
+#[tokio::test]
+async fn ending_this_apps_own_session_is_blocked_in_the_preview_and_refused_at_apply() {
+    let h = Harness::new(terminate_scene());
+    let change = terminate(OWN_PID, "mm");
+    let req = terminate_request(&h, change);
+    let Some(PgPlan::One(preview)) = &req.seen else { panic!("미리보기") };
+    assert!(preview.warnings.iter().any(|w| w.level == PgWarnLevel::Block && w.message == "이 앱의 세션은 끊을 수 없어요"), "{:?}", preview.warnings);
+    let calls = Steps::default();
+    let text = refusal(&commit(req, exec_with(&calls, Ok(())), never_reread()).await);
+    assert_eq!(text, "막혀 있어서 적용할 수 없어요: 이 앱의 세션은 끊을 수 없어요");
+    assert!(calls.lock().unwrap().is_empty() && h.log().is_empty());
+}
+
+#[tokio::test]
+async fn ending_a_session_asks_for_its_role_as_the_confirmation_and_then_runs_the_guarded_statement() {
+    let h = Harness::new(terminate_scene());
+    let change = terminate(OTHER_PID, "alice");
+    let mut req = terminate_request(&h, change.clone());
+    let Some(PgPlan::One(preview)) = &req.seen else { panic!("미리보기") };
+    assert_eq!(preview.confirm_text.as_deref(), Some("alice"));
+    assert!(preview.warnings.iter().any(|w| w.level == PgWarnLevel::Confirm && w.message == "세션을 끊어요. 되돌릴 수 없어요"));
+    assert!(!preview.reversible);
+
+    // 확인 문구 없이는 돌리지 않는다
+    let calls = Steps::default();
+    assert_eq!(refusal(&commit(terminate_request(&h, change.clone()), exec_with(&calls, Ok(())), never_reread()).await), "확인 문구가 달라요. 입력해야 할 이름: alice");
+    assert!(calls.lock().unwrap().is_empty());
+
+    req.confirm_text = Some("alice".into());
+    let result = applied(commit(req, exec_with(&calls, Ok(())), never_reread()).await);
+    assert_eq!(result.summary, "세션 끊기: alice (pid 777)");
+    let sent = calls.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].len(), 1);
+    let (sql, expect) = &sent[0][0];
+    assert!(sql.starts_with("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid = 777 AND usename = 'alice'"), "{sql}");
+    assert_eq!(*expect, Some("세션이 이미 끝났어요"));
+    let entry = &h.log()[0];
+    assert!(entry.ok && entry.inverse.is_none() && entry.change == change);
+}
+
+#[tokio::test]
+async fn a_session_that_is_gone_fails_with_the_expect_text() {
+    let h = Harness::new(terminate_scene());
+    let mut req = terminate_request(&h, terminate(OTHER_PID, "alice"));
+    req.confirm_text = Some("alice".into());
+    // 가짜 실행도 서버의 `exec`처럼 문장이 든 `expect`를 실패 문구로 쓴다(줄이 없을 때)
+    let committed = commit(
+        req,
+        |steps: Vec<Step>| {
+            let text = steps.iter().find_map(|s| s.expect).expect("확인 문구가 있어야 해요");
+            ready(Err(ExecError::Failed(AppError::other(text))))
+        },
+        never_reread(),
+    )
+    .await;
+    assert_eq!(failure(&committed), "세션이 이미 끝났어요");
+    let entry = &h.log()[0];
+    assert!(!entry.ok);
+    assert_eq!(entry.error.as_deref(), Some("세션이 이미 끝났어요"));
+}

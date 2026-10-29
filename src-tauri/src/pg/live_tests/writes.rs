@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 
 use super::changes::{Env, ADMIN};
 use super::*;
-use crate::pg::change::model::PgChange;
-use crate::pg::change::preview::{evaluate, PreviewCtx};
+use crate::pg::change::model::{PgChange, PresetChoice, PresetKind};
+use crate::pg::change::preview::{evaluate, evaluate_batch, PreviewCtx};
 use crate::pg::change::resolve::{resolve, ResolveCtx};
 use crate::pg::commit::{commit, PgChanges, PgCommitResult, PgPlan, PgRequest};
 use crate::pg::exec::{self, ExecError, Step, LOCK_TEXT};
@@ -93,7 +93,9 @@ pub(super) async fn a_warning_notice_fails_the_run(server: Server) {
 
 /// 로그인 역할을 만들면 결과의 비밀번호로 붙을 수 있고 서버에는 SCRAM 검증값만 저장된다
 pub(super) async fn a_created_login_gets_a_working_scram_password(server: Server) {
-    let mut env = Env::start(server, &["mm_w_login"], SETUP).await;
+    // 프리셋 되돌리기 시험에 쓸 그룹: 로그인한 역할이 ADMIN OPTION을 가졌다(160000부터는 그것이 있어야 구성원을 넣을 수 있다)
+    let setup = format!("{SETUP}\nCREATE ROLE mm_w_grp NOLOGIN; GRANT mm_w_grp TO mm_chg_admin WITH ADMIN OPTION;");
+    let mut env = Env::start(server, &["mm_w_login", "mm_w_login2", "mm_w_grp"], &setup).await;
     let (cluster, db) = env.snapshots().await;
     let change = PgChange::CreateRole { name: "mm_w_login".into(), login: true, groups: Vec::new(), connection_limit: -1, valid_until: None, preset: None };
     let default_db = env.scene.database.clone();
@@ -133,7 +135,62 @@ pub(super) async fn a_created_login_gets_a_working_scram_password(server: Server
     assert!(!stored.contains(&password));
     let logged = std::fs::read_to_string(dir.path().join("db-changes.jsonl")).unwrap();
     assert!(!logged.contains(&password) && !logged.contains("SCRAM"));
-    env.cleanup(&["mm_w_login"]).await;
+
+    // 이미 있는 그룹에 넣는 프리셋으로 만든 역할을 되돌린다: 만든 뒤 서버가 저절로 더한 구성원 관계(160000의 ADMIN 부여 등)가 허용 목록 안에 있어야 한다
+    let preset = PresetChoice {
+        preset: PresetKind::ReadOnly,
+        database: Some(env.scene.database.clone()),
+        schemas: vec!["mm_w1".into()],
+        creators: Vec::new(),
+        group: Some("mm_w_grp".into()),
+        create_group: false,
+    };
+    let create = PgChange::CreateRole { name: "mm_w_login2".into(), login: true, groups: Vec::new(), connection_limit: -1, valid_until: None, preset: Some(preset) };
+    let log_path = dir.path().join("db-changes.jsonl");
+    let mut conn = app_connection(&env, ADMIN, ADMIN).await;
+    let committed = commit(preset_request(&mut env, PgChanges::One(create), Vec::new(), None, &log_path, "live-2").await, |steps| async move { exec::run(&mut conn, &steps).await }, || async { Err(AppError::other("다시 읽지 않아요")) }).await;
+    assert!(committed.result.is_ok(), "{:?}", committed.result.err());
+    assert!(exists(&env, "mm_w_login2").await);
+    let entries = crate::pg::log::read_all(&log_path);
+    let undo = crate::pg::commit::undo_of(&entries, "live-2").expect("되돌릴 수 있어야 해요");
+    assert_eq!(undo.undo_of, vec!["live-2".to_string()]);
+    let changes = if undo.changes.len() == 1 { PgChanges::One(undo.changes[0].clone()) } else { PgChanges::Batch { database: undo.database.clone(), changes: undo.changes.clone() } };
+    let mut conn = app_connection(&env, ADMIN, ADMIN).await;
+    let undone = commit(preset_request(&mut env, changes, undo.undo_of.clone(), Some("mm_w_login2"), &log_path, "live-3").await, |steps| async move { exec::run(&mut conn, &steps).await }, || async { Err(AppError::other("다시 읽지 않아요")) }).await;
+    assert!(undone.result.is_ok(), "되돌리기가 거부됐어요: {:?}", undone.result.err());
+    assert!(!exists(&env, "mm_w_login2").await, "되돌리면 역할이 없어져요");
+    assert!(crate::pg::log::read_all(&log_path).iter().any(|e| e.id == "live-2" && e.undone));
+    env.cleanup(&["mm_w_login", "mm_w_login2", "mm_w_grp"]).await;
+}
+
+/// 지금 서버의 스냅숏으로 미리보기를 만들고, 그 계획으로 적용을 요청한다(`pg_preview` 다음 `pg_apply`와 같은 길)
+async fn preset_request(env: &mut Env, changes: PgChanges, undo_of: Vec<String>, confirm: Option<&str>, log_path: &std::path::Path, log_id: &str) -> PgRequest {
+    let (cluster, db) = env.snapshots().await;
+    let default_db = env.scene.database.clone();
+    let own = [env.mm.pid];
+    let now = clock::now_secs();
+    let ctx = PreviewCtx { cluster: &cluster, db: &db, own_pids: &own, read_replica: false, default_db: &default_db, now };
+    let seen = match &changes {
+        PgChanges::One(change) => PgPlan::One(evaluate(&ctx, change).preview),
+        PgChanges::Batch { database, changes } => PgPlan::Batch(evaluate_batch(&ctx, database, changes).preview),
+    };
+    PgRequest {
+        profile: "live".into(),
+        target_arn: "arn:live".into(),
+        login_user: ADMIN.into(),
+        cluster: std::sync::Arc::new(cluster.clone()),
+        db: std::sync::Arc::new(db.clone()),
+        own_pids: own.to_vec(),
+        read_replica: false,
+        default_db,
+        now,
+        changes,
+        confirm_text: confirm.map(str::to_string),
+        undo_of,
+        seen: Some(seen),
+        log_path: log_path.to_path_buf(),
+        log_id: log_id.into(),
+    }
 }
 
 /// PG16: 구성원 관계를 거둘 때 `GRANTED BY`로 그 부여자의 줄만 지운다. 그 전 버전은 부여자를 따로 가리지 못하니 보지 않는다

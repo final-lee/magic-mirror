@@ -239,15 +239,11 @@ pub fn terminate(pid: i32, role: &str, backend_start: Option<&str>) -> Statement
 }
 
 /// 역할이 가진 객체를 다른 역할에게 넘긴다
-// QB5(안전한 삭제)가 쓴다. 그때까지는 시험 빌드에서만 컴파일한다(`allow`를 쓰지 않으려고)
-#[cfg(test)]
 pub fn reassign_owned(role: &str, to: &str) -> Statement {
     Statement::plain(format!("REASSIGN OWNED BY {} TO {}", ident(role), ident(to)))
 }
 
 /// 역할이 가진 객체를 지우고 그 역할이 받은 권한을 거둔다(현재 데이터베이스에서)
-// QB5가 쓴다. 위와 같다
-#[cfg(test)]
 pub fn drop_owned(role: &str) -> Statement {
     Statement::plain(format!("DROP OWNED BY {}", ident(role)))
 }

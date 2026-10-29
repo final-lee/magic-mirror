@@ -414,6 +414,11 @@ impl<'a> Eval<'a> {
         self.graph.reach(start, |_| true).nodes.iter().map(|n| n.role.to_string()).collect()
     }
 
+    /// `from`이 `to`로 `SET ROLE`을 할 수 있는가: 자기 자신이거나, SET이 허용된 구성원 관계만 따라 닿는다(PG16부터는 사슬의 모든 부여에 SET 옵션이 있어야 하고, 그 전에는 구성원이면 된다)
+    pub fn can_set_role(&self, from: &str, to: &str) -> bool {
+        from == to || self.graph.reach(from, |e| e.can_set).index.contains_key(to)
+    }
+
     /// `member`가 `group`의 구성원으로서 ADMIN OPTION이 있는 부여를 하나라도 가졌는가(부여자가 누구든). 다른 역할을 거친 것은 세지 않는다
     pub fn membership_admin(&self, member: &str, group: &str) -> bool {
         self.graph.edges.get(member).is_some_and(|edges| edges.iter().any(|e| e.group == group && e.admin))

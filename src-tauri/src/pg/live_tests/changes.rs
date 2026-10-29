@@ -87,6 +87,15 @@ fn assert_same(label: &str, predicted: &BTreeSet<String>, actual: &BTreeSet<Stri
     assert!(only_predicted.is_empty() && only_actual.is_empty(), "{label}\n예측에만 있는 것: {only_predicted:#?}\n서버에만 있는 것: {only_actual:#?}");
 }
 
+/// 구성원 관계의 부여마다 (구성원, 그룹, 부여자, ADMIN) 한 줄. 모든 서버 버전에서 견준다(`digest`는 160000부터만 부여자를 본다)
+fn member_grantors(cluster: &ClusterSnapshot) -> BTreeSet<String> {
+    cluster
+        .members
+        .iter()
+        .flat_map(|m| m.grants.iter().map(move |g| format!("{} -> {} by {} admin={}", m.member, m.group, g.grantor, g.admin)))
+        .collect()
+}
+
 // ───────────────────────── 한 경우의 환경 ─────────────────────────
 
 pub(super) struct Env {
@@ -132,6 +141,8 @@ impl Env {
         assert!(notices.iter().all(|n| !n.starts_with("01")), "{label}: 서버가 경고를 보냈어요(앱은 이것을 실패로 봐요): {notices:?}");
         let (actual_cluster, actual_db) = self.snapshots().await;
         assert_same(label, &digest(&predicted_cluster, &predicted_db), &digest(&actual_cluster, &actual_db));
+        // 160000 전에는 구성원 관계의 부여자가 정보일 뿐이라 운영용 `digest`에는 없다. 예측이 서버가 적는 부여자와 같은지는 시험이 따로 견준다
+        assert_same(&format!("{label}: 구성원 부여자"), &member_grantors(&predicted_cluster), &member_grantors(&actual_cluster));
         resolved
     }
 

@@ -18,6 +18,9 @@
 //! - `password`: 새 비밀번호를 만들고 SCRAM-SHA-256 검증값으로 바꾼다. 평문도 검증값도 `Debug`에 찍히지 않는다.
 //! - `change`: 변경의 모양(`model`), 문장 만들기(`sql_text`), 화면 문구(`text`)
 //!
+//! - `preset`: 새 역할의 프리셋 제안(같은 권한을 가진 그룹, 새 그룹의 이름, 기본 권한을 줄 만드는 역할)
+//! - `drop`: 역할 안전하게 삭제하기. 데이터베이스마다 소유권을 넘기고 권한을 거두는 계획과, 첫 실패에서 멈추는 실행
+//!
 //! 명령(Tauri)과 읽어 둔 값의 보관은 `pg_commands`에 있다. 질의를 보내거나 트랜잭션을 여는 곳이 `catalog` 하나뿐이라는 약속은 시험 `hygiene`이 지킨다.
 
 pub mod catalog;
@@ -33,8 +36,10 @@ pub mod view;
 
 pub mod change;
 pub mod commit;
+pub mod drop;
 pub mod log;
 pub mod password;
+pub mod preset;
 pub mod sql;
 
 #[cfg(test)]

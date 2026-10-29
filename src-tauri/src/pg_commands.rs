@@ -1,6 +1,6 @@
 //! PostgreSQL 탭의 명령. 대상(클러스터·인스턴스)마다 로그인 사용자, 접속 정보, 클러스터 스냅숏, 데이터베이스 스냅숏을 한 번 읽어 두고
 //! 명령은 그것으로 계산한다(`pg::summary`, `pg::checks`). 읽기 명령은 데이터베이스에 아무것도 쓰지 않는다.
-//! 질의도 트랜잭션도 여기에 없다: 읽는 일은 `pg::catalog`이, 쓰는 일은 `pg::exec`가 하고, 여기서는 `commit::commit`에 넘기는 닫힘 하나에서만 `exec`를 부른다(검사 테스트 `pg::hygiene`이 지킨다).
+//! 질의도 트랜잭션도 여기에 없다: 읽는 일은 `pg::catalog`이, 쓰는 일은 `pg::exec`가 하고, 여기서는 `commit::commit`과 `drop::apply`에 넘기는 닫힘 하나씩에서만 `exec`를 부른다(검사 테스트 `pg::hygiene`이 지킨다).
 //!
 //! 연결은 `pg::pool`이 (대상, DB 사용자, 데이터베이스)마다 하나씩 보관한다. 명령은 시작할 때 대상의 닫힌 횟수(`epoch`)를 읽어 두고
 //! 연결을 열 때마다 넘긴다: 명령이 도는 중에 탭이 닫히면 새 연결을 열지도 보관하지도 않는다.
@@ -19,10 +19,11 @@ use crate::commands::AppState;
 use crate::error::AppError;
 use crate::iam::clock::now_secs;
 use crate::iam::commit::{new_log_id, PlanStore};
-use crate::pg::change::model::PgChange;
+use crate::pg::change::model::{PgChange, PresetKind};
 use crate::pg::change::preview::{evaluate, evaluate_batch, PreviewCtx};
 use crate::pg::commit::{self, PgChanges, PgCommitResult, PgPlan, PgRequest};
 use crate::pg::connect::{self, Connected};
+use crate::pg::drop::{self, DropLog};
 use crate::pg::exec::{self, ExecError};
 use crate::pg::log as change_log;
 use crate::pg::model::{ClusterSnapshot, DbSnapshot};
@@ -30,10 +31,10 @@ use crate::pg::pool::{ConnKey, Pool, NOT_OPENED};
 use crate::pg::summary::{self, parse_privilege};
 use crate::pg::target::{resolve as resolve_target, PgTarget, PgTargetInfo};
 use crate::pg::view::{
-    PgApplyResult, PgBatchPreview, PgBatchResult, PgCellDetail, PgDatabaseView, PgFindings, PgObjectRef, PgOverview, PgPreview, PgRoleView, PgSession,
-    PgSkippedDatabase, PgUndo, PgWhoCan,
+    PgApplyResult, PgBatchPreview, PgBatchResult, PgCellDetail, PgDatabaseView, PgDropPlan, PgDropResult, PgFindings, PgObjectRef, PgOverview, PgPresetSuggestion,
+    PgPreview, PgRoleView, PgSession, PgSkippedDatabase, PgUndo, PgWhoCan,
 };
-use crate::pg::{catalog, checks};
+use crate::pg::{catalog, checks, preset};
 
 /// 연결 보관함에서 오래 안 쓴 연결을 닫는 주기
 pub const SWEEP_EVERY: Duration = Duration::from_secs(60);
@@ -65,6 +66,8 @@ pub struct PgState {
     log_path: PathBuf,
     /// 미리보기에서 사용자가 본 계획. 적용할 때 다시 계산한 계획과 견준다(한 번 쓰면 버린다)
     plans: Mutex<PlanStore<PgPlan>>,
+    /// 역할 삭제 계획: (대상, 역할, 넘겨받을 역할)마다 마지막 계획. 적용이 꺼내 쓰면 버린다
+    drop_plans: Mutex<PlanStore<PgDropPlan>>,
     /// 대상 → 열기 번호. 대상을 닫아도 지우지 않는다: 번호는 계속 커져야 한다(닫기 전에 시작한 열기는 `epoch`가 거른다)
     opens: Mutex<HashMap<PgTarget, OpenNumbers>>,
 }
@@ -162,6 +165,11 @@ impl PgState {
 
     fn cached_db(&self, target: &PgTarget, database: &str) -> Option<Arc<DbSnapshot>> {
         locked(&self.dbs).get(&(target.clone(), database.to_string())).cloned()
+    }
+
+    /// 이 대상의 데이터베이스 스냅숏 가운데 `databases`의 것을 버린다(역할 삭제가 건드린 데이터베이스들)
+    fn forget_databases(&self, target: &PgTarget, databases: &[String]) {
+        locked(&self.dbs).retain(|(owner, name), _| !(owner == target && databases.contains(name)));
     }
 
     /// 읽은 데이터베이스 스냅숏을 담는다. 읽는 사이에 탭이 닫혔으면(닫고 다시 열었어도) 담지 않는다.
@@ -524,6 +532,96 @@ impl PgState {
         committed.result
     }
 
+    /// 프리셋 제안: 같은 권한을 이미 가진 그룹, 새 그룹의 이름, 기본 권한을 줄 만드는 역할. 읽어 둔 스냅숏을 쓴다
+    async fn preset(&self, app: &AppState, target: &PgTarget, database: &str, preset: PresetKind, schemas: Vec<String>) -> Result<PgPresetSuggestion, AppError> {
+        let opened = self.opened(target)?;
+        let snapshot = database_snapshot(app, self, target, &opened, database, false).await?;
+        blocking(move || preset::suggest(&opened.cluster, &snapshot, preset, &schemas)).await
+    }
+
+    /// 삭제 계획의 재료를 모두 새로 읽는다: 클러스터와 연결할 수 있는 모든 데이터베이스(읽지 못한 데이터베이스는 계획이 막는다). 읽은 것은 읽어 둔 값으로 담긴다
+    async fn drop_plan_now(&self, app: &AppState, target: &PgTarget, role: &str, reassign_to: &str) -> Result<(Opened, PgDropPlan), AppError> {
+        let opened = self.opened(target)?;
+        let cluster = self.read_cluster(app, target, &opened).await?;
+        let opened = Opened { cluster: cluster.clone(), ..opened };
+        let mut databases: Vec<String> = cluster.databases.iter().filter(|d| d.allow_conn).map(|d| d.name.clone()).collect();
+        databases.sort();
+        let opened_ref = &opened;
+        let (snapshots, skipped) =
+            collect_snapshots(self, target, opened.epoch, &databases, true, |database| read_database(app, self, target, opened_ref, database)).await?;
+        let unreachable: Vec<String> = skipped.into_iter().map(|s| s.database).collect();
+        let (default_db, read_replica) = (opened.info.default_database.clone(), opened.info.read_replica);
+        let (role, reassign_to) = (role.to_string(), reassign_to.to_string());
+        let plan = blocking(move || {
+            let mut plan = drop::drop_plan(&cluster, &snapshots, &unreachable, &role, &reassign_to, &default_db);
+            if read_replica {
+                drop::block_replica(&mut plan);
+            }
+            plan
+        })
+        .await?;
+        Ok((opened, plan))
+    }
+
+    async fn drop_plan(&self, app: &AppState, target: &PgTarget, role: String, reassign_to: String) -> Result<PgDropPlan, AppError> {
+        let (_, plan) = self.drop_plan_now(app, target, &role, &reassign_to).await?;
+        locked(&self.drop_plans).remember(&target.profile, &(target, &role, &reassign_to), plan.clone(), now_secs());
+        Ok(plan)
+    }
+
+    /// 역할을 지운다: 모든 것을 새로 읽어 계획을 다시 계산하고, 사용자가 본 계획과 같은지와 막힘·확인 문구를 본 뒤에 데이터베이스마다 차례로 돌린다.
+    /// 첫 실패에서 멈추고(`stopped`) 어디까지 했는지를 알린다. 끝났든 멈췄든 기록을 하나 남기고, 건드린 모든 데이터베이스의 읽어 둔 스냅숏을 버린다.
+    /// 문장을 돌리는 `exec::run`은 이 파일에서 `drop::apply`에 넘기는 닫힘 하나에서만 부른다
+    async fn apply_drop(&self, app: &AppState, target: &PgTarget, role: String, reassign_to: String, confirm_text: Option<String>) -> Result<PgDropResult, AppError> {
+        let (opened, plan) = self.drop_plan_now(app, target, &role, &reassign_to).await?;
+        let now = now_secs();
+        let seen = locked(&self.drop_plans).take(&target.profile, &(target, &role, &reassign_to), now);
+        drop::check(&plan, seen.as_ref(), confirm_text.as_deref())?;
+
+        let default_db = opened.info.default_database.clone();
+        let opened_ref = &opened;
+        let (done, stopped) = drop::apply(&plan, &default_db, |database, steps| {
+            let database = database.to_string();
+            async move {
+                let conn = connection(app, self, target, opened_ref, &database).await.map_err(ExecError::Failed)?;
+                let mut conn = conn.lock().await;
+                exec::run(&mut conn, &steps).await
+            }
+        })
+        .await;
+
+        let log_id = new_log_id(SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis()));
+        let entry = drop::log_entry(&DropLog {
+            plan: &plan,
+            profile: &target.profile,
+            target_arn: &opened.info.arn,
+            login_user: &opened.login,
+            default_db: &default_db,
+            now,
+            log_id: &log_id,
+            stopped: stopped.as_deref(),
+        });
+        let path = self.log_path.clone();
+        let saved = tokio::task::spawn_blocking(move || change_log::append(&path, &entry)).await;
+        // 지운 결과는 이미 서버에 있다. 기록을 저장하지 못한 것은 멈춘 이유에 덧붙여 알린다(끝까지 갔다면 알릴 자리가 없다)
+        let unsaved = match saved {
+            Ok(Ok(())) => None,
+            Ok(Err(e)) => Some(e.to_string()),
+            Err(e) => Some(e.to_string()),
+        };
+        let stopped = match (stopped, unsaved) {
+            (Some(text), Some(why)) => Some(format!("{text} (변경 기록을 저장하지 못했어요: {why})")),
+            (stopped, _) => stopped,
+        };
+
+        // 건드린 모든 데이터베이스의 읽어 둔 스냅숏을 버린다. 클러스터는 읽지 못해도 괜찮다: 화면이 다시 읽는다(`pg_overview`)
+        let touched: Vec<String> = plan.steps.iter().map(|s| s.database.clone().unwrap_or_else(|| default_db.clone())).collect();
+        self.forget_databases(target, &touched);
+        let _ = self.read_cluster(app, target, &opened).await;
+        let total = plan.steps.iter().filter(|s| s.database.is_some()).count();
+        Ok(PgDropResult { log_id, total, done, stopped })
+    }
+
     async fn log(&self) -> Result<Vec<change_log::PgLogEntry>, AppError> {
         let path = self.log_path.clone();
         let mut entries = tokio::task::spawn_blocking(move || change_log::read_all(&path)).await.map_err(|e| AppError::other(format!("변경 기록을 읽지 못했어요: {e}")))?;
@@ -549,6 +647,14 @@ impl PgState {
 
     pub(crate) async fn apply_for_tests(&self, app: &AppState, target: &PgTarget, change: PgChange, confirm_text: Option<String>) -> Result<PgCommitResult, AppError> {
         self.apply(app, target, PgChanges::One(change), confirm_text, Vec::new()).await
+    }
+
+    pub(crate) async fn drop_plan_for_tests(&self, app: &AppState, target: &PgTarget, role: &str, reassign_to: &str) -> Result<PgDropPlan, AppError> {
+        self.drop_plan(app, target, role.to_string(), reassign_to.to_string()).await
+    }
+
+    pub(crate) async fn apply_drop_for_tests(&self, app: &AppState, target: &PgTarget, role: &str, reassign_to: &str, confirm_text: Option<String>) -> Result<PgDropResult, AppError> {
+        self.apply_drop(app, target, role.to_string(), reassign_to.to_string(), confirm_text).await
     }
 
     pub(crate) fn kept_db_for_tests(&self, target: &PgTarget, database: &str) -> Option<Arc<DbSnapshot>> {
@@ -678,6 +784,37 @@ pub async fn pg_undo(pg: State<'_, PgState>, log_id: String) -> Result<PgUndo, A
 #[tauri::command]
 pub async fn pg_undo_batch(pg: State<'_, PgState>, batch_id: String) -> Result<PgUndo, AppError> {
     commit::undo_batch_of(&pg.log().await?, &batch_id)
+}
+
+/// 새 역할의 프리셋 제안: 같은 권한을 이미 가진 그룹, 새 그룹의 이름, 기본 권한을 줄 만드는 역할
+#[tauri::command]
+pub async fn pg_preset(
+    app: State<'_, AppState>,
+    pg: State<'_, PgState>,
+    target: PgTarget,
+    database: String,
+    preset: PresetKind,
+    schemas: Vec<String>,
+) -> Result<PgPresetSuggestion, AppError> {
+    pg.preset(&app, &target, &database, preset, schemas).await
+}
+
+/// 역할 삭제 계획. 클러스터와 연결할 수 있는 모든 데이터베이스를 새로 읽는다
+#[tauri::command]
+pub async fn pg_drop_plan(app: State<'_, AppState>, pg: State<'_, PgState>, target: PgTarget, role: String, reassign_to: String) -> Result<PgDropPlan, AppError> {
+    pg.drop_plan(&app, &target, role, reassign_to).await
+}
+
+#[tauri::command]
+pub async fn pg_apply_drop(
+    app: State<'_, AppState>,
+    pg: State<'_, PgState>,
+    target: PgTarget,
+    role: String,
+    reassign_to: String,
+    confirm_text: Option<String>,
+) -> Result<PgDropResult, AppError> {
+    pg.apply_drop(&app, &target, role, reassign_to, confirm_text).await
 }
 
 /// 탭을 닫을 때: 이 대상의 연결을 모두 닫고 읽어 둔 것과 기억해 둔 로그인을 버린다.
