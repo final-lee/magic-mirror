@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::eval::{Coverage, SchemaCell, Source};
+use super::eval::{Coverage, DirectCell, SchemaCell, Source};
 use super::model::{FunctionRec, RelKind, RelationRec};
 use super::target::PgTargetInfo;
 
@@ -151,6 +151,10 @@ pub struct PgSchemaCell {
     pub inherited_only: bool,
     /// "CONNECT 없음" 또는 "USAGE 없음". 잃을 것이 있는 칸에만 채운다
     pub unusable: Option<String>,
+    /// 위의 네 값을 이 역할 앞으로 직접 부여된 항목만으로 센 것. 편집하는 권한 표가 켜고 끄는 값이다
+    pub direct: PgCellValues,
+    /// 위의 네 값을 소유자로서 가진 항목만으로 센 것. 소유자 자신의 항목이라 표가 건드리지 않는다
+    pub owned: PgCellValues,
 }
 
 impl From<SchemaCell> for PgSchemaCell {
@@ -164,7 +168,25 @@ impl From<SchemaCell> for PgSchemaCell {
             write: cell.write.into(),
             inherited_only: cell.inherited_only,
             unusable: cell.unusable.map(str::to_string),
+            direct: cell.direct.into(),
+            owned: cell.owned.into(),
         }
+    }
+}
+
+/// 칸의 네 값을 한 종류의 출처만으로 센 것(`PgSchemaCell.direct`, `.owned`). 규칙은 칸의 보이는 값과 같다
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PgCellValues {
+    pub usage: bool,
+    pub create: bool,
+    pub read: PgCoverage,
+    pub write: PgCoverage,
+}
+
+impl From<DirectCell> for PgCellValues {
+    fn from(values: DirectCell) -> PgCellValues {
+        PgCellValues { usage: values.usage, create: values.create, read: values.read.into(), write: values.write.into() }
     }
 }
 
@@ -172,6 +194,19 @@ impl From<SchemaCell> for PgSchemaCell {
 #[serde(rename_all = "camelCase")]
 pub struct PgDbPrivilegeRow {
     pub role: String,
+    pub connect: bool,
+    pub create: bool,
+    pub temp: bool,
+    /// 위의 세 값을 이 역할 앞으로 직접 부여된 항목만으로 센 것
+    pub direct: PgDbValues,
+    /// 위의 세 값을 데이터베이스 소유자로서 가진 항목만으로 센 것
+    pub owned: PgDbValues,
+}
+
+/// 데이터베이스 수준 권한 셋을 한 종류의 출처만으로 센 것(`PgDbPrivilegeRow.direct`, `.owned`)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PgDbValues {
     pub connect: bool,
     pub create: bool,
     pub temp: bool,

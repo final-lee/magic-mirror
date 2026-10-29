@@ -3,7 +3,13 @@
 //! - `model`: 계약의 변경 종류(`PgChange`)와 그 부품. 화면이 보낸 변경이 그대로 이 값으로 읽힌다.
 //! - `sql_text`: 변경이 되는 SQL 문장을 만든다. 이름과 값은 `pg::sql`로만 넣고, 비밀번호 자리는 `Part::Password`로 비워 둔다.
 //! - `text`: 화면에 나가는 한 줄 요약과 이름표
+//! - `resolve`: 변경 하나가 연산과 문장과 막힘의 글이 된다
+//! - `after`: 연산을 적용한 뒤의 스냅숏
+//! - `rights`: 로그인한 DB 사용자가 무엇을 할 수 있나(서버 규칙대로), 서버가 부여자로 적는 역할
 
+pub mod after;
 pub mod model;
+pub mod resolve;
+pub mod rights;
 pub mod sql_text;
 pub mod text;

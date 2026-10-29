@@ -26,6 +26,13 @@ fn kinds(sources: &[Source]) -> Vec<SourceKind> {
     sources.iter().map(|s| s.kind).collect()
 }
 
+/// 한 종류의 출처로 센 값이 모두 비어 있다
+const NO_VALUES: DirectCell = DirectCell { usage: false, create: false, read: Coverage::None, write: Coverage::None };
+
+fn values(usage: bool, create: bool, read: Coverage, write: Coverage) -> DirectCell {
+    DirectCell { usage, create, read, write }
+}
+
 fn cell(role: &str, schema: &str) -> SchemaCell {
     SchemaCell {
         role: role.into(),
@@ -36,7 +43,19 @@ fn cell(role: &str, schema: &str) -> SchemaCell {
         write: Coverage::None,
         inherited_only: false,
         unusable: None,
+        direct: NO_VALUES,
+        owned: NO_VALUES,
     }
+}
+
+/// 보이는 값을 모두 이 역할 앞으로 직접 부여된 항목에서 받은 칸
+fn all_direct(cell: SchemaCell) -> SchemaCell {
+    SchemaCell { direct: values(cell.usage, cell.create, cell.read, cell.write), ..cell }
+}
+
+/// 보이는 값을 모두 소유자로서 가진 칸
+fn all_owned(cell: SchemaCell) -> SchemaCell {
+    SchemaCell { owned: values(cell.usage, cell.create, cell.read, cell.write), ..cell }
 }
 
 fn who(role: &str, sources: Vec<Source>, unusable: Option<&'static str>) -> WhoCanRow {
@@ -770,21 +789,24 @@ fn cells_summarize_usage_create_read_and_write() {
     // 소유자는 모두 가진다. 파티션 테이블과 외부 테이블도 읽고 쓰는 관계로 센다
     assert_eq!(
         find("app_owner", "app"),
-        SchemaCell { usage: true, create: true, read: Coverage::All, write: Coverage::All, ..cell("app_owner", "app") }
+        all_owned(SchemaCell { usage: true, create: true, read: Coverage::All, write: Coverage::All, ..cell("app_owner", "app") })
     );
     assert_eq!(
         find("app_owner", "audit"),
-        SchemaCell { usage: true, create: true, read: Coverage::All, write: Coverage::All, ..cell("app_owner", "audit") }
+        all_owned(SchemaCell { usage: true, create: true, read: Coverage::All, write: Coverage::All, ..cell("app_owner", "audit") })
     );
-    assert_eq!(find("app_owner", "scratch"), SchemaCell { usage: true, create: true, ..cell("app_owner", "scratch") });
+    assert_eq!(find("app_owner", "scratch"), all_owned(SchemaCell { usage: true, create: true, ..cell("app_owner", "scratch") }));
 
     // app_read는 직접 받았고, 쓰기는 없다. audit에는 아무것도 없다
-    assert_eq!(find("app_read", "app"), SchemaCell { usage: true, read: Coverage::All, ..cell("app_read", "app") });
+    assert_eq!(find("app_read", "app"), all_direct(SchemaCell { usage: true, read: Coverage::All, ..cell("app_read", "app") }));
     assert_eq!(find("app_read", "audit"), cell("app_read", "audit"));
 
-    // app_write: 쓰기를 직접 받았으니 흐리지 않는다. audit의 USAGE도 직접 받았다
-    assert_eq!(find("app_write", "app"), SchemaCell { usage: true, read: Coverage::All, write: Coverage::Some, ..cell("app_write", "app") });
-    assert_eq!(find("app_write", "audit"), SchemaCell { usage: true, ..cell("app_write", "audit") });
+    // app_write: 쓰기를 직접 받았으니 흐리지 않는다. audit의 USAGE도 직접 받았다. 읽기와 app의 USAGE는 app_read에서 물려받아 직접 받은 값이 아니다
+    assert_eq!(
+        find("app_write", "app"),
+        SchemaCell { usage: true, read: Coverage::All, write: Coverage::Some, direct: values(false, false, Coverage::None, Coverage::Some), ..cell("app_write", "app") }
+    );
+    assert_eq!(find("app_write", "audit"), all_direct(SchemaCell { usage: true, ..cell("app_write", "audit") }));
 
     // bob은 아무것도 없다. CONNECT도 없지만 잃을 것이 없으니 못 쓴다는 표시도 없다
     for schema in ["app", "audit", "scratch"] {
@@ -801,6 +823,90 @@ fn cells_summarize_usage_create_read_and_write() {
         SchemaCell { usage: true, read: Coverage::All, inherited_only: true, unusable: Some("CONNECT 없음"), ..cell("carol", "audit") }
     );
     assert_eq!(find("carol", "scratch"), SchemaCell { usage: true, inherited_only: true, unusable: Some("CONNECT 없음"), ..cell("carol", "scratch") });
+}
+
+// ───────────────────────── 직접 받은 값과 소유자로서 가진 값 ─────────────────────────
+
+#[test]
+fn a_role_that_reads_every_table_only_through_a_group_has_no_direct_read() {
+    let scene = app_scene(PG16);
+    let cells = schema_cells(&scene.ctx(), &APP_ROLES);
+    let alice = cells.iter().find(|c| c.role == "alice" && c.schema == "app").expect("alice/app");
+    // alice가 app의 모든 읽는 관계를 SELECT하는 것은 app_write → app_read를 거쳐서다: 보이는 읽기는 All이지만 직접 받은 읽기는 없다
+    assert_eq!(alice.read, Coverage::All);
+    assert_eq!(alice.direct, NO_VALUES);
+    assert_eq!(alice.owned, NO_VALUES);
+}
+
+#[test]
+fn the_owner_holds_its_values_as_owner_and_has_none_directly() {
+    let scene = app_scene(PG16);
+    let cells = schema_cells(&scene.ctx(), &APP_ROLES);
+    let owner = cells.iter().find(|c| c.role == "app_owner" && c.schema == "app").expect("app_owner/app");
+    assert_eq!(owner.owned, values(true, true, Coverage::All, Coverage::All));
+    assert_eq!((owner.direct, owner.read), (NO_VALUES, Coverage::All));
+    // 관계가 없는 스키마의 읽기와 쓰기는 None이다
+    let empty = cells.iter().find(|c| c.role == "app_owner" && c.schema == "scratch").expect("app_owner/scratch");
+    assert_eq!(empty.owned, values(true, true, Coverage::None, Coverage::None));
+}
+
+#[test]
+fn direct_counts_only_entries_for_the_role_itself_and_owned_only_the_owners() {
+    let mut scene = app_scene(PG16);
+    // pub: PUBLIC이 scratch의 테이블을 읽는다. su: superuser. 둘 다 직접 받은 것도 소유자로서 가진 것도 아니다
+    scene.cluster.roles.extend([login("pub"), RoleRec { superuser: true, ..login("su") }, login("direct")]);
+    scene.db.relations.push(table("scratch", "t", "app_owner").grant_public(&[Select]));
+    scene.db.schemas.iter_mut().find(|s| s.name == "scratch").expect("scratch").acl.push(entry("app_owner", None, Usage));
+    scene.db.schemas.iter_mut().find(|s| s.name == "scratch").expect("scratch").acl.push(entry("app_owner", Some("direct"), Usage));
+    grant_on(&mut scene, "t", "direct", &[Select, Update]);
+    let cells = schema_cells(&scene.ctx(), &["pub", "su", "direct", "carol"]);
+    let find = |role: &str| cells.iter().find(|c| c.role == role && c.schema == "scratch").unwrap_or_else(|| panic!("{role}/scratch")).clone();
+
+    let public = find("pub");
+    assert_eq!((public.usage, public.read, public.direct, public.owned), (true, Coverage::All, NO_VALUES, NO_VALUES));
+    let superuser = find("su");
+    assert_eq!((superuser.usage, superuser.create, superuser.read, superuser.write), (true, true, Coverage::All, Coverage::All));
+    assert_eq!((superuser.direct, superuser.owned), (NO_VALUES, NO_VALUES), "superuser 출처는 직접 받은 것도 소유자로서 가진 것도 아니에요");
+    // scratch의 읽는 관계와 쓰는 관계는 t 하나뿐이다: SELECT와 UPDATE를 직접 받았으니 둘 다 모두이고, CREATE는 받지 않았다
+    assert_eq!(find("direct").direct, values(true, false, Coverage::All, Coverage::All));
+    assert_eq!(find("direct").owned, NO_VALUES);
+    // carol은 pg_read_all_data(미리 정의된 역할)로 읽는다
+    let reader = find("carol");
+    assert_eq!((reader.read, reader.direct, reader.owned), (Coverage::All, NO_VALUES, NO_VALUES));
+}
+
+#[test]
+fn direct_read_and_write_are_counted_against_the_relations_the_cell_counts() {
+    let mut scene = app_scene(PG16);
+    scene.cluster.roles.push(login("tester"));
+    scene.db.schemas.iter_mut().find(|s| s.name == "app").expect("app").acl.push(entry("app_owner", Some("tester"), Usage));
+    // 읽는 관계 네 개(customers, order_summary, order_totals, orders) 가운데 둘을 직접 받는다. 쓰는 관계 둘(customers, orders) 가운데 하나에 DELETE를 직접 받는다
+    grant_on(&mut scene, "orders", "tester", &[Select]);
+    grant_on(&mut scene, "order_totals", "tester", &[Select]);
+    grant_on(&mut scene, "customers", "tester", &[Delete]);
+    let cell = schema_cells(&scene.ctx(), &["tester"]).into_iter().find(|c| c.schema == "app").expect("cell");
+    assert_eq!(cell.direct, values(true, false, Coverage::Some, Coverage::Some));
+    assert_eq!((cell.read, cell.write), (Coverage::Some, Coverage::Some));
+}
+
+#[test]
+fn a_role_that_inherits_the_owner_holds_the_owner_entries_as_owned_and_gets_a_direct_value_only_from_its_own_entries() {
+    let mut scene = app_scene(PG16);
+    // heir는 소유자 역할을 상속한다. 소유자 항목은 heir에게도 소유자 출처다(경로가 있다)
+    scene.cluster.roles.push(login("heir"));
+    scene.cluster.members.push(member_with("heir", "app_owner", true, true));
+    let cells = schema_cells(&scene.ctx(), &["heir"]);
+    let app = cells.iter().find(|c| c.schema == "app").expect("heir/app");
+    assert_eq!(app.owned, values(true, true, Coverage::All, Coverage::All));
+    assert_eq!(app.direct, NO_VALUES);
+    assert!(!app.inherited_only, "소유자 출처는 직접 쥔 출처로 센다");
+
+    // 상속하지 않는 구성원 관계는 소유자 출처를 주지 못한다
+    let mut scene = app_scene(PG16);
+    scene.cluster.roles.push(login("heir"));
+    scene.cluster.members.push(member_with("heir", "app_owner", false, true));
+    let app = schema_cells(&scene.ctx(), &["heir"]).into_iter().find(|c| c.schema == "app").expect("heir/app");
+    assert_eq!((app.owned, app.direct), (NO_VALUES, NO_VALUES));
 }
 
 #[test]
@@ -916,8 +1022,8 @@ fn a_cell_that_shows_only_create_is_not_blamed_on_a_missing_usage() {
     let ctx = scene.ctx();
     let cells = schema_cells(&ctx, &["maker"]);
     let find = |schema: &str| cells.iter().find(|c| c.schema == schema).expect("cell").clone();
-    assert_eq!(find("scratch"), SchemaCell { create: true, ..cell("maker", "scratch") });
-    assert_eq!(find("app"), SchemaCell { create: true, read: Coverage::Some, unusable: Some("USAGE 없음"), ..cell("maker", "app") });
+    assert_eq!(find("scratch"), all_direct(SchemaCell { create: true, ..cell("maker", "scratch") }));
+    assert_eq!(find("app"), all_direct(SchemaCell { create: true, read: Coverage::Some, unusable: Some("USAGE 없음"), ..cell("maker", "app") }));
     // 역할과 스키마만 묻는 `Ctx::unusable`은 그대로 USAGE가 없다고 답한다. 무엇을 보이는지는 칸이 정한다
     assert_eq!(ctx.unusable("maker", "scratch"), Some("USAGE 없음"));
 
@@ -928,8 +1034,8 @@ fn a_cell_that_shows_only_create_is_not_blamed_on_a_missing_usage() {
     scene.db.relations.iter_mut().find(|r| r.name == "remote_log").expect("remote_log").acl.push(entry("app_owner", Some("maker"), Delete));
     let cells = schema_cells(&scene.ctx(), &["maker"]);
     let find = |schema: &str| cells.iter().find(|c| c.schema == schema).expect("cell").clone();
-    assert_eq!(find("scratch"), SchemaCell { usage: true, create: true, write: Coverage::All, ..cell("maker", "scratch") });
-    assert_eq!(find("audit"), SchemaCell { create: true, write: Coverage::Some, unusable: Some("USAGE 없음"), ..cell("maker", "audit") });
+    assert_eq!(find("scratch"), all_direct(SchemaCell { usage: true, create: true, write: Coverage::All, ..cell("maker", "scratch") }));
+    assert_eq!(find("audit"), all_direct(SchemaCell { create: true, write: Coverage::Some, unusable: Some("USAGE 없음"), ..cell("maker", "audit") }));
 }
 
 // ───────────────────────── 누가 할 수 있나 ─────────────────────────
@@ -1159,4 +1265,117 @@ fn sources_serialize_to_the_contract() {
     assert_eq!(serde_json::to_value(src(Superuser, &[], None)).expect("json"), json!({ "kind": "superuser", "via": [], "grantor": null }));
     let names: Vec<_> = [Owner, Direct, Group, Public, Predefined, Superuser].map(|k| serde_json::to_value(k).expect("json")).to_vec();
     assert_eq!(names, [json!("owner"), json!("direct"), json!("group"), json!("public"), json!("predefined"), json!("superuser")]);
+}
+
+// ───────────────────────── 서버가 역할을 훑는 순서와 구성원 관계의 닫힘 ─────────────────────────
+
+/// 역할 이름과 OID를 짝지어 클러스터를 만든다(구성원 관계는 `edges`: 구성원 → 그룹). 역할의 OID는 줄 순서와 상관없이 준 값이다
+fn oid_scene(version: i32, oids: &[(&str, u32)], edges: &[(&str, &str)]) -> Scene {
+    let roles = oids.iter().map(|(name, _)| role(name)).collect();
+    let grant = |(who, group): &(&str, &str)| if version >= PG16 { member_with(who, group, true, true) } else { member(who, group) };
+    let mut scene = Scene { cluster: cluster(version, roles, edges.iter().map(grant).collect(), vec![database("d", "owner")]), db: db("d", "owner", vec![], vec![], vec![]) };
+    for (name, oid) in oids {
+        scene.role_mut(name).oid = *oid;
+    }
+    scene
+}
+
+fn order_of(scene: &Scene, start: &str) -> Vec<(String, usize)> {
+    Eval::new(&scene.ctx()).privilege_order(start).into_iter().map(|r| (r.role, r.depth)).collect()
+}
+
+fn named(list: &[(&str, usize)]) -> Vec<(String, usize)> {
+    list.iter().map(|(name, depth)| (name.to_string(), *depth)).collect()
+}
+
+#[test]
+fn the_server_visits_the_groups_of_one_role_in_oid_order_not_name_order() {
+    // l는 a, b, c의 구성원이다. 이름순이면 a, b, c지만 서버는 OID 순으로 본다: c(100), a(200), b(300)
+    let scene = oid_scene(PG16, &[("l", 50), ("a", 200), ("b", 300), ("c", 100)], &[("l", "a"), ("l", "b"), ("l", "c")]);
+    assert_eq!(order_of(&scene, "l"), named(&[("l", 0), ("c", 1), ("a", 1), ("b", 1)]));
+    // `inherited`는 이름순 구성원 관계를 따른다: 이 순서와 다르다
+    assert_eq!(Eval::new(&scene.ctx()).role("l").inherited().iter().map(|i| i.role.as_str()).collect::<Vec<_>>(), ["l", "a", "b", "c"]);
+}
+
+#[test]
+fn a_role_found_through_an_earlier_parent_comes_before_a_lower_oid_found_through_a_later_parent() {
+    // l → p1(10), p2(20). p1 → x(900), p2 → y(300). 같은 깊이 2의 x와 y: 서버는 p1을 먼저 풀어서 x를 먼저 찾는다. OID가 작은 y가 먼저가 아니다
+    let scene = oid_scene(PG16, &[("l", 1), ("p1", 10), ("p2", 20), ("x", 900), ("y", 300)], &[("l", "p1"), ("l", "p2"), ("p1", "x"), ("p2", "y")]);
+    assert_eq!(order_of(&scene, "l"), named(&[("l", 0), ("p1", 1), ("p2", 1), ("x", 2), ("y", 2)]));
+    // 부모의 OID가 뒤바뀌면 풀이 순서도 바뀐다
+    let scene = oid_scene(PG16, &[("l", 1), ("p1", 20), ("p2", 10), ("x", 900), ("y", 300)], &[("l", "p1"), ("l", "p2"), ("p1", "x"), ("p2", "y")]);
+    assert_eq!(order_of(&scene, "l"), named(&[("l", 0), ("p2", 1), ("p1", 1), ("y", 2), ("x", 2)]));
+}
+
+#[test]
+fn a_role_reached_twice_keeps_its_first_and_shortest_place() {
+    // l → a → c 와 l → c: c는 깊이 1에서 먼저 닿는다
+    let scene = oid_scene(PG16, &[("l", 1), ("a", 10), ("c", 20)], &[("l", "a"), ("a", "c"), ("l", "c")]);
+    assert_eq!(order_of(&scene, "l"), named(&[("l", 0), ("a", 1), ("c", 1)]));
+}
+
+#[test]
+fn the_order_skips_what_a_noinheriting_link_hides_before_and_from_pg16() {
+    // PG15: 구성원 역할의 NOINHERIT가 그 역할이 속한 그룹들을 가린다(l → mid → top에서 mid가 NOINHERIT면 top은 빠진다)
+    let mut scene = oid_scene(PG15, &[("l", 1), ("mid", 10), ("top", 20)], &[("l", "mid"), ("mid", "top")]);
+    scene.role_mut("mid").inherit = false;
+    assert_eq!(order_of(&scene, "l"), named(&[("l", 0), ("mid", 1)]));
+    // PG16: 관계마다의 INHERIT 옵션이 정한다. 구성원 역할의 속성은 이미 부여한 관계를 바꾸지 못한다
+    let mut scene = oid_scene(PG16, &[("l", 1), ("mid", 10), ("top", 20)], &[("l", "mid"), ("mid", "top")]);
+    scene.role_mut("mid").inherit = false;
+    assert_eq!(order_of(&scene, "l"), named(&[("l", 0), ("mid", 1), ("top", 2)]));
+    scene.member_mut("mid", "top").inherit = Some(false);
+    assert_eq!(order_of(&scene, "l"), named(&[("l", 0), ("mid", 1)]));
+    // 시작한 역할이 NOINHERIT여도 PG15는 그 역할의 그룹을 보지 않는다
+    let mut scene = oid_scene(PG15, &[("l", 1), ("g", 10)], &[("l", "g")]);
+    scene.role_mut("l").inherit = false;
+    assert_eq!(order_of(&scene, "l"), named(&[("l", 0)]));
+}
+
+#[test]
+fn the_database_owner_role_comes_after_the_explicit_groups_of_the_owner() {
+    // 데이터베이스 소유자(owner)의 명시적 그룹은 OID가 큰 g(900)도 pg_database_owner(OID 6171) 앞이다
+    let mut scene = oid_scene(PG16, &[("owner", 1), ("g", 900), ("pg_database_owner", 6171)], &[("owner", "g")]);
+    assert_eq!(order_of(&scene, "owner"), named(&[("owner", 0), ("g", 1), ("pg_database_owner", 1)]));
+    // PG15에서 소유자가 NOINHERIT면 pg_database_owner도 상속하지 않는다
+    scene.cluster.version_num = PG15;
+    scene.role_mut("owner").inherit = false;
+    assert_eq!(order_of(&scene, "owner"), named(&[("owner", 0)]));
+    // 다른 역할은 소유자가 아니니 pg_database_owner가 없다
+    let scene = oid_scene(PG16, &[("owner", 1), ("other", 2), ("pg_database_owner", 6171)], &[]);
+    assert_eq!(order_of(&scene, "other"), named(&[("other", 0)]));
+}
+
+#[test]
+fn a_role_that_is_not_in_the_snapshot_still_starts_its_own_order() {
+    let scene = oid_scene(PG16, &[("g", 10)], &[]);
+    assert_eq!(order_of(&scene, "ghost"), named(&[("ghost", 0)]));
+}
+
+#[test]
+fn the_member_closure_follows_every_link_inheriting_or_not() {
+    let mut scene = oid_scene(PG16, &[("l", 1), ("a", 2), ("b", 3), ("c", 4), ("d", 5)], &[("l", "a"), ("a", "b"), ("b", "c")]);
+    scene.member_mut("a", "b").inherit = Some(false);
+    scene.member_mut("a", "b").set = Some(false);
+    let eval = Eval::new(&scene.ctx());
+    assert_eq!(eval.member_closure("l"), ["l", "a", "b", "c"]);
+    assert_eq!(eval.member_closure("c"), ["c"]);
+    assert_eq!(eval.member_closure("ghost"), ["ghost"]);
+    // 상속하는 순서에는 b와 c가 없다
+    assert_eq!(order_of(&scene, "l"), named(&[("l", 0), ("a", 1)]));
+}
+
+#[test]
+fn a_membership_has_admin_when_any_grantor_gave_it() {
+    let mut scene = oid_scene(PG16, &[("l", 1), ("g", 2), ("h", 3)], &[("l", "g"), ("l", "h")]);
+    let eval = Eval::new(&scene.ctx());
+    assert!(!eval.membership_admin("l", "g") && !eval.membership_admin("l", "h"));
+    scene.member_mut("l", "g").admin = true;
+    scene.member_mut("l", "g").grants[0].admin = true;
+    // 합친 값만 켜고 부여는 그대로여도, 부여 하나만 켜고 합친 값은 그대로여도 ADMIN으로 센다
+    scene.member_mut("l", "h").grants[0].admin = true;
+    let eval = Eval::new(&scene.ctx());
+    assert!(eval.membership_admin("l", "g") && eval.membership_admin("l", "h"));
+    // 관계가 없는 쌍과 방향이 반대인 쌍은 ADMIN이 아니다
+    assert!(!eval.membership_admin("g", "l") && !eval.membership_admin("l", "ghost") && !eval.membership_admin("ghost", "g"));
 }

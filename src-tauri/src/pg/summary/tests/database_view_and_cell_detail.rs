@@ -66,6 +66,24 @@ fn db_privileges_have_connect_create_and_temp_for_every_role() {
 }
 
 #[test]
+fn db_privileges_split_the_direct_grants_from_the_owners() {
+    let scene = app_scene(PG16);
+    let view = database_view(&scene.cluster, &scene.db);
+    let values = |name: &str| {
+        let p = view.db_privileges.iter().find(|p| p.role == name).unwrap_or_else(|| panic!("{name}"));
+        ((p.direct.connect, p.direct.create, p.direct.temp), (p.owned.connect, p.owned.create, p.owned.temp))
+    };
+    // app_read는 CONNECT를 직접 받았다. TEMPORARY는 PUBLIC이 줘서 직접 받은 것이 아니다
+    assert_eq!(values("app_read"), ((true, false, false), (false, false, false)));
+    // 소유자의 항목은 소유자 출처다: 직접 받은 것은 없다
+    assert_eq!(values("app_owner"), ((false, false, false), (true, true, true)));
+    // alice는 app_write → app_read를 거쳐 CONNECT를 받는다: 보이는 값은 있어도 직접 받은 것은 없다
+    assert_eq!(values("alice"), ((false, false, false), (false, false, false)));
+    let alice = view.db_privileges.iter().find(|p| p.role == "alice").expect("alice");
+    assert!(alice.connect);
+}
+
+#[test]
 fn schemas_count_tables_and_partitioned_tables_only() {
     let scene = app_scene(PG16);
     let view = database_view(&scene.cluster, &scene.db);
