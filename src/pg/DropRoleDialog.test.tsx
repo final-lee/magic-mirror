@@ -1,9 +1,12 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { renderHook } from "@testing-library/react";
 import { renderWithClient } from "../test/utils";
 import { pgApi } from "./api";
 import { DropRoleDialog } from "./DropRoleDialog";
-import { LOGIN_USER, pgTarget, sampleDropPlan, sampleOverview } from "./fixtures";
+import { LOGIN_USER, pgTarget, sampleDatabaseView, sampleDropPlan, sampleOverview, sampleTargetInfo } from "./fixtures";
+import { pgKeys, usePgDatabase } from "./queries";
 import type { PgDropPlan, PgDropResult } from "./types";
 
 vi.mock("./api", () => ({ pgApi: { dropPlan: vi.fn(), applyDrop: vi.fn(), overview: vi.fn(), database: vi.fn() } }));
@@ -23,7 +26,6 @@ const dialog = () => screen.getByRole("dialog", { name: "역할 삭제" });
 const loaded = () => screen.findByRole("list", { name: "삭제 단계" });
 const heir = () => screen.getByRole("combobox", { name: "넘겨받을 역할" }) as HTMLSelectElement;
 const confirmInput = () => screen.getByLabelText("확인하려면 입력하세요: alice");
-const deleteButton = () => screen.getByRole("button", { name: /^삭제$|^적용/ });
 const steps = () => within(screen.getByRole("list", { name: "삭제 단계" })).getAllByRole("listitem", {}).filter((li) => li.classList.contains("pg-drop-step"));
 
 const stoppedResult: PgDropResult = { logId: "l1", total: 3, done: 1, stopped: "3개 데이터베이스 중 1개를 정리하고 멈췄어요: 다른 작업이 객체를 잠그고 있어 적용하지 못했어요. 잠시 뒤 다시 시도하세요" };
@@ -101,7 +103,7 @@ describe("the plan", () => {
     m.dropPlan.mockReturnValue(new Promise((r) => (resolve = r)));
     await user().selectOptions(heir(), "app_owner");
     expect(screen.queryByRole("list", { name: "삭제 단계" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^적용/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "삭제" })).toBeDisabled();
     resolve(sampleDropPlan({ reassignTo: "app_owner" }));
     await loaded();
   });
@@ -110,7 +112,7 @@ describe("the plan", () => {
     m.dropPlan.mockRejectedValue({ kind: "other", message: "질의가 30초 안에 끝나지 않았어요" });
     setup();
     expect(await screen.findByText("질의가 30초 안에 끝나지 않았어요")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^적용/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "삭제" })).toBeDisabled();
   });
 
   test("the memberships that go with it, with the ones that leave the group", async () => {
@@ -142,7 +144,7 @@ describe("the plan", () => {
     setup();
     await loaded();
     await user().type(confirmInput(), "alice");
-    expect(screen.getByRole("button", { name: /^적용/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "삭제" })).toBeDisabled();
     expect(screen.getByRole("alert")).toHaveTextContent("앱이 로그인한 역할은 삭제할 수 없어요");
   });
 });
@@ -156,17 +158,17 @@ describe("applying", () => {
   test("needs the confirm text", async () => {
     setup();
     await loaded();
-    expect(screen.getByRole("button", { name: /^적용/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "삭제" })).toBeDisabled();
     await user().type(confirmInput(), "alic");
-    expect(screen.getByRole("button", { name: /^적용/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "삭제" })).toBeDisabled();
     await user().type(confirmInput(), "e");
-    expect(screen.getByRole("button", { name: /^적용/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "삭제" })).toBeEnabled();
   });
 
   test("calls pg_apply_drop with the role, the heir and the typed text, then refreshes and reports the drop", async () => {
     const { onDropped } = setup();
     await typeName();
-    await user().click(screen.getByRole("button", { name: /^적용/ }));
+    await user().click(screen.getByRole("button", { name: "삭제" }));
     await waitFor(() => expect(onDropped).toHaveBeenCalledWith("alice", true));
     expect(m.applyDrop).toHaveBeenCalledWith(pgTarget, "alice", LOGIN_USER, "alice");
     expect(m.overview).toHaveBeenCalledWith(pgTarget);
@@ -176,7 +178,7 @@ describe("applying", () => {
     m.overview.mockRejectedValue(new Error("끊김"));
     const { onDropped } = setup();
     await typeName();
-    await user().click(screen.getByRole("button", { name: /^적용/ }));
+    await user().click(screen.getByRole("button", { name: "삭제" }));
     await waitFor(() => expect(onDropped).toHaveBeenCalledWith("alice", false));
   });
 
@@ -185,7 +187,7 @@ describe("applying", () => {
     m.applyDrop.mockReturnValue(new Promise((r) => (resolve = r)));
     const { onClose, onDropped } = setup();
     await typeName();
-    await user().click(screen.getByRole("button", { name: /^적용/ }));
+    await user().click(screen.getByRole("button", { name: "삭제" }));
     expect(await screen.findByRole("button", { name: "적용 중…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "취소" })).toBeDisabled();
     expect(heir()).toBeDisabled();
@@ -199,7 +201,7 @@ describe("applying", () => {
     m.applyDrop.mockReturnValue(new Promise(() => {}));
     setup();
     await typeName();
-    await user().click(screen.getByRole("button", { name: /^적용/ }));
+    await user().click(screen.getByRole("button", { name: "삭제" }));
     await user().click(await screen.findByRole("button", { name: "적용 중…" }));
     expect(m.applyDrop).toHaveBeenCalledTimes(1);
   });
@@ -208,7 +210,7 @@ describe("applying", () => {
     m.applyDrop.mockResolvedValue(stoppedResult);
     const { onDropped, onClose } = setup();
     await typeName();
-    await user().click(screen.getByRole("button", { name: /^적용/ }));
+    await user().click(screen.getByRole("button", { name: "삭제" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(stoppedResult.stopped!);
     expect(onDropped).not.toHaveBeenCalled();
     expect(m.overview).toHaveBeenCalledTimes(1);
@@ -227,7 +229,7 @@ describe("applying", () => {
     m.dropPlan.mockResolvedValueOnce(sampleDropPlan()).mockResolvedValue(sampleDropPlan({ steps: [{ database: null, sql: ['DROP ROLE "alice"'], owned: 0, privileges: 0, defaults: 0 }] }));
     setup();
     await typeName();
-    await user().click(screen.getByRole("button", { name: /^적용/ }));
+    await user().click(screen.getByRole("button", { name: "삭제" }));
     await screen.findByRole("alert");
     expect(steps()).toHaveLength(4);
     expect(screen.queryByLabelText("확인하려면 입력하세요: alice")).not.toBeInTheDocument();
@@ -238,7 +240,7 @@ describe("applying", () => {
     m.overview.mockRejectedValue(new Error("끊김"));
     setup();
     await typeName();
-    await user().click(screen.getByRole("button", { name: /^적용/ }));
+    await user().click(screen.getByRole("button", { name: "삭제" }));
     expect(await screen.findByText("적용은 됐지만 목록을 다시 읽지 못했어요. [다시 읽기]를 눌러 주세요")).toBeInTheDocument();
   });
 
@@ -246,15 +248,17 @@ describe("applying", () => {
     m.applyDrop.mockRejectedValue({ kind: "other", message: "미리보기 뒤에 바뀌었어요. 미리보기를 다시 받아 주세요" });
     const { onDropped } = setup();
     await typeName();
-    await user().click(screen.getByRole("button", { name: /^적용/ }));
+    await user().click(screen.getByRole("button", { name: "삭제" }));
     expect(await screen.findByText("미리보기 뒤에 바뀌었어요. 미리보기를 다시 받아 주세요")).toBeInTheDocument();
     expect(onDropped).not.toHaveBeenCalled();
     await waitFor(() => expect(m.overview).toHaveBeenCalled());
-    expect(screen.getByRole("button", { name: /^적용/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "삭제" })).toBeDisabled();
     const calls = m.dropPlan.mock.calls.length;
     await user().click(screen.getByRole("button", { name: "미리보기 다시 받기" }));
     await waitFor(() => expect(m.dropPlan.mock.calls.length).toBeGreaterThan(calls));
-    await waitFor(() => expect(screen.getByRole("button", { name: /^적용/ })).toBeEnabled());
+    await waitFor(() => expect(confirmInput()).toHaveValue(""));
+    await user().type(confirmInput(), "alice");
+    await waitFor(() => expect(screen.getByRole("button", { name: "삭제" })).toBeEnabled());
   });
 
   test("nothing happens to a dialog that is gone when the answer comes", async () => {
@@ -262,7 +266,7 @@ describe("applying", () => {
     m.applyDrop.mockReturnValue(new Promise((r) => (resolve = r)));
     const { onDropped, unmount } = setup();
     await typeName();
-    await user().click(screen.getByRole("button", { name: /^적용/ }));
+    await user().click(screen.getByRole("button", { name: "삭제" }));
     await screen.findByRole("button", { name: "적용 중…" });
     unmount();
     resolve(okResult);
@@ -276,5 +280,70 @@ describe("applying", () => {
     await loaded();
     await user().click(screen.getByRole("button", { name: "취소" }));
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("fix round 1", () => {
+  const typeName = async () => {
+    await loaded();
+    await user().type(confirmInput(), "alice");
+  };
+
+  test("the apply button reads exactly 삭제 (and 적용 does not exist)", async () => {
+    setup();
+    await loaded();
+    expect(screen.getByRole("button", { name: "삭제" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "적용" })).not.toBeInTheDocument();
+  });
+
+  // 읽어 둔 데이터베이스는 다음에 조회할 때 force로 읽도록 표시된다(화면을 다시 열면 그 표시를 쓴다)
+  const forcedRead = async (qc: ReturnType<typeof setup>["qc"], names: string[]) => {
+    for (const name of names) qc.setQueryData(pgKeys.database(pgTarget, name), sampleDatabaseView({ database: name }));
+    await typeName();
+    await user().click(screen.getByRole("button", { name: "삭제" }));
+    await waitFor(() => expect(m.overview).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 30));
+    m.database.mockClear();
+    for (const name of names) renderHook(() => usePgDatabase(pgTarget, name), { wrapper: ({ children }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider> });
+    await waitFor(() => expect(m.database).toHaveBeenCalledTimes(names.length));
+  };
+
+  test("after a drop every database of the plan is read again with force, not only the default one", async () => {
+    const { qc } = setup();
+    await forcedRead(qc, ["analytics", "orders", "postgres"]);
+    for (const name of ["analytics", "orders", "postgres"]) expect(m.database).toHaveBeenCalledWith(pgTarget, name, true);
+  });
+
+  test("a stopped drop reads the plan's databases the same way", async () => {
+    m.applyDrop.mockResolvedValue(stoppedResult);
+    const { qc } = setup();
+    await forcedRead(qc, ["analytics", "postgres"]);
+    for (const name of ["analytics", "postgres"]) expect(m.database).toHaveBeenCalledWith(pgTarget, name, true);
+  });
+
+  test("while the plan is read again after 미리보기 다시 받기, 삭제 stays off and the typed text is gone", async () => {
+    m.applyDrop.mockRejectedValue({ kind: "other", message: "미리보기 뒤에 바뀌었어요. 미리보기를 다시 받아 주세요" });
+    setup();
+    await typeName();
+    await user().click(screen.getByRole("button", { name: "삭제" }));
+    await screen.findByText("미리보기 뒤에 바뀌었어요. 미리보기를 다시 받아 주세요");
+    let resolve!: (p: PgDropPlan) => void;
+    m.dropPlan.mockReturnValue(new Promise((r) => (resolve = r)));
+    await user().click(screen.getByRole("button", { name: "미리보기 다시 받기" }));
+    expect(screen.getByRole("button", { name: "삭제" })).toBeDisabled();
+    resolve(sampleDropPlan());
+    await waitFor(() => expect(confirmInput()).toHaveValue(""));
+    expect(screen.getByRole("button", { name: "삭제" })).toBeDisabled();
+  });
+
+  test("honours the block reason while open: off, with the reason as its title", async () => {
+    const reason = "읽기 전용 복제본이라 바꿀 수 없어요";
+    setup({ overview: sampleOverview({ target: sampleTargetInfo({ readReplica: true }) }) });
+    await typeName();
+    const button = screen.getByRole("button", { name: "삭제" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", reason);
+    await user().click(button);
+    expect(m.applyDrop).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useModal } from "../iam/useModal";
 import { useDebounced } from "../lib/useDebounced";
-import { MEMBERSHIP_SYSTEM_GROUPS } from "./canChange";
+import { MEMBERSHIP_SYSTEM_GROUPS, changeBlockReason } from "./canChange";
 import { collate, dayToIso } from "./labels";
 import { PgError } from "./PgError";
 import { usePgDatabase, usePgPreset } from "./queries";
@@ -61,6 +61,7 @@ export function CreateRoleDialog({ target, overview, database, onPreview, onClos
   const [newGroup, setNewGroup] = useState<string | null>(null);
   const [creatorsOff, setCreatorsOff] = useState<string[]>([]);
 
+  const blockReason = changeBlockReason(overview.target, overview);
   const isUser = kind === "user";
   const needsSchemas = preset !== null && preset !== "admin";
 
@@ -68,7 +69,9 @@ export function CreateRoleDialog({ target, overview, database, onPreview, onClos
   const schemaNames = useMemo(() => database$.data?.schemas.map((s) => s.name) ?? [], [database$.data]);
 
   // 제안은 데이터베이스·프리셋·스키마의 마지막 변경 뒤 PRESET_DELAY_MS가 지나야 받는다. 기다리는 동안에는 이전 제안을 쓰지 않는다
-  const wanted = needsSchemas && schemas.length > 0 ? JSON.stringify([db, preset, schemas]) : null;
+  // 고른 스키마는 이름순으로 한 번만 가다듬어, 제안을 부르는 키·인자와 보내는 변경이 같은 목록을 쓴다
+  const selected = useMemo(() => [...schemas].sort(collate), [schemas]);
+  const wanted = needsSchemas && selected.length > 0 ? JSON.stringify([db, preset, selected]) : null;
   const settled = useDebounced(wanted, PRESET_DELAY_MS);
   const asked = useMemo(() => (settled ? (JSON.parse(settled) as [string, PgPresetKind, string[]]) : null), [settled]);
   const suggestion$ = usePgPreset(target, asked?.[0] ?? null, asked?.[1] ?? null, asked?.[2] ?? []);
@@ -80,7 +83,8 @@ export function CreateRoleDialog({ target, overview, database, onPreview, onClos
     .sort((a, b) => collate(a.name, b.name));
 
   const matching = suggestion?.matching ?? [];
-  const choice: Existing = groupChoice ?? (matching.length > 0 ? "existing" : "new");
+  // 새 제안에 같은 권한을 가진 그룹이 없으면 "그룹에 넣어요"는 고를 수 없으니 새 그룹 쪽이 선택된다(체크된 라디오가 늘 하나 있다)
+  const choice: Existing = matching.length === 0 ? "new" : (groupChoice ?? "existing");
   const chosenGroup = existingGroup && matching.includes(existingGroup) ? existingGroup : matching[0];
   const groupName = newGroup ?? suggestion?.proposedName ?? "";
   const usesNewGroup = isUser && suggestion !== undefined && choice === "new";
@@ -95,7 +99,7 @@ export function CreateRoleDialog({ target, overview, database, onPreview, onClos
   const limitValue = unlimited ? -1 : /^\d+$/.test(limit.trim()) ? Number(limit.trim()) : null;
   const expiryValue = noExpiry ? null : /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : undefined;
 
-  const presetReady = preset === null || preset === "admin" || (schemas.length > 0 && suggestion !== undefined && (!usesNewGroup || (groupName !== "" && groupProblem === null)));
+  const presetReady = preset === null || preset === "admin" || (selected.length > 0 && suggestion !== undefined && (!usesNewGroup || (groupName !== "" && groupProblem === null)));
   const ready = name !== "" && nameProblem === null && limitValue !== null && expiryValue !== undefined && presetReady;
 
   function build(): PgChange | null {
@@ -107,7 +111,7 @@ export function CreateRoleDialog({ target, overview, database, onPreview, onClos
       choiceOut = {
         preset,
         database: db,
-        schemas: schemaNames.filter((s) => schemas.includes(s)),
+        schemas: selected,
         creators: showCreators ? creators : [],
         group: usesExisting ? (chosenGroup ?? null) : usesNewGroup ? groupName : null,
         createGroup: usesNewGroup,
@@ -184,9 +188,15 @@ export function CreateRoleDialog({ target, overview, database, onPreview, onClos
             <legend>프리셋</legend>
             {PRESETS.map((p) => (
               <label key={p.id ?? "none"} className="pg-create-preset">
-                <input type="radio" name={`${id}-preset`} checked={preset === p.id} aria-describedby={p.description ? `${id}-${p.id}` : undefined} onChange={() => {
+                <input
+                  type="radio"
+                  name={`${id}-preset`}
+                  checked={preset === p.id}
+                  aria-describedby={p.description ? `${id}-${p.id}` : undefined}
+                  onChange={() => {
+                    // 스키마를 고르는 프리셋끼리 바꿀 때는 고른 스키마를 지킨다
+                    if (!(needsSchemas && p.id !== null && p.id !== "admin")) setSchemas([]);
                     setPreset(p.id);
-                    setSchemas([]);
                   }}
                 />
                 <span>
@@ -224,7 +234,7 @@ export function CreateRoleDialog({ target, overview, database, onPreview, onClos
                   </label>
                 ))}
               </fieldset>
-              {schemas.length > 0 && !suggestion && (suggestion$.isError && !waiting ? <PgError error={suggestion$.error} target={target} /> : <p className="dim">제안을 불러오는 중…</p>)}
+              {selected.length > 0 && !suggestion && (suggestion$.isError && !waiting ? <PgError error={suggestion$.error} target={target} /> : <p className="dim">제안을 불러오는 중…</p>)}
               {suggestion && !isUser && matching.length > 0 && <p className="pg-note">{`같은 권한을 가진 그룹이 이미 있어요: ${matching.join(", ")}`}</p>}
               {suggestion && isUser && (
                 <fieldset className="pg-create-groups">
@@ -281,7 +291,9 @@ export function CreateRoleDialog({ target, overview, database, onPreview, onClos
           </button>
           <button
             className="btn primary"
-            disabled={!ready}
+            disabled={!ready || blockReason !== null}
+            title={blockReason ?? undefined}
+            aria-description={blockReason ?? undefined}
             onClick={() => {
               const change = build();
               if (change) onPreview(change);

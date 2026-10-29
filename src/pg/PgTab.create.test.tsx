@@ -151,7 +151,7 @@ describe("역할 삭제", () => {
     setup();
     const dialog = await openDrop();
     await user().type(await within(dialog).findByLabelText("확인하려면 입력하세요: alice"), "alice");
-    await user().click(within(dialog).getByRole("button", { name: "적용" }));
+    await user().click(within(dialog).getByRole("button", { name: "삭제" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "역할 삭제" })).not.toBeInTheDocument());
     expect(m.applyDrop).toHaveBeenCalledWith(pgTarget, "alice", LOGIN_USER, "alice");
     expect(screen.getByRole("status")).toHaveTextContent("역할 삭제: alice");
@@ -164,7 +164,7 @@ describe("역할 삭제", () => {
     setup();
     const dialog = await openDrop();
     await user().type(await within(dialog).findByLabelText("확인하려면 입력하세요: alice"), "alice");
-    await user().click(within(dialog).getByRole("button", { name: "적용" }));
+    await user().click(within(dialog).getByRole("button", { name: "삭제" }));
     await screen.findByRole("table", { name: "역할 목록" });
     fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
     expect(screen.queryByRole("heading", { name: "alice" })).not.toBeInTheDocument();
@@ -176,7 +176,7 @@ describe("역할 삭제", () => {
     setup();
     const dialog = await openDrop();
     await user().type(await within(dialog).findByLabelText("확인하려면 입력하세요: alice"), "alice");
-    await user().click(within(dialog).getByRole("button", { name: "적용" }));
+    await user().click(within(dialog).getByRole("button", { name: "삭제" }));
     expect(await within(dialog).findByText("3개 데이터베이스 중 1개를 정리하고 멈췄어요: 연결이 끊겼어요")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "alice" })).toBeInTheDocument();
     await user().click(within(dialog).getByRole("button", { name: "닫기" }));

@@ -5,6 +5,7 @@ import { PreviewFooter } from "../iam/PreviewFooter";
 import { ConfirmField, WarningList, useSheetFocus } from "../iam/previewParts";
 import { applyGate } from "../iam/useIamChange";
 import { pgApi } from "./api";
+import { changeBlockReason } from "./canChange";
 import { collate, confirmLabel } from "./labels";
 import { PgError } from "./PgError";
 import { REFRESH_FAILED_TEXT, refreshPgAfterChange, usePgDropPlan } from "./queries";
@@ -57,19 +58,22 @@ export function DropRoleDialog({ target, role, overview, onClose, onDropped }: P
   // 넘겨받을 수 있는 역할: 시스템이 아닌 역할(지우는 역할은 빼고)과 로그인한 역할
   const heirs = overview.roles.filter((r) => r.name !== role && (!r.system || r.name === overview.loginUser)).map((r) => r.name).sort(collate);
 
-  const refresh = () =>
+  // 단계마다 다른 데이터베이스를 바꿨으니 단계의 데이터베이스를 모두 다시 읽는다(기본 데이터베이스는 마지막 단계에도 있다)
+  const refresh = (steps: PgDropPlan["steps"]) =>
     new Promise<boolean>((resolve) => {
-      void refreshPgAfterChange(qc, target, overview.target.defaultDatabase, resolve);
+      const databases = steps.map((s) => s.database ?? overview.target.defaultDatabase);
+      void refreshPgAfterChange(qc, target, databases.length > 0 ? databases : overview.target.defaultDatabase, resolve);
     });
+  const blockReason = changeBlockReason(overview.target, overview);
 
   const apply = async (text: string) => {
-    if (!plan || phase !== "ready" || stale || !applyGate(plan, text).ok) return;
+    if (!plan || q.isFetching || blockReason !== null || phase !== "ready" || stale || !applyGate(plan, text).ok) return;
     setPhase("applying");
     setError(null);
     try {
       const result = await pgApi.applyDrop(target, role, reassignTo, text);
       if (!alive.current) return;
-      const refreshed = await refresh();
+      const refreshed = await refresh(plan.steps);
       if (!alive.current) return;
       if (result.stopped === null) {
         onDropped(role, refreshed);
@@ -80,7 +84,7 @@ export function DropRoleDialog({ target, role, overview, onClose, onDropped }: P
     } catch (e) {
       if (!alive.current) return;
       // 일부 단계가 이미 커밋됐을 수 있고 계획을 다시 비교하느라 백엔드가 새로 읽었으니 화면도 다시 읽는다
-      void refresh();
+      void refresh(plan.steps);
       setError({ kind: "apply", message: errorMessage(e) });
       setStale(true);
       setPhase("ready");
@@ -90,6 +94,7 @@ export function DropRoleDialog({ target, role, overview, onClose, onDropped }: P
   const retry = () => {
     setStale(false);
     setError(null);
+    setTyped("");
     void q.refetch();
   };
 
@@ -168,7 +173,7 @@ export function DropRoleDialog({ target, role, overview, onClose, onDropped }: P
         ) : (
           <PreviewFooter
             gated={plan ?? null}
-            phase={plan ? phase : "loading"}
+            phase={phase === "applying" ? "applying" : plan && !q.isFetching ? "ready" : "loading"}
             error={error}
             stale={stale}
             typed={typed}
@@ -177,6 +182,8 @@ export function DropRoleDialog({ target, role, overview, onClose, onDropped }: P
             onApply={(text) => void apply(text)}
             onRetry={retry}
             onCancel={onClose}
+            applyLabel="삭제"
+            blockReason={blockReason}
           />
         )}
       </div>
