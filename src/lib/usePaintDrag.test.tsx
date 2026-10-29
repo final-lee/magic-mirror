@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { posKey } from "../iam/gridPos";
+import { posKey } from "./gridPos";
 import { takeFocus, usePaintDrag } from "./usePaintDrag";
 
 // 칠하는 일이 행과 열의 종류를 모르는지 본다: 행은 이름이 있는 객체, 열은 키가 있는 객체다. 칸의 상태는 이 틀이 집합 하나로 든다.
