@@ -9,7 +9,7 @@ use super::after;
 use super::impact::{self, Impacts};
 use super::inverse;
 use super::model::{GrantTarget, PgChange};
-use super::resolve::{resolve, ObjKey, ResolveCtx, Resolved};
+use super::resolve::{not_changeable, resolve, ObjKey, ResolveCtx, Resolved};
 use super::sql_text::Statement;
 use super::text::summary;
 use super::warnings;
@@ -97,7 +97,7 @@ pub fn evaluate(ctx: &PreviewCtx, change: &PgChange) -> Evaluated {
     let blocked = wrong_database || !step.resolved.blocks.is_empty();
     let mut all = step.warnings;
     if wrong_database {
-        all.insert(0, block_warning(&wrong_database_text(execution_database)));
+        all.insert(0, block_warning(&not_changeable(execution_database)));
     }
     all.extend(warnings::closing(&before, &after, &step.resolved.ops, ctx.now));
     let warnings = warnings::ordered(all, blocked);
@@ -118,10 +118,6 @@ pub fn evaluate(ctx: &PreviewCtx, change: &PgChange) -> Evaluated {
         reversible,
     };
     Evaluated { preview, statements: step.resolved.statements, inverse: step.inverse, after: (cluster, db) }
-}
-
-fn wrong_database_text(database: &str) -> String {
-    format!("이 데이터베이스에서는 바꿀 수 없어요: {database}")
 }
 
 // ───────────────────────── 묶음 ─────────────────────────
@@ -256,7 +252,7 @@ pub struct EvaluatedBatch {
 pub fn evaluate_batch(ctx: &PreviewCtx, database: &str, changes: &[PgChange]) -> EvaluatedBatch {
     let mut structural = batch_blocks(ctx, database, changes);
     if ctx.db.database != database {
-        structural.push(wrong_database_text(database));
+        structural.push(not_changeable(database));
     }
     let mut preview = PgBatchPreview {
         database: database.to_string(),

@@ -11,7 +11,7 @@ use crate::pg::password::{ScramHash, MASK};
 use crate::pg::sql::{self, ident, literal};
 
 /// `terminate`의 문장이 아무 줄도 못 찾았을 때의 오류 문구: 세션이 이미 끝났거나, 그 사이 다른 세션이 그 pid를 이어받았다
-const SESSION_GONE: &str = "세션이 이미 끝났어요";
+pub(crate) const SESSION_GONE: &str = "세션이 이미 끝났어요";
 
 /// 문장의 한 조각
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -742,3 +742,25 @@ fn the_statements_that_run_are_the_plain_text_the_plan_shows() {
     // 마스크 글자가 든 문장은 없다
     assert!(sent.iter().all(|sql| !sql.contains(crate::pg::password::MASK)), "{sent:?}");
 }
+
+#[test]
+fn the_plan_names_its_login_and_a_login_switch_makes_it_stale() {
+    let world = World::new(PG16);
+    let plan = world.plan();
+    assert_eq!(plan.login_user, "mm");
+    assert_eq!(serde_json::to_value(&plan).unwrap()["loginUser"], "mm");
+    let mut other = plan.clone();
+    other.login_user = "nobody".into();
+    assert_eq!(check(&plan, Some(&other), Some(ROLE)), Err(AppError::other("미리보기 뒤에 바뀌었어요. 미리보기를 다시 받아 주세요")));
+}
+
+#[test]
+fn one_object_granted_by_two_grantors_is_one_sample_entry_but_two_in_the_count() {
+    let mut world = World::new(PG16);
+    no_inherit_of_app_owner(&mut world);
+    world.cluster.roles.push(role("other_owner"));
+    world.db("appdb").relations.push(table("app", "t", "app_owner").grant_by("app_owner", ROLE, &[Select]).grant_by("other_owner", ROLE, &[Select]));
+    let text = blocks(&world.plan()).remove(0);
+    assert!(text.contains("(2개, 예: app.t SELECT)"), "{text}");
+    assert!(text.ends_with("준 역할: app_owner, other_owner"), "{text}");
+}

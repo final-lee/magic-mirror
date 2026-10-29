@@ -380,9 +380,9 @@ pub fn drop_plan(cluster: &ClusterSnapshot, dbs: &[Arc<DbSnapshot>], unreachable
     if !stays.is_empty() {
         // 같은 객체가 여러 데이터베이스에 있으면 데이터베이스를 앞에 붙여 구분하고, 그래도 같은 글은 한 번만 보인다
         let repeated = |stay: &Stay| stays.iter().any(|other| other.shown == stay.shown && other.database != stay.database);
-        let mut sample: Vec<String> = stays.iter().map(|s| if repeated(s) { format!("{}: {}", s.database, s.shown) } else { s.shown.clone() }).collect();
-        sample.dedup();
-        sample.truncate(3);
+        // 같은 객체·권한을 두 부여자가 줬어도 한 번만 보인다(개수는 항목 수 그대로다)
+        let unique: BTreeSet<String> = stays.iter().map(|s| if repeated(s) { format!("{}: {}", s.database, s.shown) } else { s.shown.clone() }).collect();
+        let sample: Vec<String> = unique.into_iter().take(3).collect();
         let grantors: BTreeSet<String> = stays.iter().map(|s| s.grantor.clone()).collect();
         block(stays_text(role, stays.len(), &sample, &grantors.into_iter().collect::<Vec<_>>()));
     }
@@ -398,7 +398,7 @@ pub fn drop_plan(cluster: &ClusterSnapshot, dbs: &[Arc<DbSnapshot>], unreachable
     if sessions > 0 {
         warnings.push(PgWarning { level: PgWarnLevel::Warn, message: sessions_stay_text(sessions), add: Vec::new() });
     }
-    PgDropPlan { role: role.to_string(), reassign_to: reassign_to.to_string(), steps, warnings, confirm_text: role.to_string(), sessions, granted_memberships: granted }
+    PgDropPlan { role: role.to_string(), reassign_to: reassign_to.to_string(), login_user: login.to_string(), steps, warnings, confirm_text: role.to_string(), sessions, granted_memberships: granted }
 }
 
 /// 160000부터: `role`이 부여자인 구성원 관계(`DROP OWNED`가 클러스터 전체에서 지운다). 이름순
