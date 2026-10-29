@@ -55,7 +55,7 @@ export interface PendingPgChange {
 export function usePgChange(target: PgTarget) {
   const qc = useQueryClient();
   const { pending, pendingRef, seq, inFlight, onApplied, alive, commit, cancel } = usePendingFlow<PendingPgChange, () => void>(targetKey(target));
-  const { notices, announce, dismissNotice } = useApplyNotices();
+  const { notices, announce, dismissNotice, dropNote } = useApplyNotices();
   // 대상은 객체지만 흐름을 가르는 것은 키다. 부모가 같은 대상을 새 객체로 넘겨도 흐름을 버리지 않으려고 최신 대상을 ref에 둔다.
   const targetRef = useRef(target);
   targetRef.current = target;
@@ -116,7 +116,7 @@ export function usePgChange(target: PgTarget) {
           const notes = result.notes ?? [];
           const noticeId = announce(result.summary, notes);
           // 목록을 다시 읽지 못했으면 화면이 낡은 채로 있으니, 같은 안내에 그 말을 더해 닫을 때까지 남긴다
-          void refreshPgAfterChange(qc, cur.target, database).then((read) => {
+          void refreshPgAfterChange(qc, cur.target, database, (read) => {
             if (!read && alive.current) announce(result.summary, [...notes, REFRESH_FAILED_TEXT], noticeId);
           });
           // 콜백이 던져도 적용은 이미 끝났다. 실패로 다루지 않는다.
@@ -138,5 +138,5 @@ export function usePgChange(target: PgTarget) {
     [alive, announce, commit, inFlight, onApplied, pendingRef, qc, seq],
   );
 
-  return { pending, notices, start, apply, retryPreview, cancel, dismissNotice };
+  return { pending, notices, start, apply, retryPreview, cancel, dismissNotice, dropNote };
 }

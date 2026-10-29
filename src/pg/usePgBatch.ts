@@ -10,7 +10,7 @@ import type { PgBatchPreview, PgChange, PgTarget, PgWarning } from "./types";
 
 export interface PgBatchStartOptions {
   /**
-   * 되돌리기 묶음일 때 되돌리는 기록의 id들(기록마다 하나). changes와 길이가 같지 않다: changes는 그 기록들의 역변경을 차례로 이은 것이고,
+   * 되돌리기 묶음일 때 되돌리는 기록의 id들(기록마다 하나). changes와 길이가 같지 않을 수 있다: changes는 그 기록들의 역변경을 차례로 이은 것이고,
    * 기록 하나가 변경 여럿으로 되돌려지기도 한다(만든 역할). pg_apply_batch에 그대로 넘기면 백엔드가 기록의 역변경과 changes를 맞춰 본다.
    */
   undoOf?: string[];
@@ -64,7 +64,7 @@ export const pgBatchGate = (p: PgBatchPreview, typed: string): ApplyGate => appl
 export function usePgBatch(target: PgTarget) {
   const qc = useQueryClient();
   const { pending, pendingRef, seq, inFlight, onApplied, alive, commit, cancel } = usePendingFlow<PendingPgBatch, (applied: PgChange[]) => void>(targetKey(target));
-  const { notices, announce, dismissNotice } = useApplyNotices();
+  const { notices, announce, dismissNotice, dropNote } = useApplyNotices();
   // 대상은 객체지만 흐름을 가르는 것은 키다. 부모가 같은 대상을 새 객체로 넘겨도 흐름을 버리지 않으려고 최신 대상을 ref에 둔다.
   const targetRef = useRef(target);
   targetRef.current = target;
@@ -130,7 +130,7 @@ export function usePgBatch(target: PgTarget) {
             console.error("적용 완료 알림을 처리하다 오류가 났어요", e);
           }
           // 목록을 다시 읽지 못했으면 화면이 낡은 채로 있으니, 같은 안내에 그 말을 더해 닫을 때까지 남긴다
-          void refreshPgAfterChange(qc, cur.target, cur.database).then((read) => {
+          void refreshPgAfterChange(qc, cur.target, cur.database, (read) => {
             if (!read && alive.current) announce(result.summary, [...notes, REFRESH_FAILED_TEXT], noticeId);
           });
         } catch (e) {
@@ -146,5 +146,5 @@ export function usePgBatch(target: PgTarget) {
     [alive, announce, commit, inFlight, onApplied, pendingRef, qc, seq],
   );
 
-  return { pending, notices, start, apply, retryPreview, cancel, dismissNotice };
+  return { pending, notices, start, apply, retryPreview, cancel, dismissNotice, dropNote };
 }

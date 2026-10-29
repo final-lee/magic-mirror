@@ -6,6 +6,7 @@ import { useHistoryKeys } from "../lib/useHistoryKeys";
 import { useRouteHistory } from "../lib/useRouteHistory";
 import { changeBlockReason } from "./canChange";
 import { ChangeLog } from "./ChangeLog";
+import { pickDatabase } from "./DatabasePicker";
 import { DefaultPrivileges } from "./DefaultPrivileges";
 import { Findings } from "./Findings";
 import { LoginPrompt } from "./LoginPrompt";
@@ -14,15 +15,17 @@ import { PgChangeDialog } from "./PgChangeDialog";
 import { PgError } from "./PgError";
 import { PgNav } from "./PgNav";
 import { PrivilegeGrid } from "./PrivilegeGrid";
-import { refreshPg, refreshPgData, usePgFindings, usePgOverview, usePgTarget } from "./queries";
+import { REFRESH_FAILED_TEXT, refreshPgData, rereadPg, usePgFindings, usePgOverview, usePgTarget } from "./queries";
 import { DEFAULT_KINDS } from "./RoleKinds";
 import { RoleDetail } from "./RoleDetail";
 import { RoleList } from "./RoleList";
 import { PG_VIEW_LABEL, roleRoute, samePgRoute, type PgRoute, type SchemaFocus } from "./route";
 import { Sessions } from "./Sessions";
+import { TrayBar } from "./TrayBar";
 import type { PgOverview, PgTarget, PgTargetInfo, PgTargetKind } from "./types";
 import { usePgBatch } from "./usePgBatch";
 import { usePgChange } from "./usePgChange";
+import { usePgDraft } from "./usePgDraft";
 import { WhoCan } from "./WhoCan";
 
 interface Props {
@@ -121,6 +124,16 @@ export function PgTab({ target, active, filter }: Props) {
   // 이 탭이 들고 있어서 PostgreSQL 안의 다른 화면을 보고 돌아와도 열린 창과 안내가 남는다.
   const change = usePgChange(target);
   const batch = usePgBatch(target);
+  // 칸을 눌러 담은 변경들(장바구니). 이 탭이 들고 있어서 PostgreSQL 안의 다른 화면을 보고 돌아와도 남고, 탭을 닫으면 사라진다.
+  const draft = usePgDraft(target, ov);
+  // 바꿀 수 없는 이유(읽기 전용 복제본, 역할을 관리할 수 없는 DB 사용자). 있으면 [바꾸기]와 [되돌리기]가 꺼지고 위쪽에 안내가 뜬다.
+  const blockReason = ov ? changeBlockReason(ov.target, ov) : null;
+  // 바꾸기 모드(탭 전체): 켜면 권한 표가 칠할 권한을 고르고 칸을 눌러 담는다. 바꿀 수 없게 되면(다른 DB 사용자로 다시 연결 …) 꺼지고, 다시 바꿀 수 있게 돼도 저절로 켜지지 않는다.
+  const [changeOn, setChangeOn] = useState(false);
+  useEffect(() => {
+    if (blockReason) setChangeOn(false);
+  }, [blockReason]);
+  const editing = changeOn && !!ov && !blockReason;
   // 역할 목록, 권한 표, 누가 할 수 있나가 함께 쓰는 칩과 시스템 역할 토글, 역할 목록에서 고른 행. 상세를 보고 돌아와도 남는다.
   const [kinds, setKinds] = useState(DEFAULT_KINDS);
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
@@ -140,7 +153,15 @@ export function PgTab({ target, active, filter }: Props) {
     connectedAs.current = loginUser;
   }, [hasOverview, loginUser, qc, target]);
 
-  const reread = () => void refreshPg(qc, target);
+  // 다시 읽기가 되면 화면이 최신이니, 적용 뒤 "목록을 다시 읽지 못했어요" 말은 거둔다
+  const dropRefreshChange = change.dropNote;
+  const dropRefreshBatch = batch.dropNote;
+  const reread = () =>
+    void rereadPg(qc, target).then((ok) => {
+      if (!ok) return;
+      dropRefreshChange(REFRESH_FAILED_TEXT);
+      dropRefreshBatch(REFRESH_FAILED_TEXT);
+    });
   const saveLogin = (name: string) => {
     if (!targetInfo || !settings) return;
     setChanging(false);
@@ -190,7 +211,29 @@ export function PgTab({ target, active, filter }: Props) {
               <b>{PG_VIEW_LABEL[route.view]}</b>
             )}
           </nav>
+          <span className="iam-bar-end">
+            {/* 연결 정보 줄의 [바꾸기](DB 사용자)와 다른 버튼이다. 이 버튼은 눌림 상태(aria-pressed)가 있다 */}
+            <button
+              type="button"
+              className={`btn small${editing ? " primary" : ""}`}
+              aria-pressed={editing}
+              disabled={!!blockReason}
+              title={blockReason ?? undefined}
+              aria-description={blockReason ?? undefined}
+              onClick={() => setChangeOn((on) => !on)}
+            >
+              바꾸기
+            </button>
+          </span>
         </div>
+        {draft.notices.map((text, i) => (
+          <div key={`${i}-${text}`} className="notice asg-notice" role="status">
+            <span>{text}</span>
+            <button className="icon" aria-label="안내 닫기" onClick={() => draft.dismissNotice(i)}>
+              ✕
+            </button>
+          </div>
+        ))}
         <div className="iam-main">
           {route.view === "roles" && route.id ? (
             <RoleDetail key={route.id} target={target} role={route.id} onOpen={go} initialTab={route.tab} onViewState={remember} />
@@ -215,6 +258,8 @@ export function PgTab({ target, active, filter }: Props) {
               onKinds={setKinds}
               pick={pick}
               onPickUsed={() => setPick(null)}
+              editing={editing}
+              draft={draft}
             />
           ) : route.view === "defaults" ? (
             <DefaultPrivileges target={target} overview={o} database={database} onDatabase={setDatabase} />
@@ -228,6 +273,8 @@ export function PgTab({ target, active, filter }: Props) {
             <Findings target={target} overview={o} onOpenRole={(name) => go(roleRoute(name))} onOpenSchema={openSchema} />
           )}
         </div>
+        {/* 담긴 변경이 있으면 모든 화면 아래에 보인다. 묶음은 담긴 변경의 데이터베이스에서 열고, 없으면 지금 보는 데이터베이스에서 연다 */}
+        <TrayBar draft={draft} database={pickDatabase(o.databases, database, o.target.defaultDatabase) ?? o.target.defaultDatabase} start={batch.start} />
       </div>
     </>
   );
@@ -267,7 +314,7 @@ export function PgTab({ target, active, filter }: Props) {
           onReread={reread}
         />
       )}
-      {ov && !ov.canManage && ov.manageReason && <div className="iam-hint">{ov.manageReason}</div>}
+      {blockReason && <div className="iam-hint">{blockReason}</div>}
       {ov && overview.isError && <PgError compact error={overview.error} target={target} />}
       {/* 대상 정보를 다시 읽다 실패해도 이전 정보는 화면에 남는다. 연결도 실패했으면 그 쪽이 이유를 이미 보이니 한 번만 알린다. */}
       {targetInfo && info.isError && !overview.isError && <PgError compact error={info.error} target={target} />}
@@ -279,7 +326,7 @@ export function PgTab({ target, active, filter }: Props) {
       ))}
       <div className="pg-main">{content}</div>
       {change.pending && <PgChangeDialog pending={change.pending} onApply={change.apply} onRetry={change.retryPreview} onCancel={change.cancel} />}
-      {batch.pending && <PgBatchDialog pending={batch.pending} onApply={batch.apply} onRetry={batch.retryPreview} onCancel={batch.cancel} />}
+      {batch.pending && <PgBatchDialog pending={batch.pending} onApply={batch.apply} onRetry={batch.retryPreview} onCancel={batch.cancel} onAddDefaults={draft.add} />}
     </div>
   );
 }
