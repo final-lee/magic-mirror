@@ -20,10 +20,11 @@ use std::net::IpAddr;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_postgres::{Client, Config, NoTls};
 
 use super::catalog::{self, cluster_snapshot, db_snapshot, db_snapshot_capped, read, sessions};
-use super::connect::Connected;
+use super::connect::{spawn_connection, Connected, Notice};
 use super::model::{AclEntry, ClusterSnapshot, DbSnapshot, DefaultAclRec, DefaultObjType, FunctionRec, MemberGrant, MemberRec, Privilege, RelKind, RelationRec, SchemaRec};
 use crate::error::AppError;
 use crate::iam::clock;
@@ -41,6 +42,9 @@ use changes::{
     default_privileges_match_the_server, grants_on_owned_and_inherited_tables_match_the_server, memberships_match_the_server,
     revokes_that_leave_other_grantors_and_bulk_grants_match_the_server,
 };
+#[cfg(test)]
+mod writes;
+use writes::{a_grant_commits_and_the_server_agrees, a_run_that_fails_midway_leaves_nothing, a_warning_notice_fails_the_run, a_created_login_gets_a_working_scram_password, a_lock_wait_fails_with_the_lock_text, a_membership_revoke_removes_only_the_named_grantors_row};
 #[cfg(test)]
 mod statements;
 use statements::{
@@ -78,15 +82,15 @@ impl Server {
 
 /// 서버가 막 떴을 때는 포트가 열리기까지 잠깐 걸릴 수 있어 몇 번 다시 해 본다
 async fn connect_to(config: &Config) -> Client {
+    connect_with_notices(config).await.0
+}
+
+/// `connect_to`와 같되, 서버가 보낸 알림이 쌓이는 수신기도 돌려준다(앱의 연결과 같은 길, `spawn_connection`)
+async fn connect_with_notices(config: &Config) -> (Client, UnboundedReceiver<Notice>) {
     let mut last_error = None;
     for _ in 0..40 {
         match config.connect(NoTls).await {
-            Ok((client, connection)) => {
-                tokio::spawn(async move {
-                    let _ = connection.await;
-                });
-                return client;
-            }
+            Ok((client, connection)) => return (client, spawn_connection(connection)),
             Err(e) => {
                 last_error = Some(e);
                 tokio::time::sleep(Duration::from_millis(250)).await;
@@ -98,9 +102,9 @@ async fn connect_to(config: &Config) -> Client {
 
 /// 앱의 `Connected`를 시험 서버에 붙인 연결로 만든다. pid는 앱이 쓰는 `backend_pid`로 읽는다
 async fn connected(config: &Config) -> Connected {
-    let mut client = connect_to(config).await;
+    let (mut client, notices) = connect_with_notices(config).await;
     let backend_pid = catalog::backend_pid(&mut client).await.expect("서버 쪽 pid를 읽지 못했어요");
-    Connected { client, backend_pid, broken: false }
+    Connected { client, backend_pid, notices, broken: false }
 }
 
 /// 한 시험의 장면: 심어 둔 데이터베이스와, superuser로 거기에 붙는 설정
@@ -308,6 +312,12 @@ on_both_servers!(
     attribute_changes_match_the_server,
     a_preset_that_creates_a_group_matches_the_server,
     blocked_rights_fail_on_the_server_too,
+    a_grant_commits_and_the_server_agrees,
+    a_run_that_fails_midway_leaves_nothing,
+    a_lock_wait_fails_with_the_lock_text,
+    a_warning_notice_fails_the_run,
+    a_created_login_gets_a_working_scram_password,
+    a_membership_revoke_removes_only_the_named_grantors_row,
 );
 
 async fn cluster_snapshot_reads_the_seeded_roles_and_memberships(server: Server) {

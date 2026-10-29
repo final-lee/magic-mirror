@@ -9,13 +9,14 @@
 //! 이 시험이 만드는 역할은 `mm_chg_`로 시작하고 시험이 끝날 때 지운다. 객체는 시험 데이터베이스(시험마다 새로 만든다)에만 둔다.
 
 use std::collections::BTreeSet;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
-use futures::future::poll_fn;
-use tokio_postgres::{AsyncMessage, Client};
+use tokio::sync::mpsc::UnboundedReceiver;
+use tokio_postgres::Client;
 
 use super::*;
 use crate::pg::change::after::apply;
+use crate::pg::connect::{spawn_connection, Notice};
 use crate::pg::change::model::{AttributesSet, GrantItem, GrantTarget, PgChange, PresetChoice, PresetKind};
 use crate::pg::change::resolve::{resolve, ResolveCtx, Resolved};
 use crate::pg::change::sql_text::{Part, Statement};
@@ -24,33 +25,33 @@ use crate::pg::sql::{ident, literal};
 
 use Privilege::{Insert, Select, Update, Usage};
 
-const ADMIN: &str = "mm_chg_admin";
+pub(super) const ADMIN: &str = "mm_chg_admin";
 
-/// 서버에 붙은 연결 하나와, 그 연결이 받은 알림(`SQLSTATE: 문구`)
-struct Session {
-    client: Client,
-    notices: Arc<Mutex<Vec<String>>>,
-    pid: i32,
+/// 서버에 붙은 연결 하나와, 그 연결이 받은 알림(앱의 연결과 같은 길, `spawn_connection`)
+pub(super) struct Session {
+    pub(super) client: Client,
+    notices: Mutex<UnboundedReceiver<Notice>>,
+    pub(super) pid: i32,
+}
+
+impl Session {
+    /// 쌓인 알림을 `SQLSTATE: 문구`로 꺼낸다
+    fn take_notices(&self) -> Vec<String> {
+        let mut receiver = self.notices.lock().unwrap();
+        std::iter::from_fn(|| receiver.try_recv().ok()).map(|n| format!("{}: {}", n.code, n.message)).collect()
+    }
 }
 
 async fn session(scene: &Scene, user: &str, password: &str) -> Session {
-    let (client, mut connection) = scene.config_as(user, password, "mm-live-changes").connect(NoTls).await.unwrap_or_else(|e| panic!("{user}로 붙지 못했어요: {e}"));
-    let notices = Arc::new(Mutex::new(Vec::new()));
-    let sink = Arc::clone(&notices);
-    tokio::spawn(async move {
-        while let Some(Ok(message)) = poll_fn(|cx| connection.poll_message(cx)).await {
-            if let AsyncMessage::Notice(notice) = message {
-                sink.lock().unwrap().push(format!("{}: {}", notice.code().code(), notice.message()));
-            }
-        }
-    });
+    let (client, connection) = scene.config_as(user, password, "mm-live-changes").connect(NoTls).await.unwrap_or_else(|e| panic!("{user}로 붙지 못했어요: {e}"));
+    let notices = Mutex::new(spawn_connection(connection));
     let pid: i32 = client.query_one("SELECT pg_backend_pid()", &[]).await.expect("pid를 읽지 못했어요").get(0);
     Session { client, notices, pid }
 }
 
 /// 풀린 문장들을 한 트랜잭션에 돌린다. 하나라도 실패하면 되돌리고 오류 문구를 돌려준다. 성공하면 커밋하고 받은 알림을 돌려준다
 async fn run_in_transaction(session: &Session, statements: &[Statement]) -> Result<Vec<String>, String> {
-    session.notices.lock().unwrap().clear();
+    session.take_notices();
     session.client.batch_execute("BEGIN").await.map_err(|e| e.to_string())?;
     for statement in statements {
         let hash = statement.parts.contains(&Part::Password).then(|| NewPassword::generate().scram());
@@ -70,8 +71,7 @@ async fn run_in_transaction(session: &Session, statements: &[Statement]) -> Resu
         }
     }
     session.client.batch_execute("COMMIT").await.map_err(|e| e.to_string())?;
-    let notices = session.notices.lock().unwrap().clone();
-    Ok(notices)
+    Ok(session.take_notices())
 }
 
 fn describe(error: &tokio_postgres::Error) -> String {
@@ -129,17 +129,17 @@ fn assert_same(label: &str, predicted: &BTreeSet<String>, actual: &BTreeSet<Stri
 
 // ───────────────────────── 한 경우의 환경 ─────────────────────────
 
-struct Env {
-    scene: Scene,
+pub(super) struct Env {
+    pub(super) scene: Scene,
     /// superuser로 붙은 연결: 장면을 차리고 스냅숏을 읽는다
-    admin: Connected,
+    pub(super) admin: Connected,
     /// 로그인한 역할(`ADMIN`)로 붙은 연결
-    mm: Session,
+    pub(super) mm: Session,
 }
 
 impl Env {
     /// 지난 시험이 남긴 같은 이름의 역할을 지우고 `mm_chg_admin`을 만든다. 장면 SQL(`setup`)을 superuser로 돌린 뒤 그 역할로 붙는다
-    async fn start(server: Server, roles: &[&str], setup: &str) -> Env {
+    pub(super) async fn start(server: Server, roles: &[&str], setup: &str) -> Env {
         let scene = seed(server).await;
         let admin = scene.connect().await;
         let mut all = vec![ADMIN];
@@ -154,7 +154,7 @@ impl Env {
         Env { scene, admin, mm }
     }
 
-    async fn snapshots(&mut self) -> (ClusterSnapshot, DbSnapshot) {
+    pub(super) async fn snapshots(&mut self) -> (ClusterSnapshot, DbSnapshot) {
         let cluster = cluster_snapshot(&mut self.admin, ADMIN).await.expect("클러스터 스냅숏을 읽지 못했어요");
         let db = db_snapshot(&mut self.admin, &self.scene.database).await.expect("데이터베이스 스냅숏을 읽지 못했어요");
         (cluster, db)
@@ -175,7 +175,7 @@ impl Env {
         resolved
     }
 
-    async fn cleanup(&mut self, roles: &[&str]) {
+    pub(super) async fn cleanup(&mut self, roles: &[&str]) {
         let mut all: Vec<&str> = roles.to_vec();
         all.push(ADMIN);
         for name in all.iter().rev() {

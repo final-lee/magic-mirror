@@ -440,24 +440,107 @@ fn every_rust_file_under_pg_belongs_to_the_module_tree() {
     assert!(orphans.is_empty(), "어디에서도 선언하지 않은 파일이 있어요: {orphans:?}");
 }
 
-/// 앱이 PostgreSQL에 질의를 보내거나 트랜잭션을 여는 곳은 `pg/catalog.rs` 하나뿐이다. 그 트랜잭션은 하나고 읽기 전용이다.
+/// 앱이 PostgreSQL에 질의를 보내거나 트랜잭션을 여는 곳은 `pg/catalog.rs`(읽기)와 `pg/exec.rs`(쓰기) 둘뿐이다.
+/// catalog의 트랜잭션은 하나고 읽기 전용이다. exec의 트랜잭션도 하나고 읽기 전용이 아니다(쓰기를 한다).
 #[test]
-fn pg_only_the_catalog_runs_queries() {
+fn pg_only_the_catalog_and_exec_run_queries() {
     let tree = tree();
     let catalog = src_dir().join("pg").join("catalog.rs");
+    let exec = src_dir().join("pg").join("exec.rs");
     assert_eq!(tree.get(&catalog), Some(&false), "catalog.rs가 제품 파일로 읽히지 않았어요");
+    assert_eq!(tree.get(&exec), Some(&false), "exec.rs가 제품 파일로 읽히지 않았어요");
 
     let mut violations = Vec::new();
-    for (file, _) in tree.iter().filter(|(file, test_only)| !**test_only && **file != catalog) {
+    for (file, _) in tree.iter().filter(|(file, test_only)| !**test_only && **file != catalog && **file != exec) {
         let text = fs::read_to_string(file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
         for call in forbidden_calls(&text) {
             violations.push(format!("{}: {call}", relative(file)));
         }
     }
-    assert!(violations.is_empty(), "catalog.rs 말고는 질의를 보내거나 트랜잭션을 열 수 없어요:\n{}", violations.join("\n"));
+    assert!(violations.is_empty(), "catalog.rs와 exec.rs 말고는 질의를 보내거나 트랜잭션을 열 수 없어요:\n{}", violations.join("\n"));
 
     // catalog.rs의 트랜잭션은 하나고, 읽기 전용으로 연다. 읽기 전용이 아닌 `transaction()`은 쓰지 않는다
     let text = fs::read_to_string(&catalog).expect("catalog.rs");
     assert_eq!(read_only_transactions(&text), (1, 1), "build_transaction()은 한 번, 바로 뒤에 .read_only(true)와 함께 나와야 해요");
     assert!(!forbidden_calls(&text).contains(&".transaction(".to_string()), "catalog.rs도 읽기 전용이 아닌 transaction()은 열 수 없어요");
+
+    // exec.rs의 트랜잭션도 하나고, 읽기 전용이 아니다
+    let text = fs::read_to_string(&exec).expect("exec.rs");
+    assert_eq!(read_only_transactions(&text), (1, 0), "exec.rs의 build_transaction()은 한 번이고 read_only가 없어야 해요");
+    assert!(!code_of(&text).contains("read_only"), "exec.rs에는 read_only가 없어야 해요");
+    assert!(!forbidden_calls(&text).contains(&".transaction(".to_string()), "exec.rs는 build_transaction() 말고 transaction()을 열 수 없어요");
+}
+
+/// 문장을 돌리는 `exec::run(`을 부르는 곳은 `pg_commands.rs`의 닫힘뿐이고, 그 닫힘은 `commit::commit`과 `drop::apply`에 넘기는 것 하나씩이다.
+/// 관문을 거치지 않는 새 호출은 이 숫자를 고쳐야 들어온다(IAM의 `WRITE_CALLS_SITES`와 같다).
+/// 지금은 `commit::commit`의 닫힘 하나다. QB5가 `drop::apply`의 닫힘을 더하면 둘이 된다
+const EXEC_RUN_SITES: usize = 1;
+/// 같은 이유로 `commit::commit(`을 부르는 곳도 센다
+const COMMIT_SITES: usize = 1;
+
+#[test]
+fn exec_runs_only_from_the_closures_handed_to_the_commit_gate() {
+    let tree = tree();
+    let mut sites = BTreeMap::new();
+    for (file, _) in tree.iter().filter(|(_, test_only)| !**test_only) {
+        let text = fs::read_to_string(file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+        let code = code_of(&text);
+        let count = code.matches("exec::run(").count();
+        if count > 0 {
+            sites.insert(relative(file), count);
+        }
+    }
+    let expected: BTreeMap<String, usize> = BTreeMap::from([("pg_commands.rs".to_string(), EXEC_RUN_SITES)]);
+    assert_eq!(sites, expected, "exec::run(은 pg_commands.rs에서 정해 둔 수만큼만 불러요");
+
+    let commands = code_of(&fs::read_to_string(src_dir().join("pg_commands.rs")).expect("pg_commands.rs"));
+    assert_eq!(commands.matches("commit::commit(").count(), COMMIT_SITES, "commit::commit(을 부르는 곳의 수");
+    // 닫힘은 commit::commit의 인자 안에 있다: exec::run( 앞에 commit::commit(이 있고 둘 사이에 다른 함수 정의가 없다
+    let commit_at = commands.find("commit::commit(").expect("commit::commit(");
+    let run_at = commands.find("exec::run(").expect("exec::run(");
+    assert!(commit_at < run_at && !commands[commit_at..run_at].contains("fn "), "exec::run(은 commit::commit에 넘기는 닫힘 안에 있어야 해요");
+}
+
+/// 코드(주석 줄 빼고)에서 제품 파일들 가운데 `needle`이 나오는 파일들
+fn files_with(needle: &str) -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    for (file, _) in tree().iter().filter(|(_, test_only)| !**test_only) {
+        let text = fs::read_to_string(file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+        if code_of(&text).contains(needle) {
+            found.insert(relative(file));
+        }
+    }
+    found
+}
+
+/// 비밀번호의 글은 한 곳에서만 만들고, 평문은 한 곳에서만 꺼낸다
+#[test]
+fn the_password_clause_is_built_in_sql_text_and_the_plaintext_is_taken_out_in_commit() {
+    assert_eq!(files_with("PASSWORD '"), BTreeSet::from(["pg/change/sql_text.rs".to_string()]));
+    assert_eq!(files_with(".expose()"), BTreeSet::from(["pg/commit.rs".to_string()]));
+}
+
+/// 비밀번호나 검증값을 든 타입은 `Debug`를 파생하지 않고, 값을 가려서 찍는 `impl Debug`를 갖는다
+#[test]
+fn types_that_hold_a_secret_do_not_derive_debug_and_mask_it() {
+    let holders = [
+        ("NewPassword", "pg/password.rs"),
+        ("ScramHash", "pg/password.rs"),
+        ("Step", "pg/exec.rs"),
+        ("PgApplyResult", "pg/view/preview.rs"),
+    ];
+    for (name, file) in holders {
+        let text = fs::read_to_string(src_dir().join(file)).unwrap_or_else(|e| panic!("{file}: {e}"));
+        let lines: Vec<&str> = text.lines().collect();
+        let declared = |line: &&str| line.trim_start().strip_prefix(&format!("pub struct {name}")).is_some_and(|rest| !rest.starts_with(|c: char| c.is_alphanumeric() || c == '_'));
+        let at = lines.iter().position(declared).unwrap_or_else(|| panic!("{file}에 {name}이 없어요"));
+        // 구조체 위의 속성 줄들
+        let mut above = at;
+        while above > 0 && (lines[above - 1].trim_start().starts_with("#[") || lines[above - 1].trim_start().starts_with("///")) {
+            above -= 1;
+        }
+        let attributes = lines[above..at].iter().filter(|line| line.trim_start().starts_with("#[")).copied().collect::<Vec<_>>().join("\n");
+        assert!(!attributes.contains("Debug"), "{name}은 Debug를 파생하면 안 돼요: {attributes}");
+        assert!(text.contains(&format!("Debug for {name}")), "{name}에 가려서 찍는 impl Debug가 있어야 해요");
+    }
 }

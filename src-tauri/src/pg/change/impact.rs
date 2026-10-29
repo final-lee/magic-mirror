@@ -5,7 +5,7 @@
 //! - 권한 연산: 연산의 `effects`에 든 (객체, 권한)
 //! - 구성원 관계·INHERIT·역할 만들기·삭제 연산: 바뀐 역할의 위쪽 닫힘(상속하는 관계를 따라 오르는 역할들, 변경 전과 후 합집합)을
 //!   받는 쪽으로 적은 ACL 항목이 있거나 그 역할이 가진 객체의 권한
-//! - 그 닫힘에 미리 정의된 역할(`pg_read_all_data` 등)이나 `pg_database_owner`가 들면 ACL에 없는 권한이 따라오니 모든 객체의 모든 권한
+//! - 그 닫힘에 미리 정의된 역할(`pg_read_all_data`, `pg_write_all_data`, `pg_maintain`)이 들면 ACL에 없는 권한이 따라오니 그 역할이 모든 객체에 주는 권한
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -23,7 +23,13 @@ pub const MAX_ROLES: usize = 30;
 const MAX_SAMPLE: usize = 5;
 const DATABASE_OWNER: &str = "pg_database_owner";
 /// 이 역할들을 위쪽 닫힘에 가진 역할은 ACL에 없는 권한도 얻고 잃는다
-const WIDE_ROLES: [&str; 4] = ["pg_read_all_data", "pg_write_all_data", "pg_maintain", DATABASE_OWNER];
+/// ACL에 이름이 없어도 모든 객체에 권한을 주는 미리 정의된 역할과, 그 역할이 주는 권한(`eval`이 쓰는 규칙과 같다).
+/// `pg_database_owner`는 여기 없다: 그 역할이 소유하거나 ACL에 이름이 있는 객체만 권한이 따라오고, 아래의 소유자·ACL 규칙이 이미 본다
+const WIDE_ROLES: [(&str, &[Privilege]); 3] = [
+    ("pg_read_all_data", &[Privilege::Select, Privilege::Usage]),
+    ("pg_write_all_data", &[Privilege::Insert, Privilege::Update, Privilege::Delete, Privilege::Usage]),
+    ("pg_maintain", &[Privilege::Maintain]),
+];
 const ALL_PRIVILEGES: [Privilege; 13] = [
     Privilege::Select,
     Privilege::Insert,
@@ -218,16 +224,17 @@ pub fn impacts(before: &Ctx, after: &Ctx, ops: &[Op]) -> Impacts {
         closure.extend(walk(&edges_after.up, &scope.seeds));
         closure
     };
-    let wide = closure.iter().any(|r| WIDE_ROLES.contains(&r.as_str()));
+    let wide: BTreeSet<Privilege> = WIDE_ROLES.iter().filter(|(role, _)| closure.contains(*role)).flat_map(|(_, privileges)| privileges.iter().copied()).collect();
     let (objects_before, objects_after) = (objects(before), objects(after));
     let mut wanted: BTreeMap<&ObjKey, BTreeSet<Privilege>> = scope.explicit.iter().map(|(k, v)| (k, v.clone())).collect();
     if !closure.is_empty() {
         for (key, obj) in objects_before.iter().chain(&objects_after) {
             let entry = wanted.entry(key).or_default();
-            if wide || closure.contains(obj.owner()) {
+            if closure.contains(obj.owner()) {
                 entry.extend(ALL_PRIVILEGES);
                 continue;
             }
+            entry.extend(&wide);
             for acl in obj.acl().iter().filter(|e| e.grantee.as_deref().is_some_and(|g| closure.contains(g))) {
                 entry.insert(acl.privilege);
             }
@@ -356,13 +363,11 @@ pub fn role_deltas(before: &Ctx, after: &Ctx) -> Vec<PgRoleDelta> {
 pub fn default_deltas(before: &Ctx, after: &Ctx, ops: &[Op]) -> Vec<PgDefaultDelta> {
     let mut seen = BTreeSet::new();
     let mut deltas = Vec::new();
-    let record = |ctx: &Ctx, creator: &str, schema: Option<&str>, object_type| -> Option<DefaultAclRec> {
-        ctx.db.default_acls.iter().find(|d| d.creator == creator && d.schema.as_deref() == schema && d.obj_type == object_type).cloned()
-    };
+    let record = |ctx: &Ctx, creator: &str, schema: Option<&str>, object_type| -> Option<DefaultAclRec> { ctx.db.default_acl(creator, schema, object_type).cloned() };
     let row = |rec: Option<DefaultAclRec>| rec.and_then(|rec| default_rows(std::slice::from_ref(&rec)).pop());
     for op in ops {
         let Op::DefaultAcl { creator, schema, object_type, .. } = op else { continue };
-        if !seen.insert((creator.clone(), schema.clone(), format!("{object_type:?}"))) {
+        if !seen.insert((creator.clone(), schema.clone(), *object_type)) {
             continue;
         }
         let (was, is) = (record(before, creator, schema.as_deref(), *object_type), record(after, creator, schema.as_deref(), *object_type));

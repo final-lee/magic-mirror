@@ -183,6 +183,7 @@ where
     if conn.broken {
         return Err(connection_closed());
     }
+    conn.drain_notices();
     let outcome = tokio::time::timeout(deadline, transact(&mut conn.client, job)).await;
     match outcome {
         Ok(done) => done.map_err(|e| app_error(&e)),

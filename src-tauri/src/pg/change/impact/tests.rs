@@ -3,7 +3,7 @@ use crate::pg::change::preview::preview;
 use crate::pg::change::support::*;
 use crate::pg::fixtures::*;
 use crate::pg::model::DefaultObjType;
-use crate::pg::model::Privilege::Select;
+use crate::pg::model::Privilege::{self, Select};
 use crate::pg::view::PgPreview;
 
 fn roles_of(preview: &PgPreview) -> Vec<&str> {
@@ -54,10 +54,10 @@ fn leaving_a_group_shows_what_the_member_loses_through_it() {
         let database = find(None, PgObjectKind::Database, "CONNECT").expect("데이터베이스");
         assert_eq!((database.database.as_str(), database.sample.clone()), ("appdb", strings(&["appdb"])));
         // 묶음은 (데이터베이스, 스키마, 종류, 권한) 순서다
-        let keys: Vec<_> = lost.iter().map(|d| (d.database.clone(), d.schema.clone(), d.object_kind, d.privilege.clone())).collect();
+        let keys: Vec<_> = lost.iter().map(|d| (d.database.clone(), d.schema.clone(), d.object_kind, Privilege::from_pg(&d.privilege).expect("권한 이름"))).collect();
         let mut sorted = keys.clone();
         sorted.sort();
-        assert_eq!(keys.len(), sorted.len());
+        assert_eq!(keys, sorted, "{version}");
     }
 }
 
@@ -263,5 +263,23 @@ fn impact_benchmark_public_select_on_one_schema_of_five_thousand_tables() {
     assert_eq!(p.impacts.len(), 30, "{:?}", p.warnings);
     // 201개 역할 가운데 이미 읽는 mm(app_owner를 물려받는다)과 app_owner를 뺀 199개가 얻는다
     assert_eq!(p.impacts_omitted, 199 - 30);
+    assert!(elapsed.as_secs_f64() < 2.0, "{elapsed:?}");
+}
+
+#[test]
+#[ignore = "릴리스로 재야 한다: cargo test --release -- --ignored impact_benchmark"]
+fn impact_benchmark_a_group_with_a_hundred_and_fifty_inheritors_joins_a_wide_group() {
+    // team을 150명이 물려받고, team이 pg_read_all_data를 가진 reader_grp에 들어간다: 20 000개 관계 모두가 후보다
+    let mut s = big_scene().add_role(role("team")).add_role(role("reader_grp")).add_role(role("pg_read_all_data"));
+    s = s.add_member(member_with("reader_grp", "pg_read_all_data", true, true));
+    s = s.add_member(member_grants("mm", "reader_grp", &[(BOOTSTRAP, true, Some(true), Some(true))]));
+    for n in 0..150 {
+        s = s.add_member(member_with(&format!("r{n:03}"), "team", true, true));
+    }
+    let change = membership("reader_grp", "team", true, false);
+    let started = std::time::Instant::now();
+    let p = run(&s, &change);
+    let elapsed = started.elapsed();
+    assert!(p.impacts.len() == 30 && p.impacts_omitted > 0, "{:?} {}", p.warnings, p.impacts.len());
     assert!(elapsed.as_secs_f64() < 2.0, "{elapsed:?}");
 }

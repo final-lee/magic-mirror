@@ -887,3 +887,104 @@ fn the_frontend_sends_the_target_as_one_object_and_the_object_ref_back_unchanged
     // 같은 값이 키로 쓰이므로 두 번 읽어도 같다
     assert_eq!(sent, serde_json::from_value(serde_json::to_value(&sent).expect("json")).expect("target"));
 }
+
+// ───────────────────────── 변경 ─────────────────────────
+
+#[test]
+fn keeping_a_cluster_replaces_only_the_cluster_and_checks_the_epoch() {
+    let state = PgState::default();
+    let t = target("a");
+    let epoch = open(&state, &t);
+    state.keep_db(&t, epoch, "appdb", Arc::new(snapshot("appdb")));
+    let mut fresh = (*cluster()).clone();
+    fresh.fetched_at = "2030-01-01T00:00:00Z".into();
+    state.keep_cluster(&t, epoch, Arc::new(fresh));
+    assert_eq!(state.opened(&t).unwrap().cluster.fetched_at, "2030-01-01T00:00:00Z");
+    assert!(state.cached_db(&t, "appdb").is_some(), "다른 스냅숏은 그대로 둬요");
+
+    // 닫힌 뒤에 끝난 읽기는 담지 않는다
+    state.close(&t);
+    state.keep_cluster(&t, epoch, cluster());
+    assert_eq!(state.opened(&t).err(), not_opened_error());
+    // 닫고 다시 연 대상에 이전 epoch의 읽기를 담지 않는다
+    let reopened = open(&state, &t);
+    assert_ne!(reopened, epoch);
+    let mut stale = (*cluster()).clone();
+    stale.fetched_at = "2001-01-01T00:00:00Z".into();
+    state.keep_cluster(&t, epoch, Arc::new(stale));
+    assert_ne!(state.opened(&t).unwrap().cluster.fetched_at, "2001-01-01T00:00:00Z");
+}
+
+#[test]
+fn the_execution_database_must_be_listed_and_connectable() {
+    let cluster = app_scene(PG16).cluster;
+    assert_eq!(check_execution_database(&cluster, "appdb"), Ok(()));
+    for name in ["template1", "rdsadmin", "nope"] {
+        assert_eq!(check_execution_database(&cluster, name), Err(AppError::other(format!("이 데이터베이스에서는 바꿀 수 없어요: {name}"))), "{name}");
+    }
+    let mut closed = cluster.clone();
+    closed.databases[0].allow_conn = false;
+    assert!(check_execution_database(&closed, "appdb").is_err());
+}
+
+#[test]
+fn plans_are_kept_per_target_and_change_and_used_once() {
+    use crate::pg::change::model::PgChange;
+    let state = PgState::default();
+    let change = PgChange::Password { role: "carol".into() };
+    let other = PgChange::Password { role: "bob".into() };
+    let batch = ("appdb".to_string(), vec![change.clone()]);
+    let plan = || PgPlan::Batch(crate::pg::view::PgBatchPreview {
+        database: "appdb".into(),
+        login_user: "mm".into(),
+        items: Vec::new(),
+        sql: Vec::new(),
+        impacts: Vec::new(),
+        impacts_omitted: 0,
+        roles: Vec::new(),
+        defaults: Vec::new(),
+        warnings: Vec::new(),
+        confirm_text: None,
+        reversible: false,
+    });
+    let (a, b) = (target("a"), target("b"));
+    locked(&state.plans).remember("dev", &(&a, &change), plan(), 100);
+    locked(&state.plans).remember("dev", &(&a, (&batch.0, &batch.1)), plan(), 100);
+    assert!(locked(&state.plans).take("dev", &(&b, &change), 101).is_none());
+    assert!(locked(&state.plans).take("dev", &(&a, &other), 101).is_none());
+    assert!(locked(&state.plans).take("dev", &(&a, &change), 101).is_some());
+    assert!(locked(&state.plans).take("dev", &(&a, &change), 102).is_none(), "한 번만 쓴다");
+    assert!(locked(&state.plans).take("dev", &(&a, (&batch.0, &batch.1)), 101).is_some());
+}
+
+#[tokio::test]
+async fn the_change_log_is_newest_first_and_needs_no_connection() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db-changes.jsonl");
+    let state = PgState::new(path.clone());
+    assert!(state.log().await.unwrap().is_empty());
+    for id in ["a", "b"] {
+        change_log::append(
+            &path,
+            &change_log::PgLogEntry {
+                id: id.into(),
+                at: "2026-10-29T00:00:00Z".into(),
+                profile: "dev".into(),
+                target_arn: "arn".into(),
+                database: "appdb".into(),
+                login_user: "mm".into(),
+                change: PgChange::Password { role: "carol".into() },
+                summary: "s".into(),
+                sql: Vec::new(),
+                ok: true,
+                error: None,
+                inverse: None,
+                undo_of: None,
+                undone: false,
+                batch_id: None,
+            },
+        )
+        .unwrap();
+    }
+    assert_eq!(state.log().await.unwrap().iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["b", "a"]);
+}

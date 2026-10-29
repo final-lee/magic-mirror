@@ -10,6 +10,7 @@ use super::impact::{self, Impacts};
 use super::inverse;
 use super::model::{GrantTarget, PgChange};
 use super::resolve::{resolve, ObjKey, ResolveCtx, Resolved};
+use super::sql_text::Statement;
 use super::text::summary;
 use super::warnings;
 use crate::pg::eval::Ctx;
@@ -68,21 +69,43 @@ fn has_confirm(warnings: &[PgWarning]) -> bool {
     warnings.iter().any(|w| w.level == PgWarnLevel::Confirm)
 }
 
+/// 변경 하나를 푼 결과 전부: 미리보기, 서버에 보낼 문장(비밀번호 자리가 비어 있다), 되돌리는 변경들, 적용한 뒤의 스냅숏.
+/// 적용(`commit`)이 같은 계산에서 문장과 되돌림과 적용 뒤의 모습을 받아 간다
+pub struct Evaluated {
+    pub preview: PgPreview,
+    pub statements: Vec<Statement>,
+    /// `None`은 되돌릴 수 없다는 뜻이고 `Some(빈 목록)`은 아무것도 바꾸지 않는다는 뜻이다
+    pub inverse: Option<Vec<PgChange>>,
+    pub after: (ClusterSnapshot, DbSnapshot),
+}
+
+// 시험이 미리보기만 볼 때 쓰는 줄임말(제품 코드는 `evaluate`를 쓴다)
+#[cfg(test)]
 pub fn preview(ctx: &PreviewCtx, change: &PgChange) -> PgPreview {
+    evaluate(ctx, change).preview
+}
+
+pub fn evaluate(ctx: &PreviewCtx, change: &PgChange) -> Evaluated {
     let (mut cluster, mut db) = (ctx.cluster.clone(), ctx.db.clone());
     let step = step(ctx, &mut cluster, &mut db, change);
     let (before, after) = (Ctx { cluster: ctx.cluster, db: ctx.db }, Ctx { cluster: &cluster, db: &db });
     let Impacts { impacts, omitted } = impact::impacts(&before, &after, &step.resolved.ops);
 
-    let blocked = !step.resolved.blocks.is_empty();
+    // 스냅숏이 변경이 도는 데이터베이스의 것이 아니면 판단이 엉뚱한 곳에서 이뤄진다: 묶음처럼 막는다
+    let execution_database = change.execution_database(ctx.default_db);
+    let wrong_database = ctx.db.database != execution_database;
+    let blocked = wrong_database || !step.resolved.blocks.is_empty();
     let mut all = step.warnings;
+    if wrong_database {
+        all.insert(0, block_warning(&wrong_database_text(execution_database)));
+    }
     all.extend(warnings::closing(&before, &after, &step.resolved.ops, ctx.now));
     let warnings = warnings::ordered(all, blocked);
     let confirm_text = has_confirm(&warnings).then(|| confirm_target(change).to_string());
     let reversible = !blocked && step.inverse.as_ref().is_some_and(|inverse| !inverse.is_empty());
-    PgPreview {
+    let preview = PgPreview {
         change: change.clone(),
-        database: change.execution_database(ctx.default_db).to_string(),
+        database: execution_database.to_string(),
         summary: summary(change),
         login_user: ctx.cluster.login_user.clone(),
         sql: step.resolved.statements.iter().map(|s| s.shown()).collect(),
@@ -93,7 +116,12 @@ pub fn preview(ctx: &PreviewCtx, change: &PgChange) -> PgPreview {
         warnings,
         confirm_text,
         reversible,
-    }
+    };
+    Evaluated { preview, statements: step.resolved.statements, inverse: step.inverse, after: (cluster, db) }
+}
+
+fn wrong_database_text(database: &str) -> String {
+    format!("이 데이터베이스에서는 바꿀 수 없어요: {database}")
 }
 
 // ───────────────────────── 묶음 ─────────────────────────
@@ -201,19 +229,32 @@ fn block_warning(text: &str) -> PgWarning {
     PgWarning { level: PgWarnLevel::Block, message: text.to_string(), add: Vec::new() }
 }
 
+// 시험이 묶음 미리보기만 볼 때 쓰는 줄임말(제품 코드는 `evaluate_batch`를 쓴다)
+#[cfg(test)]
 pub fn preview_batch(ctx: &PreviewCtx, database: &str, changes: &[PgChange]) -> PgBatchPreview {
-    batch(ctx, database, changes).0
+    evaluate_batch(ctx, database, changes).preview
 }
 
-/// 묶음을 되돌리는 변경들: 변경마다의 되돌림을 적용한 반대 순서로 이은 것. 하나라도 되돌릴 수 없으면 `None`이다
-pub fn inverse_batch(ctx: &PreviewCtx, database: &str, changes: &[PgChange]) -> Option<Vec<PgChange>> {
-    batch(ctx, database, changes).1
+/// 묶음 안에서 변경 하나가 도는 자리: 어떤 변경이, 어떤 문장으로, 어떻게 되돌려지나
+pub struct RunItem {
+    pub change: PgChange,
+    pub statements: Vec<Statement>,
+    /// 이 변경 하나를 되돌리는 변경들. 앞선 변경들을 적용한 스냅숏 위에서 판단한 것이다. `None`은 되돌릴 수 없다는 뜻이다
+    pub inverse: Option<Vec<PgChange>>,
 }
 
-fn batch(ctx: &PreviewCtx, database: &str, changes: &[PgChange]) -> (PgBatchPreview, Option<Vec<PgChange>>) {
+/// 묶음을 푼 결과 전부. `items`는 받은 순서가 아니라 실제로 도는 차례(`rank` 차례, 같은 차례 안에서는 받은 순서)다.
+/// 변경 기록과 되돌릴 기록의 순서는 이 차례를 따른다
+pub struct EvaluatedBatch {
+    pub preview: PgBatchPreview,
+    pub items: Vec<RunItem>,
+    pub after: (ClusterSnapshot, DbSnapshot),
+}
+
+pub fn evaluate_batch(ctx: &PreviewCtx, database: &str, changes: &[PgChange]) -> EvaluatedBatch {
     let mut structural = batch_blocks(ctx, database, changes);
     if ctx.db.database != database {
-        structural.push(format!("이 데이터베이스에서는 바꿀 수 없어요: {database}"));
+        structural.push(wrong_database_text(database));
     }
     let mut preview = PgBatchPreview {
         database: database.to_string(),
@@ -230,7 +271,7 @@ fn batch(ctx: &PreviewCtx, database: &str, changes: &[PgChange]) -> (PgBatchPrev
     };
     if changes.is_empty() || changes.len() > MAX_BATCH {
         preview.warnings = structural.iter().map(|t| block_warning(t)).collect();
-        return (preview, None);
+        return EvaluatedBatch { preview, items: Vec::new(), after: (ctx.cluster.clone(), ctx.db.clone()) };
     }
 
     // 문장이 나가는 차례대로 변경마다 풀고 적용한다
@@ -247,13 +288,9 @@ fn batch(ctx: &PreviewCtx, database: &str, changes: &[PgChange]) -> (PgBatchPrev
     let batch_warnings = warnings::ordered(all, blocked);
 
     let mut confirm = has_confirm(&batch_warnings);
-    let mut inverse: Option<Vec<PgChange>> = Some(Vec::new());
-    for (_, step) in steps.iter().rev() {
-        match (&mut inverse, &step.inverse) {
-            (Some(all), Some(own)) => all.extend(own.iter().cloned()),
-            _ => inverse = None,
-        }
-    }
+    // 되돌릴 수 없는 항목이 하나라도 있으면 묶음은 되돌릴 수 없다
+    let reversible_items = steps.iter().all(|(_, step)| step.inverse.is_some());
+    let inverse_len: usize = steps.iter().map(|(_, step)| step.inverse.as_ref().map_or(0, Vec::len)).sum();
     preview.items = steps
         .iter()
         .map(|(change, step)| {
@@ -270,8 +307,9 @@ fn batch(ctx: &PreviewCtx, database: &str, changes: &[PgChange]) -> (PgBatchPrev
     preview.defaults = impact::default_deltas(&before, &after, &ops);
     preview.warnings = batch_warnings;
     preview.confirm_text = confirm.then(|| batch_confirm_text(changes));
-    preview.reversible = !blocked && inverse.as_ref().is_some_and(|inverse| !inverse.is_empty());
-    (preview, inverse)
+    preview.reversible = !blocked && reversible_items && inverse_len > 0;
+    let items = steps.into_iter().map(|(change, step)| RunItem { change: change.clone(), statements: step.resolved.statements, inverse: step.inverse }).collect();
+    EvaluatedBatch { preview, items, after: (cluster, db) }
 }
 
 /// 모든 변경의 확인 대상이 같으면 그 이름, 아니면 `변경 ${n}개 적용`

@@ -248,7 +248,7 @@ pub struct FunctionRec {
 }
 
 /// 기본 권한(`ALTER DEFAULT PRIVILEGES`)이 적용되는 객체 종류. 괄호는 `defaclobjtype` 코드.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DefaultObjType {
     /// r
     Tables,
@@ -298,4 +298,11 @@ pub struct DbSnapshot {
     pub truncated: bool,
     /// ISO 8601 UTC
     pub fetched_at: String,
+}
+
+impl DbSnapshot {
+    /// 기본 권한 기록 하나. 모든 스키마의 기록은 `schema`가 None이다
+    pub fn default_acl(&self, creator: &str, schema: Option<&str>, object_type: DefaultObjType) -> Option<&DefaultAclRec> {
+        self.default_acls.iter().find(|d| d.creator == creator && d.schema.as_deref() == schema && d.obj_type == object_type)
+    }
 }

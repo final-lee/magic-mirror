@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::pg::model::{DefaultObjType, Privilege};
+use crate::pg::model::{DefaultObjType, Privilege, RoleRec};
 
 /// 권한을 주고받는 객체
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +69,20 @@ pub struct AttributesSet {
     pub connection_limit: i32,
     /// ISO 8601 UTC. None은 만료 없음
     pub valid_until: Option<String>,
+}
+
+impl AttributesSet {
+    /// 역할이 지금 가진 속성 전체
+    pub fn of(rec: &RoleRec) -> AttributesSet {
+        AttributesSet {
+            login: rec.login,
+            create_db: rec.create_db,
+            create_role: rec.create_role,
+            inherit: rec.inherit,
+            connection_limit: rec.conn_limit,
+            valid_until: rec.valid_until.clone(),
+        }
+    }
 }
 
 /// 데이터베이스를 바꾸는 변경 하나
