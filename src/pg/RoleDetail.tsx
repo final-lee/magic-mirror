@@ -1,11 +1,15 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { MEMBERSHIP_SYSTEM_GROUPS, systemRoleText } from "./canChange";
+import { draftKey } from "./draft";
 import { BadgeList } from "./Badges";
 import { COVERAGE_LABEL, INHERITED_ONLY_TEXT, OBJECT_KIND_LABEL, ROLE_KIND_LABEL, TRUNCATED_TEXT, objectName, unusableText, utcDay } from "./labels";
 import { PgError } from "./PgError";
 import { usePgDatabase, usePgRole } from "./queries";
 import { roleRoute, type PgRoute } from "./route";
 import { SessionTable } from "./Sessions";
-import type { PgObjectKind, PgRoleDatabase, PgRoleView, PgSchemaCell, PgSession, PgTarget } from "./types";
+import { putChange } from "./putChange";
+import type { PgAttributesSet, PgChange, PgObjectKind, PgRoleDatabase, PgRoleSummary, PgRoleView, PgSchemaCell, PgSession, PgTarget } from "./types";
+import type { GridDraft } from "./useChangeMode";
 
 type Tab = "overview" | "members" | "privileges" | "owned" | "sessions";
 
@@ -27,6 +31,11 @@ interface Props {
   /** 뒤로 가기로 돌아왔을 때 보던 하위 탭을 되살린다 */
   initialTab?: string;
   onViewState?: (state: { tab: string }) => void;
+  /** 바꾸기 모드(탭이 든다). 켜면 구성원 탭과 개요 탭에서 바꿀 수 있다. 장바구니(draft)가 있어야 켜진다 */
+  editing?: boolean;
+  draft?: GridDraft;
+  /** 클러스터의 모든 역할(개요). 구성원 탭이 넣을 수 있는 그룹을 고른다 */
+  roles?: PgRoleSummary[];
 }
 
 /** 아직 읽지 않은 데이터베이스를 [불러오기]로 읽는 일. 권한 탭과 소유 객체 탭이 함께 쓴다. */
@@ -37,7 +46,7 @@ interface Load {
   onRequest: (database: string) => void;
 }
 
-export function RoleDetail({ target, role, onOpen, initialTab, onViewState }: Props) {
+export function RoleDetail({ target, role, onOpen, initialTab, onViewState, editing = false, draft, roles = [] }: Props) {
   const q = usePgRole(target, role);
   const [tab, setTab] = useState<Tab>(TABS.find((t) => t.id === initialTab)?.id ?? "overview");
   const [requested, setRequested] = useState<ReadonlySet<string>>(new Set());
@@ -66,6 +75,7 @@ export function RoleDetail({ target, role, onOpen, initialTab, onViewState }: Pr
   // 모두 다시 읽게 된다. 그 데이터베이스들은 pg_open이 스냅숏을 비운 뒤 "아직 읽지 않았어요 [불러오기]"로 돌아오고, 누르면 읽는다.
   const followed = view.databases.filter((d) => requested.has(d.database));
   const reread = () => void q.refetch();
+  const edit = editing && draft ? draft : null;
 
   return (
     <section className="center iam-detail">
@@ -88,8 +98,8 @@ export function RoleDetail({ target, role, onOpen, initialTab, onViewState }: Pr
         ))}
       </div>
       <div className="iam-pane" role="tabpanel">
-        {tab === "overview" && <Overview view={view} />}
-        {tab === "members" && <Members view={view} onOpen={onOpen} />}
+        {tab === "overview" && <Overview view={view} draft={edit} />}
+        {tab === "members" && <Members view={view} onOpen={onOpen} draft={edit} roles={roles} />}
         {tab === "privileges" && <Privileges view={view} load={load} />}
         {tab === "owned" && <Databases view={view} load={load}>{(db) => <OwnedObjects db={db} />}</Databases>}
         {tab === "sessions" && <Sessions sessions={view.sessions} />}
@@ -98,7 +108,7 @@ export function RoleDetail({ target, role, onOpen, initialTab, onViewState }: Pr
   );
 }
 
-function Overview({ view }: { view: PgRoleView }) {
+function Overview({ view, draft }: { view: PgRoleView; draft: GridDraft | null }) {
   const a = view.summary.attributes;
   const attributes: [string, string][] = [
     ["LOGIN", yesNo(a.login)],
@@ -120,6 +130,7 @@ function Overview({ view }: { view: PgRoleView }) {
           </Fragment>
         ))}
       </dl>
+      {draft && <AttributesForm key={JSON.stringify(attributesOf(view, queuedAttributes(draft, view.summary.name)))} view={view} draft={draft} />}
       <section aria-label="역할별 설정">
         <h3 className="pg-sect">역할별 설정</h3>
         {view.settings.length === 0 ? (
@@ -157,10 +168,10 @@ function Marks({ inherit, set, admin }: { inherit: boolean; set: boolean; admin:
   );
 }
 
-function Members({ view, onOpen }: { view: PgRoleView; onOpen: (route: PgRoute) => void }) {
+function Members({ view, onOpen, draft, roles }: { view: PgRoleView; onOpen: (route: PgRoute) => void; draft: GridDraft | null; roles: PgRoleSummary[] }) {
   const groups = view.summary.memberOf.map((m) => ({ name: m.group, inherit: m.inherit, set: m.set, admin: m.admin }));
   const members = view.members.map((m) => ({ name: m.role, inherit: m.inherit, set: m.set, admin: m.admin }));
-  const list = (label: string, items: typeof groups, empty: string) =>
+  const list = (label: string, items: typeof groups, empty: string, withAdmin = false) =>
     items.length === 0 ? (
       <div className="empty small">{empty}</div>
     ) : (
@@ -171,6 +182,7 @@ function Members({ view, onOpen }: { view: PgRoleView; onOpen: (route: PgRoute) 
               {m.name}
             </button>
             <Marks inherit={m.inherit} set={m.set} admin={m.admin} />
+            {withAdmin && draft && <AdminOption draft={draft} group={m.name} member={view.summary.name} admin={m.admin} locked={view.summary.system || !groupAllowed(m.name, roles)} />}
           </li>
         ))}
       </ul>
@@ -178,7 +190,8 @@ function Members({ view, onOpen }: { view: PgRoleView; onOpen: (route: PgRoute) 
   return (
     <div className="pg-members">
       <h3 className="pg-sect">속한 그룹</h3>
-      {list("속한 그룹", groups, "속한 그룹이 없어요")}
+      {list("속한 그룹", groups, "속한 그룹이 없어요", true)}
+      {draft && <GroupChecks view={view} draft={draft} roles={roles} />}
       <h3 className="pg-sect">구성원</h3>
       {list("구성원", members, "구성원이 없어요")}
     </div>
@@ -352,4 +365,167 @@ function OwnedObjects({ db }: { db: PgRoleDatabase }) {
 function Sessions({ sessions }: { sessions: PgSession[] }) {
   if (sessions.length === 0) return <div className="empty small">이 역할의 세션이 없어요</div>;
   return <SessionTable sessions={sessions} />;
+}
+
+const pendingText = (add: boolean) => (add ? "넣기 예정" : "빼기 예정");
+
+/** 이 앱이 구성원을 넣고 뺄 수 있는 그룹인가: 시스템이 아닌 그룹과, 허용한 시스템 그룹. roles에 없는 역할은 알 수 없어 false다 */
+function groupAllowed(name: string, roles: PgRoleSummary[]): boolean {
+  const found = roles.find((r) => r.name === name);
+  return !!found && (found.system ? MEMBERSHIP_SYSTEM_GROUPS.includes(name) : true);
+}
+
+/** 장바구니에 담긴 구성원 변경 하나(그룹·구성원 쌍과 ADMIN OPTION 여부로 찾는다) */
+function queuedMembership(draft: GridDraft, group: string, member: string, admin: boolean) {
+  for (const { change } of draft.items) {
+    if (change.kind === "membership" && change.group === group && change.member === member && change.admin === admin) return change;
+  }
+  return undefined;
+}
+
+/**
+ * 구성원 탭의 바꾸기: 넣을 수 있는 그룹마다 체크박스. 시스템이 아닌 그룹과 허용한 시스템 그룹이 나온다.
+ * 체크박스는 담아 둔 변경까지 반영한 상태를 보이고(담아 둔 것은 "넣기 예정", "빼기 예정"), 누르면 담거나 거둔다.
+ */
+function GroupChecks({ view, draft, roles }: { view: PgRoleView; draft: GridDraft; roles: PgRoleSummary[] }) {
+  const member = view.summary.name;
+  const locked = view.summary.system;
+  const groups = roles
+    .filter((r) => r.name !== member && r.kind === "group" && (r.system ? MEMBERSHIP_SYSTEM_GROUPS.includes(r.name) : true))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const now = new Set(view.summary.memberOf.map((m) => m.group));
+  return (
+    <fieldset className="pg-form-checks pg-group-checks" disabled={locked} title={locked ? systemRoleText(member) : undefined}>
+      <legend>그룹에 넣기</legend>
+      {groups.length === 0 && <span className="dim">넣을 수 있는 그룹이 없어요</span>}
+      {groups.map((g) => {
+        const queued = queuedMembership(draft, g.name, member, false);
+        const checked = queued ? queued.add : now.has(g.name);
+        return (
+          <label key={g.name} className="pg-form-check">
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={() => {
+                const change: PgChange = { kind: "membership", group: g.name, member, add: !checked, admin: false };
+                if (queued) draft.remove(draftKey(change) ?? "");
+                else putChange(draft, change);
+              }}
+            />{" "}
+            {g.name}
+            {queued && <span className="iam-chip conditional pg-pending">{pendingText(queued.add)}</span>}
+          </label>
+        );
+      })}
+    </fieldset>
+  );
+}
+
+/** 속한 그룹 한 줄의 ADMIN OPTION 체크박스. 담아 둔 변경이 있으면 그 뜻이 체크 상태가 된다 */
+function AdminOption({ draft, group, member, admin, locked }: { draft: GridDraft; group: string; member: string; admin: boolean; locked: boolean }) {
+  const queued = queuedMembership(draft, group, member, true);
+  const checked = queued ? queued.add : admin;
+  return (
+    <label className="pg-form-check pg-admin-option" title={locked ? systemRoleText(group) : undefined}>
+      <input
+        type="checkbox"
+        disabled={locked}
+        checked={checked}
+        onChange={() => {
+          const change: PgChange = { kind: "membership", group, member, add: !checked, admin: true };
+          if (queued) draft.remove(draftKey(change) ?? "");
+          else putChange(draft, change);
+        }}
+      />{" "}
+      ADMIN OPTION
+      {queued && <span className="iam-chip conditional pg-pending">{pendingText(queued.add)}</span>}
+    </label>
+  );
+}
+
+/** 역할의 지금 속성에서 폼의 바탕 값을 만든다. 담아 둔 속성 변경이 있으면 그 값이 먼저다 */
+function attributesOf(view: PgRoleView, queued: PgAttributesSet | undefined): PgAttributesSet {
+  if (queued) return queued;
+  const a = view.summary.attributes;
+  return { login: a.login, createDb: a.createDb, createRole: a.createRole, inherit: a.inherit, connectionLimit: a.connectionLimit, validUntil: a.validUntil };
+}
+
+const FLAGS: { key: "login" | "createDb" | "createRole" | "inherit"; label: string }[] = [
+  { key: "login", label: "LOGIN" },
+  { key: "createDb", label: "CREATEDB" },
+  { key: "createRole", label: "CREATEROLE" },
+  { key: "inherit", label: "INHERIT" },
+];
+
+/** 장바구니에 담긴 이 역할의 속성 변경이 바라는 속성 */
+function queuedAttributes(draft: GridDraft, role: string): PgAttributesSet | undefined {
+  for (const { change } of draft.items) if (change.kind === "attributes" && change.role === role) return change.set;
+  return undefined;
+}
+
+/** 폼의 날짜(YYYY-MM-DD)를 UTC 그날 0시의 ISO 시각으로 */
+const dayToIso = (day: string) => `${day}T00:00:00Z`;
+
+/**
+ * 개요 탭의 바꾸기: LOGIN, CREATEDB, CREATEROLE, INHERIT, 연결 수 제한, 만료일. [담기]는 이 역할의 속성 변경 하나를 담거나 이미 담긴 것을 바꾼다.
+ * REPLICATION과 BYPASSRLS는 위의 목록에서 읽기만 한다. 만료일을 건드리지 않으면 지금 값 그대로 보낸다(날짜만 보이는 값을 다시 쓰지 않는다).
+ */
+function AttributesForm({ view, draft }: { view: PgRoleView; draft: GridDraft }) {
+  const role = view.summary.name;
+  const locked = view.summary.system;
+  const queued = queuedAttributes(draft, role);
+  const start = attributesOf(view, queued);
+  const [flags, setFlags] = useState({ login: start.login, createDb: start.createDb, createRole: start.createRole, inherit: start.inherit });
+  const [unlimited, setUnlimited] = useState(start.connectionLimit < 0);
+  const [limit, setLimit] = useState(start.connectionLimit < 0 ? "" : String(start.connectionLimit));
+  const [noExpiry, setNoExpiry] = useState(start.validUntil === null);
+  const [day, setDay] = useState(start.validUntil ? utcDay(start.validUntil) : "");
+
+  const limitValue = unlimited ? -1 : /^\d+$/.test(limit.trim()) ? Number(limit.trim()) : null;
+  const expiryValue = noExpiry ? null : /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : undefined;
+  const valid = limitValue !== null && expiryValue !== undefined;
+  const nowExpiry = view.summary.attributes.validUntil;
+  const set: PgAttributesSet | null = valid
+    ? { ...flags, connectionLimit: limitValue, validUntil: expiryValue === null ? null : nowExpiry && utcDay(nowExpiry) === expiryValue ? nowExpiry : dayToIso(expiryValue) }
+    : null;
+  const flagId = (key: string) => `${role}-attr-${key}`;
+
+  return (
+    <fieldset className="pg-attr-form" disabled={locked} title={locked ? systemRoleText(role) : undefined}>
+      <legend>속성 바꾸기{queued && <span className="iam-chip conditional pg-pending">담김</span>}</legend>
+      <div className="pg-form-checks">
+        {FLAGS.map(({ key, label }) => (
+          <label key={key} className="pg-form-check" htmlFor={flagId(key)}>
+            <input id={flagId(key)} type="checkbox" checked={flags[key]} onChange={(e) => setFlags({ ...flags, [key]: e.target.checked })} /> {label}
+          </label>
+        ))}
+      </div>
+      <div className="pg-attr-row">
+        <label htmlFor={flagId("limit")}>연결 수 제한</label>
+        <input id={flagId("limit")} type="number" min={0} step={1} value={limit} disabled={unlimited} onChange={(e) => setLimit(e.target.value)} />
+        <label className="pg-form-check">
+          <input type="checkbox" checked={unlimited} onChange={(e) => setUnlimited(e.target.checked)} /> 제한 없음
+        </label>
+      </div>
+      <div className="pg-attr-row">
+        <label htmlFor={flagId("until")}>만료일</label>
+        <input id={flagId("until")} type="date" value={day} disabled={noExpiry} onChange={(e) => setDay(e.target.value)} />
+        <label className="pg-form-check">
+          <input type="checkbox" checked={noExpiry} onChange={(e) => setNoExpiry(e.target.checked)} /> 없음
+        </label>
+      </div>
+      <div className="foot">
+        <button
+          type="button"
+          className="btn primary"
+          disabled={!set}
+          onClick={() => {
+            if (set) putChange(draft, { kind: "attributes", role, set });
+          }}
+        >
+          담기
+        </button>
+      </div>
+    </fieldset>
+  );
 }

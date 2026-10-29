@@ -236,7 +236,7 @@ export function PgTab({ target, active, filter }: Props) {
         ))}
         <div className="iam-main">
           {route.view === "roles" && route.id ? (
-            <RoleDetail key={route.id} target={target} role={route.id} onOpen={go} initialTab={route.tab} onViewState={remember} />
+            <RoleDetail key={route.id} target={target} role={route.id} onOpen={go} initialTab={route.tab} onViewState={remember} editing={editing} draft={draft} roles={o.roles} />
           ) : route.view === "roles" ? (
             <RoleList
               roles={o.roles}
@@ -262,7 +262,7 @@ export function PgTab({ target, active, filter }: Props) {
               draft={draft}
             />
           ) : route.view === "defaults" ? (
-            <DefaultPrivileges target={target} overview={o} database={database} onDatabase={setDatabase} />
+            <DefaultPrivileges target={target} overview={o} database={database} onDatabase={setDatabase} editing={editing} draft={draft} />
           ) : route.view === "whoCan" ? (
             <WhoCan target={target} overview={o} database={database} onDatabase={setDatabase} kinds={kinds} onKinds={setKinds} />
           ) : route.view === "sessions" ? (

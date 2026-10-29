@@ -1,9 +1,13 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { DefaultPrivilegeForm } from "./DefaultPrivilegeForm";
 import { DatabaseScreen } from "./DatabaseScreen";
 import { PgError } from "./PgError";
+import { putChange } from "./putChange";
 import { usePgDatabase } from "./queries";
 import { ALL_SCHEMAS, BUILTIN_NOTE, DEFAULT_OBJECT_LABEL, DEFAULT_OBJECT_ORDER, GRANT_OPTION_NOTE, defaultPrivilegeSentence, granteeLabel, noGrantSentence } from "./sentences";
-import type { PgDefaultAclRow, PgDefaultObjectType, PgOverview, PgTarget } from "./types";
+import { draftKey } from "./draft";
+import type { PgChange, PgDefaultAclRow, PgDefaultObjectType, PgOverview, PgTarget } from "./types";
+import type { GridDraft } from "./useChangeMode";
 
 type Grants = PgDefaultAclRow["grants"];
 
@@ -32,6 +36,15 @@ interface Props {
   /** 이 탭에서 고른 데이터베이스(PgTab이 들고 있다). 없거나 연결할 수 없으면 대상의 기본 데이터베이스 */
   database: string | undefined;
   onDatabase: (database: string) => void;
+  /** 바꾸기 모드(탭이 든다). 켜면 줄마다 [빼기]가 붙고 [기본 권한 추가]가 보인다. 장바구니(draft)가 있어야 켜진다 */
+  editing?: boolean;
+  draft?: GridDraft;
+}
+
+/** 바꾸기 모드에서 이 화면이 쓰는 것 */
+interface Edit {
+  draft: GridDraft;
+  overview: PgOverview;
 }
 
 /**
@@ -39,15 +52,17 @@ interface Props {
  * 행은 (만드는 역할, 스키마 또는 모든 스키마), 열은 객체 종류이고, 각 행 아래에 받는 역할마다 문장으로 풀어 쓴다.
  * 표에 없는 PostgreSQL의 기본값은 표 위에 안내한다.
  */
-export function DefaultPrivileges({ target, overview, database, onDatabase }: Props) {
+export function DefaultPrivileges({ target, overview, database, onDatabase, editing = false, draft }: Props) {
+  const edit = editing && draft ? { draft, overview } : null;
   return (
     <DatabaseScreen overview={overview} database={database} onDatabase={onDatabase}>
-      {(db) => <DatabaseDefaults target={target} database={db} />}
+      {(db) => <DatabaseDefaults target={target} database={db} edit={edit} />}
     </DatabaseScreen>
   );
 }
 
-function DatabaseDefaults({ target, database }: { target: PgTarget; database: string }) {
+function DatabaseDefaults({ target, database, edit }: { target: PgTarget; database: string; edit: Edit | null }) {
+  const [adding, setAdding] = useState(false);
   const q = usePgDatabase(target, database);
   const view = q.data;
   const groups = useMemo(() => groupRows(view?.defaultPrivileges ?? []), [view]);
@@ -58,6 +73,23 @@ function DatabaseDefaults({ target, database }: { target: PgTarget; database: st
     <>
       {q.isError && <PgError compact error={q.error} target={target} />}
       <p className="iam-hint pg-builtin">{BUILTIN_NOTE}</p>
+      {edit && (
+        <div className="pg-def-act">
+          <button type="button" className="btn small" onClick={() => setAdding(true)}>
+            기본 권한 추가
+          </button>
+        </div>
+      )}
+      {adding && edit && (
+        <DefaultPrivilegeForm
+          database={database}
+          creators={edit.overview.roles.filter((r) => !r.system).map((r) => r.name)}
+          grantees={edit.overview.roles.filter((r) => !r.system).map((r) => r.name)}
+          schemas={view.schemas.map((s) => s.name)}
+          draft={edit.draft}
+          onClose={() => setAdding(false)}
+        />
+      )}
       {groups.length === 0 ? (
         <div className="empty small">설정한 기본 권한이 없어요</div>
       ) : (
@@ -76,7 +108,7 @@ function DatabaseDefaults({ target, database }: { target: PgTarget; database: st
               </tr>
             </thead>
             {groups.map((group) => (
-              <GroupRows key={JSON.stringify([group.creator, group.schema])} group={group} />
+              <GroupRows key={JSON.stringify([group.creator, group.schema])} group={group} database={database} edit={edit} />
             ))}
           </table>
         </div>
@@ -86,7 +118,7 @@ function DatabaseDefaults({ target, database }: { target: PgTarget; database: st
 }
 
 /** 표의 한 행과 그 아래의 문장들 */
-function GroupRows({ group }: { group: Group }) {
+function GroupRows({ group, database, edit }: { group: Group; database: string; edit: Edit | null }) {
   const where = group.schema ?? ALL_SCHEMAS;
   // 설정한 적 없는 종류(grants에 없다)는 말하지 않는다. 설정은 했는데 받는 역할이 없는 종류는 아무도 받지 않는다고 말한다.
   const sentences = DEFAULT_OBJECT_ORDER.flatMap((objectType) => {
@@ -113,6 +145,7 @@ function GroupRows({ group }: { group: Group }) {
                     <li key={`${g.grantee}:${i}`}>
                       <span className="pg-grantee">{granteeLabel(g.grantee)}</span> <span className="mono">{g.privileges.join(", ")}</span>
                       {g.grantable && <span className="dim">{GRANT_OPTION_NOTE}</span>}
+                      {edit && <RevokeLine draft={edit.draft} change={revokeOf(database, group, type, g)} />}
                     </li>
                   ))}
                 </ul>
@@ -131,5 +164,37 @@ function GroupRows({ group }: { group: Group }) {
         </td>
       </tr>
     </tbody>
+  );
+}
+
+/** 기본 권한 한 줄을 빼는 변경 */
+const revokeOf = (database: string, group: Group, objectType: PgDefaultObjectType, grant: Grants[number]): PgChange => ({
+  kind: "defaultPrivilege",
+  database,
+  creator: group.creator,
+  schema: group.schema,
+  objectType,
+  grantee: grant.grantee,
+  privileges: grant.privileges,
+  add: false,
+});
+
+/** 줄의 [빼기]. 담아 둔 뺄 변경이 있으면 눌린 모양이고, 다시 누르면 거둔다 */
+function RevokeLine({ draft, change }: { draft: GridDraft; change: PgChange }) {
+  const key = draftKey(change);
+  const queued = draft.items.find((d) => d.key === key);
+  const pressed = !!queued && queued.change.kind === "defaultPrivilege" && !queued.change.add;
+  return (
+    <button
+      type="button"
+      className={`link pg-revoke${pressed ? " on" : ""}`}
+      aria-pressed={pressed}
+      onClick={() => {
+        if (pressed && key !== null) draft.remove(key);
+        else putChange(draft, change);
+      }}
+    >
+      빼기
+    </button>
   );
 }

@@ -499,3 +499,32 @@ describe("what the tray refuses", () => {
     expect(m.previewBatch).toHaveBeenCalledWith(pgTarget, "orders", [readAudit("alice")]);
   });
 });
+
+describe("editing in the cell panel, the default privileges and the role detail", () => {
+  test("a revoke from the cell panel, a default privilege and a group go into the same tray, and nothing is shown while 바꾸기 is off", async () => {
+    setup();
+    await openPrivileges();
+    // 바꾸기 모드가 꺼져 있으면 칸 상세에는 [빼기]가 없다
+    fireEvent.click(cellOf("alice", "app"));
+    fireEvent.click(await screen.findByRole("tab", { name: "시퀀스 1" }));
+    await screen.findByText("app.orders_id_seq");
+    expect(screen.queryByRole("button", { name: "객체에 권한 주기" })).not.toBeInTheDocument();
+    fireEvent.click(modeToggle());
+    fireEvent.click(within(screen.getByText("USAGE").closest("[data-testid=privilege-edit]") as HTMLElement).getByRole("button", { name: "빼기" }));
+    expect(tray()).toBe("변경 1개 · 권한 빼기: alice · app.orders_id_seq USAGE");
+
+    openMenu("기본 권한");
+    fireEvent.click(await screen.findByRole("button", { name: "기본 권한 추가" }));
+    const form = screen.getByRole("dialog", { name: "기본 권한 추가" });
+    fireEvent.change(within(form).getByRole("combobox", { name: "받는 역할" }), { target: { value: "PUBLIC" } });
+    fireEvent.click(within(form).getByRole("checkbox", { name: "SELECT" }));
+    fireEvent.click(within(form).getByRole("button", { name: "담기" }));
+    expect(tray()).toMatch(/^변경 2개 · /);
+
+    openMenu("역할");
+    fireEvent.doubleClick(await screen.findByText("alice"));
+    fireEvent.click(await screen.findByRole("tab", { name: "구성원" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: /pg_read_all_data/ }));
+    expect(tray()).toMatch(/^변경 3개 · /);
+  });
+});

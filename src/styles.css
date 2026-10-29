@@ -656,10 +656,8 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .pg-brushes { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pg-brush-sep { width: 1px; height: 14px; margin: 0 4px; background: var(--line); }
 /* 바꾸기 모드의 칸: 고른 권한 하나만 보인다(.pg-solo). 그 권한을 칠할 수 없는 칸(.pg-idle)은 흐리고, 칠할 수 있는 데이터베이스 칸(.pg-live)은 그대로 둔다 */
-
 .pg-cell.pg-solo { padding-right: 8px; }
-.pg-idle .pg-mark { opacity: .35; }
-.pg-live { background: #0a84ff0f; }
+.pg-grid .pg-table .pg-row .pg-live { background: #0a84ff0f; }
 /* 담아 둔 변경: 줄 예정(＋)과 뺄 예정(－)은 칸 바탕과 표시를 물들인다(IAM 할당 표의 .asg-add, .asg-del과 같은 색) */
 .pg-cell.pg-add, .pg-marks.pg-add { background: #30d15826; }
 .pg-cell.pg-del, .pg-marks.pg-del { background: #ff453a26; }
@@ -668,6 +666,8 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .pg-mark.pg-del { color: #ff6b62; }
 /* 출처가 그룹이나 PUBLIC뿐인 칸은 흐리게 */
 .pg-dimmed .pg-mark { opacity: .45; }
+/* 흐린 칸이 칠할 수 없는 칸이기도 하면 칠할 수 없는 쪽이 이긴다(위의 .pg-dimmed 뒤에 둔다) */
+.pg-idle .pg-mark { opacity: .35; }
 /* 못 쓰는 칸의 이유는 키보드로 왔을 때 표시 자리를 덮어 보인다(마우스는 title). ⚠ 자리는 남겨 둔다 */
 .pg-hint { display: none; position: absolute; top: 2px; bottom: 2px; left: 2px; right: 22px; align-items: center; justify-content: center; padding: 0 6px; overflow: hidden; background: var(--panel); color: var(--yellow); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
 .pg-cell:focus-visible .pg-hint { display: flex; }
@@ -713,6 +713,34 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .pg-grants li { display: flex; flex-wrap: wrap; gap: 0 8px; }
 .pg-grantee { font-weight: 500; }
 .pg-sentences ul { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; }
+
+/* 바꾸기 모드의 칸 상세, 기본 권한, 역할 상세: [빼기], 폼 창 */
+.pg-panel-act, .pg-def-act { flex: none; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.pg-def-act { padding: 8px 16px; border-bottom: 0; }
+.pg-schema-privs { flex: none; display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.pg-priv-edit { display: inline-flex; align-items: center; gap: 4px; }
+.pg-priv-edit .pg-revoke { font-size: 11px; }
+.pg-revoke.on { color: #ff6b62; font-weight: 600; }
+.pg-revoke:disabled { color: var(--dim); cursor: default; text-decoration: none; opacity: .5; }
+.pg-pending { margin-left: 6px; }
+.pg-group-checks, .pg-attr-form { margin: 8px 16px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.pg-group-checks legend, .pg-attr-form legend { padding: 0 6px; color: var(--dim); font-size: 11px; font-weight: 600; }
+.pg-form-checks { display: flex; flex-wrap: wrap; gap: 4px 14px; border: 0; margin: 8px 0 0; padding: 0; }
+.pg-form-check { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; cursor: pointer; }
+.pg-form-check input { margin: 0; accent-color: var(--accent); }
+.pg-admin-option { margin-left: 10px; }
+.pg-attr-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 12px; }
+.pg-attr-row label:first-child { width: 90px; color: var(--dim); }
+.pg-attr-row input[type="number"], .pg-attr-row input[type="date"] { width: 150px; }
+.pg-attr-form .foot { margin-top: 8px; }
+.sheet.pg-form { display: flex; flex-direction: column; gap: 4px; }
+.pg-form-field { margin-top: 8px; color: var(--dim); font-size: 12px; }
+.pg-form-search { width: 100%; margin-top: 4px; }
+.pg-form-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 180px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+.pg-form-opt { width: 100%; text-align: left; padding: 5px 10px; border: 0; border-radius: 0; background: none; color: var(--text); font-size: 12px; cursor: pointer; }
+.pg-form-opt:hover { background: #ffffff0d; }
+.pg-form-opt.on { background: #0a84ff22; }
+.pg-form-picked { margin: 8px 0 0; }
 
 /* 누가 할 수 있나, 세션, 점검. 검색 줄(.wc-form)과 점검 목록(.fx-items)은 IAM의 규칙을 그대로 쓴다. */
 .pg-bar-end { margin-left: auto; }
