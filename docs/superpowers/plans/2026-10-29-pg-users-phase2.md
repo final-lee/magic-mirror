@@ -975,7 +975,7 @@ where X: FnOnce(Vec<Step>) -> XF, XF: Future<Output = Result<(), ExecError>>,
 ```rust
 pub fn suggest(cluster: &ClusterSnapshot, db: &DbSnapshot, preset: PresetKind, schemas: &[String]) -> PgPresetSuggestion;   // pure
 pub fn drop_plan(cluster: &ClusterSnapshot, dbs: &[Arc<DbSnapshot>], unreachable: &[String], role: &str, reassign_to: &str, default_db: &str) -> PgDropPlan;   // pure
-pub async fn apply<X, XF>(plan: &PgDropPlan, exec: X) -> (usize /* database steps done */, Option<String> /* stop text */)
+pub async fn apply<X, XF>(plan: &PgDropPlan, default_db: &str /* the database of the last step (DROP ROLE, database null) */, exec: X) -> (usize /* database steps done */, Option<String> /* stop text */)
 where X: FnMut(&str /* database */, Vec<Step>) -> XF, XF: Future<Output = Result<(), ExecError>>;
 // pg_preset, pg_drop_plan and pg_apply_drop as in the Contract
 ```
