@@ -7,7 +7,6 @@ import { PgError } from "./PgError";
 import { usePgDatabase, usePgRole } from "./queries";
 import { roleRoute, type PgRoute } from "./route";
 import { SessionTable } from "./Sessions";
-import { putChange } from "./putChange";
 import type { PgAttributesSet, PgChange, PgObjectKind, PgRoleDatabase, PgRoleSummary, PgRoleView, PgSchemaCell, PgSession, PgTarget } from "./types";
 import type { GridDraft } from "./useChangeMode";
 
@@ -368,7 +367,7 @@ function Sessions({ sessions }: { sessions: PgSession[] }) {
 }
 
 /** 그룹에서 빼기가 담긴 구성원 관계의 ADMIN OPTION은 바꿀 수 없다 */
-const REMOVING_TEXT = "그룹에서 빼기가 담겨 있어서 ADMIN OPTION은 바꿀 수 없어요";
+const REMOVING_TEXT = "그룹에서 빼는 변경이 담겨 있어요. ADMIN OPTION을 바꾸려면 먼저 그 변경을 거둬 주세요";
 const pendingText = (add: boolean) => (add ? "넣기 예정" : "빼기 예정");
 
 /** 이 앱이 구성원을 넣고 뺄 수 있는 그룹인가: 시스템이 아닌 그룹과, 허용한 시스템 그룹. roles에 없는 역할은 알 수 없어 false다 */
@@ -411,7 +410,7 @@ function GroupChecks({ view, draft, roles }: { view: PgRoleView; draft: GridDraf
               onChange={() => {
                 const change: PgChange = { kind: "membership", group: g.name, member, add: !checked, admin: false };
                 if (queued) draft.remove(draftKey(change) ?? "");
-                else putChange(draft, change);
+                else draft.put(change);
               }}
             />{" "}
             {g.name}
@@ -442,7 +441,7 @@ function AdminOption({ draft, group, member, admin, lock }: { draft: GridDraft; 
           if (title) return;
           const change: PgChange = { kind: "membership", group, member, add: !checked, admin: true };
           if (queued) draft.remove(draftKey(change) ?? "");
-          else putChange(draft, change);
+          else draft.put(change);
         }}
       />{" "}
       ADMIN OPTION
@@ -528,7 +527,7 @@ function AttributesForm({ view, draft }: { view: PgRoleView; draft: GridDraft })
           className="btn primary"
           disabled={!set}
           onClick={() => {
-            if (set) putChange(draft, { kind: "attributes", role, set });
+            if (set) draft.put({ kind: "attributes", role, set });
           }}
         >
           담기

@@ -6,7 +6,6 @@ import { grantTargetOf } from "./objectTarget";
 import { PgError } from "./PgError";
 import { PrivilegeChecks } from "./PrivilegeChecks";
 import { usePgObjects } from "./queries";
-import { putChange } from "./putChange";
 import { PUBLIC_LABEL } from "./sentences";
 import type { PgObjectRef, PgTarget } from "./types";
 import type { GridDraft } from "./useChangeMode";
@@ -56,7 +55,7 @@ export function GrantSheet({ target, database, schema, role, draft, onClose }: P
   const ready = !!grantTarget && privileges.length > 0;
   const submit = () => {
     if (!grantTarget || privileges.length === 0) return;
-    putChange(draft, { kind: "grant", database, grantee, add: true, items: [{ target: grantTarget, privileges }] });
+    draft.put({ kind: "grant", database, grantee, add: true, items: [{ target: grantTarget, privileges }] });
     onClose();
   };
 

@@ -1,5 +1,6 @@
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { brushItem, brushOf } from "./brush";
 import { renderWithClient } from "../test/utils";
 import { pgApi } from "./api";
 import { CellPanel } from "./CellPanel";
@@ -43,6 +44,7 @@ function Harness(props: Props) {
 }
 const setup = (props: Props = {}) => renderWithClient(<Harness {...props} />);
 
+const panel = () => screen.getByRole("complementary", { name: "alice · app" });
 const changes = (): PgChange[] => draft.items.map((d) => d.change);
 const objectRow = (name: string) => screen.getByText(name).closest("li") as HTMLElement;
 /** 권한 칩과 그 [빼기]들이 든 묶음 */
@@ -283,6 +285,68 @@ describe("the sheet", () => {
       </QueryClientProvider>,
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("a brush that covers the object", () => {
+  const readBrush = () => act(() => draft.paint([brushItem(brushOf("read"), "orders", "alice", "app", false)]));
+  const OVERLAP = "같은 대상의 변경이 이미 담겨 있어요. 먼저 그 변경을 거둬 주세요";
+
+  test("then 빼기 of SELECT in the panel is refused with the tray unchanged", async () => {
+    setup();
+    await screen.findByText("app.orders");
+    readBrush();
+    fireEvent.click(within(privilegeGroup("app.orders", "SELECT")).getByRole("button", { name: "빼기" }));
+    expect(changes()).toHaveLength(1);
+    expect(changes()[0]).toMatchObject({ kind: "grant", items: [{ target: { kind: "allTables", schema: "app" } }] });
+    expect(draft.notices).toEqual([OVERLAP]);
+  });
+
+  test("then a GrantSheet grant of SELECT is refused", async () => {
+    setup();
+    await screen.findByText("app.orders");
+    readBrush();
+    fireEvent.click(screen.getByRole("button", { name: "객체에 권한 주기" }));
+    const dialog = await screen.findByRole("dialog", { name: "객체에 권한 주기" });
+    fireEvent.click(await within(dialog).findByRole("button", { name: /^app\.orders 테이블$/ }));
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "SELECT" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "담기" }));
+    expect(changes()).toHaveLength(1);
+    expect(draft.notices).toEqual([OVERLAP]);
+  });
+
+  test("a panel revoke first, then the brush: the brush is refused", async () => {
+    setup();
+    await screen.findByText("app.orders");
+    fireEvent.click(within(privilegeGroup("app.orders", "SELECT")).getByRole("button", { name: "빼기" }));
+    readBrush();
+    expect(changes()).toEqual([grantOf("alice", { kind: "relation", schema: "app", name: "orders" }, ["SELECT"])]);
+    expect(draft.notices).toEqual([OVERLAP]);
+  });
+});
+
+describe("a partly trimmed revoke", () => {
+  test("still shows 빼기 as pressed, and pressing it takes the remaining revoke back out", async () => {
+    setup();
+    await screen.findByText("app.orders");
+    const target = { kind: "relation", schema: "app", name: "orders" } as const;
+    act(() => draft.put(grantOf("alice", target, ["SELECT", "INSERT"])));
+    act(() => draft.put(grantOf("alice", target, ["INSERT"], true)));
+    const button = () => within(privilegeGroup("app.orders", "SELECT")).getByRole("button", { name: "빼기" });
+    expect(changes()).toEqual([grantOf("alice", target, ["SELECT"]), grantOf("alice", target, ["INSERT"], true)]);
+    expect(button()).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(button());
+    expect(changes()).toEqual([grantOf("alice", target, ["INSERT"], true)]);
+  });
+});
+
+describe("when the who-can lookup of the header fails", () => {
+  test("the error is shown in the panel and the chips fall back to what the cell knows", async () => {
+    m.whoCan.mockRejectedValue({ kind: "other", message: "읽지 못했어요" });
+    setup();
+    await screen.findByText("app.orders");
+    expect(await within(panel()).findByText("읽지 못했어요")).toBeInTheDocument();
+    expect(screen.getAllByTestId("schema-privilege")[0]).toHaveTextContent("사용 직접 받음");
   });
 });
 

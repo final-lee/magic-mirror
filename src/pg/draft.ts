@@ -8,6 +8,7 @@ export const MAX_DRAFT = 50;
 
 export const FULL_NOTICE = `한 번에 ${MAX_DRAFT}개까지 담을 수 있어요`;
 export const OTHER_DATABASE_NOTICE = "다른 데이터베이스의 변경이 담겨 있어요. 먼저 적용하거나 비워 주세요";
+export const OVERLAP_NOTICE = "같은 대상의 변경이 이미 담겨 있어요. 먼저 그 변경을 거둬 주세요";
 export const defaultsAddedNotice = (count: number) => `기본 권한 ${count}개를 담았어요`;
 
 /** 장바구니 한 줄. key는 칸(이 변경이 바꾸는 것)을 가리키고, 같은 칸의 변경은 하나만 있다. label은 변경의 요약이다 */
@@ -89,13 +90,15 @@ export interface DraftStep {
   items: PgDraftItem[];
   /** 꽉 차서 못 담은 것이 있다 */
   full: boolean;
+  /** 담아 둔 다른 모양의 변경(한 객체 대 스키마의 모든 테이블·시퀀스)과 같은 대상·권한이 겹쳐서 못 담은 것이 있다 */
+  overlap: boolean;
   /** 장바구니와 다른 데이터베이스의 변경이라서 못 담은 것이 있다 */
   elsewhere: boolean;
   /** 새로 담긴 줄의 수. 바꿔 놓은 줄은 세지 않는다 */
   added: number;
 }
 
-const start = (items: PgDraftItem[]): DraftStep => ({ items, full: false, elsewhere: false, added: 0 });
+const start = (items: PgDraftItem[]): DraftStep => ({ items, full: false, overlap: false, elsewhere: false, added: 0 });
 
 /** 속성이 지금 역할의 것과 같은 만료 시각인지. 같은 순간이면 적은 모양이 달라도 같다 */
 function sameExpiry(a: string | null, b: string | null): boolean {
@@ -118,8 +121,24 @@ function sameAsNow(change: Extract<PgChange, { kind: "attributes" }>, roles: PgR
   );
 }
 
-/** 새 줄을 맨 끝에 담는다. 먼저 데이터베이스 규칙, 그다음 한도를 본다 */
+const bulkKind = (target: PgGrantTarget): "relation" | "sequence" | null => (target.kind === "allTables" ? "relation" : target.kind === "allSequences" ? "sequence" : null);
+
+/**
+ * 두 권한 변경이 모양이 다른데 펼치면 같은 대상(받는 역할, 객체, 권한)을 건드리는가: 객체 하나(relation, sequence)와 그 스키마의 모든 테이블·시퀀스(allTables, allSequences).
+ * 백엔드는 펼친 뒤의 같은 대상을 한 묶음에 두 번 담지 못하게 막는다. 모양이 같은 변경(같은 대상)의 겹침은 putChangeItem이 권한을 걷어 내서 푼다.
+ */
+export function expandedOverlap(a: PgChange, b: PgChange): boolean {
+  if (a.kind !== "grant" || b.kind !== "grant" || a.database !== b.database || a.grantee !== b.grantee) return false;
+  const hits = (bulk: PgGrantItem, one: PgGrantItem) => {
+    const kind = bulkKind(bulk.target);
+    return kind !== null && one.target.kind === kind && "schema" in bulk.target && "schema" in one.target && bulk.target.schema === one.target.schema && bulk.privileges.some((p) => one.privileges.includes(p));
+  };
+  return a.items.some((x) => b.items.some((y) => hits(x, y) || hits(y, x)));
+}
+
+/** 새 줄을 맨 끝에 담는다. 먼저 겹침과 데이터베이스 규칙, 그다음 한도를 본다 */
 function append(step: DraftStep, item: PgDraftItem): DraftStep {
+  if (step.items.some((d) => expandedOverlap(d.change, item.change))) return { ...step, overlap: true };
   const database = changeDatabase(item.change);
   const current = draftDatabase(step.items);
   if (database !== null && current !== null && database !== current) return { ...step, elsewhere: true };
@@ -171,4 +190,71 @@ export function removeApplied(items: PgDraftItem[], applied: PgChange[]): PgDraf
   const keys = new Set(applied.map(draftKey).filter((key): key is string => key !== null));
   const left = items.filter((d) => !keys.has(d.key));
   return left.length === items.length ? items : left;
+}
+
+
+const without = (privileges: string[], taken: string[]) => privileges.filter((p) => !taken.includes(p));
+
+/**
+ * 담긴 변경에서 새 변경과 겹치는 권한(같은 데이터베이스, 받는 역할, 대상)을 뺀 변경. 겹침이 없으면 null(그대로 둔다).
+ * 권한이 남지 않으면 undefined(변경 자체를 거둔다).
+ */
+function trimmed(queued: PgChange, change: PgChange): PgChange | null | undefined {
+  if (queued.kind === "grant" && change.kind === "grant") {
+    if (queued.database !== change.database || queued.grantee !== change.grantee) return null;
+    let touched = false;
+    const items = queued.items.flatMap((item) => {
+      const taken = change.items.filter((c) => targetKey(c.target) === targetKey(item.target)).flatMap((c) => c.privileges);
+      const left = without(item.privileges, taken);
+      if (left.length !== item.privileges.length) touched = true;
+      return left.length > 0 ? [{ ...item, privileges: left }] : [];
+    });
+    if (!touched) return null;
+    return items.length > 0 ? { ...queued, items } : undefined;
+  }
+  if (queued.kind === "defaultPrivilege" && change.kind === "defaultPrivilege") {
+    const same = queued.database === change.database && queued.creator === change.creator && queued.schema === change.schema && queued.objectType === change.objectType && queued.grantee === change.grantee;
+    if (!same) return null;
+    const left = without(queued.privileges, change.privileges);
+    if (left.length === queued.privileges.length) return null;
+    return left.length > 0 ? { ...queued, privileges: left } : undefined;
+  }
+  return null;
+}
+
+/**
+ * 폼이 만든 변경 하나를 담는다. 권한을 주고 빼는 변경(grant, defaultPrivilege)은 같은 대상의 같은 권한이 장바구니에 둘 있지 않도록
+ * 담긴 변경에서 겹치는 권한을 걷어 낸다(주는 쪽이든 빼는 쪽이든. 남는 권한이 없으면 그 변경을 거둔다. 남는 변경은 제자리에 있다).
+ * 못 담는 경우(다른 모양과 겹침, 다른 데이터베이스, 꽉 참)는 장바구니를 하나도 바꾸지 않고 까닭만 알린다: 걷어 내는 일은 담길 것이 정해진 뒤에만 한다.
+ * 속성과 구성원은 putItems의 규칙대로 둔다.
+ */
+export function putChangeItem(items: PgDraftItem[], change: PgChange, roles: PgRoleSummary[]): DraftStep {
+  const item = draftItem(change);
+  if (!item) return start(items);
+  if (change.kind !== "grant" && change.kind !== "defaultPrivilege") return putItems(items, [item], roles);
+  if (items.some((d) => d.key === item.key && JSON.stringify(d.change) === JSON.stringify(change))) return start(items);
+  if (items.some((d) => expandedOverlap(d.change, change))) return { ...start(items), overlap: true };
+  const database = changeDatabase(change);
+  const current = draftDatabase(items);
+  if (database !== null && current !== null && database !== current) return { ...start(items), elsewhere: true };
+  const next = items.flatMap((queued): PgDraftItem[] => {
+    const left = trimmed(queued.change, change);
+    if (left === null) return [queued];
+    return left ? (draftItem(left) ? [draftItem(left)!] : []) : [];
+  });
+  if (next.length >= MAX_DRAFT) return { ...start(items), full: true };
+  return { ...start([...next, item]), added: 1 };
+}
+
+/** 이 변경(의 권한 일부)을 빼는 변경이 담겨 있으면 그 줄. 버튼이 눌린 모양인지와 거둘 줄을 정한다 */
+export function queuedRevoke(items: PgDraftItem[], change: PgChange): PgDraftItem | undefined {
+  return items.find(({ change: q }) => {
+    if (q.kind === "grant" && change.kind === "grant") {
+      return !q.add && q.database === change.database && q.grantee === change.grantee && q.items.some((x) => change.items.some((y) => targetKey(x.target) === targetKey(y.target) && x.privileges.some((p) => y.privileges.includes(p))));
+    }
+    if (q.kind === "defaultPrivilege" && change.kind === "defaultPrivilege") {
+      return !q.add && q.database === change.database && q.creator === change.creator && q.schema === change.schema && q.objectType === change.objectType && q.grantee === change.grantee && q.privileges.some((p) => change.privileges.includes(p));
+    }
+    return false;
+  });
 }

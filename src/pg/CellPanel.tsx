@@ -119,7 +119,23 @@ export function CellPanel({ target, database, role, schema, unusable, bypassRls,
   );
 }
 
-function Objects({ detail, role, bypassRls, tab, onTab, edit, onGrant }: { detail: PgCellDetail; role: string; bypassRls: boolean; tab: Tab; onTab: (tab: Tab) => void; edit: Edit | null; onGrant: () => void }) {
+function Objects({
+  detail,
+  role,
+  bypassRls,
+  tab,
+  onTab,
+  edit,
+  onGrant,
+}: {
+  detail: PgCellDetail;
+  role: string;
+  bypassRls: boolean;
+  tab: Tab;
+  onTab: (tab: Tab) => void;
+  edit: Edit | null;
+  onGrant: () => void;
+}) {
   const objects = detail.objects.filter((o) => tabOf(o) === tab);
   const label = TABS.find((t) => t.id === tab)!.label;
   return (
@@ -214,37 +230,63 @@ function SchemaChips({ target, edit, schema, cell }: { target: PgTarget; edit: E
   const usage = usePgWhoCan(target, edit.database, object, "USAGE");
   const create = usePgWhoCan(target, edit.database, object, "CREATE");
   const held = [
-    { label: "사용", privilege: "USAGE", has: cell.usage, direct: cell.direct.usage, owned: cell.owned.usage, who: usage.data },
-    { label: "만들기", privilege: "CREATE", has: cell.create, direct: cell.direct.create, owned: cell.owned.create, who: create.data },
+    {
+      label: "사용",
+      privilege: "USAGE",
+      has: cell.usage,
+      direct: cell.direct.usage,
+      owned: cell.owned.usage,
+      who: usage.data,
+    },
+    {
+      label: "만들기",
+      privilege: "CREATE",
+      has: cell.create,
+      direct: cell.direct.create,
+      owned: cell.owned.create,
+      who: create.data,
+    },
   ];
   const schemaTarget: PgGrantTarget = { kind: "schema", name: schema };
+  const failed = usage.isError ? usage.error : create.isError ? create.error : null;
   return (
-    <div className="pg-schema-privs" role="group" aria-label="스키마 권한">
-      {held.map(({ label, privilege, has, direct, owned, who }) => {
-        // 누가 할 수 있나를 읽기 전(또는 읽지 못했을 때)에는 칸이 아는 만큼만 보인다: 직접, 소유자, 그 밖에는 물려받음
-        if (!who) {
-          const via = [direct ? "직접 받음" : null, owned ? "소유자" : null, !direct && !owned ? "물려받음" : null].filter(Boolean).join(", ");
-          return (
-            <span key={privilege} className={`pg-priv-edit${has ? "" : " off"}`} data-testid="schema-privilege">
-              <span className={`iam-chip${has ? "" : " conditional"}`} title={has ? via : undefined}>
-                {label} {has ? via : "없음"}
+    <>
+      <div className="pg-schema-privs" role="group" aria-label="스키마 권한">
+        {held.map(({ label, privilege, has, direct, owned, who }) => {
+          // 누가 할 수 있나를 읽기 전(또는 읽지 못했을 때)에는 칸이 아는 만큼만 보인다: 직접, 소유자, 그 밖에는 물려받음
+          if (!who) {
+            const via = [direct ? "직접 받음" : null, owned ? "소유자" : null, !direct && !owned ? "물려받음" : null].filter(Boolean).join(", ");
+            return (
+              <span key={privilege} className={`pg-priv-edit${has ? "" : " off"}`} data-testid="schema-privilege">
+                <span className={`iam-chip${has ? "" : " conditional"}`} title={has ? via : undefined}>
+                  {label} {has ? via : "없음"}
+                </span>
+                {has && direct && (
+                  <RevokeButton
+                    draft={edit.draft}
+                    change={revokeOf(edit.database, edit.role, schemaTarget, privilege)}
+                    label="빼기"
+                    disabled={edit.system}
+                    title={lockedTitle(edit) ?? `${edit.role} 역할에서 스키마 ${schema}의 ${privilege} 권한을 빼요`}
+                  />
+                )}
+                {has && !direct && <RevokeButton draft={edit.draft} change={null} label="빼기" disabled title={owned ? OWNER_HELD_TEXT : via} />}
               </span>
-              {has && direct && <RevokeButton draft={edit.draft} change={revokeOf(edit.database, edit.role, schemaTarget, privilege)} label="빼기" disabled={edit.system} title={lockedTitle(edit) ?? `${edit.role} 역할에서 스키마 ${schema}의 ${privilege} 권한을 빼요`} />}
-              {has && !direct && <RevokeButton draft={edit.draft} change={null} label="빼기" disabled title={owned ? OWNER_HELD_TEXT : via} />}
+            );
+          }
+          const sources = who.allowed.find((r) => r.role === edit.role)?.sources ?? [];
+          const why = sources.map((s) => sourceText(s, edit.role)).join(", ");
+          return (
+            <span key={privilege} className={`pg-priv-edit${sources.length > 0 ? "" : " off"}`} data-testid="schema-privilege">
+              <span className={`iam-chip${sources.length > 0 ? "" : " conditional"}`} title={why || undefined}>
+                {label} {why || "없음"}
+              </span>
+              {sources.length > 0 && <Revokes edit={edit} target={schemaTarget} privilege={privilege} sources={sources} why={why} />}
             </span>
           );
-        }
-        const sources = who.allowed.find((r) => r.role === edit.role)?.sources ?? [];
-        const why = sources.map((s) => sourceText(s, edit.role)).join(", ");
-        return (
-          <span key={privilege} className={`pg-priv-edit${sources.length > 0 ? "" : " off"}`} data-testid="schema-privilege">
-            <span className={`iam-chip${sources.length > 0 ? "" : " conditional"}`} title={why || undefined}>
-              {label} {why || "없음"}
-            </span>
-            {sources.length > 0 && <Revokes edit={edit} target={schemaTarget} privilege={privilege} sources={sources} why={why} />}
-          </span>
-        );
-      })}
-    </div>
+        })}
+      </div>
+      {failed && <PgError compact error={failed} target={target} />}
+    </>
   );
 }
