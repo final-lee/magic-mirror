@@ -6,9 +6,12 @@ import type {
   PgCellDetail,
   PgChangeLogEntry,
   PgDatabaseView,
+  PgDropPlan,
   PgFindings,
   PgObjectRef,
   PgOverview,
+  PgPresetKind,
+  PgPresetSuggestion,
   PgRoleView,
   PgSession,
   PgTarget,
@@ -38,6 +41,8 @@ export const pgKeys = {
     ["pg", targetKey(t), "whoCan", database, object, privilege] as const,
   sessions: (t: PgTarget) => ["pg", targetKey(t), "sessions"] as const,
   findings: (t: PgTarget) => ["pg", targetKey(t), "findings"] as const,
+  preset: (t: PgTarget, database: string | null, preset: PgPresetKind | null, schemas: string[]) => ["pg", targetKey(t), "preset", database, preset, schemas] as const,
+  dropPlan: (t: PgTarget, role: string | null, reassignTo: string | null) => ["pg", targetKey(t), "dropPlan", role, reassignTo] as const,
   /**
    * 변경 기록은 대상마다 있는 것이 아니라 앱이 쓰는 파일 하나다(IAM의 iamKeys.changeLog와 같다). 그래서 대상의 키 밖에 둔다:
    * 다시 읽기(refreshPg)와 탭 닫기(closePg)는 대상의 쿼리만 건드리고, 이 목록은 적용이 끝날 때마다 refreshPgAfterChange가 무효화한다.
@@ -183,6 +188,34 @@ export function usePgChangeLog() {
     queryKey: pgKeys.changeLog,
     queryFn: () => pgApi.changeLog(),
     staleTime: 0,
+    retry: false,
+  });
+}
+
+/**
+ * 역할 만들기의 프리셋 제안(같은 권한을 가진 그룹, 제안할 이름, 기본 권한을 줄 역할). 데이터베이스·프리셋·스키마를 모두 골랐을 때만 조회한다.
+ * 같은 선택은 캐시를 쓴다. 적용이 끝나면 다른 쿼리와 함께 무효화되어 다시 열 때 새로 읽는다.
+ */
+export function usePgPreset(target: PgTarget, database: string | null, preset: PgPresetKind | null, schemas: string[]) {
+  return useQuery<PgPresetSuggestion, AppError>({
+    queryKey: pgKeys.preset(target, database, preset, schemas),
+    queryFn: () => pgApi.preset(target, database!, preset!, schemas),
+    enabled: !!database && !!preset && preset !== "admin" && schemas.length > 0,
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+/**
+ * 역할 삭제 계획. 고른 넘겨받을 역할마다 새로 받고, 이전 계획을 남겨 두지 않는다(gcTime 0): 계획은 그 순간의 클러스터로 만든 것이다.
+ */
+export function usePgDropPlan(target: PgTarget, role: string | null, reassignTo: string | null) {
+  return useQuery<PgDropPlan, AppError>({
+    queryKey: pgKeys.dropPlan(target, role, reassignTo),
+    queryFn: () => pgApi.dropPlan(target, role!, reassignTo!),
+    enabled: !!role && !!reassignTo,
+    staleTime: 0,
+    gcTime: 0,
     retry: false,
   });
 }

@@ -41,7 +41,7 @@ describe("styles of the 바꾸기 mode", () => {
     expect(at(".pg-idle .pg-mark")).toBeGreaterThan(at(".pg-dimmed .pg-mark"));
   });
 
-  test.each([".pg-revoke.on", ".pg-priv-edit", ".sheet.pg-form", ".pg-form-checks", ".pg-attr-form", ".pg-schema-privs"])("has a rule for %s", (sel) => {
+  test.each([".pg-revoke.on", ".pg-priv-edit", ".sheet.pg-form", ".pg-form-checks", ".pg-attr-form", ".pg-schema-privs", ".pg-head-actions", ".pg-create .pg-create-body", ".pg-create-preset", ".pg-drop-steps", ".pg-drop-head"])("has a rule for %s", (sel) => {
     expect(hasRule(sel)).toBe(true);
   });
 });

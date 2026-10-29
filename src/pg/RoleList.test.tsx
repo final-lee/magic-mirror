@@ -158,3 +158,28 @@ test("the expiry is the UTC date, as 점검 prints it, also where the local date
     vi.unstubAllEnvs();
   }
 });
+
+describe("역할 만들기", () => {
+  test("is a button that opens the form", () => {
+    const onCreate = vi.fn();
+    render(<Harness onCreate={onCreate} />);
+    fireEvent.click(screen.getByRole("button", { name: "역할 만들기" }));
+    expect(onCreate).toHaveBeenCalledTimes(1);
+  });
+
+  test("is off with the block reason as its title when the roles can not be changed", () => {
+    const onCreate = vi.fn();
+    render(<Harness onCreate={onCreate} blockReason="읽기 전용 복제본이라 바꿀 수 없어요" />);
+    const button = screen.getByRole("button", { name: "역할 만들기" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "읽기 전용 복제본이라 바꿀 수 없어요");
+    expect(button).toHaveAccessibleDescription("읽기 전용 복제본이라 바꿀 수 없어요");
+    fireEvent.click(button);
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  test("is not there without a handler", () => {
+    render(<Harness />);
+    expect(screen.queryByRole("button", { name: "역할 만들기" })).not.toBeInTheDocument();
+  });
+});

@@ -6,8 +6,8 @@ import {
   OVERLAP_NOTICE,
   defaultsAddedNotice,
   draftDatabase,
-  draftItem,
   putChangeItem,
+  putChangeItems,
   putItems,
   removeApplied as dropApplied,
   toggleItem,
@@ -89,18 +89,10 @@ export function usePgDraft(target: PgTarget, ov: PgOverview | undefined) {
   /** 폼이 만든 변경 하나를 담는다. 같은 칸에 담긴 변경은 겹치는 권한을 걷어 내고 바뀐다(draft.ts putChangeItem) */
   const put = useCallback((change: PgChange) => run((roles, items) => putChangeItem(items, change, roles)), [run]);
 
-  /** 경고가 담아 둔 변경(기본 권한도 담기)을 담는다. 장바구니에 담지 않는 변경은 건너뛰고, 몇 개를 담았는지 알린다 */
+  /** 경고가 담아 둔 변경(기본 권한도 담기)을 담는다. put과 같이 같은 칸의 겹치는 권한을 걷어 내고, 장바구니에 담지 않는 변경은 건너뛰며, 몇 개를 담았는지 알린다 */
   const add = useCallback(
     (changes: PgChange[]) =>
-      run(
-        (roles, items) =>
-          putItems(
-            items,
-            changes.flatMap((change) => draftItem(change) ?? []),
-            roles,
-          ),
-        true,
-      ),
+      run((roles, items) => putChangeItems(items, changes, roles), true),
     [run],
   );
 

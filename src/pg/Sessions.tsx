@@ -3,7 +3,7 @@ import { formatDateTime } from "../iam/format";
 import { DASH, collate } from "./labels";
 import { PgError } from "./PgError";
 import { usePgSessions } from "./queries";
-import type { PgSession, PgTarget } from "./types";
+import type { PgChange, PgSession, PgTarget } from "./types";
 
 /** 다른 사용자의 세션 상세가 이 DB 사용자에게 가려져 있을 때 표 아래에 밝히는 말 */
 export const SESSIONS_FOOTNOTE = "빈 칸은 이 DB 사용자에게 보이지 않는 정보예요. 다른 사용자의 세션을 자세히 보려면 pg_read_all_stats 권한이 필요해요";
@@ -16,18 +16,49 @@ const detailsHidden = (s: PgSession) => !s.own && s.state === null;
 
 const DETAIL_COLUMNS = ["데이터베이스", "클라이언트", "application_name", "상태", "시작", "대기"];
 
+/** 이 앱의 세션은 끊을 수 없다(연결이 끊기면 이 앱이 읽지 못한다) */
+export const OWN_SESSION_TEXT = "이 앱의 세션은 끊을 수 없어요";
+
+/** 세션 줄마다 [끊기]를 둔다. reason이 있으면 모든 [끊기]가 꺼지고 그 글이 제목이다(바꿀 수 없는 이유) */
+export interface Terminate {
+  reason: string | null;
+  onTerminate: (change: PgChange) => void;
+}
+
 interface TableProps {
   sessions: PgSession[];
   /** 역할 열을 맨 앞에 둔다. 세션 화면은 여러 역할의 세션을 늘어놓지만, 역할 상세는 그 역할 하나의 것이라 두지 않는다. */
   withRole?: boolean;
+  /** 주면 줄마다 [끊기] 열이 생긴다 */
+  terminate?: Terminate;
+}
+
+/**
+ * [끊기]: 세션 끊기 변경의 미리보기를 연다. 이 앱의 세션은 끌 수 없고(OWN_SESSION_TEXT), 바꿀 수 없는 이유가 있으면 그 이유가 제목이다.
+ * 끊을 세션을 가리키는 시작 시각은 이 줄에 있을 때만 보낸다: pg_read_all_stats가 없으면 다른 사용자 세션의 시작 시각은 비어서 온다.
+ */
+function TerminateButton({ session, role, terminate }: { session: PgSession; role: string; terminate: Terminate }) {
+  const reason = session.own ? OWN_SESSION_TEXT : terminate.reason;
+  return (
+    <button
+      type="button"
+      className="btn small"
+      disabled={reason !== null}
+      title={reason ?? undefined}
+      aria-description={reason ?? undefined}
+      onClick={() => terminate.onTerminate({ kind: "terminate", pid: session.pid, role, backendStart: session.backendStart })}
+    >
+      끊기
+    </button>
+  );
 }
 
 /**
  * 세션 표(세션 화면과 역할 상세의 세션 탭이 함께 쓴다). 값이 없는 칸은 다른 표처럼 줄표로 보이고,
  * 상세가 가려진 세션이 있으면 그 이유를 표 아래에 밝힌다. 이 앱의 연결에는 "이 앱"이 붙는다.
  */
-export function SessionTable({ sessions, withRole = false }: TableProps) {
-  const columns = withRole ? ["역할", ...DETAIL_COLUMNS] : DETAIL_COLUMNS;
+export function SessionTable({ sessions, withRole = false, terminate }: TableProps) {
+  const columns = [...(withRole ? ["역할"] : []), ...DETAIL_COLUMNS, ...(terminate ? ["조치"] : [])];
   return (
     <>
       <table className="pg-sessions" aria-label="세션 목록">
@@ -53,6 +84,7 @@ export function SessionTable({ sessions, withRole = false }: TableProps) {
               <td>{s.state ?? DASH}</td>
               <td>{formatDateTime(s.backendStart) || DASH}</td>
               <td>{s.waitEvent ?? DASH}</td>
+              {terminate && <td>{s.role === null ? null : <TerminateButton session={s} role={s.role} terminate={terminate} />}</td>}
             </tr>
           ))}
         </tbody>
@@ -74,7 +106,7 @@ const ALL_ROLES = "";
  * 역할로 거를 수 있다. 백엔드는 클라이언트 연결의 세션만 보낸다(백그라운드 프로세스는 읽을 때 거른다). 그래도 역할이 없는 줄이 오면
  * 거름 선택지에 넣지 않고, 역할을 고르면 보이지 않는다.
  */
-export function Sessions({ target }: { target: PgTarget }) {
+export function Sessions({ target, terminate }: { target: PgTarget; terminate?: Terminate }) {
   const q = usePgSessions(target);
   const [role, setRole] = useState(ALL_ROLES);
   const sessions = q.data;
@@ -116,7 +148,7 @@ export function Sessions({ target }: { target: PgTarget }) {
       ) : (
         <div className="pg-pane">
           {q.isError && <PgError compact error={q.error} target={target} />}
-          {shown.length === 0 ? <div className="empty small">{sessions.length === 0 ? "세션이 없어요" : "조건에 맞는 세션이 없어요"}</div> : <SessionTable sessions={shown} withRole />}
+          {shown.length === 0 ? <div className="empty small">{sessions.length === 0 ? "세션이 없어요" : "조건에 맞는 세션이 없어요"}</div> : <SessionTable sessions={shown} withRole terminate={terminate} />}
         </div>
       )}
     </section>

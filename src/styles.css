@@ -744,6 +744,18 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 
 /* 누가 할 수 있나, 세션, 점검. 검색 줄(.wc-form)과 점검 목록(.fx-items)은 IAM의 규칙을 그대로 쓴다. */
 .pg-bar-end { margin-left: auto; }
+/* 역할 만들기·삭제, 비밀번호 재설정, 세션 끊기 */
+.pg-head-actions { display: flex; gap: 8px; margin-top: 4px; }
+.pg-create .pg-create-body { display: flex; flex-direction: column; gap: 4px; max-height: 60vh; overflow: auto; padding-right: 4px; }
+.pg-create fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 8px 0 0; padding: 8px 12px; }
+.pg-create legend { padding: 0 6px; color: var(--dim); font-size: 11px; font-weight: 600; }
+.pg-create .pg-group-checks { margin: 8px 0 0; }
+.pg-create-preset { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; font-size: 12px; cursor: pointer; }
+.pg-create-opt { display: flex; align-items: center; gap: 10px; margin-top: 4px; font-size: 12px; }
+.pg-note { margin: 8px 0 0; font-size: 12px; color: var(--yellow); }
+.pg-drop-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.pg-drop-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; font-size: 12px; }
+.pg-drop-members { margin: 0; padding-left: 18px; font-size: 12px; }
 .wc-form .pg-chips { flex-wrap: wrap; }
 .pg-pick { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .pg-who { margin-bottom: 4px; }

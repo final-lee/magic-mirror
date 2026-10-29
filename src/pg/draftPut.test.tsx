@@ -144,3 +144,48 @@ describe("draft.put", () => {
     expect(result.current.items).toHaveLength(2);
   });
 });
+
+describe("draft.add (기본 권한도 담기) trims like put", () => {
+  const all = ["SELECT", "INSERT", "UPDATE"];
+
+  test("a default privilege add trims the queued revoke of the same line, and is announced once", () => {
+    const result = open();
+    act(() => result.current.put(dflt(all, false)));
+    act(() => result.current.add([dflt(["SELECT"], true)]));
+    expect(result.current.items.map((d) => d.change)).toEqual([dflt(["INSERT", "UPDATE"], false), dflt(["SELECT"], true)]);
+    expect(result.current.notices).toEqual(["기본 권한 1개를 담았어요"]);
+  });
+
+  test("a revoke that covers a queued add drops it", () => {
+    const result = open();
+    act(() => result.current.put(dflt(["SELECT"], true)));
+    act(() => result.current.add([dflt(all, false)]));
+    expect(result.current.items.map((d) => d.change)).toEqual([dflt(all, false)]);
+  });
+
+  test("several changes are put one after another on what the earlier ones left", () => {
+    const result = open();
+    act(() => result.current.add([dflt(all, false), dflt(["SELECT"], true), dflt(["INSERT"], true)]));
+    expect(result.current.items.map((d) => d.change)).toEqual([dflt(["UPDATE"], false), dflt(["SELECT"], true), dflt(["INSERT"], true)]);
+    expect(result.current.notices).toEqual(["기본 권한 3개를 담았어요"]);
+  });
+
+  test("a refused add trims nothing: another database leaves the tray as it was", () => {
+    const result = open();
+    act(() => result.current.put(grant(["SELECT", "INSERT"], false)));
+    const before = result.current.items;
+    act(() => result.current.add([{ ...(dflt(["SELECT"], true) as Extract<PgChange, { kind: "defaultPrivilege" }>), database: "analytics" }]));
+    expect(result.current.items).toBe(before);
+    expect(result.current.notices).toEqual([OTHER_DATABASE_NOTICE]);
+  });
+
+  test("a full tray: the add changes nothing, even where it would trim", () => {
+    const result = open();
+    act(() => result.current.add([dflt(all, false), ...Array.from({ length: 49 }, (_, i) => ({ kind: "membership" as const, group: `g${i}`, member: "x", add: true, admin: false }))]));
+    expect(result.current.items).toHaveLength(50);
+    const before = result.current.items;
+    act(() => result.current.add([dflt(["SELECT"], true)]));
+    expect(result.current.items).toBe(before);
+    expect(result.current.notices).toContain(FULL_NOTICE);
+  });
+});

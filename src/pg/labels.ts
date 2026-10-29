@@ -49,3 +49,6 @@ export function objectName(o: PgObjectRef): string {
   const base = o.kind === "database" || o.kind === "schema" || !o.schema ? o.name : `${o.schema}.${o.name}`;
   return o.signature === null ? base : `${base}(${o.signature})`;
 }
+
+/** 폼의 날짜(YYYY-MM-DD)를 UTC 그날 0시의 ISO 시각으로(utcDay의 반대) */
+export const dayToIso = (day: string) => `${day}T00:00:00Z`;

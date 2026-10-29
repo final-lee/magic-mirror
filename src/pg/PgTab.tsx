@@ -2,12 +2,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useSettings } from "../api/queries";
 import { DoneNotice } from "../components/DoneNotice";
+import { useApplyNotices } from "../iam/useApplyFlow";
 import { useHistoryKeys } from "../lib/useHistoryKeys";
 import { useRouteHistory } from "../lib/useRouteHistory";
 import { changeBlockReason } from "./canChange";
 import { ChangeLog } from "./ChangeLog";
+import { CreateRoleDialog } from "./CreateRoleDialog";
 import { pickDatabase } from "./DatabasePicker";
 import { DefaultPrivileges } from "./DefaultPrivileges";
+import { DropRoleDialog, droppedSummary } from "./DropRoleDialog";
 import { Findings } from "./Findings";
 import { LoginPrompt } from "./LoginPrompt";
 import { PgBatchDialog } from "./PgBatchDialog";
@@ -126,6 +129,10 @@ export function PgTab({ target, active, filter }: Props) {
   const batch = usePgBatch(target);
   // 칸을 눌러 담은 변경들(장바구니). 이 탭이 들고 있어서 PostgreSQL 안의 다른 화면을 보고 돌아와도 남고, 탭을 닫으면 사라진다.
   const draft = usePgDraft(target, ov);
+  // 역할 만들기 창, 역할 삭제 창(지울 역할), 삭제를 마친 뒤의 안내. 이 탭이 들고 있어서 다른 화면을 보고 돌아와도 열린 창이 남는다.
+  const [creating, setCreating] = useState(false);
+  const [dropping, setDropping] = useState<string | null>(null);
+  const dropNotices = useApplyNotices();
   // 바꿀 수 없는 이유(읽기 전용 복제본, 역할을 관리할 수 없는 DB 사용자). 있으면 [바꾸기]와 [되돌리기]가 꺼지고 위쪽에 안내가 뜬다.
   const blockReason = ov ? changeBlockReason(ov.target, ov) : null;
   // 바꾸기 모드(탭 전체): 켜면 권한 표가 칠할 권한을 고르고 칸을 눌러 담는다. 바꿀 수 없게 되면(다른 DB 사용자로 다시 연결 …) 꺼지고, 다시 바꿀 수 있게 돼도 저절로 켜지지 않는다.
@@ -156,11 +163,13 @@ export function PgTab({ target, active, filter }: Props) {
   // 다시 읽기가 되면 화면이 최신이니, 적용 뒤 "목록을 다시 읽지 못했어요" 말은 거둔다
   const dropRefreshChange = change.dropNote;
   const dropRefreshBatch = batch.dropNote;
+  const dropRefreshDrop = dropNotices.dropNote;
   const reread = () =>
     void rereadPg(qc, target).then((ok) => {
       if (!ok) return;
       dropRefreshChange(REFRESH_FAILED_TEXT);
       dropRefreshBatch(REFRESH_FAILED_TEXT);
+      dropRefreshDrop(REFRESH_FAILED_TEXT);
     });
   const saveLogin = (name: string) => {
     if (!targetInfo || !settings) return;
@@ -178,6 +187,13 @@ export function PgTab({ target, active, filter }: Props) {
     setDatabase(to.database);
     setPick(to);
     navigate({ view: "privileges" });
+  };
+  // 역할을 지웠다: 안내하고, 그 역할을 보고 있었다면 상세를 목록으로 바꾼다(지운 역할로 뒤로 돌아오지 않도록 기록 항목을 바꿔 둔다)
+  const dropped = (role: string, refreshed: boolean) => {
+    setDropping(null);
+    dropNotices.announce(droppedSummary(role), refreshed ? [] : [REFRESH_FAILED_TEXT]);
+    setSelectedRole((current) => (current === role ? null : current));
+    replace((r) => (r.view === "roles" && r.id === role ? { view: "roles" } : r));
   };
   // 상세 화면이 보던 하위 탭을 현재 기록 항목에 남긴다. 뒤로 돌아오면 되살린다.
   const remember = (state: Partial<PgRoute>) => replace((r) => ({ ...r, ...state }));
@@ -236,7 +252,7 @@ export function PgTab({ target, active, filter }: Props) {
         ))}
         <div className="iam-main">
           {route.view === "roles" && route.id ? (
-            <RoleDetail key={route.id} target={target} role={route.id} onOpen={go} initialTab={route.tab} onViewState={remember} editing={editing} draft={draft} roles={o.roles} />
+            <RoleDetail key={route.id} target={target} role={route.id} onOpen={go} initialTab={route.tab} onViewState={remember} editing={editing} draft={draft} roles={o.roles} blockReason={blockReason} onChange={change.start} onDrop={setDropping} />
           ) : route.view === "roles" ? (
             <RoleList
               roles={o.roles}
@@ -246,6 +262,8 @@ export function PgTab({ target, active, filter }: Props) {
               selectedId={selectedRole}
               onSelect={setSelectedRole}
               onOpen={(name) => go(roleRoute(name))}
+              onCreate={() => setCreating(true)}
+              blockReason={blockReason}
             />
           ) : route.view === "privileges" ? (
             <PrivilegeGrid
@@ -266,7 +284,7 @@ export function PgTab({ target, active, filter }: Props) {
           ) : route.view === "whoCan" ? (
             <WhoCan target={target} overview={o} database={database} onDatabase={setDatabase} kinds={kinds} onKinds={setKinds} />
           ) : route.view === "sessions" ? (
-            <Sessions target={target} />
+            <Sessions target={target} terminate={{ reason: blockReason, onTerminate: change.start }} />
           ) : route.view === "changes" ? (
             <ChangeLog target={target} targetArn={o.target.arn} blockReason={changeBlockReason(o.target, o)} onStart={change.start} onStartBatch={batch.start} />
           ) : (
@@ -324,7 +342,21 @@ export function PgTab({ target, active, filter }: Props) {
       {batch.notices.map((notice) => (
         <DoneNotice key={`batch-${notice.id}`} notice={notice} onDismiss={() => batch.dismissNotice(notice.id)} />
       ))}
+      {dropNotices.notices.map((notice) => (
+        <DoneNotice key={`drop-${notice.id}`} notice={notice} onDismiss={() => dropNotices.dismissNotice(notice.id)} />
+      ))}
       <div className="pg-main">{content}</div>
+      {/* 만들기·삭제 창은 미리보기 창보다 먼저 그린다: 미리보기 창이 늘 위에 놓인다 */}
+      {ov && loginUser && creating && (
+        <CreateRoleDialog
+          target={target}
+          overview={ov}
+          database={pickDatabase(ov.databases, database, ov.target.defaultDatabase) ?? ov.target.defaultDatabase}
+          onPreview={(created) => change.start(created, { onApplied: () => setCreating(false) })}
+          onClose={() => setCreating(false)}
+        />
+      )}
+      {ov && loginUser && dropping && <DropRoleDialog target={target} role={dropping} overview={ov} onClose={() => setDropping(null)} onDropped={dropped} />}
       {change.pending && <PgChangeDialog pending={change.pending} onApply={change.apply} onRetry={change.retryPreview} onCancel={change.cancel} />}
       {batch.pending && <PgBatchDialog pending={batch.pending} onApply={batch.apply} onRetry={batch.retryPreview} onCancel={batch.cancel} onAddDefaults={batch.pending.undoOf ? undefined : draft.add} />}
     </div>

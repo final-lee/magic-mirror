@@ -192,7 +192,6 @@ export function removeApplied(items: PgDraftItem[], applied: PgChange[]): PgDraf
   return left.length === items.length ? items : left;
 }
 
-
 const without = (privileges: string[], taken: string[]) => privileges.filter((p) => !taken.includes(p));
 
 /**
@@ -240,7 +239,8 @@ export function putChangeItem(items: PgDraftItem[], change: PgChange, roles: PgR
   const next = items.flatMap((queued): PgDraftItem[] => {
     const left = trimmed(queued.change, change);
     if (left === null) return [queued];
-    return left ? (draftItem(left) ? [draftItem(left)!] : []) : [];
+    const kept = left ? draftItem(left) : null;
+    return kept ? [kept] : [];
   });
   if (next.length >= MAX_DRAFT) return { ...start(items), full: true };
   return { ...start([...next, item]), added: 1 };
@@ -257,4 +257,15 @@ export function queuedRevoke(items: PgDraftItem[], change: PgChange): PgDraftIte
     }
     return false;
   });
+}
+
+/**
+ * 변경 여러 개를 차례로 담는다(기본 권한도 담기). 하나하나 putChangeItem의 규칙을 따른다: 겹치는 권한은 걷어 내고, 못 담는 것은 까닭만 알린다.
+ * 담긴 순서를 지키고, 앞 변경이 담긴 장바구니 위에 다음 변경을 담는다.
+ */
+export function putChangeItems(items: PgDraftItem[], changes: PgChange[], roles: PgRoleSummary[]): DraftStep {
+  return changes.reduce((step, change) => {
+    const next = putChangeItem(step.items, change, roles);
+    return { items: next.items, added: step.added + next.added, full: step.full || next.full, overlap: step.overlap || next.overlap, elsewhere: step.elsewhere || next.elsewhere };
+  }, start(items));
 }

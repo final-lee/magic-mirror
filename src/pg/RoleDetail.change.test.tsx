@@ -202,3 +202,55 @@ describe("개요 tab", () => {
     expect(screen.queryByRole("group", { name: /속성 바꾸기/ })).not.toBeInTheDocument();
   });
 });
+
+describe("비밀번호 재설정 and 삭제", () => {
+  const actions = (props: Props = {}) => {
+    const handlers = { onChange: vi.fn<(change: PgChange) => void>(), onDrop: vi.fn<(role: string) => void>() };
+    setup({ editing: false, draft: undefined, ...handlers, ...props });
+    return handlers;
+  };
+  const resetButton = () => screen.getByRole("button", { name: "비밀번호 재설정" });
+  const dropButton = () => screen.getByRole("button", { name: "삭제" });
+
+  test("비밀번호 재설정 starts a password change for the role", async () => {
+    const { onChange } = actions();
+    await screen.findByRole("heading", { name: "alice" });
+    fireEvent.click(resetButton());
+    expect(onChange).toHaveBeenCalledWith({ kind: "password", role: "alice" });
+  });
+
+  test("삭제 asks to drop the role", async () => {
+    const { onDrop } = actions();
+    await screen.findByRole("heading", { name: "alice" });
+    fireEvent.click(dropButton());
+    expect(onDrop).toHaveBeenCalledWith("alice");
+  });
+
+  test("a group has no 비밀번호 재설정 (it can not log in) but can be dropped", async () => {
+    actions({ role: "app_read" });
+    await screen.findByRole("heading", { name: "app_read" });
+    expect(screen.queryByRole("button", { name: "비밀번호 재설정" })).not.toBeInTheDocument();
+    expect(dropButton()).toBeEnabled();
+  });
+
+  test("both are off with the block reason as their title", async () => {
+    const reason = "이 사용자는 rds_superuser 멤버가 아니고 CREATEROLE도 없어서 바꿀 수 없어요";
+    const { onChange, onDrop } = actions({ blockReason: reason });
+    await screen.findByRole("heading", { name: "alice" });
+    for (const button of [resetButton(), dropButton()]) {
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("title", reason);
+      expect(button).toHaveAccessibleDescription(reason);
+      fireEvent.click(button);
+    }
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onDrop).not.toHaveBeenCalled();
+  });
+
+  test("they show without the 바꾸기 mode and not at all without handlers", async () => {
+    setup({ editing: false, draft: undefined });
+    await screen.findByRole("heading", { name: "alice" });
+    expect(screen.queryByRole("button", { name: "삭제" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "비밀번호 재설정" })).not.toBeInTheDocument();
+  });
+});

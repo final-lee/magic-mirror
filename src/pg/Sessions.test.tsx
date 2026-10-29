@@ -4,7 +4,7 @@ import { renderWithClient } from "../test/utils";
 import { pgApi } from "./api";
 import { pgTarget, sampleSessions } from "./fixtures";
 import { Sessions, SESSIONS_FOOTNOTE } from "./Sessions";
-import type { PgSession } from "./types";
+import type { PgChange, PgSession } from "./types";
 
 vi.mock("./api", () => ({ pgApi: { sessions: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
@@ -259,5 +259,70 @@ describe("the footnote", () => {
     expect(screen.queryByText(FOOTNOTE)).not.toBeInTheDocument();
     fireEvent.change(roleFilter(), { target: { value: "carol" } });
     expect(screen.getByText(FOOTNOTE)).toBeInTheDocument();
+  });
+});
+
+describe("끊기", () => {
+  const OWN = "이 앱의 세션은 끊을 수 없어요";
+  const withButtons = (reason: string | null = null) => {
+    const onTerminate = vi.fn();
+    setup2({ reason, onTerminate });
+    return onTerminate;
+  };
+  function setup2(terminate: { reason: string | null; onTerminate: (c: PgChange) => void }) {
+    return renderWithClient(<Sessions target={pgTarget} terminate={terminate} />);
+  }
+  test("each session with a role has a button that starts a terminate change with the pid, the role and the start", async () => {
+    m.sessions.mockResolvedValue([hidden({ pid: 4001, role: "carol", state: "idle", backendStart: "2026-10-29T08:00:00Z" })]);
+    const onTerminate = withButtons();
+    await loaded();
+    fireEvent.click(within(bodyRows()[0]).getByRole("button", { name: "끊기" }));
+    expect(onTerminate).toHaveBeenCalledWith({ kind: "terminate", pid: 4001, role: "carol", backendStart: "2026-10-29T08:00:00Z" });
+  });
+
+  test("a start time the row does not have is sent as null", async () => {
+    m.sessions.mockResolvedValue([hidden({ pid: 4001, role: "carol", backendStart: null })]);
+    const onTerminate = withButtons();
+    await loaded();
+    fireEvent.click(within(bodyRows()[0]).getByRole("button", { name: "끊기" }));
+    expect(onTerminate).toHaveBeenCalledWith({ kind: "terminate", pid: 4001, role: "carol", backendStart: null });
+  });
+
+  test("the app's own session has a disabled button titled with why", async () => {
+    m.sessions.mockResolvedValue([hidden({ pid: 1, role: "iam_admin", own: true, state: "active" })]);
+    const onTerminate = withButtons();
+    await loaded();
+    const button = within(bodyRows()[0]).getByRole("button", { name: "끊기" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", OWN);
+    fireEvent.click(button);
+    expect(onTerminate).not.toHaveBeenCalled();
+  });
+
+  test("a row without a role has no button", async () => {
+    m.sessions.mockResolvedValue([hidden({ pid: 4002, role: null })]);
+    withButtons();
+    await loaded();
+    expect(within(bodyRows()[0]).queryByRole("button", { name: "끊기" })).not.toBeInTheDocument();
+  });
+
+  test("with a block reason every button is off and the reason is its title (the own session keeps its own text)", async () => {
+    m.sessions.mockResolvedValue([hidden({ pid: 4001, role: "carol" }), hidden({ pid: 1, role: "iam_admin", own: true })]);
+    const reason = "읽기 전용 복제본이라 바꿀 수 없어요";
+    const onTerminate = withButtons(reason);
+    await loaded();
+    const [other, own] = bodyRows().map((r) => within(r).getByRole("button", { name: "끊기" }));
+    expect(other).toBeDisabled();
+    expect(other).toHaveAttribute("title", reason);
+    expect(own).toHaveAttribute("title", OWN);
+    fireEvent.click(other);
+    expect(onTerminate).not.toHaveBeenCalled();
+  });
+
+  test("without the prop there is no button column", async () => {
+    setup();
+    await loaded();
+    expect(screen.queryByRole("button", { name: "끊기" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "조치" })).not.toBeInTheDocument();
   });
 });
