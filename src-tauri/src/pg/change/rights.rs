@@ -48,6 +48,11 @@ fn drop_text(role: &str, version: i32) -> String {
     format!("{role} 역할을 삭제할 권한이 없어요. {}", requirement(version))
 }
 
+/// 160000 전에 NOINHERIT인 로그인한 역할: 삭제하려고 받는 구성원 관계가 아무 권한도 주지 못한다
+pub fn drop_inherit_text(role: &str) -> String {
+    format!("{role} 역할을 삭제할 권한이 없어요. 로그인한 역할에 INHERIT가 있어야 해요")
+}
+
 fn membership_text(group: &str, version: i32) -> String {
     if version >= MEMBERSHIP_OPTIONS_SINCE {
         format!("{group} 역할의 구성원을 바꿀 권한이 없어요. {group} 역할에 대한 ADMIN OPTION이 있어야 해요")
@@ -189,6 +194,11 @@ impl<'a> Rights<'a> {
         Ok(())
     }
 
+    /// `SET ROLE role`을 할 수 있는가(`check_can_set_role`, 160000 전에는 `check_is_member_of_role`): superuser이거나 자기 자신이거나 SET이 허용된 사슬이 있다
+    pub fn can_set_role(&self, role: &str) -> bool {
+        self.superuser() || self.eval.can_set_role(self.login, role)
+    }
+
     /// `group`의 구성원 관계를 바꿀 권한(`check_role_membership_authorization`): superuser 그룹은 superuser가, 그 밖에는 superuser이거나
     /// 구성원 관계 사슬(상속하든 말든) 어디에선가 ADMIN OPTION이 닿아야 한다. 160000 전에는 로그인한 역할 자신의 CREATEROLE도 된다.
     /// 부여자를 찾지는 않는다: 거두는 쪽은 `GRANTED BY`로 부여자를 직접 대서 이것만 통과하면 된다
@@ -228,8 +238,6 @@ impl<'a> Rights<'a> {
     }
 
     /// `member`를 `group`에서 거둘 때 어느 부여를 거둘 수 있나
-    // QB5(안전한 삭제)가 쓴다. 그때까지는 시험 빌드에서만 컴파일한다(`allow`를 쓰지 않으려고)
-    #[cfg(test)]
     pub fn membership_revocations(&self, group: &str, member: &str) -> Revocations {
         self.revocations(group, member, false)
     }

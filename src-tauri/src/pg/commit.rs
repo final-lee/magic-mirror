@@ -17,8 +17,8 @@ use super::model::{ClusterSnapshot, DbSnapshot};
 use super::password::NewPassword;
 use super::view::{PgApplyResult, PgBatchPreview, PgBatchResult, PgPreview, PgUndo, PgWarnLevel, PgWarning};
 use crate::error::AppError;
-use crate::pg::summary::RDS_SUPERUSER;
 use crate::iam::clock::iso;
+use crate::pg::summary::RDS_SUPERUSER;
 
 pub const STALE: &str = "미리보기 뒤에 바뀌었어요. 미리보기를 다시 받아 주세요";
 pub const NOT_FOUND: &str = "변경 기록을 찾을 수 없어요";
@@ -210,7 +210,7 @@ fn check_drop_roles(req: &PgRequest, entries: &[PgLogEntry]) -> Result<(), AppEr
 // ───────────────────────── 관문 ─────────────────────────
 
 /// 경고들과 확인 문구로 본 관문(IAM과 같은 문구)
-fn gate_of<'a>(mut warnings: impl Iterator<Item = &'a PgWarning> + Clone, confirm_text: Option<&str>, typed: Option<&str>) -> Result<(), AppError> {
+pub(super) fn gate_of<'a>(mut warnings: impl Iterator<Item = &'a PgWarning> + Clone, confirm_text: Option<&str>, typed: Option<&str>) -> Result<(), AppError> {
     let blocks: Vec<&str> = warnings.clone().filter(|w| w.level == PgWarnLevel::Block).map(|w| w.message.as_str()).collect();
     if !blocks.is_empty() {
         return Err(AppError::other(format!("막혀 있어서 적용할 수 없어요: {}", blocks.join(" / "))));
@@ -421,7 +421,9 @@ where
             // 기록을 저장하지 못한 것도 알리되 오류의 종류는 그대로 둔다
             Some(AppError::Network { message }) => AppError::Network { message: noted(message, &recorded.notes) },
             Some(AppError::Other { message }) => AppError::Other { message: noted(message, &recorded.notes) },
-            Some(error) => error,
+            // 문구 칸이 없는 오류(`SsoExpired`, `AccessDenied`, `Throttled`)는 글로 풀어 `Other`로 낸다: 기록을 저장하지 못했다는 말이 사라지지 않게 한다.
+            // 이때만 오류의 종류가 바뀐다(기록 저장이 실패한 드문 경우)
+            Some(error) => AppError::other(noted(error.to_string(), &recorded.notes)),
             None => AppError::other(noted(text, &recorded.notes)),
         })
     };

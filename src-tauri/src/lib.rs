@@ -104,6 +104,9 @@ pub fn run() {
             pg_commands::pg_change_log,
             pg_commands::pg_undo,
             pg_commands::pg_undo_batch,
+            pg_commands::pg_preset,
+            pg_commands::pg_drop_plan,
+            pg_commands::pg_apply_drop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

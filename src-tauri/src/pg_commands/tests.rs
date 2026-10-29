@@ -315,6 +315,37 @@ fn the_loaded_databases_are_the_kept_snapshots_of_the_target_in_name_order() {
     assert_eq!(state.loaded_dbs(&a).iter().map(|s| s.database.as_str()).collect::<Vec<_>>(), ["analytics", "orders"]);
 }
 
+#[test]
+fn forgetting_databases_drops_the_named_snapshots_of_that_target_and_nothing_else() {
+    let state = PgState::default();
+    let (a, b) = (target("a"), target("b"));
+    open(&state, &a);
+    open(&state, &b);
+    let epoch_a = state.pool.epoch(&a);
+    let epoch_b = state.pool.epoch(&b);
+    for name in ["appdb", "analytics", "orders"] {
+        state.keep_db(&a, epoch_a, name, Arc::new(snapshot(name)));
+    }
+    state.keep_db(&b, epoch_b, "appdb", Arc::new(snapshot("appdb")));
+    state.forget_databases(&a, &names(&["appdb", "orders", "not-kept"]));
+    assert_eq!(state.loaded_dbs(&a).iter().map(|s| s.database.as_str()).collect::<Vec<_>>(), ["analytics"]);
+    assert!(state.cached_db(&b, "appdb").is_some(), "다른 대상의 스냅숏은 그대로예요");
+}
+
+#[test]
+fn a_drop_plan_is_remembered_per_target_role_and_heir_and_used_once() {
+    let state = PgState::default();
+    let a = target("a");
+    let plan = |heir: &str| crate::pg::drop::drop_plan(&cluster(), &[], &[], "carol", heir, "appdb");
+    let (to_alice, to_bob) = (plan("alice"), plan("bob"));
+    locked(&state.drop_plans).remember("dev", &(&a, "carol", "alice"), to_alice.clone(), 100);
+    locked(&state.drop_plans).remember("dev", &(&a, "carol", "bob"), to_bob.clone(), 100);
+    assert_eq!(locked(&state.drop_plans).take("dev", &(&a, "carol", "alice"), 101), Some(to_alice));
+    assert_eq!(locked(&state.drop_plans).take("dev", &(&a, "carol", "alice"), 101), None, "한 번만 써요");
+    assert_eq!(locked(&state.drop_plans).take("dev", &(&target("b"), "carol", "bob"), 101), None, "다른 대상의 계획이에요");
+    assert_eq!(locked(&state.drop_plans).take("dev", &(&a, "carol", "bob"), 101), Some(to_bob));
+}
+
 // ───────────────────────── 데이터베이스 스냅숏 ─────────────────────────
 
 #[tokio::test]

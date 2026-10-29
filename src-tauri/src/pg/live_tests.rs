@@ -46,6 +46,12 @@ use changes::{
 mod writes;
 use writes::{a_grant_commits_and_the_server_agrees, a_run_that_fails_midway_leaves_nothing, a_warning_notice_fails_the_run, a_created_login_gets_a_working_scram_password, a_lock_wait_fails_with_the_lock_text, a_membership_revoke_removes_only_the_named_grantors_row, preview_then_apply_runs_through_the_state};
 #[cfg(test)]
+mod drops;
+use drops::{
+    a_lock_stops_the_drop_at_its_database_and_the_role_stays, a_privilege_that_would_stay_blocks_the_plan_and_the_server_stops_too, a_role_is_dropped_in_every_database_and_leaves_no_trace,
+    a_session_is_ended_through_the_commit_flow,
+};
+#[cfg(test)]
 mod statements;
 use statements::{
     membership_statements_grant_and_revoke, ownership_and_session_statements, privilege_statements_change_the_acls, role_statements_create_alter_and_reset_roles,
@@ -319,6 +325,10 @@ on_both_servers!(
     a_created_login_gets_a_working_scram_password,
     a_membership_revoke_removes_only_the_named_grantors_row,
     preview_then_apply_runs_through_the_state,
+    a_role_is_dropped_in_every_database_and_leaves_no_trace,
+    a_privilege_that_would_stay_blocks_the_plan_and_the_server_stops_too,
+    a_lock_stops_the_drop_at_its_database_and_the_role_stays,
+    a_session_is_ended_through_the_commit_flow,
 );
 
 async fn cluster_snapshot_reads_the_seeded_roles_and_memberships(server: Server) {

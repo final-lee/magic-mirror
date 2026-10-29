@@ -473,13 +473,13 @@ fn pg_only_the_catalog_and_exec_run_queries() {
 
 /// 문장을 돌리는 `exec::run(`을 부르는 곳은 `pg_commands.rs`의 닫힘뿐이고, 그 닫힘은 `commit::commit`과 `drop::apply`에 넘기는 것 하나씩이다.
 /// 관문을 거치지 않는 새 호출은 이 숫자를 고쳐야 들어온다(IAM의 `WRITE_CALLS_SITES`와 같다).
-/// 지금은 `commit::commit`의 닫힘 하나다. QB5가 `drop::apply`의 닫힘을 더하면 둘이 된다
-const EXEC_RUN_SITES: usize = 1;
-/// 같은 이유로 `commit::commit(`을 부르는 곳도 센다
+const EXEC_RUN_SITES: usize = 2;
+/// 같은 이유로 `commit::commit(`과 `drop::apply(`를 부르는 곳도 센다
 const COMMIT_SITES: usize = 1;
+const DROP_APPLY_SITES: usize = 1;
 
 #[test]
-fn exec_runs_only_from_the_closures_handed_to_the_commit_gate() {
+fn exec_runs_only_from_the_closures_handed_to_the_commit_and_drop_gates() {
     let tree = tree();
     let mut sites = BTreeMap::new();
     for (file, _) in tree.iter().filter(|(_, test_only)| !**test_only) {
@@ -495,10 +495,17 @@ fn exec_runs_only_from_the_closures_handed_to_the_commit_gate() {
 
     let commands = code_of(&fs::read_to_string(src_dir().join("pg_commands.rs")).expect("pg_commands.rs"));
     assert_eq!(commands.matches("commit::commit(").count(), COMMIT_SITES, "commit::commit(을 부르는 곳의 수");
-    // 닫힘은 commit::commit의 인자 안에 있다: exec::run( 앞에 commit::commit(이 있고 둘 사이에 다른 함수 정의가 없다
-    let commit_at = commands.find("commit::commit(").expect("commit::commit(");
-    let run_at = commands.find("exec::run(").expect("exec::run(");
-    assert!(commit_at < run_at && !commands[commit_at..run_at].contains("fn "), "exec::run(은 commit::commit에 넘기는 닫힘 안에 있어야 해요");
+    assert_eq!(commands.matches("drop::apply(").count(), DROP_APPLY_SITES, "drop::apply(를 부르는 곳의 수");
+    // 닫힘은 관문의 인자 안에 있다: 모든 exec::run( 앞에 관문 호출이 있고 둘 사이에 다른 함수 정의가 없으며, 관문마다 닫힘이 하나씩이다
+    let gates: Vec<usize> = commands.match_indices("commit::commit(").chain(commands.match_indices("drop::apply(")).map(|(at, _)| at).collect();
+    let runs: Vec<usize> = commands.match_indices("exec::run(").map(|(at, _)| at).collect();
+    let mut used = BTreeSet::new();
+    for run_at in runs {
+        let gate = gates.iter().copied().filter(|&gate| gate < run_at).max().expect("exec::run( 앞에 관문 호출이 있어야 해요");
+        assert!(!commands[gate..run_at].contains("fn "), "exec::run(은 관문(commit::commit, drop::apply)에 넘기는 닫힘 안에 있어야 해요");
+        assert!(used.insert(gate), "관문 하나에 exec::run(이 둘 있어요");
+    }
+    assert_eq!(used.len(), gates.len(), "exec::run(이 없는 관문이 있어요");
 }
 
 /// 코드(주석 줄 빼고)에서 제품 파일들 가운데 `needle`이 나오는 파일들

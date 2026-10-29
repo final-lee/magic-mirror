@@ -32,7 +32,7 @@ const OPEN_SYSTEM_GROUPS: [&str; 11] = [
 ];
 /// 역할 이름으로 쓸 수 없는 예약어(대소문자 구분 없이)
 const RESERVED_NAMES: [&str; 5] = ["public", "none", "current_role", "current_user", "session_user"];
-const READ_REPLICA: &str = "읽기 전용 복제본이라 바꿀 수 없어요";
+pub(crate) const READ_REPLICA: &str = "읽기 전용 복제본이라 바꿀 수 없어요";
 const BAD_NAME: &str = "역할 이름이 올바르지 않아요. 1~63바이트이고 pg_로 시작하지 않아야 해요";
 const RESERVED_NAME: &str = "이 이름은 PostgreSQL이 예약해 둬서 쓸 수 없어요";
 const PUBLIC_ROLE: &str = "PUBLIC이라는 이름의 역할은 이 앱에서 바꿀 수 없어요";
@@ -41,15 +41,15 @@ const NO_ITEMS: &str = "바꿀 객체가 없어요";
 const SCHEMAS_WITH_SCHEMA: &str = "스키마의 기본 권한은 모든 스키마에만 줄 수 있어요";
 const UNDO_AFTER_MORE: &str = "만든 뒤에 객체나 권한이 생겨서 되돌릴 수 없어요";
 const OWN_PASSWORD: &str = "지금 로그인한 역할이라 여기서 비밀번호를 바꿀 수 없어요";
-const DROP_LOGIN: &str = "앱이 로그인한 역할은 삭제할 수 없어요";
+pub(crate) const DROP_LOGIN: &str = "앱이 로그인한 역할은 삭제할 수 없어요";
 const SESSION_GONE: &str = "세션이 이미 끝났어요";
 const TRUNCATED: &str = "객체가 많아 일부만 읽었어요. 영향에 없는 객체에도 적용돼요";
 
-fn system_role_text(role: &str) -> String {
+pub(crate) fn system_role_text(role: &str) -> String {
     format!("시스템 역할이라 바꿀 수 없어요: {role}")
 }
 
-fn unknown_role_text(role: &str) -> String {
+pub(crate) fn unknown_role_text(role: &str) -> String {
     format!("역할을 찾을 수 없어요: {role}")
 }
 
