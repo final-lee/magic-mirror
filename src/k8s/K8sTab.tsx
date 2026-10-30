@@ -57,7 +57,7 @@ export function K8sTab({ target }: Props) {
     return <K8sError error={ctx.error} target={target} ssoProfile={target.profile} />;
   }
   if (chosen === null) {
-    if (info!.candidates.length === 0) return <NoContext message={info!.kubeconfigPaths.length > 0 ? NO_KUBECONFIG(info!.kubeconfigPaths) : NO_CONTEXT} command={info!.updateCommand} onRecheck={recheck} />;
+    if (info!.candidates.length === 0) return <NoContext message={info!.kubeconfigMissing ? NO_KUBECONFIG(info!.kubeconfigPaths) : NO_CONTEXT} command={info!.updateCommand} onRecheck={recheck} />;
     return (
       <ContextPicker
         candidates={info!.candidates}
