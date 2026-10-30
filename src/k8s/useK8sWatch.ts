@@ -34,7 +34,7 @@ export function useK8sWatch(
       setSnap(LOADING);
       return;
     }
-    return watchRegistry.subscribe(key, (onMessage) => k8sApi.watch(target, kind, namespace, ssoProfile, onMessage), setSnap);
+    return watchRegistry.subscribe(key, (onMessage) => k8sApi.watch(target, kind, namespace, ssoProfile, onMessage), setSnap, ssoProfile);
     // key가 target·context·kind·namespace를 모두 담는다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, enabled, ssoProfile, sessionEpoch]);

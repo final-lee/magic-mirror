@@ -1,4 +1,5 @@
 import type { AppError } from "../api/types";
+import { reportSsoExpired } from "../api/invoke";
 import { k8sApi } from "./api";
 import type { K8sRow, K8sWatchMessage } from "./types";
 
@@ -22,6 +23,10 @@ interface Entry {
   unwatchOnId: boolean;
   timer: ReturnType<typeof setTimeout> | null;
   dead: boolean;
+  /** 이 감시가 쓰는 exec 프로필: SSO 만료를 알릴 때 쓴다 */
+  ssoProfile: string | null;
+  /** 이번 오류 구간에서 SSO 만료를 이미 알렸는지. reset/changes가 오면 새 구간이다. */
+  ssoReported: boolean;
 }
 
 const entries = new Map<string, Entry>();
@@ -41,19 +46,26 @@ function onMessage(e: Entry, m: K8sWatchMessage) {
   if (e.dead) return;
   const prev = e.snapshot;
   if (m.type === "reset") {
+    e.ssoReported = false;
     e.rows = new Map(m.rows.map((r) => [r.uid, r]));
     publish(e, { rows: rowsOf(e), status: "ready", error: null });
   } else if (m.type === "changes") {
-    if (m.upserts.length === 0 && m.deletes.length === 0) return;
+    // 감시가 다시 이어졌다는 뜻이라 변화가 없어도 오류는 지운다.
+    e.ssoReported = false;
+    if (m.upserts.length === 0 && m.deletes.length === 0 && prev.error === null) return;
     for (const r of m.upserts) e.rows.set(r.uid, r);
     for (const uid of m.deletes) e.rows.delete(uid);
-    publish(e, { ...prev, rows: rowsOf(e) });
+    publish(e, { ...prev, rows: rowsOf(e), error: null });
   } else if (m.fatal) {
     // 치명적이면 감시가 멈춘 것이다. 지금까지의 행은 낡았을 수 있어 비운다.
     e.rows = new Map();
     publish(e, { rows: [], status: "error", error: m.error });
   } else {
     // 일시적인 오류: 행과 상태는 그대로 두고 오류만 알린다.
+    if (m.error.kind === "ssoExpired" && e.ssoProfile !== null && !e.ssoReported) {
+      e.ssoReported = true;
+      reportSsoExpired(e.ssoProfile);
+    }
     publish(e, { ...prev, error: m.error });
   }
 }
@@ -71,7 +83,7 @@ function unwatch(id: number) {
 
 export const watchRegistry = {
   /** 같은 key의 구독자는 감시 하나를 나눠 쓴다. 현재 상태를 곧바로 받고, 돌려받은 함수로 구독을 끝낸다. */
-  subscribe(key: string, start: Start, listener: Listener): () => void {
+  subscribe(key: string, start: Start, listener: Listener, ssoProfile: string | null = null): () => void {
     let e = entries.get(key);
     if (e) {
       if (e.timer) {
@@ -79,7 +91,7 @@ export const watchRegistry = {
         e.timer = null;
       }
     } else {
-      const entry: Entry = { rows: new Map(), snapshot: LOADING, listeners: new Set(), id: null, unwatchOnId: false, timer: null, dead: false };
+      const entry: Entry = { rows: new Map(), snapshot: LOADING, listeners: new Set(), id: null, unwatchOnId: false, timer: null, dead: false, ssoProfile, ssoReported: false };
       e = entry;
       entries.set(key, entry);
       start((m) => onMessage(entry, m)).then(

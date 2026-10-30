@@ -2,6 +2,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { api } from "../api/client";
+import { onSsoExpired } from "../api/invoke";
 import type { Settings } from "../api/types";
 import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
@@ -258,4 +259,60 @@ test("a fatal watch error shows a compact error above the selector", async () =>
   await waitFor(() => expect(watchCalls()).toHaveLength(1));
   act(() => emit({ type: "error", error: { kind: "other", message: "watch broke" }, fatal: true }));
   expect(await screen.findByText("watch broke")).toBeInTheDocument();
+});
+
+test("a non-fatal stall error shows as a banner and goes away after the next changes", async () => {
+  m.context.mockResolvedValue(info([cand("ctx")]));
+  setup();
+  await screen.findByText(STATE_CONNECTED);
+  await waitFor(() => expect(watchCalls()).toHaveLength(1));
+  await sendNamespaces([ns("default")]);
+  act(() => emit({ type: "error", error: { kind: "network", message: "stalled list" }, fatal: false } as K8sWatchMessage));
+  expect(await screen.findByText(/stalled list/)).toBeInTheDocument();
+  expect(screen.getByText(STATE_CONNECTED)).toBeInTheDocument();
+  act(() => emit({ type: "changes", upserts: [ns("two")], deletes: [] }));
+  await waitFor(() => expect(screen.queryByText(/stalled list/)).not.toBeInTheDocument());
+});
+
+test("ssoExpired over the watch channel reports the exec profile", async () => {
+  const seen: string[] = [];
+  const off = onSsoExpired((p) => seen.push(p));
+  m.context.mockResolvedValue(info([cand("ctx", { execProfile: "exec-p" })]));
+  setup();
+  await screen.findByText(STATE_CONNECTED);
+  await waitFor(() => expect(watchCalls()).toHaveLength(1));
+  act(() => emit({ type: "error", error: { kind: "ssoExpired" }, fatal: false } as K8sWatchMessage));
+  act(() => emit({ type: "error", error: { kind: "ssoExpired" }, fatal: false } as K8sWatchMessage));
+  expect(seen).toEqual(["exec-p"]);
+  off();
+});
+
+test("reconnecting does not ask the rules before the session is open again", async () => {
+  m.context.mockResolvedValue(info([cand("ctx")]));
+  setup();
+  await screen.findByText(STATE_CONNECTED);
+  await waitFor(() => expect(m.rules).toHaveBeenCalledTimes(1));
+  let release!: (s: K8sSession) => void;
+  m.open.mockImplementationOnce(() => new Promise((r) => (release = r)));
+  m.rules.mockRejectedValue({ kind: "other", message: "먼저 연결해 주세요" });
+  fireEvent.click(screen.getByRole("button", { name: RECONNECT }));
+  await waitFor(() => expect(m.close).toHaveBeenCalled());
+  await waitFor(() => expect(m.open).toHaveBeenCalledTimes(2));
+  expect(m.rules).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText("먼저 연결해 주세요")).not.toBeInTheDocument();
+  m.rules.mockResolvedValue(rules());
+  release(session());
+  await waitFor(() => expect(m.rules).toHaveBeenCalledTimes(2));
+});
+
+test("the context is not read until the settings have loaded", async () => {
+  m.context.mockResolvedValue(info([cand("ctx")]));
+  let release!: (s: Settings) => void;
+  vi.mocked(api.getSettings).mockImplementation(() => new Promise((r) => (release = r)));
+  const qc = newQueryClient();
+  render(withClientAndSso(<K8sTab target={target} active />, qc, ssoLoginStub()));
+  await new Promise((r) => setTimeout(r, 20));
+  expect(m.context).not.toHaveBeenCalled();
+  release({ enabledServices: [], favorites: [], lastProfile: "app", lastRegion: null, kubeconfigPath: "/kc" });
+  await waitFor(() => expect(m.context).toHaveBeenCalledWith(target, "/kc", null));
 });

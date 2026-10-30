@@ -1,14 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useSettings } from "../api/queries";
-import { savedMissing } from "./text";
 import { ContextPicker } from "./ContextPicker";
 import { K8sError } from "./K8sError";
 import { MyRules } from "./MyRules";
 import { NoContext } from "./NoContext";
 import { NAMESPACES, chooseContext, ssoProfileOf } from "./targets";
 import { ALL, TopBar, type K8sConnection } from "./TopBar";
-import { NAV_LABEL, NAV_MY_PERMISSIONS, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNECTING, updateCommand } from "./text";
+import { NAV_LABEL, savedMissing, NAV_MY_PERMISSIONS, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNECTING, updateCommand } from "./text";
 import { refreshK8s, useK8sContext, useK8sRules, useK8sSession } from "./queries";
 import type { K8sTarget } from "./types";
 import { useK8sWatch } from "./useK8sWatch";
@@ -25,7 +24,7 @@ export function K8sTab({ target }: Props) {
   const settingsReady = settings !== undefined || settingsFailed;
   const kubeconfig = settings?.kubeconfigPath ?? null;
   // 저장해 둔 context는 ARN을 알아야 찾을 수 있어서, 백엔드에는 늘 null을 넘기고 고르는 일은 여기서 한다.
-  const ctx = useK8sContext(target, kubeconfig, null);
+  const ctx = useK8sContext(target, kubeconfig, null, settingsReady);
   const info = ctx.data;
   const saved = info ? settings?.k8sContexts?.[info.arn] ?? null : null;
   const [chosen, missing] = info
@@ -82,7 +81,7 @@ export function K8sTab({ target }: Props) {
         onReconnect={reconnect}
       />
       {missing && <p className="err k8s-notes">{savedMissing(missing)}</p>}
-      {namespaces.status === "error" && namespaces.error && <K8sError error={namespaces.error} target={target} ssoProfile={ssoProfile} compact />}
+      {namespaces.error && <K8sError error={namespaces.error} target={target} ssoProfile={ssoProfile} compact />}
       <div className="pg-main">
         <nav className="iam-nav" aria-label={NAV_LABEL}>
           <button className="iam-nav-item on" aria-current="page">
