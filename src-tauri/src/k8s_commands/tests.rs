@@ -96,3 +96,48 @@ fn missing_only_when_no_path_is_a_file() {
     assert!(none_exists(&[]));
     assert!(!none_exists(&[absent, present]));
 }
+
+fn pending() -> tokio::task::JoinHandle<()> {
+    tokio::spawn(std::future::pending::<()>())
+}
+
+#[tokio::test]
+async fn close_aborts_only_that_targets_watches() {
+    let state = K8sState::default();
+    let (a, b) = (target("a"), target("b"));
+    let (ha, hb) = (pending(), pending());
+    let (ca, cb) = (ha.abort_handle(), hb.abort_handle());
+    let ia = state.register_watch(&a, 0, |_| ca).unwrap();
+    let ib = state.register_watch(&b, 0, |_| cb).unwrap();
+    assert_ne!(ia, ib);
+    state.close(&a);
+    assert!(ha.await.unwrap_err().is_cancelled());
+    tokio::task::yield_now().await;
+    assert!(!hb.is_finished());
+    state.unwatch(ib);
+    assert!(hb.await.unwrap_err().is_cancelled());
+}
+
+#[tokio::test]
+async fn register_after_close_with_the_old_epoch_is_refused() {
+    let state = K8sState::default();
+    let t = target("a");
+    let started = state.epoch(&t);
+    state.close(&t);
+    assert_eq!(state.register_watch(&t, started, |_| unreachable!("must not spawn")), None);
+}
+
+#[tokio::test]
+async fn unwatch_of_an_unknown_id_is_a_no_op_and_forget_does_not_abort() {
+    let state = K8sState::default();
+    state.unwatch(99);
+    let t = target("a");
+    let h = pending();
+    let c = h.abort_handle();
+    let id = state.register_watch(&t, 0, |_| c).unwrap();
+    state.forget_watch(id);
+    state.unwatch(id);
+    tokio::task::yield_now().await;
+    assert!(!h.is_finished());
+    h.abort();
+}

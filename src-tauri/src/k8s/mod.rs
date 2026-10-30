@@ -4,8 +4,10 @@ pub mod failure;
 pub mod kubeconfig;
 pub mod path;
 pub mod review;
+pub mod rows;
 pub mod target;
 pub mod tls;
+pub mod watch;
 
 #[cfg(test)]
 mod hygiene;

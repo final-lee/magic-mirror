@@ -1,12 +1,13 @@
 //! EKS 탭의 명령. 대상(프로필·리전·클러스터)마다 열린 연결 하나(`Session`)를 둔다.
 //! 열기는 시작할 때 대상의 닫힌 횟수(`epoch`)를 읽어 두고, 끝날 때 그사이 닫혔으면 연결을 버린다(PG 탭과 같은 규칙).
-//! 잠금 순서: `epochs` 다음에 `sessions`. 두 잠금을 함께 잡는 곳은 모두 이 순서를 지킨다.
+//! 잠금 순서: `epochs`, `sessions`, `watches`. 두 잠금을 함께 잡는 곳은 모두 이 순서를 지킨다.
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::commands::AppState;
 use crate::error::AppError;
@@ -14,7 +15,9 @@ use crate::k8s::connect;
 use crate::k8s::failure::{describe, failure_of, Endpoint, Failure, NOT_OPENED};
 use crate::k8s::kubeconfig::{self, Candidate, NO_CONTEXT};
 use crate::k8s::review::{self, Identity, Rules};
+use crate::k8s::rows::KindRef;
 use crate::k8s::target::{describe_cluster, K8sTarget};
+use crate::k8s::watch::{self, WatchMessage};
 
 pub struct Session {
     pub client: kube::Client,
@@ -26,6 +29,14 @@ pub struct Session {
 pub struct K8sState {
     sessions: Mutex<HashMap<K8sTarget, Arc<Session>>>,
     epochs: Mutex<HashMap<K8sTarget, u64>>,
+    watches: Mutex<HashMap<u64, WatchEntry>>,
+    next_watch: AtomicU64,
+}
+
+/// 돌고 있는 watch 하나. 대상이 닫히면 같은 대상의 것을 모두 멈춘다.
+struct WatchEntry {
+    target: K8sTarget,
+    handle: tokio::task::AbortHandle,
 }
 
 fn locked<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -51,6 +62,36 @@ impl K8sState {
         let mut epochs = locked(&self.epochs);
         *epochs.entry(t.clone()).or_insert(0) += 1;
         locked(&self.sessions).remove(t);
+        locked(&self.watches).retain(|_, w| {
+            let same = w.target == *t;
+            if same {
+                w.handle.abort();
+            }
+            !same
+        });
+    }
+
+    /// 시작할 때의 `epoch`와 같을 때만 `spawn`으로 watch를 띄워 등록한다. 다르면(그사이 닫힘) None.
+    /// 등록이 끝날 때까지 `watches` 잠금을 쥐니, 곧바로 끝나는 작업의 `forget_watch`도 등록 뒤에 실행된다.
+    pub fn register_watch(&self, t: &K8sTarget, started: u64, spawn: impl FnOnce(u64) -> tokio::task::AbortHandle) -> Option<u64> {
+        let epochs = locked(&self.epochs);
+        if *epochs.get(t).unwrap_or(&0) != started {
+            return None;
+        }
+        let mut watches = locked(&self.watches);
+        let id = self.next_watch.fetch_add(1, Ordering::Relaxed) + 1;
+        watches.insert(id, WatchEntry { target: t.clone(), handle: spawn(id) });
+        Some(id)
+    }
+
+    pub fn forget_watch(&self, id: u64) {
+        locked(&self.watches).remove(&id);
+    }
+
+    pub fn unwatch(&self, id: u64) {
+        if let Some(w) = locked(&self.watches).remove(&id) {
+            w.handle.abort();
+        }
     }
 
     pub fn session(&self, t: &K8sTarget) -> Result<Arc<Session>, AppError> {
@@ -148,7 +189,6 @@ pub async fn k8s_open(app: State<'_, AppState>, k8s: State<'_, K8sState>, target
         .map_err(|_| describe(&Failure::Unreachable, endpoint))?
         .map_err(|e| describe(&failure_of(&e, "get", "version"), endpoint))?;
     let session = Session { client, endpoint, context };
-    // `Session.context`는 KB4가 읽는다. 그때까지 dead code 경고가 나지 않게 여기서 읽는다
     let context = session.context.clone();
     if !k8s.keep(&target, started, session) {
         return Err(AppError::other(NOT_OPENED));
@@ -165,6 +205,36 @@ pub fn k8s_close(k8s: State<'_, K8sState>, target: K8sTarget) {
 pub async fn k8s_rules(k8s: State<'_, K8sState>, target: K8sTarget, namespace: String) -> Result<Rules, AppError> {
     let s = k8s.session(&target)?;
     review::rules(&s.client, &namespace, s.endpoint).await
+}
+
+/// 목록을 지켜본다. 처음 목록은 `reset`, 이후 변경은 묶어서 `changes`로 채널에 흘린다. 반환값은 `k8s_unwatch`에 쓰는 번호.
+#[tauri::command]
+pub fn k8s_watch(
+    app: tauri::AppHandle,
+    k8s: State<'_, K8sState>,
+    target: K8sTarget,
+    kind: KindRef,
+    namespace: Option<String>,
+    on_event: tauri::ipc::Channel<WatchMessage>,
+) -> Result<u64, AppError> {
+    let started = k8s.epoch(&target);
+    let session = k8s.session(&target)?;
+    let (client, endpoint) = (session.client.clone(), session.endpoint);
+    k8s.register_watch(&target, started, |id| {
+        let task = tauri::async_runtime::spawn(async move {
+            watch::run(client, kind, namespace, endpoint, move |m| on_event.send(m).is_ok()).await;
+            app.state::<K8sState>().forget_watch(id);
+        });
+        match task {
+            tauri::async_runtime::JoinHandle::Tokio(h) => h.abort_handle(),
+        }
+    })
+    .ok_or_else(|| AppError::other(NOT_OPENED))
+}
+
+#[tauri::command]
+pub fn k8s_unwatch(k8s: State<'_, K8sState>, watch_id: u64) {
+    k8s.unwatch(watch_id);
 }
 
 #[cfg(test)]
