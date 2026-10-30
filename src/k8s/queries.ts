@@ -14,10 +14,11 @@ export const k8sKeys = {
 };
 
 /** kubeconfig와 DescribeCluster를 읽는다. 인증 명령은 실행하지 않는다. */
-export function useK8sContext(target: K8sTarget, kubeconfig: string | null, saved: string | null) {
+export function useK8sContext(target: K8sTarget, kubeconfig: string | null, saved: string | null, enabled = true) {
   return useQuery<K8sContextInfo, AppError>({
     queryKey: k8sKeys.context(target, kubeconfig, saved),
     queryFn: () => k8sApi.context(target, kubeconfig, saved),
+    enabled,
     staleTime: Infinity,
     retry: false,
   });
@@ -60,7 +61,10 @@ export async function closeK8s(qc: QueryClient, target: K8sTarget, ssoProfile: s
 /**
  * 다시 연결: 감시를 버리고 연결을 닫은 뒤, 세션 쿼리를 초기화한다(resetQueries). 그러면 구독 중인 화면에 알려져
  * 값이 비워져(enabled가 꺼진다) 닫는 동안 감시가 시작되지 않고, 켜져 있는 세션 쿼리는 k8s_open을 다시 불러
- * 새 dataUpdatedAt(sessionEpoch)으로 감시가 한 번 다시 구독된다. 나머지 쿼리는 무효화해 context를 다시 읽는다.
+ * 새 dataUpdatedAt(sessionEpoch)으로 감시가 한 번 다시 구독된다. 이 새 구독만 새 연결을 쓴다: 감시는 반드시
+ * 이 함수(또는 closeK8s)가 dropTarget을 먼저 부른 뒤에 다시 구독해야 한다.
+ * 세션에 기대는 나머지 쿼리(권한 등)는 지워서(removeQueries) 닫힌 연결에 다시 묻지 않게 한다. 세션이 다시 열려
+ * enabled가 켜지면 새로 읽는다. context 쿼리만 무효화해 kubeconfig를 다시 읽는다.
  */
 export async function refreshK8s(qc: QueryClient, target: K8sTarget, ssoProfile: string): Promise<void> {
   watchRegistry.dropTarget(targetKey(target));
@@ -69,9 +73,10 @@ export async function refreshK8s(qc: QueryClient, target: K8sTarget, ssoProfile:
   } catch {
     // 이미 닫혔다
   }
-  const sessionKey = [...k8sKeys.root(target), "session"];
+  const kindOf = (q: { queryKey: readonly unknown[] }) => q.queryKey[2];
+  qc.removeQueries({ queryKey: k8sKeys.root(target), predicate: (q) => kindOf(q) !== "session" && kindOf(q) !== "context" });
   await Promise.all([
-    qc.resetQueries({ queryKey: sessionKey }),
-    qc.invalidateQueries({ queryKey: k8sKeys.root(target), predicate: (q) => q.queryKey[2] !== "session" }),
+    qc.resetQueries({ queryKey: [...k8sKeys.root(target), "session"] }),
+    qc.invalidateQueries({ queryKey: [...k8sKeys.root(target), "context"] }),
   ]);
 }

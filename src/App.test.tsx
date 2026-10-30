@@ -827,7 +827,18 @@ describe("EKS 탭", () => {
     expect(k8sApi.close).toHaveBeenCalledWith(target("staging"), "prod");
   });
 
+  /** 연결까지 끝나는 EKS 탭: context가 하나라 바로 열린다 */
+  const connectable = () => {
+    vi.mocked(k8sApi.context).mockResolvedValue({
+      arn: "arn:aws:eks:ap-northeast-2:1:cluster/x", endpoint: "https://x", version: "1.30", endpointPublic: true, endpointPrivate: false, publicCidrs: [],
+      kubeconfigMissing: false, kubeconfigPaths: [], candidates: [{ name: "ctx", cluster: "x", user: "u", namespace: null, execProfile: null }], chosen: null, savedMissing: null, updateCommand: "",
+    });
+    vi.mocked(k8sApi.open).mockResolvedValue({ context: "ctx", execProfile: null, serverVersion: "1.30", identity: { username: "a", groups: [], arn: null, source: "kubeconfig" } });
+    vi.mocked(k8sApi.watch).mockResolvedValue(1);
+  };
+
   test("⌘R on an active k8s tab refreshes that target only", async () => {
+    connectable();
     await showClusters();
     await open("prod");
     await screen.findByRole("tab", { name: tabTitle("prod") });
@@ -838,18 +849,28 @@ describe("EKS 탭", () => {
     fireEvent.keyDown(window, { key: "r", metaKey: true });
     await waitFor(() => expect(k8sApi.close).toHaveBeenCalledTimes(1));
     expect(k8sApi.close).toHaveBeenCalledWith(target("staging"), "prod");
+    // 닫은 뒤 그 탭만 다시 연다
+    await waitFor(() => expect(vi.mocked(k8sApi.open).mock.calls.filter(([t]) => t.cluster === "staging")).toHaveLength(2));
+    expect(vi.mocked(k8sApi.open).mock.calls.filter(([t]) => t.cluster === "prod")).toHaveLength(1);
   });
 
-  test("changing the kubeconfig path in the settings saves it and invalidates the k8s queries", async () => {
+  test("changing the kubeconfig path in the settings saves it and refreshes each open k8s tab", async () => {
     m.saveSettings.mockResolvedValue(undefined as never);
-    const { qc } = renderWithClient(<App />);
-    await screen.findByText("EKS");
-    qc.setQueryData(["k8s", "x", "context"], 1);
+    connectable();
+    await showClusters();
+    await open("prod");
+    await screen.findByRole("tab", { name: tabTitle("prod") });
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    await open("staging");
+    await screen.findByRole("tab", { name: tabTitle("staging") });
+    vi.mocked(k8sApi.close).mockClear();
     fireEvent.click(screen.getByRole("button", { name: "서비스 설정" }));
     const input = screen.getByLabelText("kubeconfig 경로");
     fireEvent.change(input, { target: { value: "/tmp/kube" } });
     fireEvent.blur(input);
     await waitFor(() => expect(m.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ kubeconfigPath: "/tmp/kube" })));
-    expect(qc.getQueryState(["k8s", "x", "context"])?.isInvalidated).toBe(true);
+    await waitFor(() => expect(k8sApi.close).toHaveBeenCalledTimes(2));
+    expect(k8sApi.close).toHaveBeenCalledWith(target("prod"), "prod");
+    expect(k8sApi.close).toHaveBeenCalledWith(target("staging"), "prod");
   });
 });

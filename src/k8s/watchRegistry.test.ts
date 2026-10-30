@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { onSsoExpired } from "../api/invoke";
 import { LINGER_MS, watchRegistry, type WatchSnapshot } from "./watchRegistry";
 import type { K8sRow, K8sWatchMessage } from "./types";
 
@@ -142,4 +143,41 @@ test("dropTarget clears that target's keys without unwatch and ignores late mess
   watchRegistry.subscribe(key, start, () => {});
   expect(start).toHaveBeenCalledTimes(2);
   expect(other.start).toHaveBeenCalledTimes(1);
+});
+
+const ssoErr: K8sWatchMessage = { type: "error", error: { kind: "ssoExpired" }, fatal: false } as K8sWatchMessage;
+
+test("a non-fatal ssoExpired over the channel reports the exec profile once per error transition", async () => {
+  const seen: string[] = [];
+  const off = onSsoExpired((p) => seen.push(p));
+  const { start, ref } = starter();
+  let last!: WatchSnapshot;
+  watchRegistry.subscribe(key, start, (s) => (last = s), "exec-p");
+  await vi.advanceTimersByTimeAsync(0);
+  ref.send({ type: "reset", rows: [row("a")] });
+  ref.send(ssoErr);
+  ref.send(ssoErr);
+  expect(seen).toEqual(["exec-p"]);
+  expect(last.status).toBe("ready");
+  expect(last.error).toEqual({ kind: "ssoExpired" });
+  ref.send({ type: "changes", upserts: [row("b")], deletes: [] });
+  expect(last.error).toBeNull();
+  ref.send(ssoErr);
+  expect(seen).toEqual(["exec-p", "exec-p"]);
+  off();
+});
+
+test("a later reset or an empty changes clears a non-fatal error", async () => {
+  const { start, ref } = starter();
+  let last!: WatchSnapshot;
+  watchRegistry.subscribe(key, start, (s) => (last = s));
+  await vi.advanceTimersByTimeAsync(0);
+  ref.send({ type: "reset", rows: [row("a")] });
+  ref.send({ type: "error", error: { kind: "network", message: "stall" }, fatal: false } as K8sWatchMessage);
+  expect(last.error).not.toBeNull();
+  ref.send({ type: "changes", upserts: [], deletes: [] });
+  expect(last.error).toBeNull();
+  ref.send({ type: "error", error: { kind: "network", message: "stall" }, fatal: false } as K8sWatchMessage);
+  ref.send({ type: "reset", rows: [] });
+  expect(last.error).toBeNull();
 });

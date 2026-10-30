@@ -364,7 +364,8 @@ export default function App() {
             kubeconfigPath={settings.kubeconfigPath ?? null}
             onKubeconfigPathChange={(path) => {
               update({ kubeconfigPath: path });
-              void qc.invalidateQueries({ queryKey: ["k8s"] });
+              // 연결을 닫고 감시를 버린 뒤 다시 열어야 새 kubeconfig의 인증을 쓴다.
+              for (const t of k8sTabs) void refreshK8s(qc, t.target, t.target.profile);
             }}
             updater={updater}
             appVersion={appVersion}
