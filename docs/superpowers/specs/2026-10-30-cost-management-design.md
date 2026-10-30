@@ -18,9 +18,9 @@
 | 단계 | 범위 |
 |---|---|
 | C0 | 실제 계정으로 확인하는 짧은 조사. 2026-10-30 `personal` 계정으로 했고 결과는 **C0 결과** 절에 있다. 리소스 단위 조회의 `SERVICE` 필터 요구와 `RESOURCE_ID` 형식은 이 계정에서 opt-in이 꺼져 있어 확인하지 못했다. C4 계획 전에 opt-in을 켠 계정으로 다시 확인한다. |
-| C1 | 백엔드 기반: Cost Explorer·Price List 클라이언트(us-east-1), 디스크 캐시, 요청 계수기, 오류 분류, 대시보드 명령 |
+| C1 | 백엔드 기반: Cost Explorer 클라이언트(us-east-1), 디스크 캐시, 요청 계수기, 오류 분류, 대시보드 명령 |
 | C2 | `💰 비용` 탭 화면 |
-| C3 | 상세 패널 정가 추정 |
+| C3 | 상세 패널 정가 추정(Price List 클라이언트 포함) |
 | C4 | 상세 패널 실제 청구액(최근 14일) |
 
 ## C0 결과
@@ -186,7 +186,7 @@ cost_overview(profile, query: CostQuery, refresh: boolean): CostOverview
   // 요약, 일별 상위 5개+기타, 예상(이번 달만), 데이터 시각
 cost_breakdown(profile, query: CostQuery, refresh: boolean): CostBreakdown
   // 행: key, current, previous, delta, share. 작은 항목 묶음 포함
-cost_tag_keys(profile): string[]
+cost_tag_keys(profile, refresh: boolean): string[]
 cost_usage(profile): { yearMonth: string; requests: number }   // 요청 계수기
 cost_estimate(profile, region, subject: CostSubject): CostEstimate | { unsupported: string }
 cost_resource_actual(profile, target: { ceService: string; resourceId: string }, metric: CostMetric, refresh: boolean): CostDaily
