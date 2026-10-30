@@ -14,6 +14,8 @@ import {
   CORE_GROUP,
   IDENTITY_FALLBACK,
   NO_CONTEXT,
+  NO_KUBECONFIG,
+  BAR_LABEL,
   RECHECK,
   RECONNECT,
   RULES_INCOMPLETE,
@@ -90,6 +92,20 @@ test("no candidates shows the guide, copies the command, and rechecks", async ()
   await waitFor(() => expect(m.context).toHaveBeenCalledTimes(2));
 });
 
+test("no kubeconfig: empty candidates with tried paths shows the paths and the update command", async () => {
+  m.context.mockResolvedValue(info([], { kubeconfigPaths: ["/a/config", "/b/config"] }));
+  setup();
+  expect(await screen.findByText(NO_KUBECONFIG(["/a/config", "/b/config"]))).toBeInTheDocument();
+  expect(screen.getByText("aws eks update-kubeconfig --name prod").tagName).toBe("CODE");
+});
+
+test("a single candidate auto-opens and still shows the saved-missing notice", async () => {
+  m.context.mockResolvedValue(info([cand("ctx")]));
+  setup({ k8sContexts: { [ARN]: "gone" } });
+  expect(await screen.findByText(savedMissing("gone"))).toBeInTheDocument();
+  await screen.findByText(STATE_CONNECTED);
+});
+
 test("several candidates: picking one saves it and opens with that context", async () => {
   m.context.mockResolvedValue(info([cand("a", { execProfile: "pa" }), cand("b")]));
   setup();
@@ -114,7 +130,7 @@ test("one candidate opens directly and the top bar shows context, identity, grou
   let resolve!: (s: K8sSession) => void;
   m.open.mockReturnValue(new Promise((r) => (resolve = r)));
   setup();
-  const bar = async () => within(await screen.findByRole("group", { name: "연결 정보" }));
+  const bar = async () => within(await screen.findByRole("group", { name: BAR_LABEL }));
   expect(await (await bar()).findByText(STATE_CONNECTING)).toBeInTheDocument();
   await act(async () => resolve(session()));
   const b = await bar();
@@ -219,6 +235,7 @@ test("reconnect closes, reopens once, and lists the namespaces again", async () 
   fireEvent.click(screen.getByRole("button", { name: RECONNECT }));
   await waitFor(() => expect(m.close).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(m.open).toHaveBeenCalledTimes(2));
+  expect(m.close.mock.invocationCallOrder[0]).toBeLessThan(m.open.mock.invocationCallOrder[1]);
   await waitFor(() => expect(watchCalls()).toHaveLength(2));
   await act(async () => {});
   expect(watchCalls()).toHaveLength(2);

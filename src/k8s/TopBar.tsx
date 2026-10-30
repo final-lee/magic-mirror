@@ -1,6 +1,7 @@
 import type { K8sIdentity } from "./types";
 import {
   ALL_NAMESPACES,
+  BAR_LABEL,
   IDENTITY_FALLBACK,
   LABEL_CONTEXT,
   LABEL_GROUPS,
@@ -45,7 +46,7 @@ export function TopBar({ context, identity, connection, execProfile, profile, na
   const mismatch = execProfile !== null && execProfile !== profile;
   return (
     <div className="k8s-top-wrap">
-      <div className="pg-top" role="group" aria-label="연결 정보">
+      <div className="pg-top" role="group" aria-label={BAR_LABEL}>
         <span className="k8s-field">
           <span className="dim">{LABEL_CONTEXT}</span>
           <b className="mono">{context}</b>
