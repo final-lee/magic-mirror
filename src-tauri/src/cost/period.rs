@@ -38,6 +38,7 @@ fn civil_from_days(z: i64) -> Ymd {
     Ymd { y: y as i32, m, d }
 }
 
+#[cfg(test)]
 fn days_in_month(y: i32, m: u32) -> u32 {
     match m {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
@@ -54,6 +55,7 @@ impl Ymd {
     }
 
     /// `YYYY-MM-DD`. 없는 날짜(2월 30일 등)나 다른 모양이면 None.
+    #[cfg(test)]
     pub fn parse(s: &str) -> Option<Ymd> {
         let b = s.as_bytes();
         if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
@@ -92,6 +94,7 @@ impl Ymd {
     }
 
     /// 두 날짜 사이의 날 수(`other - self`).
+    #[cfg(test)]
     pub fn days_until(self, other: Ymd) -> i64 {
         other.days() - self.days()
     }
