@@ -88,6 +88,7 @@ fn fallback(user: &str) -> Identity {
 }
 
 /// SelfSubjectReview(1.28+). 서버가 이 API를 모르면(404) kubeconfig 사용자 이름으로 대신한다.
+/// 시간 초과는 늘 Unreachable로 알린다. 토큰이 만료돼 exec 플러그인이 요청 안에서 멈춘 경우도 여기로 온다.
 pub async fn identity(client: &Client, kubeconfig_user: &str, endpoint: Endpoint) -> Result<Identity, AppError> {
     let api: Api<SelfSubjectReview> = Api::all(client.clone());
     match tokio::time::timeout(REQUEST_TIMEOUT, api.create(&PostParams::default(), &SelfSubjectReview::default())).await {
@@ -105,12 +106,12 @@ pub async fn rules(client: &Client, namespace: &str, endpoint: Endpoint) -> Resu
         .await
         .map_err(|_| describe(&Failure::Unreachable, endpoint))?
         .map_err(|e| describe(&failure_of(&e, "create", "selfsubjectrulesreviews"), endpoint))?;
-    Ok(out.status.as_ref().map(|s| rules_of(s, namespace)).unwrap_or(Rules {
-        namespace: namespace.into(),
-        resource_rules: vec![],
-        non_resource_rules: vec![],
-        incomplete: true,
-    }))
+    Ok(rules_or_incomplete(out.status.as_ref(), namespace))
+}
+
+/// 서버가 status를 비워 보내면 빈 목록을 "불완전"으로 돌려준다(화면이 버튼을 켜 두고 안내를 띄운다).
+pub fn rules_or_incomplete(status: Option<&SubjectRulesReviewStatus>, namespace: &str) -> Rules {
+    status.map(|s| rules_of(s, namespace)).unwrap_or(Rules { namespace: namespace.into(), resource_rules: vec![], non_resource_rules: vec![], incomplete: true })
 }
 
 #[cfg(test)]

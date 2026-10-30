@@ -30,3 +30,18 @@ async fn unknown_context_is_an_error() {
     let config = Kubeconfig::from_yaml(KUBECONFIG).unwrap();
     assert!(client_for(&config, "nope", ENDPOINT).await.is_err());
 }
+
+#[tokio::test]
+async fn a_slow_exec_plugin_ends_in_the_exec_failed_message() {
+    install_crypto_provider();
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("slow.sh");
+    std::fs::write(&script, "#!/bin/sh\nsleep 5\n").unwrap();
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let yaml = KUBECONFIG.replace(r#"user: { token: "not-a-real-token" }"#, &format!("user:\n    exec:\n      apiVersion: client.authentication.k8s.io/v1beta1\n      command: {}\n      interactiveMode: Never", script.display()));
+    let config = Kubeconfig::from_yaml(&yaml).unwrap();
+    let started = std::time::Instant::now();
+    let err = client_for_with_timeout(&config, "ctx", ENDPOINT, Duration::from_millis(200)).await.err().unwrap();
+    assert_eq!(err, AppError::other(exec_failed(EXEC_TIMEOUT_REASON)));
+    assert!(started.elapsed() < Duration::from_secs(3));
+}
