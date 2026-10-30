@@ -795,3 +795,14 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .k8s-table td { padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .k8s-problems { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .k8s-problem { background: #ff453a26; color: var(--red); border-radius: 9px; padding: 0 7px; font-size: 11px; white-space: nowrap; }
+
+.k8s-tree { width: 190px; flex: none; overflow: auto; border-right: 1px solid var(--line); padding: 6px; display: flex; flex-direction: column; gap: 8px; }
+.k8s-tree-title { color: var(--dim); font-size: 11px; padding: 2px 6px; }
+.k8s-tree-item { display: block; width: 100%; text-align: left; padding: 3px 8px; background: none; border: 0; border-radius: 5px; color: inherit; cursor: pointer; }
+.k8s-tree-item:hover { background: #ffffff0d; }
+.k8s-tree-item.on { background: #ffffff1a; }
+.k8s-list { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.k8s-list-bar { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.k8s-filter { flex: 1; min-width: 0; }
+.k8s-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
+.k8s-hint { margin: 4px 10px; font-size: 12px; }

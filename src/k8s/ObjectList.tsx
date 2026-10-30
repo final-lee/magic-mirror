@@ -1,0 +1,49 @@
+import { useMemo, useState } from "react";
+import { ListTable } from "../iam/ListTable";
+import { columnsFor } from "./columns";
+import { matchesFilter, parseFilter } from "./selector";
+import { BAD_SELECTOR, FILTER_PLACEHOLDER, LIST_EMPTY, LIST_NO_MATCH, LOADING, ONLY_PROBLEMS } from "./text";
+import type { K8sKindRef, K8sRow } from "./types";
+
+interface Props {
+  kind: K8sKindRef;
+  rows: K8sRow[];
+  status: "loading" | "ready" | "error";
+  /** 모든 네임스페이스를 보는 중이면 네임스페이스 열을 보인다 */
+  showNamespace: boolean;
+  selectedUid: string | null;
+  onSelect: (row: K8sRow) => void;
+  /** 나이 계산 기준(시험용). 없으면 그리는 시각 */
+  now?: number;
+}
+
+/** 감시로 받은 행을 이름·레이블 셀렉터·이상 여부로 걸러 보여 준다 */
+export function ObjectList({ kind, rows, status, showNamespace, selectedUid, onSelect, now }: Props) {
+  const [query, setQuery] = useState("");
+  const [onlyProblems, setOnlyProblems] = useState(false);
+  const filter = parseFilter(query);
+  const shown = rows.filter((r) => matchesFilter(r, filter) && (!onlyProblems || r.problems.length > 0));
+  const at = now ?? Date.now();
+  const columns = useMemo(() => columnsFor(kind, showNamespace, at), [kind, showNamespace, at]);
+  const select = (uid: string) => {
+    const r = rows.find((x) => x.uid === uid);
+    if (r) onSelect(r);
+  };
+  return (
+    <div className="k8s-list">
+      <div className="k8s-list-bar">
+        <input type="search" className="k8s-filter" aria-label={FILTER_PLACEHOLDER} placeholder={FILTER_PLACEHOLDER} value={query} onChange={(e) => setQuery(e.target.value)} />
+        <label className="k8s-check">
+          <input type="checkbox" checked={onlyProblems} onChange={(e) => setOnlyProblems(e.target.checked)} />
+          {ONLY_PROBLEMS}
+        </label>
+      </div>
+      {filter.kind === "invalid" && <p className="err k8s-hint">{BAD_SELECTOR}</p>}
+      {status === "loading" ? (
+        <div className="empty">{LOADING}</div>
+      ) : (
+        <ListTable label={kind.kind} rows={shown} columns={columns} rowKey={(r) => r.uid} selectedId={selectedUid} onSelect={select} onOpen={select} empty={rows.length === 0 ? LIST_EMPTY : LIST_NO_MATCH} />
+      )}
+    </div>
+  );
+}
