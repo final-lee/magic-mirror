@@ -357,8 +357,16 @@ async fn broken_pod_is_flagged_in_the_watch_and_has_warning_events() {
         }
     }
     task.abort();
-    let v = get(&client, &pods, Some("mm-k2"), "broken", PRIVATE).await.unwrap();
-    assert!(v.events.iter().any(|e| e.type_ == "Warning"), "{:?}", v.events);
+    // 상태가 보인 뒤에 Event가 목록에 나타나기까지는 따로 걸릴 수 있으니 제한 시간 안에서 기다린다
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let v = get(&client, &pods, Some("mm-k2"), "broken", PRIVATE).await.unwrap();
+        if v.events.iter().any(|e| e.type_ == "Warning") {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "no Warning event for broken within 60 s: {:?}", v.events);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }
 
 #[tokio::test]
