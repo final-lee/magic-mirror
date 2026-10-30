@@ -1,6 +1,8 @@
 //! 접속과 요청 실패를 사용자 문구로 가른다. 문구는 계획의 Global Constraints와 같다.
 use std::io::ErrorKind;
 
+use kube::client::AuthError;
+
 use crate::error::AppError;
 
 pub const UNREACHABLE_PRIVATE: &str = "클러스터 엔드포인트에 연결하지 못했어요. 프라이빗 엔드포인트라서 Tailscale 연결을 확인해 주세요";
@@ -51,16 +53,52 @@ pub fn exec_failure(stderr: &str) -> Failure {
     }
 }
 
-/// 토큰처럼 보이는 낱말을 가린다: EKS 토큰(`k8s-aws-v1.`), JWT(`eyJ`로 시작하고 점이 둘), `Bearer` 다음 낱말.
+fn is_token_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~' | '+' | '/' | '=')
+}
+
+/// 토큰처럼 보이는 부분을 가린다: EKS 토큰(`k8s-aws-v1.`), JWT(`eyJ`로 시작하고 점이 둘 이상), `Bearer` 다음 낱말.
+/// 낱말 경계에 기대지 않고 글 어디서든 찾는다(따옴표 안, JSON 안, `=`/`:` 뒤, `Bearer` 뒤의 탭이나 겹 공백).
 pub fn redact_secrets(text: &str) -> String {
-    let mut out = Vec::new();
-    let mut bearer = false;
-    for word in text.split(' ') {
-        let secret = bearer || word.starts_with("k8s-aws-v1.") || (word.starts_with("eyJ") && word.matches('.').count() >= 2);
-        bearer = word.eq_ignore_ascii_case("bearer");
-        out.push(if secret { "[가림]" } else { word });
+    const MASK: &str = "[가림]";
+    let chars: Vec<char> = text.chars().collect();
+    let starts = |i: usize, p: &str| chars[i..].iter().zip(p.chars()).filter(|(c, q)| c.eq_ignore_ascii_case(q)).count() == p.chars().count();
+    let token_end = |i: usize| i + chars[i..].iter().take_while(|c| is_token_char(**c)).count();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i..].starts_with(&['k', '8', 's', '-', 'a', 'w', 's', '-', 'v', '1', '.']) {
+            out.push_str(MASK);
+            i = token_end(i);
+        } else if chars[i..].starts_with(&['e', 'y', 'J']) {
+            let end = token_end(i);
+            if chars[i..end].iter().filter(|c| **c == '.').count() >= 2 {
+                out.push_str(MASK);
+            } else {
+                out.extend(&chars[i..end]);
+            }
+            i = end;
+        } else if starts(i, "bearer") {
+            out.extend(&chars[i..i + 6]);
+            i += 6;
+            let ws = chars[i..].iter().take_while(|c| c.is_whitespace()).count();
+            out.extend(&chars[i..i + ws]);
+            i += ws;
+            let end = i + chars[i..].iter().take_while(|c| !c.is_whitespace() && !matches!(**c, '"' | '\'' | ',' | '}' | ']')).count();
+            if end > i {
+                out.push_str(MASK);
+            }
+            i = end;
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
     }
-    out.join(" ")
+    out
+}
+
+fn capped(text: &str) -> String {
+    redact_secrets(text).chars().take(EXEC_LINE_MAX).collect()
 }
 
 pub fn describe(f: &Failure, endpoint: Endpoint) -> AppError {
@@ -80,9 +118,9 @@ pub fn describe(f: &Failure, endpoint: Endpoint) -> AppError {
         Failure::ExecMissing { command } => AppError::other(exec_missing(command)),
         Failure::ExecFailed { stderr } => {
             let line = stderr.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
-            AppError::other(exec_failed(&redact_secrets(line).chars().take(EXEC_LINE_MAX).collect::<String>()))
+            AppError::other(exec_failed(&capped(line)))
         }
-        Failure::Other(message) => AppError::other(redact_secrets(message)),
+        Failure::Other(message) => AppError::other(capped(message)),
     }
 }
 
@@ -116,6 +154,15 @@ fn io_kind_failure(kind: ErrorKind) -> Option<Failure> {
     .then_some(Failure::Unreachable)
 }
 
+/// exec 플러그인 오류만 가른다. `AuthExecRun`의 Display는 플러그인 stdout까지 담으니 그 글은 절대 쓰지 않는다.
+fn auth_failure(auth: &AuthError) -> Option<Failure> {
+    match auth {
+        AuthError::AuthExecStart(io) if io.kind() == ErrorKind::NotFound => Some(Failure::ExecMissing { command: DEFAULT_EXEC_COMMAND.into() }),
+        AuthError::AuthExecRun { out, .. } => Some(exec_failure(&String::from_utf8_lossy(&out.stderr))),
+        _ => None,
+    }
+}
+
 pub fn failure_of(e: &kube::Error, verb: &str, resource: &str) -> Failure {
     match e {
         kube::Error::Api(status) => {
@@ -127,19 +174,18 @@ pub fn failure_of(e: &kube::Error, verb: &str, resource: &str) -> Failure {
         }
         kube::Error::RustlsTls(_) => return Failure::Tls,
         kube::Error::Auth(auth) => {
-            use kube::client::AuthError;
-            match auth {
-                AuthError::AuthExecStart(io) if io.kind() == ErrorKind::NotFound => {
-                    return Failure::ExecMissing { command: DEFAULT_EXEC_COMMAND.into() };
-                }
-                AuthError::AuthExecRun { out, .. } => return exec_failure(&String::from_utf8_lossy(&out.stderr)),
-                _ => {}
+            if let Some(f) = auth_failure(auth) {
+                return f;
             }
         }
         _ => {}
     }
     let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(e);
     while let Some(c) = cause {
+        // 토큰 갱신 중의 exec 실패는 `Error::Service(Box<AuthError>)`로 온다.
+        if let Some(f) = c.downcast_ref::<AuthError>().and_then(auth_failure) {
+            return f;
+        }
         if let Some(io) = c.downcast_ref::<std::io::Error>() {
             if let Some(f) = io_kind_failure(io.kind()) {
                 return f;

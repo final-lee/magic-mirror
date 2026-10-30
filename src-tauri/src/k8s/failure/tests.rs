@@ -99,3 +99,41 @@ fn text_in_the_chain_is_walked() {
     let e = kube::Error::Service("tcp connect error: Connection refused (os error 61)".into());
     assert_eq!(failure_of(&e, "get", "version"), Failure::Unreachable);
 }
+
+fn exec_run(stderr: &str) -> AuthError {
+    AuthError::AuthExecRun {
+        cmd: "aws".into(),
+        status: ExitStatus::from_raw(1 << 8),
+        out: Output { status: ExitStatus::from_raw(1 << 8), stdout: b"k8s-aws-v1.stdoutsecret".to_vec(), stderr: stderr.as_bytes().to_vec() },
+    }
+}
+
+#[test]
+fn token_refresh_errors_arrive_wrapped_in_service() {
+    let sso = kube::Error::Service(Box::new(exec_run(SSO_STDERR)));
+    assert_eq!(failure_of(&sso, "list", "pods"), Failure::SsoExpired);
+    let denied = kube::Error::Service(Box::new(exec_run(DENIED_STDERR)));
+    assert_eq!(failure_of(&denied, "list", "pods"), Failure::ExecFailed { stderr: DENIED_STDERR.into() });
+    let missing = kube::Error::Service(Box::new(AuthError::AuthExecStart(std::io::Error::from(ErrorKind::NotFound))));
+    assert_eq!(failure_of(&missing, "list", "pods"), Failure::ExecMissing { command: "aws".into() });
+}
+
+#[test]
+fn redaction_finds_tokens_anywhere() {
+    assert_eq!(redact_secrets("got \"k8s-aws-v1.aHR0\" back"), "got \"[가림]\" back");
+    assert_eq!(redact_secrets("{\"token\":\"k8s-aws-v1.aHR0\",\"x\":1}"), "{\"token\":\"[가림]\",\"x\":1}");
+    assert_eq!(redact_secrets("token=k8s-aws-v1.aHR0&x"), "token=[가림]&x");
+    assert_eq!(redact_secrets("authorization: eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.sig"), "authorization: [가림]");
+    assert_eq!(redact_secrets("Bearer\tabc.def"), "Bearer\t[가림]");
+    assert_eq!(redact_secrets("bearer   abc.def ok"), "bearer   [가림] ok");
+    assert_eq!(redact_secrets("\"Authorization\":\"Bearer abc.def\""), "\"Authorization\":\"Bearer [가림]\"");
+    assert_eq!(redact_secrets("eyJ is not a jwt"), "eyJ is not a jwt");
+}
+
+#[test]
+fn other_is_redacted_and_capped() {
+    let message = format!("{} k8s-aws-v1.secret {}", "y".repeat(280), "z".repeat(100));
+    let AppError::Other { message } = describe(&Failure::Other(message), BOTH) else { panic!() };
+    assert!(!message.contains("secret"));
+    assert_eq!(message.chars().count(), 300);
+}
