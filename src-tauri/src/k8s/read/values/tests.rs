@@ -160,3 +160,159 @@ fn problems_serialize_in_camel_case() {
     let all = [Problem::CrashLoopBackOff, Problem::ImagePullBackOff, Problem::Pending, Problem::OomKilled, Problem::NotReady];
     assert_eq!(serde_json::to_value(all).unwrap(), json!(["crashLoopBackOff", "imagePullBackOff", "pending", "oomKilled", "notReady"]));
 }
+
+fn of(group: &str, k: &str, body: serde_json::Value) -> Values {
+    let mut body = body;
+    body["kind"] = json!(k);
+    body["apiVersion"] = json!(if group.is_empty() { "v1".to_string() } else { format!("{group}/v1") });
+    if body.get("metadata").is_none() {
+        body["metadata"] = json!({});
+    }
+    values_of(&kind(group, k), &obj(body))
+}
+
+#[test]
+fn service_values() {
+    let v = of("", "Service", json!({
+        "spec": { "type": "LoadBalancer", "clusterIP": "172.20.0.10", "ports": [{ "port": 80, "protocol": "TCP", "nodePort": 30080 }, { "port": 443, "protocol": "TCP" }] },
+        "status": { "loadBalancer": { "ingress": [{ "hostname": "k8s-web.elb.amazonaws.com" }] } }
+    }));
+    assert_eq!(
+        ["type", "clusterIp", "externalIp", "ports"].map(|k| get(&v, k)),
+        [Some("LoadBalancer"), Some("172.20.0.10"), Some("k8s-web.elb.amazonaws.com"), Some("80:30080/TCP,443/TCP")]
+    );
+}
+
+#[test]
+fn ingress_and_network_policy_values() {
+    let ing = of("networking.k8s.io", "Ingress", json!({
+        "spec": { "ingressClassName": "alb", "rules": [{ "host": "a.example.com" }, { "host": "b.example.com" }] },
+        "status": { "loadBalancer": { "ingress": [{ "hostname": "alb.example" }] } }
+    }));
+    assert_eq!(["class", "hosts", "address"].map(|k| get(&ing, k)), [Some("alb"), Some("a.example.com,b.example.com"), Some("alb.example")]);
+    let np = of("networking.k8s.io", "NetworkPolicy", json!({ "spec": { "podSelector": { "matchLabels": { "app": "web" } }, "policyTypes": ["Ingress", "Egress"] } }));
+    assert_eq!((get(&np, "podSelector"), get(&np, "policyTypes")), (Some("app=web"), Some("Ingress,Egress")));
+    let all = of("networking.k8s.io", "NetworkPolicy", json!({ "spec": { "podSelector": {} } }));
+    assert_eq!(get(&all, "podSelector"), None);
+}
+
+#[test]
+fn endpoints_show_three_then_a_count() {
+    let addresses: Vec<_> = (1..=5).map(|i| json!({ "ip": format!("10.0.0.{i}") })).collect();
+    let v = of("", "Endpoints", json!({ "subsets": [{ "addresses": addresses, "ports": [{ "port": 80 }] }] }));
+    assert_eq!(get(&v, "endpoints"), Some("10.0.0.1:80, 10.0.0.2:80, 10.0.0.3:80 +2"));
+}
+
+#[test]
+fn config_map_counts_keys() {
+    let v = of("", "ConfigMap", json!({ "data": { "a": "1", "b": "2" }, "binaryData": { "c": "AA==" } }));
+    assert_eq!(get(&v, "keys"), Some("3"));
+}
+
+#[test]
+fn secret_row_has_type_and_key_count_and_no_value() {
+    let o = obj(json!({ "apiVersion": "v1", "kind": "Secret", "metadata": {}, "type": "Opaque",
+        "data": { "password": "aHVudGVyMg==" }, "stringData": { "token": "plain-secret" } }));
+    let k = kind("", "Secret");
+    let v = values_of(&k, &o);
+    assert_eq!((get(&v, "type"), get(&v, "keys")), (Some("Opaque"), Some("2")));
+    let row = serde_json::to_string(&crate::k8s::rows::row_of(&k, &o)).unwrap();
+    for secret in ["aHVudGVyMg==", "hunter2", "plain-secret"] {
+        assert!(!row.contains(secret), "row leaks {secret}: {row}");
+    }
+}
+
+#[test]
+fn service_account_role_arn() {
+    let v = of("", "ServiceAccount", json!({ "metadata": { "annotations": { "eks.amazonaws.com/role-arn": "arn:aws:iam::1:role/web" } } }));
+    assert_eq!(get(&v, "roleArn"), Some("arn:aws:iam::1:role/web"));
+}
+
+#[test]
+fn storage_kinds() {
+    let pvc = of("", "PersistentVolumeClaim", json!({
+        "spec": { "volumeName": "pv-1", "accessModes": ["ReadWriteOnce"], "storageClassName": "gp3" },
+        "status": { "phase": "Pending", "capacity": { "storage": "10Gi" } }
+    }));
+    assert_eq!(
+        ["status", "volume", "capacity", "accessModes", "storageClass"].map(|k| get(&pvc, k)),
+        [Some("Pending"), Some("pv-1"), Some("10Gi"), Some("ReadWriteOnce"), Some("gp3")]
+    );
+    assert_eq!(pvc.problems, [Problem::Pending]);
+    let pv = of("", "PersistentVolume", json!({
+        "spec": { "capacity": { "storage": "10Gi" }, "accessModes": ["ReadWriteOnce"], "persistentVolumeReclaimPolicy": "Delete",
+            "claimRef": { "namespace": "web", "name": "data" }, "storageClassName": "gp3" },
+        "status": { "phase": "Bound" }
+    }));
+    assert_eq!(
+        ["capacity", "accessModes", "reclaimPolicy", "status", "claim", "storageClass"].map(|k| get(&pv, k)),
+        [Some("10Gi"), Some("ReadWriteOnce"), Some("Delete"), Some("Bound"), Some("web/data"), Some("gp3")]
+    );
+    let sc = of("storage.k8s.io", "StorageClass", json!({
+        "metadata": { "annotations": { "storageclass.kubernetes.io/is-default-class": "true" } },
+        "provisioner": "ebs.csi.aws.com", "reclaimPolicy": "Delete", "volumeBindingMode": "WaitForFirstConsumer"
+    }));
+    assert_eq!(
+        ["provisioner", "reclaimPolicy", "volumeBindingMode", "default"].map(|k| get(&sc, k)),
+        [Some("ebs.csi.aws.com"), Some("Delete"), Some("WaitForFirstConsumer"), Some("true")]
+    );
+    let plain = of("storage.k8s.io", "StorageClass", json!({ "provisioner": "x" }));
+    assert_eq!(get(&plain, "default"), None);
+}
+
+fn node(labels: serde_json::Value, unschedulable: bool, ready: &str) -> Values {
+    of("", "Node", json!({
+        "metadata": { "labels": labels },
+        "spec": { "unschedulable": unschedulable },
+        "status": { "conditions": [{ "type": "Ready", "status": ready }], "nodeInfo": { "kubeletVersion": "v1.33.4-eks-1" } }
+    }))
+}
+
+#[test]
+fn node_values_and_groups() {
+    let v = node(json!({ "node.kubernetes.io/instance-type": "m6i.large", "topology.kubernetes.io/zone": "ap-northeast-2a", "eks.amazonaws.com/nodegroup": "ng-1" }), false, "True");
+    assert_eq!(
+        ["status", "version", "instanceType", "zone", "groupKind", "group"].map(|k| get(&v, k)),
+        [Some("Ready"), Some("v1.33.4-eks-1"), Some("m6i.large"), Some("ap-northeast-2a"), Some("managed"), Some("ng-1")]
+    );
+    assert!(v.problems.is_empty());
+    let cordoned = node(json!({}), true, "False");
+    assert_eq!((get(&cordoned, "status"), get(&cordoned, "groupKind"), get(&cordoned, "group")), (Some("NotReady,SchedulingDisabled"), Some("self"), None));
+    assert_eq!(cordoned.problems, [Problem::NotReady]);
+    assert_eq!(get(&node(json!({}), false, "Unknown"), "status"), Some("Unknown"));
+}
+
+#[test]
+fn node_group_kinds() {
+    let l = |pairs: &[(&str, &str)]| pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<BTreeMap<_, _>>();
+    assert_eq!(node_group(&l(&[("eks.amazonaws.com/compute-type", "fargate"), ("eks.amazonaws.com/fargate-profile", "fp")])), (GroupKind::Fargate, Some("fp".into())));
+    assert_eq!(node_group(&l(&[("eks.amazonaws.com/nodegroup", "ng")])), (GroupKind::Managed, Some("ng".into())));
+    assert_eq!(node_group(&l(&[("karpenter.sh/nodepool", "default")])), (GroupKind::Karpenter, Some("default".into())));
+    assert_eq!(node_group(&l(&[])), (GroupKind::SelfManaged, None));
+    assert_eq!(serde_json::to_value(GroupKind::SelfManaged).unwrap(), json!("self"));
+    assert_eq!(GroupKind::SelfManaged.as_str(), "self");
+}
+
+#[test]
+fn event_values_prefer_the_series_time() {
+    let v = of("", "Event", json!({
+        "metadata": { "creationTimestamp": "2026-10-30T00:00:00Z" },
+        "type": "Warning", "reason": "BackOff", "message": "Back-off restarting failed container",
+        "involvedObject": { "kind": "Pod", "name": "web-1" }, "count": 4,
+        "lastTimestamp": "2026-10-30T01:00:00Z", "series": { "count": 9, "lastObservedTime": "2026-10-30T02:00:00.123456Z" }
+    }));
+    assert_eq!(
+        ["type", "reason", "object", "message", "count", "lastSeen"].map(|k| get(&v, k)),
+        [Some("Warning"), Some("BackOff"), Some("Pod/web-1"), Some("Back-off restarting failed container"), Some("9"), Some("2026-10-30T02:00:00Z")]
+    );
+    let old = of("", "Event", json!({ "metadata": { "creationTimestamp": "2026-10-30T00:00:00Z" }, "involvedObject": { "kind": "Node", "name": "n" } }));
+    assert_eq!((get(&old, "count"), get(&old, "lastSeen")), (Some("1"), Some("2026-10-30T00:00:00Z")));
+}
+
+#[test]
+fn custom_kinds_use_the_ready_condition() {
+    let v = of("mm.example.com", "Widget", json!({ "status": { "conditions": [{ "type": "Ready", "status": "False" }] } }));
+    assert_eq!(get(&v, "ready"), Some("False"));
+    assert_eq!(v.problems, [Problem::NotReady]);
+    assert!(of("mm.example.com", "Widget", json!({})).values.is_empty());
+}
