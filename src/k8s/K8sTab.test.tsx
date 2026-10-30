@@ -21,6 +21,7 @@ import {
   NO_CONTEXT,
   NO_KUBECONFIG,
   BAR_LABEL,
+  KIND_TREE_LABEL,
   RECHECK,
   RECONNECT,
   RULES_INCOMPLETE,
@@ -366,4 +367,44 @@ test("a node name in the overview opens its detail in workloads", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "ip-1" }));
   await waitFor(() => expect(m.get).toHaveBeenCalledWith(target, NODES, null, "ip-1", target.profile));
   expect(screen.getByRole("button", { name: NAV_WORKLOADS })).toHaveAttribute("aria-current", "page");
+});
+
+test("a failed kinds discovery shows next to the workloads tree, and retry refetches only the kinds", async () => {
+  m.context.mockResolvedValue(info([cand("ctx", { execProfile: "pa" })]));
+  m.open.mockResolvedValue(session({ execProfile: "pa" }));
+  m.kinds.mockRejectedValueOnce({ kind: "other", message: "discovery broke" }).mockResolvedValue([]);
+  setup();
+  await screen.findByText(STATE_CONNECTED);
+  fireEvent.click(screen.getByRole("button", { name: NAV_WORKLOADS }));
+  expect(await screen.findByText("discovery broke")).toBeInTheDocument();
+  expect(screen.getByRole("navigation", { name: KIND_TREE_LABEL })).toBeInTheDocument();
+  await waitFor(() => expect(watchCalls().some((c) => c[1].plural === PODS.plural)).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
+  await waitFor(() => expect(m.kinds).toHaveBeenCalledTimes(2));
+  expect(m.kinds).toHaveBeenLastCalledWith(target, "pa");
+  await waitFor(() => expect(screen.queryByText("discovery broke")).toBeNull());
+  expect(m.open).toHaveBeenCalledTimes(1);
+  expect(m.close).not.toHaveBeenCalled();
+});
+
+test("after the exec profile logs in again, the failed kinds discovery is refetched", async () => {
+  m.context.mockResolvedValue(info([cand("ctx", { execProfile: "pa" })]));
+  m.open.mockResolvedValue(session({ execProfile: "pa" }));
+  m.kinds.mockRejectedValueOnce({ kind: "ssoExpired" }).mockResolvedValue([]);
+  seeded = { enabledServices: [], favorites: [], lastProfile: "app", lastRegion: null };
+  vi.mocked(api.getSettings).mockResolvedValue(seeded);
+  const qc = newQueryClient();
+  qc.setQueryData(["settings"], seeded);
+  const manager = ssoLoginStub();
+  const at = Date.now() + 1000;
+  const ui = (successProfile: string | null) => withClientAndSso(<K8sTab target={target} active />, qc, { ...manager, lastSuccessAt: (p) => (p === successProfile ? at : null) });
+  const rendered = render(ui(null));
+  await screen.findByText(STATE_CONNECTED);
+  fireEvent.click(screen.getByRole("button", { name: NAV_WORKLOADS }));
+  expect(await screen.findByText("SSO 세션이 만료됐어요 (pa)")).toBeInTheDocument();
+  rendered.rerender(ui("app"));
+  expect(m.kinds).toHaveBeenCalledTimes(1);
+  rendered.rerender(ui("pa"));
+  await waitFor(() => expect(m.kinds).toHaveBeenCalledTimes(2));
+  expect(m.kinds).toHaveBeenLastCalledWith(target, "pa");
 });

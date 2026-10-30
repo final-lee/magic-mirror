@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { K8sError } from "./K8sError";
 import { KindTree } from "./KindTree";
 import { CATEGORIES, PODS, customCategories, sameKind } from "./kinds";
@@ -26,10 +26,12 @@ interface Props {
   kinds: K8sKind[];
   focus: WorkloadsFocus | null;
   onOpenIam?: (arn: string) => void;
+  /** 목록 위에 붙이는 알림(종류 발견 실패 등). 종류 트리와 기본 종류 탐색은 그대로 쓴다. */
+  banner?: ReactNode;
 }
 
 /** 종류 트리 + 감시 목록 + 상세 스택 */
-export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live, namespace, kinds, focus, onOpenIam }: Props) {
+export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live, namespace, kinds, focus, onOpenIam, banner }: Props) {
   const [kind, setKind] = useState<K8sKindRef>(PODS);
   const [stack, setStack] = useState<ObjectRef[]>([]);
 
@@ -55,6 +57,7 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
     <div className="k8s-workloads">
       <KindTree categories={categories} selected={kind} onSelect={pickKind} />
       <div className="k8s-list-pane">
+        {banner}
         {watch.error && <K8sError error={watch.error} target={target} ssoProfile={ssoProfile} compact />}
         <ObjectList
           kind={kind}
