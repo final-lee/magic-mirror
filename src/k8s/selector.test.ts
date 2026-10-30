@@ -25,6 +25,18 @@ test("rejects malformed selectors", () => {
   }
 });
 
+test("validates label keys and values like Kubernetes", () => {
+  const n63 = "a".repeat(63);
+  const prefix253 = [..."abc"].map(() => "a".repeat(63)).join(".") + "." + "b".repeat(61);
+  expect(prefix253).toHaveLength(253);
+  for (const bad of ["a..b/key=x", "a.-b/key=x", "a-.b/key=x", `${"a".repeat(64)}=x`, `key=${"a".repeat(64)}`, `${prefix253}a/key=x`, `a/${"a".repeat(64)}=x`, "A.b/key=x"]) {
+    expect(parseFilter(bad)).toEqual({ kind: "invalid" });
+  }
+  expect(parseFilter(`${n63}=${n63}`)).toEqual({ kind: "selector", reqs: [{ key: n63, op: "=", values: [n63] }] });
+  expect(parseFilter(`${prefix253}/key=x`)).toEqual({ kind: "selector", reqs: [{ key: `${prefix253}/key`, op: "=", values: ["x"] }] });
+  expect(parseFilter("a.b-c.d/key=x").kind).toBe("selector");
+});
+
 test("parseFilter decides between a name and a selector", () => {
   expect(parseFilter("  ")).toEqual({ kind: "none" });
   expect(parseFilter("Api")).toEqual({ kind: "name", text: "api" });
