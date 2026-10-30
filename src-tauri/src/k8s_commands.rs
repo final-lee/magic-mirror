@@ -16,6 +16,7 @@ use crate::k8s::failure::{describe, failure_of, Endpoint, Failure, NOT_OPENED};
 use crate::k8s::kubeconfig::{self, Candidate, NO_CONTEXT};
 use crate::k8s::read::detail::{self, ObjectView};
 use crate::k8s::read::kinds::{self, Kind};
+use crate::k8s::read::overview::{self, Overview};
 use crate::k8s::read::secret::{self, SecretValue};
 use crate::k8s::review::{self, Identity, Rules};
 use crate::k8s::rows::KindRef;
@@ -274,6 +275,14 @@ pub async fn k8s_kinds(k8s: State<'_, K8sState>, target: K8sTarget) -> Result<Ve
 pub async fn k8s_get(k8s: State<'_, K8sState>, target: K8sTarget, kind: KindRef, namespace: Option<String>, name: String) -> Result<ObjectView, AppError> {
     let s = k8s.session(&target)?;
     detail::get(&s.client, &kind, namespace.as_deref(), &name, s.endpoint).await
+}
+
+/// 개요. 부분마다 실패를 `gaps`에 담아 돌려주므로 연결이 없을 때와 AWS 프로필 설정을 읽지 못할 때만 실패한다.
+#[tauri::command]
+pub async fn k8s_overview(app: State<'_, AppState>, k8s: State<'_, K8sState>, target: K8sTarget) -> Result<Overview, AppError> {
+    let s = k8s.session(&target)?;
+    let cfg = app.ctx.config(&target.profile, &target.region).await?;
+    Ok(overview::overview(&aws_sdk_eks::Client::new(&cfg), &target.cluster, &s.client, s.endpoint).await)
 }
 
 /// Secret 키 하나의 값. 화면이 "값 보기"를 누를 때만 부른다. 값은 기록·오류에 넣지 않는다.
