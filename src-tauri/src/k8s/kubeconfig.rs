@@ -7,6 +7,7 @@ use kube::config::{AuthInfo, Kubeconfig};
 use serde::Serialize;
 
 use super::failure::short_reason;
+use kube::config::KubeconfigError;
 use crate::error::AppError;
 
 pub const NO_CONTEXT: &str = "kubeconfig에 이 클러스터의 context가 없어요. 터미널에서 아래 명령을 실행한 뒤 다시 열어 주세요";
@@ -56,6 +57,20 @@ pub fn kubeconfig_paths(setting: Option<&str>, env: Option<&str>, home: Option<&
     home.map(|h| vec![h.join(".kube").join("config")]).unwrap_or_default()
 }
 
+pub const MALFORMED: &str = "형식이 올바르지 않아요";
+
+/// kubeconfig 오류의 사유. YAML 해석 오류는 serde 글이 읽은 값을 따옴표로 싣곤 해서 쓰지 않고, 고정 문구에 위치(줄, 열)만 붙인다.
+pub fn reason(e: &KubeconfigError) -> String {
+    match e {
+        KubeconfigError::Parse(parse) => match parse.location() {
+            Some(at) => format!("{MALFORMED} (줄 {}, 열 {})", at.line(), at.column()),
+            None => MALFORMED.to_string(),
+        },
+        KubeconfigError::ReadConfig(io, _) => short_reason(io),
+        other => short_reason(other),
+    }
+}
+
 /// 있는 파일만 읽어 합친다(kubectl처럼 같은 이름은 앞 파일이 이긴다). 하나도 없으면 `no_kubeconfig`, 읽다가 깨지면 `unreadable_kubeconfig`.
 pub fn load(paths: &[PathBuf]) -> Result<Loaded, AppError> {
     let mut merged: Option<Kubeconfig> = None;
@@ -64,10 +79,10 @@ pub fn load(paths: &[PathBuf]) -> Result<Loaded, AppError> {
         if !path.is_file() {
             continue;
         }
-        let kc = Kubeconfig::read_from(path).map_err(|e| AppError::other(unreadable_kubeconfig(path, &short_reason(&e))))?;
+        let kc = Kubeconfig::read_from(path).map_err(|e| AppError::other(unreadable_kubeconfig(path, &reason(&e))))?;
         merged = Some(match merged {
             None => kc,
-            Some(m) => m.merge(kc).map_err(|e| AppError::other(unreadable_kubeconfig(path, &short_reason(&e))))?,
+            Some(m) => m.merge(kc).map_err(|e| AppError::other(unreadable_kubeconfig(path, &reason(&e))))?,
         });
         read.push(path.clone());
     }

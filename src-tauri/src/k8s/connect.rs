@@ -4,8 +4,8 @@ use std::time::Duration;
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::{Client, Config};
 
-use super::failure::{describe, exec_failed, failure_of, short_reason, Endpoint, Failure};
-use super::kubeconfig::{with_path, Loaded};
+use super::failure::{describe, exec_failed, failure_of, Endpoint, Failure};
+use super::kubeconfig::{reason, with_path, Loaded};
 use super::path::login_path;
 use crate::error::AppError;
 
@@ -14,7 +14,7 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub const EXEC_TIMEOUT_REASON: &str = "30초 안에 끝나지 않았어요";
 
-/// kubeconfig 해석 오류의 글은 원문 조각(토큰, 키)을 싣고 있을 수 있어, 첫 줄만 가려서(`short_reason`) 보여 준다.
+/// kubeconfig 해석 오류의 글은 원문 조각(토큰, 키)을 싣고 있을 수 있어, 고정 문구와 위치만 보여 준다(`kubeconfig::reason`).
 pub async fn client_for(config: &Kubeconfig, context: &str, endpoint: Endpoint) -> Result<Client, AppError> {
     client_for_with_timeout(config, context, endpoint, REQUEST_TIMEOUT).await
 }
@@ -24,7 +24,7 @@ pub async fn client_for(config: &Kubeconfig, context: &str, endpoint: Endpoint) 
 pub async fn client_for_with_timeout(config: &Kubeconfig, context: &str, endpoint: Endpoint, limit: Duration) -> Result<Client, AppError> {
     let command = exec_command(config, context);
     let options = KubeConfigOptions { context: Some(context.to_string()), ..Default::default() };
-    let mut cfg = Config::from_custom_kubeconfig(config.clone(), &options).await.map_err(|e| AppError::other(short_reason(&e)))?;
+    let mut cfg = Config::from_custom_kubeconfig(config.clone(), &options).await.map_err(|e| AppError::other(reason(&e)))?;
     cfg.connect_timeout = Some(CONNECT_TIMEOUT);
     let build = tokio::task::spawn_blocking(move || Client::try_from(cfg));
     match tokio::time::timeout(limit, build).await {

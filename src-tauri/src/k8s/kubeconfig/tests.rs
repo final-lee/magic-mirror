@@ -143,3 +143,16 @@ fn a_malformed_kubeconfig_never_shows_its_source_text() {
     assert!(!message.contains("SECRETVALUE"), "{message}");
     assert!(!message.contains('\n'), "{message}");
 }
+
+#[test]
+fn a_secret_that_serde_would_quote_is_not_shown() {
+    let dir = std::env::temp_dir().join(format!("mm-k8s-kc2-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config");
+    std::fs::write(&path, "apiVersion: v1\nkind: Config\nclusters: SECRETVALUE\nusers:\n- name: u\n  user:\n    client-key-data: [ \"SECRETVALUE\" ]\n").unwrap();
+    let AppError::Other { message } = load(&[path.clone()]).err().unwrap() else { panic!() };
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(!message.contains("SECRETVALUE"), "{message}");
+    assert!(message.contains(MALFORMED), "{message}");
+    assert!(message.contains("줄 "), "{message}");
+}
