@@ -71,6 +71,18 @@ test("cordon, pressure, usage, partial requests, node pools, removed APIs, no sk
   expect(screen.getByText(NO_SKEW)).toBeInTheDocument();
 });
 
+test.each(["cluster", "nodes"] as const)("does not claim no skew when %s is unavailable", async (section) => {
+  m.overview.mockResolvedValue(overview({
+    [section]: null,
+    skew: [],
+    gaps: [{ section, error: { kind: "accessDenied", action: "read" } }],
+  }));
+  setup();
+  expect(await screen.findByText(gapText(SECTION_LABELS[section]))).toBeInTheDocument();
+  expect(screen.getByText(UP_TO_DATE)).toBeInTheDocument();
+  expect(screen.queryByText(NO_SKEW)).toBeNull();
+});
+
 test("gaps show next to their section and refresh refetches", async () => {
   m.overview.mockResolvedValue(overview({ addons: null, gaps: [{ section: "addons", error: { kind: "accessDenied", action: "eks:ListAddons" } }] }));
   setup();

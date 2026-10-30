@@ -200,7 +200,7 @@ export function OverviewView({ target, context, ssoProfile, live, onOpenNode }: 
           )
         )}
         <h5>{SUB_SKEW}</h5>
-        {o.skew.length === 0 ? (
+        {o.cluster && o.nodes && (o.skew.length === 0 ? (
           <p className="dim">{NO_SKEW}</p>
         ) : (
           <ul className="k8s-links">
@@ -208,7 +208,7 @@ export function OverviewView({ target, context, ssoProfile, live, onOpenNode }: 
               <li key={s.node}><span className="mono">{s.node}</span> ({s.kubeletVersion}): {skewText(s.minorsBehind)}</li>
             ))}
           </ul>
-        )}
+        ))}
       </Sect>
     </div>
   );
