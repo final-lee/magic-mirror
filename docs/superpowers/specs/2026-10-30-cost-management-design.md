@@ -187,3 +187,7 @@ cost_resource_actual(profile, target: { ceService: string; resourceId: string },
 - **H. 정리 작업(쓰기)**: D에서 찾은 항목을 앱에서 처리. 스냅샷 뒤 볼륨 삭제, EIP 해제, 로그 보존 기간 설정, S3·ECR 수명 주기 규칙. IAM 쓰기처럼 미리보기(API 호출·예상 절감액) → 위험하면 이름 입력 → 변경 기록 → 되돌리기. 쓰기는 한 파일에만 둔다.
 - **I. 지도·쿠버네티스 연동**: VPC 다이어그램에 NAT·LB 비용, EKS 네임스페이스별 요청량 기준 비용 추정.
 - **Organizations 연결 계정별 분해, 여러 프로필 합산**: 이번에는 단일 계정만.
+- **Cost Explorer 말고 다른 출처**: 검토했지만 1차는 Cost Explorer만 쓴다.
+  - CloudWatch 청구 지표(`AWS/Billing` `EstimatedCharges`): 거의 무료지만 총액·서비스별만 있다.
+  - Data Exports(CUR 2.0) → S3: 무료이고 가장 자세하지만 내보내기 준비와 Parquet 처리가 필요하고 하루 늦다.
+  - 요청 비용이 부담되면 다시 본다.
