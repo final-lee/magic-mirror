@@ -1,6 +1,8 @@
+import { useState } from "react";
 import type { Updater } from "../lib/useUpdater";
 import type { ServiceInfo } from "../api/types";
 import type { DiffTool } from "../explorer/types";
+import { SETTINGS_KUBECONFIG_LABEL, SETTINGS_KUBECONFIG_PLACEHOLDER } from "../k8s/text";
 import { ServiceBadge } from "./ServiceBadge";
 
 interface Props {
@@ -11,6 +13,8 @@ interface Props {
   diffTool?: DiffTool;
   diffToolCommand?: string | null;
   onDiffToolChange?: (tool: DiffTool, command: string | null) => void;
+  kubeconfigPath?: string | null;
+  onKubeconfigPathChange?: (path: string | null) => void;
   updater?: Updater;
   appVersion?: string | null;
 }
@@ -46,9 +50,12 @@ export function ServiceSettings({
   diffTool,
   diffToolCommand,
   onDiffToolChange,
+  kubeconfigPath,
+  onKubeconfigPathChange,
   updater,
   appVersion,
 }: Props) {
+  const [kubeconfigDraft, setKubeconfigDraft] = useState(kubeconfigPath ?? "");
   const toggle = (id: string, on: boolean) => onChange(on ? [...enabled, id] : enabled.filter((x) => x !== id));
   return (
     <div
@@ -95,6 +102,19 @@ export function ServiceSettings({
                 onChange={(e) => onDiffToolChange("custom", e.target.value)}
               />
             )}
+          </>
+        )}
+        {onKubeconfigPathChange && (
+          <>
+            <h4>{SETTINGS_KUBECONFIG_LABEL}</h4>
+            <input
+              className="field-input mono"
+              aria-label={SETTINGS_KUBECONFIG_LABEL}
+              placeholder={SETTINGS_KUBECONFIG_PLACEHOLDER}
+              value={kubeconfigDraft}
+              onChange={(e) => setKubeconfigDraft(e.target.value)}
+              onBlur={() => onKubeconfigPathChange(kubeconfigDraft || null)}
+            />
           </>
         )}
         {updater && (

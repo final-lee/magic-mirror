@@ -5,6 +5,7 @@ import { useCopyShortcut } from "../hooks/useCopyShortcut";
 import { resourceDetail } from "../lib/detail";
 import type { S3Location } from "../lib/s3";
 import { NOT_POSTGRES, pgTargetOf } from "../pg/targets";
+import type { K8sTarget } from "../k8s/types";
 import type { PgTarget } from "../pg/types";
 import { Breadcrumb } from "./Breadcrumb";
 import { DetailPanel } from "./DetailPanel";
@@ -26,6 +27,8 @@ interface Props {
   onOpenIam?: (arn: string | null) => void;
   /** PostgreSQL 클러스터·인스턴스를 열 때 사용자 관리 탭으로 보낸다. 다른 엔진이면 부르지 않고 안내만 띄운다. */
   onOpenPg?: (target: PgTarget) => void;
+  /** EKS 클러스터를 열 때 Kubernetes 탭으로 보낸다. */
+  onOpenK8s?: (target: K8sTarget) => void;
   onRefresh: () => void;
   active: boolean;
 }
@@ -34,7 +37,7 @@ const IAM_OPENABLE = ["users", "roles", "policies"];
 /** 안내가 떠 있는 시간 */
 const NOTICE_MS = 5000;
 
-export function ResourceArea({ service, type, profile, region, account, filter, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onRefresh, active }: Props) {
+export function ResourceArea({ service, type, profile, region, account, filter, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onRefresh, active }: Props) {
   const q = useResources(profile, region, service, type.id);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
@@ -61,6 +64,8 @@ export function ResourceArea({ service, type, profile, region, account, filter, 
       onOpenVpc?.({ vpcId: item.id, name: item.name, region });
     } else if (service.id === "iam" && IAM_OPENABLE.includes(type.id)) {
       onOpenIam?.(item.arn);
+    } else if (service.id === "eks" && type.id === "clusters") {
+      onOpenK8s?.({ profile, region, cluster: item.id });
     } else if (service.id === "rds" && (type.id === "db-clusters" || type.id === "db-instances")) {
       const target = pgTargetOf(item, type.id);
       if (target) onOpenPg?.({ profile, region, ...target });

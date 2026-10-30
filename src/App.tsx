@@ -14,6 +14,12 @@ import { ExplorerTab } from "./explorer/ExplorerTab";
 import { refKey, refName } from "./explorer/rows";
 import type { DiffTool, FileRef, TransferRequest } from "./explorer/types";
 import { useTransfers } from "./explorer/useTransfers";
+import { ClusterPicker } from "./k8s/ClusterPicker";
+import { K8sTab } from "./k8s/K8sTab";
+import { closeK8s, refreshK8s } from "./k8s/queries";
+import { k8sTabId } from "./k8s/targets";
+import { tabTitle } from "./k8s/text";
+import type { K8sTarget } from "./k8s/types";
 import { IamTab } from "./iam/IamTab";
 import { refreshIam, useIamOverview } from "./iam/queries";
 import type { S3Location } from "./lib/s3";
@@ -48,6 +54,9 @@ export default function App() {
   const [vpcTabs, setVpcTabs] = useState<{ id: string; vpcId: string; name: string; region: string }[]>([]);
   // 대상(프로필·리전·종류·식별자)마다 탭 하나. 탭을 닫거나 프로필을 바꾸면 그 대상의 DB 연결도 닫는다.
   const [pgTabs, setPgTabs] = useState<{ id: string; target: PgTarget; title: string }[]>([]);
+  // 클러스터마다 탭 하나(id는 리전과 이름). 탭을 닫거나 프로필을 바꾸면 그 클러스터의 연결과 감시도 닫는다.
+  const [k8sTabs, setK8sTabs] = useState<{ id: string; target: K8sTarget }[]>([]);
+  const [showK8sPicker, setShowK8sPicker] = useState(false);
   // IAM 탭은 하나뿐이다(id "iam"). focus는 리소스 목록에서 넘어온 대상 ARN, nonce는 열 때마다 올라가 같은 대상도 다시 이동시킨다.
   const [iamTab, setIamTab] = useState<{ focus: string | null; nonce: number } | null>(null);
   const iamOverview = useIamOverview(iamTab ? profile : null);
@@ -88,7 +97,10 @@ export default function App() {
     // 보고 있는 PostgreSQL 탭은 연결부터 다시 읽는다. 보이지 않는 PostgreSQL 탭은 DB 연결을 열어 둔 채로 그대로 둔다.
     const pg = pgTabs.find((t) => t.id === activeTab);
     if (pg) void refreshPg(qc, pg.target);
-  }, [qc, profile, pgTabs, activeTab]);
+    // 보고 있는 Kubernetes 탭은 연결을 닫고 다시 읽는다. 앱은 exec 프로필을 모르니 앱에서 고른 프로필을 넘긴다.
+    const k8s = k8sTabs.find((t) => t.id === activeTab);
+    if (k8s) void refreshK8s(qc, k8s.target, k8s.target.profile);
+  }, [qc, profile, pgTabs, k8sTabs, activeTab]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -127,6 +139,7 @@ export default function App() {
   const enabled = services.data.filter((s) => settings.enabledServices.includes(s.id));
 
   const s3Service = services.data.find((s) => s.id === "s3");
+  const eksService = services.data.find((s) => s.id === "eks");
 
   const openDiff = (left: FileRef, right: FileRef) => {
     const id = `diff:${refKey(left)}|${refKey(right)}`;
@@ -151,6 +164,12 @@ export default function App() {
     setActiveTab(id);
     setFilter("");
   };
+  const openK8s = (target: K8sTarget) => {
+    const id = k8sTabId(target);
+    setK8sTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs : [...tabs, { id, target }]));
+    setActiveTab(id);
+    setFilter("");
+  };
   const openIam = (focus: string | null = null) => {
     setIamTab((t) => ({ focus, nonce: (t?.nonce ?? 0) + 1 }));
     setActiveTab("iam");
@@ -161,6 +180,9 @@ export default function App() {
     const pg = pgTabs.find((t) => t.id === id);
     if (pg) void closePg(qc, pg.target);
     setPgTabs((tabs) => tabs.filter((t) => t.id !== id));
+    const k8s = k8sTabs.find((t) => t.id === id);
+    if (k8s) void closeK8s(qc, k8s.target, k8s.target.profile);
+    setK8sTabs((tabs) => tabs.filter((t) => t.id !== id));
     setVpcTabs((tabs) => tabs.filter((t) => t.id !== id));
     setExplorerTabs((tabs) => tabs.filter((t) => t.id !== id));
     setDiffTabs((tabs) => tabs.filter((t) => t.id !== id));
@@ -180,6 +202,7 @@ export default function App() {
     ...explorerTabs.map((t) => ({ id: t.id, title: `S3: ${t.location.bucket}`, closable: true })),
     ...vpcTabs.map((t) => ({ id: t.id, title: `🗺 ${t.name}`, closable: true })),
     ...pgTabs.map((t) => ({ id: t.id, title: t.title, closable: true })),
+    ...k8sTabs.map((t) => ({ id: t.id, title: tabTitle(t.target.cluster), closable: true })),
     ...diffTabs.map((t) => ({ id: t.id, title: diffTitle(t.left, t.right), closable: true })),
   ];
   const diffTool: DiffTool = settings.diffTool ?? "filemerge";
@@ -197,8 +220,10 @@ export default function App() {
     setDiffTabs([]);
     setVpcTabs([]);
     setPgTabs([]);
+    k8sTabs.forEach((t) => void closeK8s(qc, t.target, t.target.profile));
+    setK8sTabs([]);
     setIamTab(null);
-    if (activeTab.startsWith("s3:") || activeTab.startsWith("vpc:") || activeTab.startsWith("diff:") || activeTab.startsWith("pg:") || activeTab === "iam") setActiveTab("resources");
+    if (activeTab.startsWith("s3:") || activeTab.startsWith("vpc:") || activeTab.startsWith("diff:") || activeTab.startsWith("pg:") || activeTab.startsWith("k8s:") || activeTab === "iam") setActiveTab("resources");
     update({ lastProfile: name, lastRegion: nextRegion });
   };
 
@@ -247,6 +272,7 @@ export default function App() {
             onSelect={select}
             onToggleFavorite={toggleFavorite}
             onOpenIam={() => openIam()}
+            onOpenK8s={() => setShowK8sPicker(true)}
           />
           <MainArea
             key={mainKey}
@@ -260,6 +286,7 @@ export default function App() {
             onOpenVpc={openVpc}
             onOpenIam={openIam}
             onOpenPg={(target) => openPg(target, `🐘 ${target.id}`)}
+            onOpenK8s={openK8s}
             onRefresh={refresh}
             active={activeTab === "resources"}
           />
@@ -297,6 +324,11 @@ export default function App() {
             <PgTab target={t.target} title={t.title} active={activeTab === t.id} filter={activeTab === t.id ? filter : ""} />
           </div>
         ))}
+        {k8sTabs.map((t) => (
+          <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
+            <K8sTab target={t.target} active={activeTab === t.id} />
+          </div>
+        ))}
         {diffTabs.map((t) => (
           <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
             <DiffTab
@@ -308,6 +340,18 @@ export default function App() {
             />
           </div>
         ))}
+        {showK8sPicker && profile && eksService && (
+          <ClusterPicker
+            service={eksService}
+            profile={profile}
+            region={region}
+            onPick={(cluster) => {
+              setShowK8sPicker(false);
+              openK8s({ profile, region, cluster });
+            }}
+            onClose={() => setShowK8sPicker(false)}
+          />
+        )}
         {showSettings && (
           <ServiceSettings
             services={services.data}
@@ -317,6 +361,11 @@ export default function App() {
             diffTool={diffTool}
             diffToolCommand={settings.diffToolCommand ?? null}
             onDiffToolChange={(tool, command) => update({ diffTool: tool, diffToolCommand: command })}
+            kubeconfigPath={settings.kubeconfigPath ?? null}
+            onKubeconfigPathChange={(path) => {
+              update({ kubeconfigPath: path });
+              void qc.invalidateQueries({ queryKey: ["k8s"] });
+            }}
             updater={updater}
             appVersion={appVersion}
           />

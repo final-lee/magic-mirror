@@ -1,6 +1,6 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 import { ResourceArea } from "./ResourceArea";
-import { dbRow, makeResource, rdsService, renderWithClient, sampleServices } from "../test/utils";
+import { dbRow, eksService, makeResource, rdsService, renderWithClient, sampleServices } from "../test/utils";
 import { api } from "../api/client";
 
 vi.mock("../api/client", () => ({ api: { listResources: vi.fn(), ssoLogin: vi.fn() } }));
@@ -220,5 +220,28 @@ describe("PostgreSQL entry", () => {
     fireEvent.doubleClick(await screen.findByText("web-1"));
     expect(onOpenPg).not.toHaveBeenCalled();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+});
+
+describe("EKS entry", () => {
+  const typeOf = (id: string) => eksService.types.find((t) => t.id === id)!;
+  const rows = (...ids: string[]) =>
+    vi.mocked(api.listResources).mockResolvedValue({ items: ids.map((id) => makeResource(id, { name: id })), truncated: false });
+
+  test("double clicking a cluster opens it with the profile and region", async () => {
+    rows("prod");
+    const onOpenK8s = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenK8s={onOpenK8s} service={eksService} type={typeOf("clusters")} />);
+    fireEvent.doubleClick(await screen.findByText("prod"));
+    expect(onOpenK8s).toHaveBeenCalledTimes(1);
+    expect(onOpenK8s).toHaveBeenCalledWith({ profile: "prod", region: "ap-northeast-2", cluster: "prod" });
+  });
+
+  test("double clicking a node group does nothing", async () => {
+    rows("workers");
+    const onOpenK8s = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenK8s={onOpenK8s} service={eksService} type={typeOf("nodegroups")} />);
+    fireEvent.doubleClick(await screen.findByText("workers"));
+    expect(onOpenK8s).not.toHaveBeenCalled();
   });
 });
