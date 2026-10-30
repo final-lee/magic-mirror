@@ -113,7 +113,10 @@ export function ServiceSettings({
               placeholder={SETTINGS_KUBECONFIG_PLACEHOLDER}
               value={kubeconfigDraft}
               onChange={(e) => setKubeconfigDraft(e.target.value)}
-              onBlur={() => onKubeconfigPathChange(kubeconfigDraft || null)}
+              onBlur={() => {
+                const next = kubeconfigDraft.trim() || null;
+                if (next !== (kubeconfigPath ?? null)) onKubeconfigPathChange(next);
+              }}
             />
           </>
         )}

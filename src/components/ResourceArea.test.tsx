@@ -240,7 +240,7 @@ describe("EKS entry", () => {
   test("double clicking a node group does nothing", async () => {
     rows("workers");
     const onOpenK8s = vi.fn();
-    renderWithClient(<ResourceArea {...props} onOpenK8s={onOpenK8s} service={eksService} type={typeOf("nodegroups")} />);
+    renderWithClient(<ResourceArea {...props} onOpenK8s={onOpenK8s} service={eksService} type={typeOf("node-groups")} />);
     fireEvent.doubleClick(await screen.findByText("workers"));
     expect(onOpenK8s).not.toHaveBeenCalled();
   });

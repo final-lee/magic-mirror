@@ -102,6 +102,6 @@ export const eksService: ServiceInfo = {
   global: false,
   types: [
     { id: "clusters", name: "Clusters", columns: [column("name", "Name"), column("version", "Version"), column("status", "Status")] },
-    { id: "nodegroups", name: "Node Groups", columns: [column("name", "Name")] },
+    { id: "node-groups", name: "Node Groups", columns: [column("name", "Name")] },
   ],
 };
