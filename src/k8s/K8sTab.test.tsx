@@ -41,7 +41,7 @@ const ARN = "arn:aws:eks:ap-northeast-2:1:cluster/prod";
 const cand = (name: string, over: Partial<K8sContextCandidate> = {}): K8sContextCandidate => ({ name, cluster: name, user: `${name}-user`, namespace: null, execProfile: null, ...over });
 const info = (candidates: K8sContextCandidate[], over: Partial<K8sContextInfo> = {}): K8sContextInfo => ({
   arn: ARN, endpoint: "https://x", version: "1.30", endpointPublic: true, endpointPrivate: false, publicCidrs: [],
-  kubeconfigPaths: [], candidates, chosen: null, savedMissing: null, updateCommand: "aws eks update-kubeconfig --name prod", ...over,
+  kubeconfigMissing: false, kubeconfigPaths: [], candidates, chosen: null, savedMissing: null, updateCommand: "aws eks update-kubeconfig --name prod", ...over,
 });
 const session = (over: Partial<K8sSession> = {}): K8sSession => ({
   context: "ctx", execProfile: null, serverVersion: "1.30",
@@ -93,9 +93,16 @@ test("no candidates shows the guide, copies the command, and rechecks", async ()
 });
 
 test("no kubeconfig: empty candidates with tried paths shows the paths and the update command", async () => {
-  m.context.mockResolvedValue(info([], { kubeconfigPaths: ["/a/config", "/b/config"] }));
+  m.context.mockResolvedValue(info([], { kubeconfigMissing: true, kubeconfigPaths: ["/a/config", "/b/config"] }));
   setup();
   expect(await screen.findByText(NO_KUBECONFIG(["/a/config", "/b/config"]))).toBeInTheDocument();
+  expect(screen.getByText("aws eks update-kubeconfig --name prod").tagName).toBe("CODE");
+});
+
+test("files exist but none points at this cluster: no-context message, not the missing-file one", async () => {
+  m.context.mockResolvedValue(info([], { kubeconfigPaths: ["/a/config"] }));
+  setup();
+  expect(await screen.findByText(NO_CONTEXT)).toBeInTheDocument();
   expect(screen.getByText("aws eks update-kubeconfig --name prod").tagName).toBe("CODE");
 });
 

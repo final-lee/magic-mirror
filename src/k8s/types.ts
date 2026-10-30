@@ -23,6 +23,8 @@ export interface K8sContextInfo {
   endpointPublic: boolean;
   endpointPrivate: boolean;
   publicCidrs: string[];
+  /** 어느 경로에도 kubeconfig 파일이 없을 때만 true. 이때 kubeconfigPaths는 찾아본 경로들이고 candidates는 비어 있다 */
+  kubeconfigMissing: boolean;
   /** 읽은 파일들, 합친 순서대로 */
   kubeconfigPaths: string[];
   /** 이 클러스터를 가리키는 context들, kubeconfig 순서 */
