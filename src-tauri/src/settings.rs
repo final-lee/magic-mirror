@@ -24,6 +24,10 @@ pub struct Settings {
     pub diff_tool_command: Option<String>,
     /// PostgreSQL 탭의 로그인 사용자: 대상(클러스터·인스턴스) ARN → DB 사용자 이름
     pub pg_logins: BTreeMap<String, String>,
+    /// EKS 탭이 접속할 kubeconfig context: 클러스터 ARN → context 이름
+    pub k8s_contexts: BTreeMap<String, String>,
+    /// kubeconfig 경로. 비우면 KUBECONFIG 또는 ~/.kube/config
+    pub kubeconfig_path: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -37,6 +41,8 @@ struct RawSettings {
     diff_tool: Option<String>,
     diff_tool_command: Option<String>,
     pg_logins: BTreeMap<String, String>,
+    k8s_contexts: BTreeMap<String, String>,
+    kubeconfig_path: Option<String>,
 }
 
 fn defaults(all_services: &[&str]) -> Settings {
@@ -62,6 +68,8 @@ pub fn load(path: &Path, all_services: &[&str]) -> Settings {
                 diff_tool: raw.diff_tool,
                 diff_tool_command: raw.diff_tool_command,
                 pg_logins: raw.pg_logins,
+                k8s_contexts: raw.k8s_contexts,
+                kubeconfig_path: raw.kubeconfig_path,
             },
             Err(_) => defaults(all_services),
         },
@@ -97,6 +105,16 @@ mod tests {
         let path = dir.path().join("settings.json");
         fs::write(&path, text).unwrap();
         load(&path, &["ec2", "s3"])
+    }
+
+    #[test]
+    fn k8s_fields_roundtrip_and_default() {
+        let s = load_text(r#"{"k8sContexts":{"arn:aws:eks:r:1:cluster/a":"ctx-a"},"kubeconfigPath":"~/kc"}"#);
+        assert_eq!(s.k8s_contexts.get("arn:aws:eks:r:1:cluster/a").map(String::as_str), Some("ctx-a"));
+        assert_eq!(s.kubeconfig_path.as_deref(), Some("~/kc"));
+        let d = load_text("{}");
+        assert!(d.k8s_contexts.is_empty());
+        assert_eq!(d.kubeconfig_path, None);
     }
 
     #[test]

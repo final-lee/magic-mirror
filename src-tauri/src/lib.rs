@@ -8,6 +8,7 @@ mod iam;
 mod iam_commands;
 mod jsonl;
 pub mod k8s;
+mod k8s_commands;
 mod model;
 mod mouse_nav;
 mod pg;
@@ -39,6 +40,7 @@ pub fn run() {
             });
             app.manage(explorer_commands::ExplorerState::default());
             app.manage(iam_commands::IamState::new(dir.join("iam-changes.jsonl")));
+            app.manage(k8s_commands::K8sState::default());
             app.manage(pg_commands::PgState::new(dir.join("db-changes.jsonl")));
             pg_commands::spawn_sweeper(app.handle().clone());
             std::thread::spawn(explorer::external::sweep_stale);
@@ -106,6 +108,10 @@ pub fn run() {
             pg_commands::pg_change_log,
             pg_commands::pg_undo,
             pg_commands::pg_undo_batch,
+            k8s_commands::k8s_context,
+            k8s_commands::k8s_open,
+            k8s_commands::k8s_close,
+            k8s_commands::k8s_rules,
             pg_commands::pg_preset,
             pg_commands::pg_drop_plan,
             pg_commands::pg_apply_drop,
