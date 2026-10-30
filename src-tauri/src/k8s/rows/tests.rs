@@ -39,7 +39,7 @@ fn row_json_keys_match_the_ts_contract() {
         v,
         serde_json::json!({
             "uid": "u1", "name": "ops", "namespace": null, "resourceVersion": "7",
-            "createdAt": "2026-10-30T01:02:03Z", "labels": { "team": "a" }, "values": { "status": "Active" }
+            "createdAt": "2026-10-30T01:02:03Z", "labels": { "team": "a" }, "values": { "status": "Active" }, "problems": []
         })
     );
 }
@@ -48,4 +48,15 @@ fn row_json_keys_match_the_ts_contract() {
 fn kind_ref_reads_camel_case() {
     let k: KindRef = serde_json::from_value(serde_json::json!({ "group": "apps", "version": "v1", "kind": "Deployment", "plural": "deployments", "namespaced": true })).unwrap();
     assert!(k.namespaced && k.plural == "deployments");
+}
+
+#[test]
+fn row_carries_problems_from_values() {
+    let pod: DynamicObject = serde_json::from_value(serde_json::json!({
+        "apiVersion": "v1", "kind": "Pod", "metadata": { "name": "p", "uid": "u", "resourceVersion": "1" },
+        "spec": { "containers": [{ "name": "a", "image": "x" }] }, "status": { "phase": "Pending" }
+    }))
+    .unwrap();
+    let kind = KindRef { group: "".into(), version: "v1".into(), kind: "Pod".into(), plural: "pods".into(), namespaced: true };
+    assert_eq!(row_of(&kind, &pod).problems, [crate::k8s::read::values::Problem::Pending]);
 }

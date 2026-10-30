@@ -4,6 +4,8 @@ use kube::Client;
 
 use super::rows::KindRef;
 
+pub mod values;
+
 /// 종류와 네임스페이스로 동적 API를 만든다. 빈 이름이나 클러스터 범위 종류는 모든 네임스페이스로 본다(빈 경로를 만들지 않는다).
 pub fn api_for(client: Client, kind: &KindRef, namespace: Option<&str>) -> Api<DynamicObject> {
     let gvk = GroupVersionKind::gvk(&kind.group, &kind.version, &kind.kind);
