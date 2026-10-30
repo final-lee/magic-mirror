@@ -7,6 +7,7 @@ mod explorer_commands;
 mod iam;
 mod iam_commands;
 mod jsonl;
+pub mod k8s;
 mod model;
 mod mouse_nav;
 mod pg;
