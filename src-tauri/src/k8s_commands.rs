@@ -143,7 +143,8 @@ pub async fn k8s_open(app: State<'_, AppState>, k8s: State<'_, K8sState>, target
     let client = connect::connect(&loaded, &context, endpoint).await?;
     let identity = review::identity(&client, &candidate.user, endpoint).await?;
     let version = client.apiserver_version().await.map_err(|e| describe(&failure_of(&e, "get", "version"), endpoint))?;
-    let session = Session { client, endpoint, context: context.clone() };
+    let session = Session { client, endpoint, context };
+    let context = session.context.clone();
     if !k8s.keep(&target, started, session) {
         return Err(AppError::other(NOT_OPENED));
     }
