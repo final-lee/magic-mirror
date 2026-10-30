@@ -49,12 +49,22 @@ impl K8sState {
     }
 
     /// 시작할 때의 `epoch`와 같을 때만 넣는다. 다르면(그사이 닫힘) false.
+    /// 이미 연결이 있던 대상을 다시 열면(닫지 않은 재연결: kubeconfig 경로 변경, 웹뷰 새로고침) 그 대상의 watch는 옛 클라이언트를 쥐고 있으니 멈추고 잊는다.
     pub fn keep(&self, t: &K8sTarget, started: u64, session: Session) -> bool {
         let epochs = locked(&self.epochs);
         if *epochs.get(t).unwrap_or(&0) != started {
             return false;
         }
-        locked(&self.sessions).insert(t.clone(), Arc::new(session));
+        let mut sessions = locked(&self.sessions);
+        if sessions.insert(t.clone(), Arc::new(session)).is_some() {
+            locked(&self.watches).retain(|_, w| {
+                let same = w.target == *t;
+                if same {
+                    w.handle.abort();
+                }
+                !same
+            });
+        }
         true
     }
 

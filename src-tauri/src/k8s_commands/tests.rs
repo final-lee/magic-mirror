@@ -119,6 +119,27 @@ async fn close_aborts_only_that_targets_watches() {
 }
 
 #[tokio::test]
+async fn keep_over_an_existing_session_aborts_only_that_targets_watches() {
+    install_crypto_provider();
+    let state = K8sState::default();
+    let (a, b) = (target("a"), target("b"));
+    assert!(state.keep(&a, 0, session("one")));
+    let (ha, hb) = (pending(), pending());
+    let (ca, cb) = (ha.abort_handle(), hb.abort_handle());
+    let ia = state.register_watch(&a, 0, |_| ca).unwrap();
+    let ib = state.register_watch(&b, 0, |_| cb).unwrap();
+    assert!(state.keep(&a, 0, session("two")));
+    assert!(ha.await.unwrap_err().is_cancelled());
+    assert_eq!(state.session(&a).unwrap().context, "two");
+    tokio::task::yield_now().await;
+    assert!(!hb.is_finished());
+    // 잊혔으니 다시 멈추는 것은 아무 일도 아니다
+    state.unwatch(ia);
+    state.unwatch(ib);
+    assert!(hb.await.unwrap_err().is_cancelled());
+}
+
+#[tokio::test]
 async fn register_after_close_with_the_old_epoch_is_refused() {
     let state = K8sState::default();
     let t = target("a");

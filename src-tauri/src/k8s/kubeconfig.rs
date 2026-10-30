@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use kube::config::{AuthInfo, Kubeconfig};
 use serde::Serialize;
 
+use super::failure::short_reason;
 use crate::error::AppError;
 
 pub const NO_CONTEXT: &str = "kubeconfig에 이 클러스터의 context가 없어요. 터미널에서 아래 명령을 실행한 뒤 다시 열어 주세요";
@@ -63,10 +64,10 @@ pub fn load(paths: &[PathBuf]) -> Result<Loaded, AppError> {
         if !path.is_file() {
             continue;
         }
-        let kc = Kubeconfig::read_from(path).map_err(|e| AppError::other(unreadable_kubeconfig(path, &e.to_string())))?;
+        let kc = Kubeconfig::read_from(path).map_err(|e| AppError::other(unreadable_kubeconfig(path, &short_reason(&e))))?;
         merged = Some(match merged {
             None => kc,
-            Some(m) => m.merge(kc).map_err(|e| AppError::other(unreadable_kubeconfig(path, &e.to_string())))?,
+            Some(m) => m.merge(kc).map_err(|e| AppError::other(unreadable_kubeconfig(path, &short_reason(&e))))?,
         });
         read.push(path.clone());
     }

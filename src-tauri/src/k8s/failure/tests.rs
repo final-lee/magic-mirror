@@ -141,5 +141,28 @@ fn other_is_redacted_and_capped() {
 #[test]
 fn empty_api_message_gets_a_fixed_text() {
     let e = kube::Error::Api(Status::failure("", "Reason").with_code(500).boxed());
-    assert_eq!(failure_of(&e, "list", "pods"), Failure::Other("클러스터가 오류를 돌려줬어요(HTTP 500)".into()));
+    assert_eq!(failure_of(&e, "list", "pods"), Failure::Other(api_error(500)));
+}
+
+#[test]
+fn a_refresh_exec_failure_is_not_relabeled_by_the_outer_text() {
+    // 바깥 Service 오류의 글에 "certificate"가 들어 있어도 안쪽 AuthError가 이긴다
+    let out = Output { status: ExitStatus::from_raw(1 << 8), stdout: Vec::new(), stderr: b"certificate verify timed out".to_vec() };
+    let auth = AuthError::AuthExecRun { cmd: "aws".into(), status: out.status, out };
+    let e = kube::Error::Service(Box::new(auth));
+    assert_eq!(failure_of(&e, "list", "pods"), Failure::ExecFailed { stderr: "certificate verify timed out".into() });
+}
+
+#[test]
+fn an_unparseable_exec_output_gets_a_fixed_reason() {
+    let kube::config::KubeconfigError::Parse(parse) = kube::config::Kubeconfig::from_yaml("clientKeyData: SECRETVALUE: [").unwrap_err() else { panic!() };
+    let parse = *parse;
+    let e = kube::Error::Auth(AuthError::AuthExecParse(parse));
+    assert_eq!(failure_of(&e, "list", "pods"), Failure::ExecFailed { stderr: EXEC_OUTPUT_UNPARSEABLE.into() });
+}
+
+#[test]
+fn short_reason_keeps_the_first_line_only_and_redacts() {
+    assert_eq!(short_reason(&"\n  bad thing k8s-aws-v1.abc here\n  | clientKeyData: SECRETVALUE"), "bad thing [가림] here");
+    assert_eq!(short_reason(&"x".repeat(500)).chars().count(), 300);
 }
