@@ -117,6 +117,7 @@ pub fn run() {
             k8s_commands::k8s_rules,
             k8s_commands::k8s_watch,
             k8s_commands::k8s_unwatch,
+            k8s_commands::k8s_kinds,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
