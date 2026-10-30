@@ -38,4 +38,5 @@ for image in $IMAGES; do
 
   K8S_LIVE_KUBECONFIG="$kc" K8S_LIVE_BIN="$WORK/bin" K8S_LIVE_SLOW_ARM="$WORK/slow.armed" K8S_LIVE_READER_TOKEN="$reader_token" \
     cargo test --manifest-path src-tauri/Cargo.toml --lib k8s::live_tests -- --ignored --test-threads=1
+  kind delete cluster --name "$name" >/dev/null 2>&1 || true
 done
