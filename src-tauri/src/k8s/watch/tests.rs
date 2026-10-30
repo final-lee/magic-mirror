@@ -120,25 +120,103 @@ fn stall_fires_once_after_the_limit_and_progress_resets_it() {
     assert!(s.expired(t0 + secs(630)));
 }
 
-#[test]
-fn stall_stops_at_init_done_and_an_error_after_it_does_not_rearm() {
-    let t0 = Instant::now();
-    let mut s = Stall::default();
-    s.start(t0);
-    s.on_event(&Event::<Row>::InitDone, t0);
-    assert!(!s.expired(t0 + secs(3600)));
-    s.on_error(t0 + secs(10)); // watch 도중의 오류는 Init 없이 다시 watch한다
-    s.on_event(&Event::Apply(row("a", "1")), t0 + secs(31));
-    assert!(!s.expired(t0 + secs(100)));
-}
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
+
+use futures::StreamExt;
 
 #[test]
-fn stall_rearms_on_an_error_while_listing() {
-    let t0 = Instant::now();
-    let mut s = Stall::default();
-    s.on_event(&Event::<Row>::Init, t0);
-    s.on_error(t0 + secs(20));
-    assert!(!s.expired(t0 + secs(49)));
-    assert!(s.expired(t0 + secs(50)));
-    assert!(!s.expired(t0 + secs(500)));
+fn retry_doubles_to_the_cap_and_resets() {
+    let mut r = Retry::default();
+    let got: Vec<u64> = (0..7).map(|_| r.next_delay().as_secs()).collect();
+    assert_eq!(got, [1, 2, 4, 8, 16, 30, 30]);
+    r.reset();
+    assert_eq!(r.next_delay(), RETRY_FIRST);
+}
+
+type Item = Result<Event<DynamicObject>, watcher::Error>;
+
+/// 부를 때마다 다음 스트림을 내준다. 각 스트림은 주어진 항목 뒤에 열린 채로 멈춘다(조용한 watch).
+fn opener(streams: Vec<Vec<Item>>) -> (impl FnMut() -> Events + Send, Arc<Mutex<usize>>) {
+    let queue = Arc::new(Mutex::new(streams.into_iter().collect::<VecDeque<_>>()));
+    let opened = Arc::new(Mutex::new(0));
+    let count = opened.clone();
+    let open = move || {
+        *count.lock().unwrap() += 1;
+        let items = queue.lock().unwrap().pop_front().unwrap_or_default();
+        futures::stream::iter(items).chain(futures::stream::pending()).boxed()
+    };
+    (open, opened)
+}
+
+fn obj(name: &str, uid: &str) -> DynamicObject {
+    ns(name, uid, "Active")
+}
+
+async fn collect(open: impl FnMut() -> Events + Send + 'static, wait: std::time::Duration) -> Vec<WatchMessage> {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let task = tokio::spawn(run_with(open, namespaces(), Endpoint { public: true, private: false }, move |m| tx.send(m).is_ok()));
+    tokio::time::sleep(wait).await;
+    task.abort();
+    let mut out = Vec::new();
+    while let Ok(m) = rx.try_recv() {
+        out.push(m);
+    }
+    out
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_non_fatal_error_after_the_list_restarts_with_a_fresh_list() {
+    let (open, opened) = opener(vec![
+        vec![Ok(Event::Init), Ok(Event::InitApply(obj("a", "1"))), Ok(Event::InitDone), Err(watcher::Error::NoResourceVersion)],
+        vec![Ok(Event::Init), Ok(Event::InitApply(obj("a", "1"))), Ok(Event::InitApply(obj("b", "2"))), Ok(Event::InitDone)],
+    ]);
+    let got = collect(open, secs(5)).await;
+    assert_eq!(*opened.lock().unwrap(), 2);
+    let kinds: Vec<&str> = got
+        .iter()
+        .map(|m| match m {
+            WatchMessage::Reset { .. } => "reset",
+            WatchMessage::Changes { .. } => "changes",
+            WatchMessage::Error { fatal: false, .. } => "error",
+            WatchMessage::Error { fatal: true, .. } => "fatal",
+        })
+        .collect();
+    assert_eq!(kinds, ["reset", "error", "reset"]);
+    let Some(WatchMessage::Reset { rows }) = got.last() else { panic!() };
+    assert_eq!(rows.len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn pending_changes_are_sent_before_the_error() {
+    let (open, _) = opener(vec![vec![Ok(Event::Init), Ok(Event::InitDone), Ok(Event::Apply(obj("a", "1"))), Err(watcher::Error::NoResourceVersion)]]);
+    let got = collect(open, secs(1)).await;
+    assert!(matches!(got[1], WatchMessage::Changes { ref upserts, .. } if upserts.len() == 1), "{got:?}");
+    assert!(matches!(got[2], WatchMessage::Error { fatal: false, .. }));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_fatal_error_stops_without_reopening() {
+    let (open, opened) = opener(vec![vec![Err(watcher::Error::WatchError(status(403)))]]);
+    let got = collect(open, secs(120)).await;
+    assert_eq!(*opened.lock().unwrap(), 1);
+    assert_eq!(got.len(), 1);
+    assert!(matches!(got[0], WatchMessage::Error { fatal: true, .. }));
+}
+
+#[tokio::test(start_paused = true)]
+async fn repeated_errors_back_off_and_a_full_list_resets_the_wait() {
+    let err = || vec![Err(watcher::Error::NoResourceVersion)];
+    // 1초, 2초, 4초 기다린 뒤 네 번째 스트림이 목록을 끝낸다. 그 뒤 오류는 다시 1초만 기다린다.
+    let (open, opened) = opener(vec![err(), err(), err(), vec![Ok(Event::Init), Ok(Event::InitDone), Err(watcher::Error::NoResourceVersion)], vec![]]);
+    // 받는 쪽을 끝까지 쥐고 있어야 보내기가 실패하지 않는다
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let task = tokio::spawn(run_with(open, namespaces(), Endpoint { public: true, private: false }, move |m| tx.send(m).is_ok()));
+    tokio::time::sleep(std::time::Duration::from_millis(6_500)).await; // 0 + 1 + 2 + 4 = 7초 전
+    assert_eq!(*opened.lock().unwrap(), 3);
+    tokio::time::sleep(secs(1)).await; // 7초: 네 번째가 열리고 목록 → 오류
+    assert_eq!(*opened.lock().unwrap(), 4);
+    tokio::time::sleep(std::time::Duration::from_millis(1_100)).await; // 1초 뒤 다섯 번째
+    assert_eq!(*opened.lock().unwrap(), 5);
+    task.abort();
 }

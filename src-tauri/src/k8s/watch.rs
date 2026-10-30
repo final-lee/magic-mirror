@@ -1,17 +1,20 @@
 //! 목록 watch. 처음 목록(Init…InitDone)은 한 번에 `Reset`으로, 그 뒤 변경은 100ms 또는 500줄마다 `Changes`로 묶어 보낸다.
+//! 일시적인 오류가 나면 알리고, 기다렸다가 새 watcher로 처음 목록부터 다시 받는다. 새 목록의 `Reset`이 회복 소식이다.
 use std::collections::BTreeMap;
+use std::time::Duration;
 
-use kube::api::{Api, ApiResource, DynamicObject, GroupVersionKind};
+use futures::stream::BoxStream;
+use kube::api::DynamicObject;
 use kube::runtime::watcher::{self, Event};
-use kube::runtime::WatchStreamExt;
 use tokio::time::Instant;
 
 use super::connect::REQUEST_TIMEOUT;
 use super::failure::{describe, failure_of, Endpoint, Failure};
+use super::read::api_for;
 use super::rows::{row_of, KindRef, Row};
 use crate::error::AppError;
 
-pub const FLUSH_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
+pub const FLUSH_EVERY: Duration = Duration::from_millis(100);
 pub const FLUSH_ROWS: usize = 500;
 pub const PAGE_SIZE: u32 = 500;
 
@@ -74,37 +77,24 @@ impl Batcher {
 
 /// 목록 단계(시작, 다시 목록)가 `REQUEST_TIMEOUT` 안에 아무 소식 없이 멈추면 한 번 알리게 하는 시계.
 /// 토큰이 만료돼 exec 플러그인이 다시 도는 동안처럼 요청이 조용히 걸려 있을 때를 위한 것이다. `InitDone` 뒤의 watch는 원래 조용할 수 있어 재지 않는다.
-/// watch 도중의 오류는 watcher가 목록 없이 다시 watch하니(`Init` 없음) 목록 단계일 때만 다시 잰다.
+/// watch가 오류로 끝나면 새 watcher와 함께 새 `Stall`이 처음부터 잰다.
 #[derive(Default)]
 pub struct Stall {
     since: Option<Instant>,
-    listing: bool,
 }
 
 impl Stall {
     /// 목록 단계를 시작한다(처음, 또는 `Init`)
     pub fn start(&mut self, now: Instant) {
-        self.listing = true;
         self.since = Some(now);
     }
 
     /// 이벤트가 오면 부른다. 목록 중이면 진행이 있었으니 다시 재고, 목록이 끝나면 멈춘다.
     pub fn on_event<K>(&mut self, ev: &Event<K>, now: Instant) {
         match ev {
-            Event::Init => self.start(now),
-            Event::InitApply(_) => self.since = Some(now),
-            Event::InitDone => {
-                self.listing = false;
-                self.since = None;
-            }
+            Event::Init | Event::InitApply(_) => self.since = Some(now),
+            Event::InitDone => self.since = None,
             Event::Apply(_) | Event::Delete(_) => {}
-        }
-    }
-
-    /// 오류 뒤 backoff로 목록 요청을 다시 하는 경우만 다시 잰다
-    pub fn on_error(&mut self, now: Instant) {
-        if self.listing {
-            self.since = Some(now);
         }
     }
 
@@ -146,21 +136,74 @@ fn is_fatal(f: &Failure) -> bool {
     matches!(f, Failure::Forbidden { .. } | Failure::Unauthorized)
 }
 
-/// 보내기가 실패하면(프론트가 채널을 버림) 끝난다. 403·401은 치명적이라 알리고 끝낸다. 다른 오류는 알리고 watcher의 재시도(backoff)에 맡긴다.
-pub async fn run<F>(client: kube::Client, kind: KindRef, namespace: Option<String>, endpoint: Endpoint, mut send: F)
+pub const RETRY_FIRST: Duration = Duration::from_secs(1);
+pub const RETRY_MAX: Duration = Duration::from_secs(30);
+
+/// 일시적인 오류 뒤 새 목록을 받기 전에 기다리는 시간: 1초에서 두 배씩 30초까지. 목록을 끝까지 받으면 1초로 돌아간다.
+#[derive(Debug)]
+pub struct Retry {
+    next: Duration,
+}
+
+impl Default for Retry {
+    fn default() -> Self {
+        Retry { next: RETRY_FIRST }
+    }
+}
+
+impl Retry {
+    pub fn next_delay(&mut self) -> Duration {
+        let d = self.next;
+        self.next = (self.next * 2).min(RETRY_MAX);
+        d
+    }
+
+    pub fn reset(&mut self) {
+        self.next = RETRY_FIRST;
+    }
+}
+
+pub type Events = BoxStream<'static, Result<Event<DynamicObject>, watcher::Error>>;
+
+enum Outcome {
+    Stop,
+    Retry,
+}
+
+/// 보내기가 실패하면(프론트가 채널을 버림) 끝난다. 403·401은 치명적이라 알리고 끝낸다. 다른 오류는 알리고, 기다렸다가 처음 목록부터 다시 받는다.
+pub async fn run<F>(client: kube::Client, kind: KindRef, namespace: Option<String>, endpoint: Endpoint, send: F)
 where
     F: FnMut(WatchMessage) -> bool + Send,
 {
     use futures::StreamExt;
 
-    let gvk = GroupVersionKind::gvk(&kind.group, &kind.version, &kind.kind);
-    let ar = ApiResource::from_gvk_with_plural(&gvk, &kind.plural);
-    // 빈 이름은 모든 네임스페이스로 본다(빈 경로를 만들지 않는다)
-    let api: Api<DynamicObject> = match (namespace.as_deref().filter(|n| !n.is_empty()), kind.namespaced) {
-        (Some(ns), true) => Api::namespaced_with(client, ns, &ar),
-        _ => Api::all_with(client, &ar),
-    };
-    let mut stream = watcher::watcher(api, watcher::Config::default().page_size(PAGE_SIZE)).default_backoff().boxed();
+    let api = api_for(client, &kind, namespace.as_deref());
+    let config = watcher::Config::default().page_size(PAGE_SIZE);
+    run_with(move || watcher::watcher(api.clone(), config.clone()).boxed(), kind, endpoint, send).await;
+}
+
+/// `open`은 부를 때마다 새 watcher(처음 목록부터)를 만든다. 시험은 가짜 스트림을 넘긴다.
+pub async fn run_with<O, F>(mut open: O, kind: KindRef, endpoint: Endpoint, mut send: F)
+where
+    O: FnMut() -> Events + Send,
+    F: FnMut(WatchMessage) -> bool + Send,
+{
+    let mut retry = Retry::default();
+    loop {
+        match once(open(), &kind, endpoint, &mut send, &mut retry).await {
+            Outcome::Stop => return,
+            Outcome::Retry => tokio::time::sleep(retry.next_delay()).await,
+        }
+    }
+}
+
+/// watcher 하나를 오류나 끝까지 돌린다
+async fn once<F>(mut stream: Events, kind: &KindRef, endpoint: Endpoint, send: &mut F, retry: &mut Retry) -> Outcome
+where
+    F: FnMut(WatchMessage) -> bool + Send,
+{
+    use futures::StreamExt;
+
     let mut batch = Batcher::default();
     let mut tick = tokio::time::interval(FLUSH_EVERY);
     let mut stall = Stall::default();
@@ -168,38 +211,47 @@ where
     loop {
         tokio::select! {
             next = stream.next() => match next {
-                None => return,
+                None => return Outcome::Stop,
                 Some(Ok(ev)) => {
                     stall.on_event(&ev, Instant::now());
-                    if let Some(msg) = batch.on(rows_of(&kind, ev)) {
+                    if matches!(ev, Event::InitDone) {
+                        retry.reset();
+                    }
+                    if let Some(msg) = batch.on(rows_of(kind, ev)) {
                         if !send(msg) {
-                            return;
+                            return Outcome::Stop;
                         }
                     }
                     if batch.full() {
                         if let Some(msg) = batch.take() {
                             if !send(msg) {
-                                return;
+                                return Outcome::Stop;
                             }
                         }
                     }
                 }
                 Some(Err(e)) => {
-                    let failure = watch_failure(&e, &kind);
+                    let failure = watch_failure(&e, kind);
                     let fatal = is_fatal(&failure);
-                    stall.on_error(Instant::now());
-                    if !send(WatchMessage::Error { error: describe(&failure, endpoint), fatal }) || fatal {
-                        return;
+                    // 오류 전에 받은 변경을 먼저 보낸다(새 목록이 덮지만 그사이 화면이 낡지 않게)
+                    if let Some(msg) = batch.take() {
+                        if !send(msg) {
+                            return Outcome::Stop;
+                        }
                     }
+                    if !send(WatchMessage::Error { error: describe(&failure, endpoint), fatal }) || fatal {
+                        return Outcome::Stop;
+                    }
+                    return Outcome::Retry;
                 }
             },
             _ = tick.tick() => {
                 if stall.expired(Instant::now()) && !send(WatchMessage::Error { error: describe(&Failure::Unreachable, endpoint), fatal: false }) {
-                    return;
+                    return Outcome::Stop;
                 }
                 if let Some(msg) = batch.take() {
                     if !send(msg) {
-                        return;
+                        return Outcome::Stop;
                     }
                 }
             }
