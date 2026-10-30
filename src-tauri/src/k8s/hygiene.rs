@@ -12,6 +12,11 @@ const WRITE_CALLS: &[&str] = &[
 /// (파일, 허용하는 호출)
 const ALLOWED: &[(&str, &[&str])] = &[("k8s/review.rs", &[".create("])];
 
+/// 시험일 때만 컴파일되는 파일은 스캔하지 않는다: `hygiene.rs`, `live_tests.rs`, 이름이 `tests.rs`인 파일
+fn is_test_only(path: &Path) -> bool {
+    path.file_name().is_some_and(|n| n == "hygiene.rs" || n == "live_tests.rs" || n == "tests.rs")
+}
+
 fn sources() -> Vec<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut out = vec![root.join("k8s_commands.rs")];
@@ -21,7 +26,7 @@ fn sources() -> Vec<PathBuf> {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-            } else if path.extension().is_some_and(|e| e == "rs") && !path.ends_with("hygiene.rs") {
+            } else if path.extension().is_some_and(|e| e == "rs") && !is_test_only(&path) {
                 out.push(path);
             }
         }
@@ -29,51 +34,45 @@ fn sources() -> Vec<PathBuf> {
     out.into_iter().filter(|p| p.exists()).collect()
 }
 
-/// 제품 코드 부분. `#[cfg(test)]`는 줄 맨 앞에서만 속성으로 읽고(주석 속 글자는 무시), 파일 끝의 시험 모듈로만 쓸 수 있다:
-/// `#[cfg(test)] mod x {` 본문이 끝까지 가거나, 끝에 `#[cfg(test)] mod x;` 줄들만 이어진다. 그 밖의 자리(앞쪽의 시험 전용 `use`나 함수 등)는
-/// 그 뒤의 제품 코드를 가려 버리므로 에러로 거절한다.
+/// 제품 코드 부분. 테스트 배치 규칙: 스캔하는 파일은 맨 끝에 `#[cfg(test)]`(0열) 다음 줄에 `mod 이름;`(0열) 쌍을 0개 이상 두고, 그 뒤에는
+/// 빈 줄과 `//` 주석만 올 수 있다. 시험 코드는 `이름/tests.rs` 같은 파일로 뺀다(`pg/connect.rs`와 `pg/connect/tests.rs`처럼). 중괄호 꼴의
+/// 인라인 시험 모듈은 없다. 이 밖의 자리에 있는 `#[cfg(test)]`는(주석 줄은 빼고) 뒤의 제품 코드를 가릴 수 있어 에러로 거절한다.
 fn production_part(text: &str) -> Result<&str, String> {
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let mut offset = 0;
     let mut cut = None;
-    let mut lines = text.split_inclusive('\n').peekable();
-    while let Some(line) = lines.next() {
-        let start = offset;
-        offset += line.len();
-        let trimmed = line.trim();
-        if let Some(at) = cut {
-            // `;` 꼴 뒤에는 시험 모듈 선언, 주석, 빈 줄만 올 수 있다. `{` 꼴은 본문이 끝까지다.
-            if cut_is_inline(text, at) {
-                return Ok(&text[..at]);
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let bare = line.trim_end_matches(['\n', '\r']);
+        let trimmed = bare.trim();
+        if bare == "#[cfg(test)]" {
+            let next = lines.get(i + 1).map_or("", |l| l.trim_end_matches(['\n', '\r']));
+            if !is_mod_decl(next) {
+                return Err(format!("`#[cfg(test)]` 다음 줄은 `mod 이름;`이어야 해요: {next}"));
             }
-            let ok = trimmed.is_empty() || trimmed.starts_with("//") || trimmed == "#[cfg(test)]" || is_mod_decl(trimmed.trim_start_matches("#[cfg(test)]").trim());
-            if !ok {
-                return Err(format!("`#[cfg(test)] mod x;` 뒤에 다른 코드가 있어요: {trimmed}"));
-            }
+            cut.get_or_insert(offset);
+            offset += line.len() + lines[i + 1].len();
+            i += 2;
             continue;
         }
-        if let Some(rest) = trimmed.strip_prefix("#[cfg(test)]") {
-            let rest = rest.trim();
-            let decl = if rest.is_empty() { lines.peek().map_or("", |l| l.trim()) } else { rest };
-            if !is_mod_decl(decl) {
-                return Err(format!("`#[cfg(test)]`는 파일 끝의 `mod x;`/`mod x {{` 앞에만 둘 수 있어요: {decl}"));
-            }
-            cut = Some(start);
+        if trimmed.starts_with("//") || (cut.is_some() && trimmed.is_empty()) {
+            // 주석은 어디서든 괜찮다
+        } else if trimmed.contains("#[cfg(test)]") {
+            return Err(format!("`#[cfg(test)]`는 0열에서 파일 끝의 `mod 이름;` 앞에만 둘 수 있어요: {bare}"));
+        } else if cut.is_some() && !trimmed.is_empty() {
+            return Err(format!("시험 모듈 선언 뒤에 다른 코드가 있어요: {bare}"));
         }
+        offset += line.len();
+        i += 1;
     }
     Ok(cut.map_or(text, |at| &text[..at]))
 }
 
+/// 0열에서 시작하는 `mod 이름;`(앞에 `pub`이 없는)
 fn is_mod_decl(line: &str) -> bool {
-    let line = line.trim();
-    let Some(rest) = line.strip_prefix("mod ").or_else(|| line.strip_prefix("pub mod ")) else { return false };
-    let name_end = rest.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(rest.len());
-    name_end > 0 && matches!(rest[name_end..].trim_start().chars().next(), Some(';' | '{'))
-}
-
-/// 잘린 자리의 선언이 본문이 있는 `mod x {` 꼴인가
-fn cut_is_inline(text: &str, at: usize) -> bool {
-    let tail = text[at..].trim_start().trim_start_matches("#[cfg(test)]").trim_start();
-    tail.lines().next().is_some_and(|l| l.trim_end().ends_with('{'))
+    let Some(name) = line.strip_prefix("mod ").and_then(|r| r.strip_suffix(';')) else { return false };
+    !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
 
 #[test]
@@ -99,17 +98,23 @@ fn the_scan_sees_k8s_files() {
 }
 
 #[test]
-fn production_part_cuts_at_the_trailing_test_module() {
-    assert_eq!(production_part("fn a() {}\n#[cfg(test)]\nmod tests {\n    fn t() {}\n}\n").unwrap(), "fn a() {}\n");
-    assert_eq!(production_part("pub mod a;\n#[cfg(test)]\nmod hygiene;\n#[cfg(test)]\nmod live_tests;\n").unwrap(), "pub mod a;\n");
+fn production_part_accepts_trailing_test_mod_pairs() {
+    assert_eq!(production_part("fn a() {}\n#[cfg(test)]\nmod tests;\n").unwrap(), "fn a() {}\n");
+    assert_eq!(production_part("pub mod a;\n\n#[cfg(test)]\nmod hygiene;\n// 메모\n\n#[cfg(test)]\nmod live_tests;\n\n").unwrap(), "pub mod a;\n\n");
     assert_eq!(production_part("fn a() {}\n").unwrap(), "fn a() {}\n");
 }
 
 #[test]
-fn production_part_rejects_early_test_only_items() {
-    assert!(production_part("#[cfg(test)]\nuse std::fs;\nfn a() { x.delete(); }\n").is_err());
+fn production_part_rejects_everything_else() {
+    // 앞쪽의 시험 전용 항목
+    assert!(production_part("#[cfg(test)]\nuse std::fs;\nfn a() {}\n").is_err());
     assert!(production_part("#[cfg(test)] use std::fs;\nfn a() {}\n").is_err());
-    assert!(production_part("pub mod a;\n#[cfg(test)]\nmod hygiene;\nfn late() {}\n").is_err());
+    assert!(production_part("#[cfg(test)]\nfn t() {}\n").is_err());
+    // 여러 줄 인라인 모듈 뒤의 코드, 들여쓴 모듈, 한 줄 모듈
+    assert!(production_part("fn a() {}\n#[cfg(test)]\nmod tests {\n    fn t() {}\n}\nfn late() {}\n").is_err());
+    assert!(production_part("fn a() {}\n    #[cfg(test)] mod t {}\nfn late() {}\n").is_err());
+    assert!(production_part("fn a() {}\n#[cfg(test)]\nmod tests;\nmod evil { fn x() {} }\n").is_err());
+    assert!(production_part("fn a() {}\n#[cfg(test)]\nmod tests;\nfn late() {}\n").is_err());
 }
 
 #[test]
