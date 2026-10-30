@@ -326,7 +326,7 @@ export default function App() {
         ))}
         {k8sTabs.map((t) => (
           <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
-            <K8sTab target={t.target} active={activeTab === t.id} />
+            <K8sTab target={t.target} active={activeTab === t.id} onOpenIam={openIam} />
           </div>
         ))}
         {diffTabs.map((t) => (
