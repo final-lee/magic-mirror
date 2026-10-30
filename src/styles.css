@@ -16,6 +16,7 @@ button { font: inherit; color: inherit; }
 .search:focus { border-color: var(--accent); }
 .icon { width: 28px; height: 26px; display: grid; place-items: center; border-radius: 6px; color: var(--dim); background: none; border: 0; cursor: pointer; }
 .icon:hover { background: #3a3a3d; color: #fff; }
+.titlebar .icon { width: 32px; height: 30px; font-size: 20px; line-height: 1; }
 .main { flex: 1; display: flex; min-height: 0; }
 .side { width: 220px; background: var(--side); border-right: 1px solid var(--line); overflow: auto; padding: 8px 0; }
 .grp { color: var(--dim); font-size: 11px; font-weight: 600; padding: 10px 14px 4px; }
