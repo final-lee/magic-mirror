@@ -1,8 +1,9 @@
 import { useQuery, type QueryClient } from "@tanstack/react-query";
+import { reportSsoExpired } from "../api/invoke";
 import type { AppError } from "../api/types";
 import { k8sApi } from "./api";
 import { kindKey, targetKey } from "./targets";
-import type { K8sContextInfo, K8sKind, K8sObjectView, K8sOverview, K8sRules, K8sSession, K8sTarget, ObjectRef } from "./types";
+import type { K8sContextInfo, K8sKind, K8sObjectView, K8sOverview, K8sOverviewSection, K8sRules, K8sSession, K8sTarget, ObjectRef } from "./types";
 import { watchRegistry } from "./watchRegistry";
 
 /** 쿼리 키. 대상별 데이터는 모두 ["k8s", targetKey(target), ...] 아래에 두어 한 번에 무효화하거나 지울 수 있다. */
@@ -76,10 +77,27 @@ export function useK8sObject(target: K8sTarget, context: string | null, ref: Obj
   });
 }
 
-export function useK8sOverview(target: K8sTarget, context: string | null, _ssoProfile: string, enabled: boolean) {
+/** EKS API 쪽 개요 구역. 로그인할 프로필이 앱의 프로필이다(나머지는 kubeconfig의 exec 프로필). */
+export const EKS_SECTIONS = new Set<K8sOverviewSection>(["cluster", "nodegroups", "fargate", "addons", "insights"]);
+
+/**
+ * 개요. 구역 오류(gaps)는 성공한 응답 안에 있어서 invoke가 SSO 만료를 알리지 못한다. 그래서 실제로 조회가 도는 이 함수에서,
+ * 요청을 시작한 시각과 함께 거절된 명령과 같은 길(reportSsoExpired)로 프로필마다 한 번 알린다.
+ * 화면이 캐시된 응답을 다시 그릴 때는 이 함수가 돌지 않으니, 로그인 뒤에 낡은 만료를 다시 알리는 일이 없다.
+ */
+export function useK8sOverview(target: K8sTarget, context: string | null, ssoProfile: string, enabled: boolean) {
   return useQuery<K8sOverview, AppError>({
     queryKey: k8sKeys.overview(target, context),
-    queryFn: () => k8sApi.overview(target),
+    queryFn: async () => {
+      const startedAt = Date.now();
+      const overview = await k8sApi.overview(target);
+      const expired = new Set<string>();
+      for (const g of overview.gaps) {
+        if (g.error.kind === "ssoExpired") expired.add(EKS_SECTIONS.has(g.section) ? target.profile : ssoProfile);
+      }
+      for (const profile of expired) reportSsoExpired(profile, startedAt);
+      return overview;
+    },
     enabled: enabled && context !== null,
     staleTime: 60_000,
     retry: false,
