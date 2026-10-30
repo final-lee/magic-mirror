@@ -13,6 +13,11 @@ use super::failure::{exec_missing, Endpoint, TLS_UNVERIFIED, UNAUTHORIZED, UNREA
 use super::kubeconfig::{load, with_path};
 use super::review::{identity, rules, IdentitySource};
 use super::rows::KindRef;
+use super::read::detail::{get, ContainerState};
+use super::read::kinds::{discover, kinds_of};
+use super::read::overview::k8s_parts;
+use super::read::secret::{key_missing, secret_value, secrets_kind, Encoding, SecretKey, SecretValue, MASK};
+use super::read::values::Problem;
 use super::tls::install_crypto_provider;
 use super::watch::{run, WatchMessage};
 use crate::error::AppError;
@@ -270,4 +275,104 @@ async fn watch_reports_a_list_that_stalls() {
         }
     }
     task.abort();
+}
+
+fn kind_ref(group: &str, version: &str, kind: &str, plural: &str) -> KindRef {
+    KindRef { group: group.into(), version: version.into(), kind: kind.into(), plural: plural.into(), namespaced: true }
+}
+
+async fn admin() -> kube::Client {
+    let (context, value) = base();
+    client_for(&build(&value), &context, PRIVATE).await.unwrap()
+}
+
+#[tokio::test]
+#[ignore]
+async fn discovery_lists_builtin_and_custom_kinds() {
+    let client = admin().await;
+    let kinds = kinds_of(&discover(&client, PRIVATE).await.unwrap());
+    let find = |g: &str, k: &str| kinds.iter().find(|x| x.kind.group == g && x.kind.kind == k).cloned();
+    let deploy = find("apps", "Deployment").expect("Deployment");
+    assert!(!deploy.custom && deploy.kind.namespaced && deploy.kind.plural == "deployments");
+    assert!(find("mm.example.com", "Widget").expect("Widget").custom);
+    assert!(find("", "Pod").is_some() && find("", "Node").is_some_and(|n| !n.kind.namespaced));
+}
+
+#[tokio::test]
+#[ignore]
+async fn deployment_owns_a_replicaset_that_owns_a_pod() {
+    let client = admin().await;
+    let d = get(&client, &kind_ref("apps", "v1", "Deployment", "deployments"), Some("mm-k2"), "web", PRIVATE).await.unwrap();
+    assert_eq!(d.containers[0].state, ContainerState::Template);
+    assert!(d.children_error.is_none() && d.events_error.is_none());
+    let rs = d.children.first().expect("a ReplicaSet child").clone();
+    assert_eq!(rs.kind, "ReplicaSet");
+    let rs_view = get(&client, &kind_ref("apps", "v1", "ReplicaSet", "replicasets"), Some("mm-k2"), &rs.name, PRIVATE).await.unwrap();
+    assert!(rs_view.owners.iter().any(|o| o.kind == "Deployment" && o.name == "web" && o.controller));
+    let pod = rs_view.children.first().expect("a Pod child").clone();
+    let pod_view = get(&client, &kind_ref("", "v1", "Pod", "pods"), Some("mm-k2"), &pod.name, PRIVATE).await.unwrap();
+    assert!(pod_view.owners.iter().any(|o| o.uid == rs_view.row.uid));
+    assert!(!pod_view.yaml.contains("managedFields"));
+}
+
+#[tokio::test]
+#[ignore]
+async fn secret_is_masked_in_detail_and_readable_by_key() {
+    let client = admin().await;
+    let v = get(&client, &secrets_kind(), Some("mm-k2"), "db", PRIVATE).await.unwrap();
+    let all = serde_json::to_string(&v).unwrap();
+    assert!(!all.contains("hunter2") && !all.contains("aHVudGVyMg=="), "{all}");
+    assert!(v.yaml.contains(MASK));
+    assert_eq!(v.secret_keys, Some(vec![SecretKey { key: "password".into(), size: 7 }]));
+    assert_eq!(secret_value(&client, "mm-k2", "db", "password", PRIVATE).await.unwrap(), SecretValue { text: "hunter2".into(), encoding: Encoding::Utf8 });
+    assert_eq!(secret_value(&client, "mm-k2", "db", "nope", PRIVATE).await.unwrap_err(), AppError::other(key_missing("nope")));
+}
+
+#[tokio::test]
+#[ignore]
+async fn a_reader_without_secret_access_is_denied() {
+    let (context, value) = reader_config();
+    let client = client_for(&build(&value), &context, PRIVATE).await.unwrap();
+    assert_eq!(secret_value(&client, "mm-live", "any", "k", PRIVATE).await.unwrap_err(), AppError::AccessDenied { action: "get secrets".into() });
+}
+
+#[tokio::test]
+#[ignore]
+async fn broken_pod_is_flagged_in_the_watch_and_has_warning_events() {
+    let client = admin().await;
+    let pods = kind_ref("", "v1", "Pod", "pods");
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let task = tokio::spawn(run(client.clone(), pods.clone(), Some("mm-k2".into()), PRIVATE, move |m| tx.send(m).is_ok()));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    loop {
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        match recv(&mut rx, left).await {
+            Some(WatchMessage::Reset { rows }) | Some(WatchMessage::Changes { upserts: rows, .. })
+                if rows.iter().any(|r| r.name == "broken" && r.problems.contains(&Problem::ImagePullBackOff)) =>
+            {
+                break
+            }
+            Some(_) => {}
+            None => panic!("broken never showed imagePullBackOff within 120 s"),
+        }
+    }
+    task.abort();
+    let v = get(&client, &pods, Some("mm-k2"), "broken", PRIVATE).await.unwrap();
+    assert!(v.events.iter().any(|e| e.type_ == "Warning"), "{:?}", v.events);
+}
+
+#[tokio::test]
+#[ignore]
+async fn overview_kubernetes_part_reads_nodes_and_requests() {
+    let client = admin().await;
+    let parts = k8s_parts(&client, Some("1.33"), PRIVATE).await;
+    assert!(!parts.nodes.unwrap().is_empty());
+    let (requests, partial) = parts.requests.unwrap();
+    assert!(!partial);
+    // coredns가 CPU를 요청한다
+    assert!(requests.values().any(|r| r.cpu_milli > 0 && r.pods > 0), "{requests:?}");
+    // kind에는 metrics-server와 Karpenter가 없다
+    assert_eq!(parts.usage.unwrap(), None);
+    assert_eq!(parts.node_pools.unwrap(), None);
+    assert_eq!(parts.removed.unwrap(), Some(vec![]));
 }

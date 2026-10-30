@@ -24,6 +24,53 @@ for image in $IMAGES; do
   kubectl --kubeconfig "$kc" -n mm-live create rolebinding reader-pods --role=pod-reader --serviceaccount=mm-live:reader
   reader_token=$(kubectl --kubeconfig "$kc" -n mm-live create token reader --duration=1h)
 
+  # K2 픽스처: 준비되는 Deployment, 이미지를 받지 못하는 Pod, kubectl apply로 만든 Secret(last-applied에 값이 남는다), CRD와 그 객체
+  kubectl --kubeconfig "$kc" apply -f - <<'YAML'
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: { name: widgets.mm.example.com }
+spec:
+  group: mm.example.com
+  scope: Namespaced
+  names: { plural: widgets, singular: widget, kind: Widget }
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema: { openAPIV3Schema: { type: object, x-kubernetes-preserve-unknown-fields: true } }
+YAML
+  kubectl --kubeconfig "$kc" wait --for condition=established --timeout=60s crd/widgets.mm.example.com
+  kubectl --kubeconfig "$kc" apply -f - <<'YAML'
+apiVersion: v1
+kind: Namespace
+metadata: { name: mm-k2 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: web, namespace: mm-k2 }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: web } }
+  template:
+    metadata: { labels: { app: web } }
+    spec: { containers: [{ name: app, image: "registry.k8s.io/pause:3.10" }] }
+---
+apiVersion: v1
+kind: Pod
+metadata: { name: broken, namespace: mm-k2 }
+spec: { containers: [{ name: app, image: "registry.invalid/mm/nope:1" }] }
+---
+apiVersion: v1
+kind: Secret
+metadata: { name: db, namespace: mm-k2 }
+stringData: { password: hunter2 }
+---
+apiVersion: mm.example.com/v1
+kind: Widget
+metadata: { name: w1, namespace: mm-k2 }
+YAML
+  kubectl --kubeconfig "$kc" -n mm-k2 rollout status deployment/web --timeout=120s
+
   # exec 플러그인 시험용: kind의 클라이언트 인증서를 ExecCredential로 내보내는 가짜 플러그인, SSO 만료를 흉내 내는 플러그인,
   # 평소엔 바로 답하다가 slow.armed 파일이 생기면 40초 멈추는 플러그인(watch가 멈춘 목록을 알리는지 보는 시험)
   cert=$(yq '.users[0].user.client-certificate-data' "$kc" | base64 -d)
