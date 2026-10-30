@@ -79,19 +79,28 @@ test("closeK8s drops queries only after close finishes", async () => {
   expect(qc.getQueryData(k8sKeys.session(T, "ctx"))).toBeUndefined();
 });
 
-test("refreshK8s removes the session query before close and refetches the context", async () => {
+test("refreshK8s closes, then reopens a mounted session and refetches the context, with no watch in between", async () => {
   const qc = client();
-  api.context.mockResolvedValue({ chosen: null } as never);
-  const { result } = renderHook(() => useK8sContext(T, null, null), { wrapper: wrap(qc) });
-  await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  qc.setQueryData(k8sKeys.session(T, "ctx"), { context: "ctx" });
-  let seen: unknown = "unset";
+  const log: string[] = [];
+  api.context.mockResolvedValue({ chosen: "ctx" } as never);
+  api.open.mockImplementation(async () => {
+    log.push("open");
+    return { context: "ctx" } as never;
+  });
   api.close.mockImplementation(async () => {
-    seen = qc.getQueryData(k8sKeys.session(T, "ctx"));
+    log.push("close");
     return null;
   });
+  const { result } = renderHook(
+    () => ({ ctx: useK8sContext(T, null, null), session: useK8sSession(T, null, "ctx", "p") }),
+    { wrapper: wrap(qc) },
+  );
+  await waitFor(() => expect(result.current.session.isSuccess).toBe(true));
+  await waitFor(() => expect(result.current.ctx.isSuccess).toBe(true));
+  log.length = 0;
   await refreshK8s(qc, T, "p");
-  expect(seen).toBeUndefined();
-  expect(qc.getQueryData(k8sKeys.session(T, "ctx"))).toBeUndefined();
+  await waitFor(() => expect(api.open).toHaveBeenCalledTimes(2));
   await waitFor(() => expect(api.context).toHaveBeenCalledTimes(2));
+  expect(log).toEqual(["close", "open"]);
+  expect(api.watch).not.toHaveBeenCalled();
 });
