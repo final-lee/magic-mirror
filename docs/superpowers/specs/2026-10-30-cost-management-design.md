@@ -17,11 +17,56 @@
 
 | 단계 | 범위 |
 |---|---|
-| C0 | 실제 계정으로 확인하는 짧은 조사: 리소스 단위 조회의 `SERVICE` 필터 요구, 서비스별 `RESOURCE_ID` 형식, opt-in이 꺼진 계정의 오류 모양, Price List 필터 값. 결과를 이 문서의 표에 반영한다. |
+| C0 | 실제 계정으로 확인하는 짧은 조사. 2026-10-30 `personal` 계정으로 했고 결과는 **C0 결과** 절에 있다. 리소스 단위 조회의 `SERVICE` 필터 요구와 `RESOURCE_ID` 형식은 이 계정에서 opt-in이 꺼져 있어 확인하지 못했다. C4 계획 전에 opt-in을 켠 계정으로 다시 확인한다. |
 | C1 | 백엔드 기반: Cost Explorer·Price List 클라이언트(us-east-1), 디스크 캐시, 요청 계수기, 오류 분류, 대시보드 명령 |
 | C2 | `💰 비용` 탭 화면 |
 | C3 | 상세 패널 정가 추정 |
 | C4 | 상세 패널 실제 청구액(최근 14일) |
+
+## C0 결과
+2026-10-30, `personal` 계정(단독 IAM 사용자, ap-northeast-2)으로 확인했다. Cost Explorer 요청은 5건 들었다.
+
+### Cost Explorer
+- `GetCostAndUsage`
+  - 조건: 이번 달 1일~오늘, `DAILY`, `GroupBy SERVICE`.
+  - 한 페이지에 29일 × 27개 서비스가 왔다(`NextPageToken` 없음).
+  - 통화 단위는 `USD`, 금액은 `"0.53168163"` 같은 소수 문자열이다.
+- `GroupBy`를 주면 날짜별 `Total`이 빈 객체로 온다. 합계는 그룹을 더해서 만든다.
+- 이번 달은 모든 날이 `Estimated: true`였다. "추정 포함" 표시는 이번 달이면 사실상 늘 붙는다.
+- 서비스 이름에 주의할 것
+  - EBS 볼륨은 `Amazon Elastic Compute Cloud - Compute`가 아니라 `EC2 - Other`에 들어간다.
+  - 세금은 `Tax`라는 서비스로, Bedrock 모델은 `Claude Sonnet 5 (Amazon Bedrock Edition)`처럼 모델마다 다른 서비스로 나온다.
+  - 앱이 부른 Cost Explorer 요금도 `AWS Cost Explorer`로 보인다(이 달 $0.84).
+- `RECORD_TYPE` 값은 이 계정에서 `Usage`, `Tax`뿐이었다.
+  - **크레딧·환불 빼기**는 `Not RECORD_TYPE ∈ {Credit, Refund}`로 걸고, 세금은 빼지 않는다.
+  - 분해 표에는 `Tax`가 한 줄로 그대로 나온다.
+- `GetCostForecast(Start=오늘, End=다음 달 1일, MONTHLY, 80%)`
+  - 응답 기간이 `이번 달 1일~다음 달 1일`로 바뀌어 왔고, `MeanValue`는 지금까지의 실제 금액을 포함한 **이번 달 전체** 예상이었다(이번 달 누적 ≈ $704, 예상 $749.67).
+  - 화면의 월말 예상은 이 값을 그대로 쓰고 누적에 더하지 않는다.
+- 활성 비용 할당 태그가 없는 계정에서 `ListCostAllocationTags(Status=Active)`는 빈 목록을 돌려줬다.
+- 리소스 단위 데이터가 꺼진 계정의 `GetCostAndUsageWithResources` 응답
+  - `AccessDeniedException`
+  - 메시지: `Resource-level data granularity is an opt-in only feature. You can be enable this feature from the PAYER account’s Cost Explorer Settings page.`
+  - 권한 부족과 코드가 같으므로 메시지의 `opt-in`으로 구분한다. 켜는 곳은 결제(관리) 계정이다.
+
+### Price List
+조건을 아래처럼 주면 정확히 1개 상품이 나왔다. 단가는 서울 리전 기준이다.
+
+| 대상 | 서비스 코드 | 조건 | 단가 |
+|---|---|---|---|
+| EC2 인스턴스 | `AmazonEC2` | `instanceType`, `operatingSystem`(`Linux`, `Windows` 등), `tenancy=Shared`, `preInstalledSw=NA`, `capacitystatus=Used`, `licenseModel=No License required` | t4g.medium $0.0416/h, m5.large Windows $0.21/h |
+| EBS 저장 | `AmazonEC2` | `productFamily=Storage`, `volumeApiName` | gp3 $0.0912/GB-월 |
+| gp3 IOPS | `AmazonEC2` | `productFamily=System Operation`, `volumeApiName=gp3` | $0.0057/IOPS-월 |
+| gp3 처리량 | `AmazonEC2` | `productFamily=Provisioned Throughput`, `volumeApiName=gp3` | 단위가 `GiBps-mo`($46.6944). MiB/s당은 1024로 나눈다($0.0456) |
+| io2 IOPS | `AmazonEC2` | `productFamily=System Operation`, `volumeApiName=io2` | 3개 구간(`group` = `EBS IOPS`, `EBS IOPS Tier 2`, `EBS IOPS Tier 3`). 0~32,000, 32,001~64,000, 64,000 초과 |
+| RDS 인스턴스 | `AmazonRDS` | `instanceType`, `databaseEngine`(`PostgreSQL`, `Aurora PostgreSQL` 등), `deploymentOption`(`Single-AZ`, `Multi-AZ`), `storage` | `storage`가 없으면 Aurora가 3개 나온다(`UnusedBox` 포함). 일반 RDS와 Aurora 표준은 `EBS Only`, Aurora I/O-Optimized(`aurora-iopt1`)는 `Aurora IO Optimization Mode`. Aurora PG t4g.medium $0.113, I/O-Optimized $0.147, PG $0.102 |
+| RDS 스토리지 | `AmazonRDS` | `productFamily=Database Storage`, `databaseEngine`, `deploymentOption`, `volumeType`(`General Purpose-GP3` 등) | PG gp3 Single-AZ $0.131/GB-월 |
+| EKS 클러스터 | `AmazonEKS` | `usagetype` CONTAINS `AmazonEKS-Hours:perCluster` | $0.10/h |
+| EKS 연장 지원 | `AmazonEKS` | `usagetype` CONTAINS `AmazonEKS-Hours:extendedSupport` | $0.50/h. 표준 $0.10에 더해지는 금액으로 보인다(확인 필요) |
+| Secrets Manager | `AWSSecretsManager` | `productFamily=Secret` | $0.40/월 |
+
+- `CONTAINS` 필터가 동작한다. `usagetype` 앞의 리전 접두사(`APN2-`)를 앱이 알 필요가 없다.
+- EKS에는 Provisioned 컨트롤 플레인 등급(XL~8XL, $1.65~$13.90/h)이 따로 있다. 그 등급을 쓰는 클러스터는 표준 단가로 추정하지 않는다. 등급을 읽을 수 없으면 추정하지 않는다.
 
 ## 공통
 
@@ -47,7 +92,7 @@
 | Cost Explorer를 한 번도 켜지 않은 계정 | "Billing 콘솔에서 Cost Explorer를 처음 열면 켜져요(최대 24시간)" |
 | `LimitExceededException` | 기존 `Throttled`와 같다 |
 | `DataUnavailableException` | "이 기간의 비용 데이터가 아직 없어요" |
-| 리소스 단위 데이터가 꺼짐 | "Cost Explorer 설정에서 리소스 단위 데이터를 켜면 볼 수 있어요" (C0에서 오류 모양 확인) |
+| 리소스 단위 데이터가 꺼짐 (`AccessDeniedException`이고 메시지에 `opt-in`) | "결제 계정의 Cost Explorer 설정에서 리소스 단위 데이터를 켜면 볼 수 있어요" |
 
 ### 읽기 전용 보장
 - 백엔드 `src-tauri/src/cost/`만 Cost Explorer와 Price List를 부른다.
@@ -74,7 +119,7 @@
 ### 화면
 1. **요약 카드**
    - 이번 기간 합계. `Estimated`가 참인 날이 있으면 "추정 포함" 표시.
-   - 월말 예상(이번 달에서만): `GetCostForecast`, 오늘~다음 달 1일, 80% 예측 구간. 데이터가 모자라 실패하면 "예상하기엔 데이터가 부족해요".
+   - 월말 예상(이번 달에서만): `GetCostForecast`, 오늘~다음 달 1일, 80% 예측 구간. 응답의 `MeanValue`가 이미 이번 달 전체 예상이다(**C0 결과**). 데이터가 모자라 실패하면 "예상하기엔 데이터가 부족해요".
    - 비교 기간 대비 증감액과 증감률.
 2. **일별 추이**: 막대그래프. 비용 상위 5개 서비스와 "기타"를 쌓는다. 차트 라이브러리를 들이지 않고 SVG 컴포넌트로 그린다. 막대에 마우스를 올리면 그날 서비스별 금액이 보인다.
 3. **분해 표**
@@ -115,12 +160,12 @@
 | Secrets Manager 시크릿 | (없음) | 시크릿당 월 정가 |
 
 - 그 밖의 종류(Lambda, S3, DynamoDB, SQS, SNS, CloudFront, 로그 그룹, ECR, ECS 등)는 추정하지 않는다.
-- Price List 조회: `GetProducts(ServiceCode, Filters=[TERM_MATCH regionCode, …])`, 온디맨드 `USD` 단가를 읽는다. 결과가 0개나 여러 개면 추정하지 않고 "정가를 찾지 못했어요"를 보여준다. 엉뚱한 값을 고르지 않는다. 필터 값은 C0에서 확정한다.
+- Price List 조회: `GetProducts(ServiceCode, Filters=[TERM_MATCH regionCode, …])`, 온디맨드 `USD` 단가를 읽는다. 조건은 **C0 결과**의 Price List 표를 따른다. 결과가 0개나 여러 개면 추정하지 않고 "정가를 찾지 못했어요"를 보여준다. 엉뚱한 값을 고르지 않는다.
 - 같은 `(서비스, 리전, 필터)`는 메모리와 디스크에 7일 캐시한다. 목록 화면에서는 부르지 않고, 상세 패널을 열 때만 부른다.
 
 ### 실제 청구액 조회
 - `GetCostAndUsageWithResources`, `Granularity=DAILY`, 기간 = 14일 전~오늘.
-- 필터: `RESOURCE_ID = <리소스 ID>`. API 문서상 `SERVICE` 필터가 필요할 수 있으므로 `Resource.cost`에 Cost Explorer 서비스 이름도 둔다. 두 값의 형식은 C0에서 확정한다(EC2는 `i-…`, 다른 서비스는 ARN일 수 있음).
+- 필터: `RESOURCE_ID = <리소스 ID>`. API 문서상 `SERVICE` 필터가 필요할 수 있으므로 `Resource.cost`에 Cost Explorer 서비스 이름도 둔다(EC2 인스턴스는 `Amazon Elastic Compute Cloud - Compute`, EBS는 `EC2 - Other`). 필터 요구와 ID 형식은 아직 확인하지 못했다(EC2는 `i-…`, 다른 서비스는 ARN일 수 있음). C4 계획 전에 opt-in을 켠 계정으로 확인한다.
 - 지표는 대시보드에서 고른 지표를 따르고, 탭이 없으면 `UnblendedCost`.
 
 ## 권한
