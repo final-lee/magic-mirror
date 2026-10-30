@@ -169,6 +169,7 @@ pub fn failure_of(e: &kube::Error, verb: &str, resource: &str) -> Failure {
             return match status.code {
                 401 => Failure::Unauthorized,
                 403 => Failure::Forbidden { verb: verb.into(), resource: resource.into() },
+                _ if status.message.is_empty() => Failure::Other(format!("클러스터가 오류를 돌려줬어요(HTTP {})", status.code)),
                 _ => Failure::Other(status.message.clone()),
             };
         }
