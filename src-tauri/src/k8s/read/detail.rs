@@ -1,10 +1,10 @@
 //! 상세: 요약 줄, 소유 관계(위: ownerReferences, 아래: 알려진 자식 종류), 컨테이너, 상태 조건, 관련 이벤트, 보기용 YAML.
-//! Secret은 키 크기를 센 뒤 JSON을 가리고, 어노테이션·YAML은 모두 가린 JSON에서 만든다.
+//! Secret은 키 크기를 센 뒤 가리고, 줄·소유자·어노테이션·YAML은 모두 가린 객체에서 만든다.
 use std::collections::BTreeMap;
 
 use kube::api::{DynamicObject, ListParams};
 use kube::Client;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::secret::{is_secret, keys, mask, SecretKey};
@@ -280,9 +280,15 @@ pub fn events_of(items: &[DynamicObject]) -> Vec<EventView> {
 pub fn view_of(kind: &KindRef, obj: &DynamicObject) -> Result<ObjectView, AppError> {
     let mut json = serde_json::to_value(obj).map_err(|_| AppError::other(YAML_FAILED))?;
     let secret_keys = is_secret(kind).then(|| keys(&json));
-    if is_secret(kind) {
+    // Secret은 크기를 잰 뒤 바로 가리고, 이후에는 가린 객체만 쓴다(줄, 소유자, 어노테이션, YAML 모두).
+    let masked;
+    let obj = if secret_keys.is_some() {
         mask(&mut json);
-    }
+        masked = DynamicObject::deserialize(&json).map_err(|_| AppError::other(YAML_FAILED))?;
+        &masked
+    } else {
+        obj
+    };
     let annotations = json
         .pointer("/metadata/annotations")
         .and_then(Value::as_object)

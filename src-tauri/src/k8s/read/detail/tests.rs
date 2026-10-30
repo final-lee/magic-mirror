@@ -156,3 +156,19 @@ fn object_view_json_keys_match_the_ts_contract() {
     assert_eq!(v["conditions"][0]["type"], json!("Ready"));
     assert_eq!(v["conditions"][0]["lastTransition"], json!("2026-10-30T01:00:00Z"));
 }
+
+#[test]
+fn a_secret_view_never_carries_a_value_anywhere() {
+    let s = obj(json!({ "apiVersion": "v1", "kind": "Secret", "type": "kubernetes.io/basic-auth",
+        "metadata": { "name": "db", "namespace": "prod", "uid": "s1",
+            "annotations": { "kubectl.kubernetes.io/last-applied-configuration": "{\"stringData\":{\"s\":\"sentinel-plain\"}}" },
+            "ownerReferences": [{ "apiVersion": "v1", "kind": "ConfigMap", "name": "cm", "uid": "c1" }] },
+        "data": { "p": "c2VudGluZWwtcGxhaW4=", "q": "c2VudGluZWwtcGxhaW4=" }, "stringData": { "s": "sentinel-plain" } }));
+    let v = view_of(&secrets_kind(), &s).unwrap();
+    assert_eq!(v.row.values.get("type").map(String::as_str), Some("kubernetes.io/basic-auth"));
+    assert_eq!(v.row.values.get("keys").map(String::as_str), Some("3"));
+    assert_eq!(v.owners.len(), 1);
+    assert_eq!(v.secret_keys.as_ref().map(Vec::len), Some(3));
+    let all = serde_json::to_string(&v).unwrap();
+    assert!(!all.contains("sentinel-plain") && !all.contains("c2VudGluZWwtcGxhaW4="), "{all}");
+}
