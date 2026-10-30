@@ -86,11 +86,10 @@ async fn exec_plugin_with_path_injection() {
     let who = identity(&client, "kind-user", PRIVATE).await.unwrap();
     assert_eq!(who.source, IdentitySource::SelfSubjectReview);
 
-    // PATH를 넣지 않으면 플러그인을 찾지 못한다. spawn 오류가 명령 이름을 싣지 않아 기본 이름(aws)으로 나온다
+    // PATH를 넣지 않으면 플러그인을 찾지 못한다
     let err = client_for(&build(&value), &context, PRIVATE).await.err().expect("connect without PATH must fail");
     let AppError::Other { message } = err else { panic!("unexpected error: {err:?}") };
-    println!("exec missing message without PATH: {message}");
-    assert!(message == exec_missing("aws") || message == exec_missing("fake-get-token"), "message: {message}");
+    assert_eq!(message, exec_missing("fake-get-token"));
 }
 
 #[tokio::test]
@@ -129,7 +128,7 @@ async fn dns_failure_is_unreachable() {
 async fn blackholed_endpoint_times_out_as_unreachable() {
     let (context, mut value) = base();
     // 아무도 답하지 않는 주소: 연결 제한(10초)에 걸리거나 경로가 없다는 오류가 곧바로 온다. 어느 쪽이든 Unreachable이어야 한다
-    set_server(&mut value, "https://10.255.255.1:6443");
+    set_server(&mut value, "https://192.0.2.1:6443");
     let started = std::time::Instant::now();
     let err = open(&value, &context, PRIVATE).await.unwrap_err();
     assert_eq!(err, AppError::Network { message: UNREACHABLE_PRIVATE.into() });
@@ -252,12 +251,23 @@ async fn watch_reports_a_list_that_stalls() {
     let client = client_for(&config, &context, PRIVATE).await.unwrap();
     // 연결이 끝난 뒤부터 플러그인이 멈춘다
     std::fs::write(&arm, "").unwrap();
+    // 이 플러그인의 신원은 reader라서 mm-live의 pods만 읽을 수 있다
+    let pods = KindRef { group: String::new(), version: "v1".into(), kind: "Pod".into(), plural: "pods".into(), namespaced: true };
     let (tx, mut rx) = mpsc::unbounded_channel();
     let started = tokio::time::Instant::now();
-    let task = tokio::spawn(run(client, namespaces(), None, PRIVATE, move |m| tx.send(m).is_ok()));
+    let task = tokio::spawn(run(client, pods, Some("mm-live".into()), PRIVATE, move |m| tx.send(m).is_ok()));
     let first = recv(&mut rx, REQUEST_TIMEOUT + Duration::from_secs(5)).await;
     assert_eq!(first, Some(WatchMessage::Error { error: AppError::Network { message: UNREACHABLE_PRIVATE.into() }, fatal: false }));
     assert!(started.elapsed() >= REQUEST_TIMEOUT - Duration::from_secs(1), "reported after {:?}", started.elapsed());
     assert!(!task.is_finished(), "the run keeps going after a non-fatal error");
+    // 이미 멈춘 한 번이 깨어나면(40초) 목록이 이어져 Reset이 온다. 그 뒤 요청은 다시 멈추지 않게 푼다
+    std::fs::remove_file(&arm).unwrap();
+    loop {
+        match recv(&mut rx, Duration::from_secs(30)).await {
+            Some(WatchMessage::Reset { .. }) => break,
+            Some(other) => eprintln!("while waiting for reset: {other:?}"),
+            None => panic!("no reset after the plugin woke up"),
+        }
+    }
     task.abort();
 }
