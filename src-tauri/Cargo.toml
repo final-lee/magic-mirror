@@ -20,7 +20,7 @@ serde_json = "1"
 thiserror = "2"
 aws-smithy-types = "1"
 aws-smithy-runtime-api = { version = "1", features = ["client"] }
-aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-config = { version = "1", features = ["behavior-version-latest", "credentials-login"] }
 aws-credential-types = "1"
 aws-sdk-sts = "1"
 tokio = { version = "1", features = ["sync", "process", "macros", "rt-multi-thread", "fs", "io-util", "time"] }
