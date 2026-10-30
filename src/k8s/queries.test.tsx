@@ -78,3 +78,20 @@ test("closeK8s drops queries only after close finishes", async () => {
   await done;
   expect(qc.getQueryData(k8sKeys.session(T, "ctx"))).toBeUndefined();
 });
+
+test("refreshK8s removes the session query before close and refetches the context", async () => {
+  const qc = client();
+  api.context.mockResolvedValue({ chosen: null } as never);
+  const { result } = renderHook(() => useK8sContext(T, null, null), { wrapper: wrap(qc) });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  qc.setQueryData(k8sKeys.session(T, "ctx"), { context: "ctx" });
+  let seen: unknown = "unset";
+  api.close.mockImplementation(async () => {
+    seen = qc.getQueryData(k8sKeys.session(T, "ctx"));
+    return null;
+  });
+  await refreshK8s(qc, T, "p");
+  expect(seen).toBeUndefined();
+  expect(qc.getQueryData(k8sKeys.session(T, "ctx"))).toBeUndefined();
+  await waitFor(() => expect(api.context).toHaveBeenCalledTimes(2));
+});

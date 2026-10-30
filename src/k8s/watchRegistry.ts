@@ -6,8 +6,6 @@ export interface WatchSnapshot {
   rows: K8sRow[];
   status: "loading" | "ready" | "error";
   error: AppError | null;
-  /** dropTarget이 비운 상태. 구독자는 다시 구독해야 채워진다. */
-  dropped?: boolean;
 }
 
 type Listener = (s: WatchSnapshot) => void;
@@ -27,9 +25,6 @@ interface Entry {
 }
 
 const entries = new Map<string, Entry>();
-/** 대상별 세대. dropTarget이 올린다: 훅이 이 값으로 다시 구독할 때를 안다. */
-const generations = new Map<string, number>();
-const DROPPED: WatchSnapshot = { rows: [], status: "loading", error: null, dropped: true };
 
 const LOADING: WatchSnapshot = { rows: [], status: "loading", error: null };
 
@@ -111,18 +106,14 @@ export const watchRegistry = {
     };
   },
 
-  /** 대상의 지금 세대 */
-  generation: (targetKey: string) => generations.get(targetKey) ?? 0,
-
   /** 대상의 감시를 모두 버린다(모든 context의 것). 백엔드의 k8s_close가 이미 멈췄으므로 unwatch는 부르지 않는다. */
   dropTarget(targetKey: string) {
-    generations.set(targetKey, (generations.get(targetKey) ?? 0) + 1);
     for (const [key, e] of [...entries]) {
       if (!key.startsWith(`${targetKey}|`)) continue;
       release(key, e);
       e.rows = new Map();
-      // 구독자는 비어 있는 로딩 상태를 받는다(다시 연결하면 새 구독으로 채워진다).
-      for (const l of [...e.listeners]) l(DROPPED);
+      // 구독자는 비어 있는 로딩 상태를 받는다. 다시 구독하지는 않는다: 세션이 다시 열리면 호출한 쪽이 sessionEpoch를 바꿔 새로 구독한다.
+      for (const l of [...e.listeners]) l(LOADING);
     }
   },
 };

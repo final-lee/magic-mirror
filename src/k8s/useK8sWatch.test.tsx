@@ -19,7 +19,7 @@ beforeEach(() => {
 
 test("subscribes, sorts rows by name then namespace, and reports ready", async () => {
   const T = { profile: "app", region: "r", cluster: `hook${n++}` };
-  const { result, unmount } = renderHook(() => useK8sWatch(T, "ctx", "prod-ro", NAMESPACES, null, true));
+  const { result, unmount } = renderHook(() => useK8sWatch(T, "ctx", 1, "prod-ro", NAMESPACES, null, true));
   expect(result.current.status).toBe("loading");
   await act(async () => {});
   const call = vi.mocked(invoke).mock.calls.find((c) => c[0] === "k8s_watch")!;
@@ -33,7 +33,7 @@ test("subscribes, sorts rows by name then namespace, and reports ready", async (
 
 test("does nothing while disabled", async () => {
   const T = { profile: "app", region: "r", cluster: `hook${n++}` };
-  renderHook(() => useK8sWatch(T, "ctx", "p", NAMESPACES, null, false));
+  renderHook(() => useK8sWatch(T, "ctx", 1, "p", NAMESPACES, null, false));
   await act(async () => {});
   expect(invoke).not.toHaveBeenCalled();
 });
@@ -41,38 +41,43 @@ test("does nothing while disabled", async () => {
 const watchCalls = () => vi.mocked(invoke).mock.calls.filter((c) => c[0] === "k8s_watch");
 const unwatchCalls = () => vi.mocked(invoke).mock.calls.filter((c) => c[0] === "k8s_unwatch");
 
-test("drop then re-enable refills the rows", async () => {
+test("drop leaves the watch off until the session reopens with a new epoch, then watches once and refills", async () => {
   const T = { profile: "app", region: "r", cluster: `hook${n++}` };
   vi.mocked(invoke).mockResolvedValue(1);
-  const { result, rerender } = renderHook(({ on }) => useK8sWatch(T, "ctx", "p", NAMESPACES, null, on), { initialProps: { on: true } });
-  await act(async () => {});
   const send = (m: unknown) => act(() => (watchCalls()[watchCalls().length - 1][1] as { onEvent: Channel }).onEvent.onmessage(m));
+  const { result, rerender } = renderHook(({ on, epoch }) => useK8sWatch(T, "ctx", epoch, "p", NAMESPACES, null, on), { initialProps: { on: true, epoch: 1 } });
+  await act(async () => {});
   send({ type: "reset", rows: [row("1", "a")] });
   expect(result.current.rows).toHaveLength(1);
+  // 다시 연결: 세션 쿼리가 지워져 enabled가 꺼지고, 감시가 비워진다
+  rerender({ on: false, epoch: 1 });
   act(() => watchRegistry.dropTarget(targetKey(T)));
-  rerender({ on: false });
-  rerender({ on: true });
+  await act(async () => {});
+  expect(result.current.rows).toEqual([]);
+  expect(watchCalls()).toHaveLength(1);
+  // 세션이 다시 열린다
+  rerender({ on: true, epoch: 2 });
   await act(async () => {});
   expect(watchCalls()).toHaveLength(2);
   send({ type: "reset", rows: [row("2", "b")] });
   expect(result.current.rows.map((r) => r.uid)).toEqual(["2"]);
 });
 
-test("a drop while enabled resubscribes", async () => {
+test("a drop alone does not resubscribe", async () => {
   const T = { profile: "app", region: "r", cluster: `hook${n++}` };
   vi.mocked(invoke).mockResolvedValue(1);
-  renderHook(() => useK8sWatch(T, "ctx", "p", NAMESPACES, null, true));
+  renderHook(() => useK8sWatch(T, "ctx", 1, "p", NAMESPACES, null, true));
   await act(async () => {});
   act(() => watchRegistry.dropTarget(targetKey(T)));
   await act(async () => {});
-  expect(watchCalls()).toHaveLength(2);
+  expect(watchCalls()).toHaveLength(1);
 });
 
 test("different contexts watch separately", async () => {
   const T = { profile: "app", region: "r", cluster: `hook${n++}` };
   vi.mocked(invoke).mockResolvedValue(1);
-  renderHook(() => useK8sWatch(T, "a", "p", NAMESPACES, null, true));
-  renderHook(() => useK8sWatch(T, "b", "p", NAMESPACES, null, true));
+  renderHook(() => useK8sWatch(T, "a", 1, "p", NAMESPACES, null, true));
+  renderHook(() => useK8sWatch(T, "b", 1, "p", NAMESPACES, null, true));
   await act(async () => {});
   expect(watchCalls()).toHaveLength(2);
 });
@@ -82,7 +87,7 @@ test("unmount lingers then unwatches; a key change moves to a new watch while th
   try {
     const T = { profile: "app", region: "r", cluster: `hook${n++}` };
     vi.mocked(invoke).mockResolvedValue(5);
-    const { rerender, unmount } = renderHook(({ ns }) => useK8sWatch(T, "ctx", "p", NAMESPACES, ns, true), { initialProps: { ns: "a" as string | null } });
+    const { rerender, unmount } = renderHook(({ ns }) => useK8sWatch(T, "ctx", 1, "p", NAMESPACES, ns, true), { initialProps: { ns: "a" as string | null } });
     await act(async () => {});
     rerender({ ns: "b" });
     await act(async () => {});

@@ -57,8 +57,12 @@ export async function closeK8s(qc: QueryClient, target: K8sTarget, ssoProfile: s
   qc.removeQueries({ queryKey: k8sKeys.root(target) });
 }
 
-/** 다시 연결: 감시를 버리고 연결을 닫은 뒤 쿼리를 무효화해 context를 다시 읽고 세션을 다시 연다. */
+/**
+ * 다시 연결: 세션 쿼리를 먼저 지워 enabled가 바로 꺼지게 하고(다시 여는 데 실패해도 낡은 값이 남지 않는다),
+ * 감시를 버리고 연결을 닫은 뒤 나머지 쿼리를 무효화해 context를 다시 읽는다. 세션 쿼리는 화면이 다시 그려질 때 새로 만들어진다.
+ */
 export async function refreshK8s(qc: QueryClient, target: K8sTarget, ssoProfile: string): Promise<void> {
+  qc.removeQueries({ queryKey: [...k8sKeys.root(target), "session"] });
   watchRegistry.dropTarget(targetKey(target));
   try {
     await k8sApi.close(target, ssoProfile);
