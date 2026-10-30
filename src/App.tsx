@@ -272,7 +272,7 @@ export default function App() {
             onSelect={select}
             onToggleFavorite={toggleFavorite}
             onOpenIam={() => openIam()}
-            onOpenK8s={() => setShowK8sPicker(true)}
+            onOpenK8s={() => setShowK8sPicker(profile !== null)}
           />
           <MainArea
             key={mainKey}

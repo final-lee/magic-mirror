@@ -82,3 +82,17 @@ test("kubeconfig path field saves on blur and maps empty to null", () => {
   fireEvent.blur(input);
   expect(onKubeconfigPathChange).toHaveBeenLastCalledWith(null);
 });
+
+test("blurring the kubeconfig path field without a change does nothing", () => {
+  const onKubeconfigPathChange = vi.fn();
+  const { rerender } = render(
+    <ServiceSettings services={sampleServices} enabled={[]} onChange={() => {}} onClose={() => {}} kubeconfigPath="/old/config" onKubeconfigPathChange={onKubeconfigPathChange} />,
+  );
+  fireEvent.blur(screen.getByLabelText(SETTINGS_KUBECONFIG_LABEL));
+  expect(onKubeconfigPathChange).not.toHaveBeenCalled();
+  rerender(<ServiceSettings services={sampleServices} enabled={[]} onChange={() => {}} onClose={() => {}} kubeconfigPath={null} onKubeconfigPathChange={onKubeconfigPathChange} />);
+  const input = screen.getByLabelText(SETTINGS_KUBECONFIG_LABEL);
+  fireEvent.change(input, { target: { value: "  " } });
+  fireEvent.blur(input);
+  expect(onKubeconfigPathChange).not.toHaveBeenCalled();
+});
