@@ -17,32 +17,32 @@ interface Props {
 /** Values are read on demand and kept only in this component's state. */
 export function SecretKeys({ target, ssoProfile, namespace, name, keys, canRead }: Props) {
   const identity = JSON.stringify([targetKey(target), namespace, name]);
-  const [shown, setShown] = useState<Record<string, K8sSecretValue>>({});
-  const [errors, setErrors] = useState<Record<string, unknown>>({});
-  const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [shown, setShown] = useState<Map<string, K8sSecretValue>>(() => new Map());
+  const [errors, setErrors] = useState<Map<string, unknown>>(() => new Map());
+  const [busy, setBusy] = useState<Set<string>>(() => new Set());
   const generation = useRef(0);
 
   useLayoutEffect(() => {
-    setShown({});
-    setErrors({});
-    setBusy({});
+    setShown(new Map());
+    setErrors(new Map());
+    setBusy(new Set());
     return () => { generation.current++; };
   }, [identity]);
 
   const reveal = async (key: string) => {
     const gen = generation.current;
-    setBusy((s) => ({ ...s, [key]: true }));
-    setErrors(({ [key]: _, ...rest }) => rest);
+    setBusy((s) => new Set(s).add(key));
+    setErrors((s) => { const next = new Map(s); next.delete(key); return next; });
     try {
       const value = await k8sApi.secretValue(target, namespace, name, key, ssoProfile);
-      if (generation.current === gen) setShown((s) => ({ ...s, [key]: value }));
+      if (generation.current === gen) setShown((s) => new Map(s).set(key, value));
     } catch (e) {
-      if (generation.current === gen) setErrors((s) => ({ ...s, [key]: e }));
+      if (generation.current === gen) setErrors((s) => new Map(s).set(key, e));
     } finally {
-      if (generation.current === gen) setBusy(({ [key]: _, ...rest }) => rest);
+      if (generation.current === gen) setBusy((s) => { const next = new Set(s); next.delete(key); return next; });
     }
   };
-  const hide = (key: string) => setShown(({ [key]: _, ...rest }) => rest);
+  const hide = (key: string) => setShown((s) => { const next = new Map(s); next.delete(key); return next; });
 
   return (
     <section className="k8s-sect">
@@ -57,7 +57,9 @@ export function SecretKeys({ target, ssoProfile, namespace, name, keys, canRead 
         </thead>
         <tbody>
           {keys.map(({ key, size }) => {
-            const value = shown[key];
+            const value = shown.get(key);
+            const gen = generation.current;
+            const retry = () => { if (generation.current === gen) void reveal(key); };
             return (
               <tr key={key}>
                 <td className="mono">{key}</td>
@@ -70,11 +72,11 @@ export function SecretKeys({ target, ssoProfile, namespace, name, keys, canRead 
                       <button className="btn" onClick={() => hide(key)}>{HIDE_VALUE}</button>
                     </div>
                   ) : (
-                    <button className="btn" disabled={canRead === "no" || busy[key]} title={canRead === "no" ? NO_SECRET_PERMISSION : undefined} onClick={() => void reveal(key)}>
+                    <button className="btn" disabled={canRead === "no" || busy.has(key)} title={canRead === "no" ? NO_SECRET_PERMISSION : undefined} onClick={() => void reveal(key)}>
                       {SHOW_VALUE}
                     </button>
                   )}
-                  {errors[key] !== undefined && <ErrorState error={errors[key]} profile={ssoProfile} compact onRetry={() => void reveal(key)} />}
+                  {errors.has(key) && <ErrorState error={errors.get(key)} profile={ssoProfile} compact onRetry={retry} onLoggedIn={retry} />}
                 </td>
               </tr>
             );

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
 import { SecretKeys } from "./SecretKeys";
@@ -143,4 +143,59 @@ test("a pending value is discarded after unmount", async () => {
   setup();
   await act(async () => resolve({ text: "late-secret", encoding: "utf8" }));
   expect(screen.queryByText("late-secret")).toBeNull();
+});
+
+test.each(["constructor", "__proto__"])("reveals and hides the %s key", async (key) => {
+  m.secretValue.mockResolvedValue({ text: "secret", encoding: "utf8" });
+  setup({ keys: [{ key, size: 6 }] });
+  const row = screen.getByText(key).closest("tr")!;
+  expect(within(row).getByRole("button", { name: SHOW_VALUE })).toBeEnabled();
+  expect(within(row).queryByRole("button", { name: HIDE_VALUE })).toBeNull();
+  fireEvent.click(within(row).getByRole("button", { name: SHOW_VALUE }));
+  expect(await within(row).findByText("secret")).toBeInTheDocument();
+  fireEvent.click(within(row).getByRole("button", { name: HIDE_VALUE }));
+  expect(within(row).queryByText("secret")).toBeNull();
+  expect(within(row).getByRole("button", { name: SHOW_VALUE })).toBeEnabled();
+  expect(m.secretValue).toHaveBeenCalledWith(T, "web", "db", key, "prod-ro");
+});
+
+test("managed SSO success retries only the failed key", async () => {
+  m.secretValue.mockRejectedValueOnce({ kind: "ssoExpired" });
+  m.secretValue.mockResolvedValueOnce({ text: "recovered", encoding: "utf8" });
+  const qc = newQueryClient();
+  const manager = ssoLoginStub();
+  const ui = (at: number | null) => withClientAndSso(
+    <SecretKeys target={T} ssoProfile="prod-ro" namespace="web" name="db" keys={KEYS} canRead="yes" />,
+    qc, { ...manager, lastSuccessAt: (profile) => profile === "prod-ro" ? at : null },
+  );
+  const view = render(ui(null));
+  fireEvent.click(showButtons()[1]);
+  await screen.findByText(/SSO 세션이 만료됐어요/);
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "로그인" })); });
+  expect(manager.start).toHaveBeenCalledWith("prod-ro", { manual: true });
+  const later = Date.now() + 1000;
+  view.rerender(ui(later));
+  expect(await screen.findByText("recovered")).toBeInTheDocument();
+  view.rerender(ui(later));
+  expect(screen.queryByText(/SSO 세션이 만료됐어요/)).toBeNull();
+  expect(m.secretValue).toHaveBeenCalledTimes(2);
+  expect(m.secretValue).toHaveBeenLastCalledWith(T, "web", "db", "blob", "prod-ro");
+});
+
+test("managed SSO success after switching Secrets does not retry the old key", async () => {
+  m.secretValue.mockRejectedValueOnce({ kind: "ssoExpired" });
+  const qc = newQueryClient();
+  const manager = ssoLoginStub();
+  const ui = (name: string, at: number | null) => withClientAndSso(
+    <SecretKeys target={T} ssoProfile="prod-ro" namespace="web" name={name} keys={KEYS} canRead="yes" />,
+    qc, { ...manager, lastSuccessAt: () => at },
+  );
+  const view = render(ui("db", null));
+  fireEvent.click(showButtons()[0]);
+  await screen.findByText(/SSO 세션이 만료됐어요/);
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "로그인" })); });
+  view.rerender(ui("other", null));
+  view.rerender(ui("other", Date.now() + 1000));
+  expect(m.secretValue).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText(/SSO 세션이 만료됐어요/)).toBeNull();
 });
