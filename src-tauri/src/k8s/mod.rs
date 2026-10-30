@@ -11,3 +11,6 @@ pub mod watch;
 
 #[cfg(test)]
 mod hygiene;
+
+#[cfg(test)]
+mod live_tests;
