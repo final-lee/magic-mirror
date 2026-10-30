@@ -35,6 +35,9 @@ aws-sdk-eks = "1"
 # EKS 탭: kubeconfig의 exec 플러그인으로 접속하는 쿠버네티스 클라이언트. TLS는 앱의 다른 곳처럼 rustls + aws-lc-rs만 쓴다
 kube = { version = "4.2", default-features = false, features = ["client", "config", "runtime", "rustls-tls", "aws-lc-rs"] }
 k8s-openapi = { version = "0.28", features = ["v1_33"] }
+# 보기용 YAML과 Secret 값 풀기. 둘 다 kube-client가 이미 쓰는 크레이트(같은 버전)라 새로 받는 것은 없다
+serde-saphyr = "0.0.29"
+base64 = "0.22"
 aws-sdk-iam = "1"
 aws-sdk-route53 = "1"
 aws-sdk-cloudfront = "1"

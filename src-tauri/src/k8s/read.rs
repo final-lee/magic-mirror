@@ -10,7 +10,9 @@ use super::rows::KindRef;
 use crate::error::AppError;
 
 pub mod kinds;
+pub mod secret;
 pub mod values;
+pub mod yaml;
 
 /// 쿠버네티스 요청 하나를 `REQUEST_TIMEOUT` 안에 끝낸다. 시간이 넘으면 엔드포인트에 맞는 연결 안내, 오류는 동작·리소스 이름으로 가른다.
 pub async fn bounded<T>(fut: impl Future<Output = Result<T, kube::Error>>, verb: &str, resource: &str, endpoint: Endpoint) -> Result<T, AppError> {
