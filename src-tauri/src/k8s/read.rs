@@ -11,6 +11,9 @@ use crate::error::AppError;
 
 pub mod detail;
 pub mod kinds;
+pub mod nodes;
+pub mod quantity;
+pub mod removed;
 pub mod secret;
 pub mod values;
 pub mod yaml;
