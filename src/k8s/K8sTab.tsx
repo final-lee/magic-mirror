@@ -2,13 +2,18 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useSettings } from "../api/queries";
 import { ContextPicker } from "./ContextPicker";
+import { EventsView } from "./EventsView";
 import { K8sError } from "./K8sError";
+import { K8sNav, type K8sView } from "./K8sNav";
+import { NODES } from "./kinds";
 import { MyRules } from "./MyRules";
 import { NoContext } from "./NoContext";
+import { OverviewView } from "./OverviewView";
 import { NAMESPACES, chooseContext, ssoProfileOf } from "./targets";
 import { ALL, TopBar, type K8sConnection } from "./TopBar";
-import { NAV_LABEL, savedMissing, NAV_MY_PERMISSIONS, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNECTING, updateCommand } from "./text";
-import { refreshK8s, useK8sContext, useK8sRules, useK8sSession } from "./queries";
+import { WorkloadsView, type WorkloadsFocus } from "./WorkloadsView";
+import { savedMissing, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNECTING, updateCommand } from "./text";
+import { refreshK8s, useK8sContext, useK8sKinds, useK8sRules, useK8sSession } from "./queries";
 import type { K8sTarget } from "./types";
 import { useK8sWatch } from "./useK8sWatch";
 
@@ -16,9 +21,11 @@ interface Props {
   target: K8sTarget;
   /** 이 탭이 보이는 탭인지(이후 단계의 단축키용) */
   active: boolean;
+  /** 서비스 어카운트의 IAM 역할 ARN을 IAM 작업 공간에서 연다 */
+  onOpenIam?: (arn: string) => void;
 }
 
-export function K8sTab({ target }: Props) {
+export function K8sTab({ target, onOpenIam }: Props) {
   const qc = useQueryClient();
   const { settings, isError: settingsFailed, update } = useSettings();
   const settingsReady = settings !== undefined || settingsFailed;
@@ -36,6 +43,8 @@ export function K8sTab({ target }: Props) {
   const candidate = info?.candidates.find((c) => c.name === chosen) ?? null;
 
   const [userNs, setUserNs] = useState<string | null>(null);
+  const [view, setView] = useState<K8sView>("overview");
+  const [focus, setFocus] = useState<WorkloadsFocus | null>(null);
   const session = useK8sSession(target, kubeconfig, settingsReady ? chosen : null, ssoProfileOf(target, candidate, null));
   const ssoProfile = ssoProfileOf(target, candidate, session.data);
   const live = session.isSuccess && !session.isFetching;
@@ -46,7 +55,14 @@ export function K8sTab({ target }: Props) {
   const fallback = candidate?.namespace || (names.includes("default") ? "default" : ALL);
   const namespace = userNs ?? fallback;
   const rulesNs = namespace === ALL ? "default" : namespace;
-  const rules = useK8sRules(target, chosen, rulesNs, ssoProfile, live);
+  // 내 권한 화면에서만 읽는다(ObjectDetail의 Secret 확인은 자기 네임스페이스를 따로 묻는다)
+  const rules = useK8sRules(target, chosen, rulesNs, ssoProfile, live && view === "myRules");
+  const kinds = useK8sKinds(target, chosen, ssoProfile, live);
+  const nsOrAll = namespace === ALL ? null : namespace;
+  const openNode = (name: string) => {
+    setFocus((f) => ({ ref: { kind: NODES, namespace: null, name }, nonce: (f?.nonce ?? 0) + 1 }));
+    setView("workloads");
+  };
 
   const reconnect = () => void refreshK8s(qc, target, ssoProfile);
   const recheck = () => void ctx.refetch();
@@ -83,14 +99,16 @@ export function K8sTab({ target }: Props) {
       {missing && <p className="err k8s-notes">{savedMissing(missing)}</p>}
       {namespaces.error && <K8sError error={namespaces.error} target={target} ssoProfile={ssoProfile} compact />}
       <div className="pg-main">
-        <nav className="iam-nav" aria-label={NAV_LABEL}>
-          <button className="iam-nav-item on" aria-current="page">
-            <span className="iam-nav-label">{NAV_MY_PERMISSIONS}</span>
-          </button>
-        </nav>
-        <div className="k8s-body">
+        <K8sNav view={view} onSelect={setView} />
+        <div className={`k8s-body${view === "workloads" ? " flush" : ""}`}>
           {session.isError ? (
             <K8sError error={session.error} target={target} ssoProfile={ssoProfile} />
+          ) : view === "overview" ? (
+            <OverviewView target={target} context={chosen} ssoProfile={ssoProfile} live={live} onOpenNode={openNode} />
+          ) : view === "workloads" ? (
+            <WorkloadsView target={target} context={chosen} sessionEpoch={session.dataUpdatedAt} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} kinds={kinds.data ?? []} focus={focus} onOpenIam={onOpenIam} />
+          ) : view === "events" ? (
+            <EventsView target={target} context={chosen} sessionEpoch={session.dataUpdatedAt} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} />
           ) : rules.isError ? (
             <K8sError error={rules.error} target={target} ssoProfile={ssoProfile} />
           ) : rules.data ? (

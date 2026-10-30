@@ -9,6 +9,10 @@ import { k8sApi } from "./api";
 import { K8sTab } from "./K8sTab";
 import {
   ALL_NAMESPACES,
+  NAV_EVENTS,
+  NAV_MY_PERMISSIONS,
+  NAV_WORKLOADS,
+  SEC_NODES,
   ALL_NAMESPACES_NOTE,
   COPIED,
   COPY,
@@ -27,9 +31,12 @@ import {
   profileMismatch,
   savedMissing,
 } from "./text";
+import { EVENTS, NODES, PODS } from "./kinds";
 import type { K8sContextCandidate, K8sContextInfo, K8sRow, K8sRules, K8sSession, K8sTarget, K8sWatchMessage } from "./types";
 
-vi.mock("./api", () => ({ k8sApi: { context: vi.fn(), open: vi.fn(), close: vi.fn(), rules: vi.fn(), watch: vi.fn(), unwatch: vi.fn() } }));
+vi.mock("./api", () => ({
+  k8sApi: { context: vi.fn(), open: vi.fn(), close: vi.fn(), rules: vi.fn(), watch: vi.fn(), unwatch: vi.fn(), kinds: vi.fn(), get: vi.fn(), secretValue: vi.fn(), overview: vi.fn() },
+}));
 vi.mock("../api/client", () => ({ api: { getSettings: vi.fn(), saveSettings: vi.fn(), ssoLogin: vi.fn() } }));
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: vi.fn(async () => {}) }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
@@ -53,6 +60,11 @@ const rules = (over: Partial<K8sRules> = {}): K8sRules => ({
   resourceRules: [{ verbs: ["get", "list"], apiGroups: ["", "apps"], resources: ["pods"], resourceNames: [] }, { verbs: ["*"], apiGroups: ["*"], resources: ["*"], resourceNames: ["x"] }], ...over,
 });
 const ns = (name: string): K8sRow => ({ uid: name, name, namespace: null, resourceVersion: "1", createdAt: null, labels: {}, values: {}, problems: [] });
+const emptyOverview = {
+  cluster: null, nodes: [], requestsPartial: false, metrics: false, nodegroups: [], fargateProfiles: [], nodePools: null,
+  addons: [], insights: [], removedApis: null, nextVersion: null, skew: [], gaps: [],
+};
+const openMyRules = () => fireEvent.click(screen.getByRole("button", { name: NAV_MY_PERMISSIONS }));
 
 let emit: (m: K8sWatchMessage) => void = () => {};
 let seeded: Settings;
@@ -74,6 +86,8 @@ beforeEach(() => {
   m.open.mockResolvedValue(session());
   m.close.mockResolvedValue(null);
   m.rules.mockResolvedValue(rules());
+  m.kinds.mockResolvedValue([]);
+  m.overview.mockResolvedValue(emptyOverview);
   m.unwatch.mockResolvedValue(null);
   m.watch.mockImplementation(async (_t, _k, _n, _p, onMessage) => {
     emit = onMessage;
@@ -195,6 +209,7 @@ test("namespace selector lists namespaces and defaults to the context namespace,
   const select = screen.getByRole("combobox") as HTMLSelectElement;
   expect(select.value).toBe("team");
   expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual([ALL_NAMESPACES, "default", "kube-system", "team"]);
+  openMyRules();
   await waitFor(() => expect(m.rules).toHaveBeenCalledWith(target, "team", target.profile));
   first.unmount();
 
@@ -219,6 +234,8 @@ test("my rules: one row per group and resource, core and wildcard words, all-nam
   m.context.mockResolvedValue(info([cand("ctx")]));
   m.rules.mockResolvedValue(rules({ incomplete: true }));
   setup();
+  await screen.findByText(STATE_CONNECTED);
+  openMyRules();
   expect(await screen.findByText(RULES_INCOMPLETE)).toBeInTheDocument();
   expect(screen.getByText(ALL_NAMESPACES_NOTE)).toBeInTheDocument();
   expect(m.rules).toHaveBeenCalledWith(target, "default", target.profile);
@@ -291,6 +308,7 @@ test("reconnecting does not ask the rules before the session is open again", asy
   m.context.mockResolvedValue(info([cand("ctx")]));
   setup();
   await screen.findByText(STATE_CONNECTED);
+  openMyRules();
   await waitFor(() => expect(m.rules).toHaveBeenCalledTimes(1));
   let release!: (s: K8sSession) => void;
   m.open.mockImplementationOnce(() => new Promise((r) => (release = r)));
@@ -315,4 +333,37 @@ test("the context is not read until the settings have loaded", async () => {
   expect(m.context).not.toHaveBeenCalled();
   release({ enabledServices: [], favorites: [], lastProfile: "app", lastRegion: null, kubeconfigPath: "/kc" });
   await waitFor(() => expect(m.context).toHaveBeenCalledWith(target, "/kc", null));
+});
+
+test("opens on the overview once connected", async () => {
+  m.context.mockResolvedValue(info([cand("ctx")]));
+  setup();
+  await screen.findByText(STATE_CONNECTED);
+  await waitFor(() => expect(m.overview).toHaveBeenCalledWith(target));
+  expect(await screen.findByText(SEC_NODES)).toBeInTheDocument();
+  expect(m.rules).not.toHaveBeenCalled();
+  await waitFor(() => expect(m.kinds).toHaveBeenCalledWith(target, target.profile));
+});
+
+test("the nav switches to workloads (pods) and events", async () => {
+  m.context.mockResolvedValue(info([cand("ctx")]));
+  setup();
+  await screen.findByText(STATE_CONNECTED);
+  fireEvent.click(screen.getByRole("button", { name: NAV_WORKLOADS }));
+  await waitFor(() => expect(watchCalls().some((c) => c[1].plural === PODS.plural)).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: NAV_EVENTS }));
+  await waitFor(() => expect(watchCalls().some((c) => c[1].plural === EVENTS.plural)).toBe(true));
+});
+
+test("a node name in the overview opens its detail in workloads", async () => {
+  m.context.mockResolvedValue(info([cand("ctx")]));
+  m.overview.mockResolvedValue({ ...emptyOverview, nodes: [{
+    name: "ip-1", ready: true, unschedulable: false, pressures: [], instanceType: null, zone: null, groupKind: "self", group: null, kubeletVersion: "v1.31.0",
+    allocatable: { cpuMilli: 1000, memoryBytes: 1, pods: 1 }, requested: { cpuMilli: 0, memoryBytes: 0, pods: 0 }, usage: null,
+  }] });
+  m.get.mockResolvedValue({ kind: NODES, row: ns("ip-1"), annotations: {}, owners: [], children: [], childrenTruncated: false, childrenError: null, containers: [], conditions: [], events: [], eventsError: null, yaml: "", secretKeys: null });
+  setup();
+  fireEvent.click(await screen.findByRole("button", { name: "ip-1" }));
+  await waitFor(() => expect(m.get).toHaveBeenCalledWith(target, NODES, null, "ip-1", target.profile));
+  expect(screen.getByRole("button", { name: NAV_WORKLOADS })).toHaveAttribute("aria-current", "page");
 });

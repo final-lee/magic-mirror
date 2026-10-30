@@ -781,6 +781,7 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .k8s-notes { padding: 4px 14px; background: #232325; border-bottom: 1px solid var(--line); }
 .k8s-notes p { margin: 2px 0; font-size: 12px; }
 .k8s-body { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 12px 16px; }
+.k8s-body.flush { padding: 0; display: flex; overflow: hidden; }
 .k8s-prompt { flex: 1; display: grid; place-items: center; padding: 24px; }
 .k8s-card { width: 520px; max-width: 100%; display: flex; flex-direction: column; gap: 10px; background: var(--panel); border: 1px solid #444; border-radius: 12px; padding: 20px; }
 .k8s-card p { margin: 0; }
