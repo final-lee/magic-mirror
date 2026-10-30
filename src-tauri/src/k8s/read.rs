@@ -10,6 +10,7 @@ use super::rows::KindRef;
 use crate::error::AppError;
 
 pub mod detail;
+pub mod eks;
 pub mod kinds;
 pub mod nodes;
 pub mod quantity;
