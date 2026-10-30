@@ -60,8 +60,8 @@ rustls = { version = "0.23", default-features = false, features = ["std", "tls12
 
 [dev-dependencies]
 tempfile = "3"
-# 테스트의 가짜 PostgreSQL 서버가 로컬 TCP를 연다
-tokio = { version = "1", features = ["net"] }
+# 테스트의 가짜 PostgreSQL 서버가 로컬 TCP를 연다. test-util: watch 재시작 시험이 멈춘 시계(start_paused)로 기다림을 건너뛴다
+tokio = { version = "1", features = ["net", "test-util"] }
 # 테스트용 CA와 서버 인증서를 그때그때 만들고(비밀 키를 저장소에 두지 않는다), 가짜 서버가 TLS를 받는다
 rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs"] }
 tokio-rustls = { version = "0.26", default-features = false }
