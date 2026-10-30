@@ -18,7 +18,7 @@
   - `k8s_commands.rs` holds `K8sState` and the Tauri commands.
 - **Frontend:** a new `src/k8s/` tab. It reuses `ErrorState` (SSO login button), the settings hook, and the tab plumbing in `App.tsx`. A shared watch registry keeps one backend watch per (target, kind, namespace) and keeps it alive for 30 s after the last subscriber leaves.
 
-**Tech Stack:** Tauri 2, Rust 1.96 (tokio, `kube` 4.2 + `kube-runtime`, `k8s-openapi` 0.29 with feature `v1_33`, rustls aws-lc-rs, aws-sdk-eks), React 18 + TS, TanStack Query, Vitest; Docker + kind for the live tests.
+**Tech Stack:** Tauri 2, Rust 1.96 (tokio, `kube` 4.2 + `kube-runtime`, `k8s-openapi` 0.28 (the version kube 4.2 depends on; 0.29 conflicts) with feature `v1_33`, rustls aws-lc-rs, aws-sdk-eks), React 18 + TS, TanStack Query, Vitest; Docker + kind for the live tests.
 
 ## Global Constraints
 - Spec: `docs/superpowers/specs/2026-10-30-eks-kubernetes-design.md` (sections "대상과 탭", "접속", and the K1 row of "단계"). Branch: `feat/eks-k8s` (create from `main` before the first task). No release at the end of K1: the release happens after KR.
