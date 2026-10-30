@@ -4,8 +4,17 @@ export type Requirement = { key: string; op: "=" | "!=" | "in" | "notin" | "exis
 export type Filter = { kind: "none" } | { kind: "name"; text: string } | { kind: "selector"; reqs: Requirement[] } | { kind: "invalid" };
 
 // 쿠버네티스 레이블 키(접두사/이름)와 값의 모양
-const KEY = /^([a-z0-9]([-a-z0-9.]*[a-z0-9])?\/)?[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$/;
-const VALUE = /^([A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?)?$/;
+const NAME = /^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$/;
+const PREFIX = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
+
+const validName = (s: string) => s.length <= 63 && NAME.test(s);
+function validKey(k: string): boolean {
+  const slash = k.indexOf("/");
+  if (slash < 0) return validName(k);
+  const prefix = k.slice(0, slash);
+  return prefix.length <= 253 && PREFIX.test(prefix) && validName(k.slice(slash + 1));
+}
+const validValue = (v: string) => v === "" || validName(v);
 const SET = /^(\S+)\s+(in|notin)\s*\(([^()]*)\)$/;
 const EQ = /^([^=!\s]+)\s*(==|=|!=)\s*(\S+)$/;
 const NOT = /^!\s*(\S+)$/;
@@ -31,17 +40,17 @@ function requirement(t: string): Requirement | null {
   let m = SET.exec(t);
   if (m) {
     const values = m[3].split(",").map((v) => v.trim());
-    if (values.some((v) => v === "" || !VALUE.test(v)) || !KEY.test(m[1])) return null;
+    if (values.some((v) => v === "" || !validValue(v)) || !validKey(m[1])) return null;
     return { key: m[1], op: m[2] as "in" | "notin", values };
   }
   m = EQ.exec(t);
   if (m) {
-    if (!KEY.test(m[1]) || !VALUE.test(m[3])) return null;
+    if (!validKey(m[1]) || !validValue(m[3])) return null;
     return { key: m[1], op: m[2] === "!=" ? "!=" : "=", values: [m[3]] };
   }
   m = NOT.exec(t);
-  if (m) return KEY.test(m[1]) ? { key: m[1], op: "!exists", values: [] } : null;
-  return KEY.test(t) ? { key: t, op: "exists", values: [] } : null;
+  if (m) return validKey(m[1]) ? { key: m[1], op: "!exists", values: [] } : null;
+  return validKey(t) ? { key: t, op: "exists", values: [] } : null;
 }
 
 /** kubectl -l 과 같은 문법. 하나라도 틀리면 null */
