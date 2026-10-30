@@ -46,14 +46,35 @@ test("refreshK8s closes and re-runs the context query", async () => {
 test("session waits for a context; rules wait for enabled and a namespace", async () => {
   const qc = client();
   renderHook(() => useK8sSession(T, null, null, "p"), { wrapper: wrap(qc) });
-  renderHook(() => useK8sRules(T, "ops", "p", false), { wrapper: wrap(qc) });
-  renderHook(() => useK8sRules(T, null, "p", true), { wrapper: wrap(qc) });
+  renderHook(() => useK8sRules(T, "ctx", "ops", "p", false), { wrapper: wrap(qc) });
+  renderHook(() => useK8sRules(T, "ctx", null, "p", true), { wrapper: wrap(qc) });
   expect(api.open).not.toHaveBeenCalled();
   expect(api.rules).not.toHaveBeenCalled();
   api.open.mockResolvedValue({ context: "ctx" } as never);
   api.rules.mockResolvedValue({ namespace: "ops" } as never);
   renderHook(() => useK8sSession(T, "~/kc", "ctx", "p"), { wrapper: wrap(qc) });
-  renderHook(() => useK8sRules(T, "ops", "p", true), { wrapper: wrap(qc) });
+  renderHook(() => useK8sRules(T, "ctx", "ops", "p", true), { wrapper: wrap(qc) });
   await waitFor(() => expect(api.open).toHaveBeenCalledWith(T, "~/kc", "ctx", "p"));
   await waitFor(() => expect(api.rules).toHaveBeenCalledWith(T, "ops", "p"));
+});
+
+test("rules are cached per context", async () => {
+  const qc = client();
+  api.rules.mockResolvedValue({ namespace: "ops" } as never);
+  renderHook(() => useK8sRules(T, "a", "ops", "p", true), { wrapper: wrap(qc) });
+  renderHook(() => useK8sRules(T, "b", "ops", "p", true), { wrapper: wrap(qc) });
+  await waitFor(() => expect(api.rules).toHaveBeenCalledTimes(2));
+  expect(k8sKeys.rules(T, "a", "ops")).not.toEqual(k8sKeys.rules(T, "b", "ops"));
+});
+
+test("closeK8s drops queries only after close finishes", async () => {
+  const qc = client();
+  qc.setQueryData(k8sKeys.session(T, "ctx"), { context: "ctx" });
+  let release!: () => void;
+  api.close.mockReturnValue(new Promise((r) => (release = () => r(null))));
+  const done = closeK8s(qc, T, "p");
+  expect(qc.getQueryData(k8sKeys.session(T, "ctx"))).toBeDefined();
+  release();
+  await done;
+  expect(qc.getQueryData(k8sKeys.session(T, "ctx"))).toBeUndefined();
 });
