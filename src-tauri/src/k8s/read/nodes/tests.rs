@@ -16,6 +16,8 @@ fn pod_requests_take_the_larger_of_containers_and_init_plus_overhead() {
     } });
     assert_eq!(pod_requests(&pod), Resources { cpu_milli: 510, memory_bytes: 65 * 1024 * 1024, pods: 1 });
     assert_eq!(pod_requests(&json!({ "spec": { "containers": [{}] } })), Resources { cpu_milli: 0, memory_bytes: 0, pods: 1 });
+    let nano = json!({ "spec": { "containers": [{ "resources": { "requests": { "memory": "1n" } } }] } });
+    assert_eq!(pod_requests(&nano).memory_bytes, 1);
 }
 
 #[test]
