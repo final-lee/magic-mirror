@@ -52,3 +52,6 @@ export const SETTINGS_KUBECONFIG_LABEL = "kubeconfig 경로";
 export const SETTINGS_KUBECONFIG_PLACEHOLDER = "비우면 KUBECONFIG 또는 ~/.kube/config";
 
 export const ALL_NAMESPACES_NOTE = "모든 네임스페이스를 고르면 default 네임스페이스 기준으로 보여줘요";
+
+export const BAR_LABEL = "연결 정보";
+export const NAV_LABEL = "클러스터 메뉴";

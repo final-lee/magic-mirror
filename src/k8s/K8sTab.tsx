@@ -1,13 +1,14 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useSettings } from "../api/queries";
+import { savedMissing } from "./text";
 import { ContextPicker } from "./ContextPicker";
 import { K8sError } from "./K8sError";
 import { MyRules } from "./MyRules";
 import { NoContext } from "./NoContext";
 import { NAMESPACES, chooseContext, ssoProfileOf } from "./targets";
 import { ALL, TopBar, type K8sConnection } from "./TopBar";
-import { NAV_MY_PERMISSIONS, NO_CONTEXT, STATE_CONNECTING, updateCommand } from "./text";
+import { NAV_LABEL, NAV_MY_PERMISSIONS, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNECTING, updateCommand } from "./text";
 import { refreshK8s, useK8sContext, useK8sRules, useK8sSession } from "./queries";
 import type { K8sTarget } from "./types";
 import { useK8sWatch } from "./useK8sWatch";
@@ -17,8 +18,6 @@ interface Props {
   /** 이 탭이 보이는 탭인지(이후 단계의 단축키용) */
   active: boolean;
 }
-
-const NO_KUBECONFIG_PREFIX = "kubeconfig 파일이 없어요";
 
 export function K8sTab({ target }: Props) {
   const qc = useQueryClient();
@@ -55,14 +54,10 @@ export function K8sTab({ target }: Props) {
 
   if (!settingsReady || ctx.isPending) return <div className="empty">{STATE_CONNECTING}</div>;
   if (ctx.isError) {
-    const e = ctx.error;
-    if (e.kind === "other" && e.message.startsWith(NO_KUBECONFIG_PREFIX)) {
-      return <NoContext message={e.message} command={updateCommand(target.cluster, target.region, target.profile)} onRecheck={recheck} />;
-    }
-    return <K8sError error={e} target={target} ssoProfile={target.profile} />;
+    return <K8sError error={ctx.error} target={target} ssoProfile={target.profile} />;
   }
   if (chosen === null) {
-    if (info!.candidates.length === 0) return <NoContext message={NO_CONTEXT} command={info!.updateCommand} onRecheck={recheck} />;
+    if (info!.candidates.length === 0) return <NoContext message={info!.kubeconfigPaths.length > 0 ? NO_KUBECONFIG(info!.kubeconfigPaths) : NO_CONTEXT} command={info!.updateCommand} onRecheck={recheck} />;
     return (
       <ContextPicker
         candidates={info!.candidates}
@@ -86,9 +81,10 @@ export function K8sTab({ target }: Props) {
         onNamespace={setUserNs}
         onReconnect={reconnect}
       />
+      {missing && <p className="err k8s-notes">{savedMissing(missing)}</p>}
       {namespaces.status === "error" && namespaces.error && <K8sError error={namespaces.error} target={target} ssoProfile={ssoProfile} compact />}
       <div className="pg-main">
-        <nav className="iam-nav" aria-label="클러스터 메뉴">
+        <nav className="iam-nav" aria-label={NAV_LABEL}>
           <button className="iam-nav-item on" aria-current="page">
             <span className="iam-nav-label">{NAV_MY_PERMISSIONS}</span>
           </button>
