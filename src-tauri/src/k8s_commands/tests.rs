@@ -92,7 +92,7 @@ fn missing_only_when_no_path_is_a_file() {
     let absent = dir.path().join("none");
     let present = dir.path().join("config");
     std::fs::write(&present, "").unwrap();
-    assert!(none_exists(&[absent.clone()]));
+    assert!(none_exists(std::slice::from_ref(&absent)));
     assert!(none_exists(&[]));
     assert!(!none_exists(&[absent, present]));
 }
