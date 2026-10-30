@@ -1,3 +1,4 @@
+import { SETTINGS_KUBECONFIG_LABEL, SETTINGS_KUBECONFIG_PLACEHOLDER } from "../k8s/text";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ServiceSettings } from "./ServiceSettings";
 import { sampleServices } from "../test/utils";
@@ -56,4 +57,28 @@ test("custom command input appears for custom tool", () => {
   );
   fireEvent.change(screen.getByLabelText("비교 명령"), { target: { value: "ksdiff {left} {right}" } });
   expect(onDiffToolChange).toHaveBeenLastCalledWith("custom", "ksdiff {left} {right}");
+});
+
+test("kubeconfig path field saves on blur and maps empty to null", () => {
+  const onKubeconfigPathChange = vi.fn();
+  render(
+    <ServiceSettings
+      services={sampleServices}
+      enabled={[]}
+      onChange={() => {}}
+      onClose={() => {}}
+      kubeconfigPath="/old/config"
+      onKubeconfigPathChange={onKubeconfigPathChange}
+    />,
+  );
+  const input = screen.getByLabelText(SETTINGS_KUBECONFIG_LABEL);
+  expect(input).toHaveValue("/old/config");
+  expect(input).toHaveAttribute("placeholder", SETTINGS_KUBECONFIG_PLACEHOLDER);
+  fireEvent.change(input, { target: { value: "/new/config" } });
+  expect(onKubeconfigPathChange).not.toHaveBeenCalled();
+  fireEvent.blur(input);
+  expect(onKubeconfigPathChange).toHaveBeenLastCalledWith("/new/config");
+  fireEvent.change(input, { target: { value: "" } });
+  fireEvent.blur(input);
+  expect(onKubeconfigPathChange).toHaveBeenLastCalledWith(null);
 });

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useResources } from "../api/queries";
 import type { Favorite, ResourceType, ServiceInfo } from "../api/types";
+import { SIDEBAR_ROW } from "../k8s/text";
 import { ServiceBadge } from "./ServiceBadge";
 
 interface Props {
@@ -13,9 +14,11 @@ interface Props {
   onToggleFavorite: (sel: Favorite) => void;
   /** IAM 작업 공간 탭을 연다. 주면 IAM 서비스 아래 첫 항목으로 "IAM 관리"가 보인다. */
   onOpenIam?: () => void;
+  /** EKS 클러스터를 골라 Kubernetes 탭을 연다. 주면 EKS 서비스 아래 첫 항목으로 "클러스터 관리"가 보인다. */
+  onOpenK8s?: () => void;
 }
 
-export function Sidebar({ services, profile, region, selection, favorites, onSelect, onToggleFavorite, onOpenIam }: Props) {
+export function Sidebar({ services, profile, region, selection, favorites, onSelect, onToggleFavorite, onOpenIam, onOpenK8s }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(selection ? [selection.service] : []));
 
   const toggle = (id: string) =>
@@ -74,6 +77,11 @@ export function Sidebar({ services, profile, region, selection, favorites, onSel
               {svc.id === "iam" && onOpenIam && (
                 <div className="typ iam-open" role="button" onClick={() => onOpenIam()}>
                   <span>🔐 IAM 관리</span>
+                </div>
+              )}
+              {svc.id === "eks" && onOpenK8s && (
+                <div className="typ iam-open" role="button" onClick={() => onOpenK8s()}>
+                  <span>{SIDEBAR_ROW}</span>
                 </div>
               )}
               {svc.types.map((t) => (

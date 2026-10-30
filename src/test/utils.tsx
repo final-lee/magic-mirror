@@ -94,3 +94,14 @@ export const sampleServices: ServiceInfo[] = [
   },
   { id: "iam", name: "IAM", global: true, types: [{ id: "users", name: "Users", columns: [{ key: "name", label: "Name", kind: "text" }] }] },
 ];
+
+/** EKS 서비스 정의. 목록의 행은 makeResource로 만든다(values에 version, status). */
+export const eksService: ServiceInfo = {
+  id: "eks",
+  name: "EKS",
+  global: false,
+  types: [
+    { id: "clusters", name: "Clusters", columns: [column("name", "Name"), column("version", "Version"), column("status", "Status")] },
+    { id: "nodegroups", name: "Node Groups", columns: [column("name", "Name")] },
+  ],
+};
