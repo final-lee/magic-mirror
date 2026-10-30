@@ -14,6 +14,7 @@ use crate::error::AppError;
 use crate::k8s::connect;
 use crate::k8s::failure::{describe, failure_of, Endpoint, Failure, NOT_OPENED};
 use crate::k8s::kubeconfig::{self, Candidate, NO_CONTEXT};
+use crate::k8s::read::detail::{self, ObjectView};
 use crate::k8s::read::kinds::{self, Kind};
 use crate::k8s::read::secret::{self, SecretValue};
 use crate::k8s::review::{self, Identity, Rules};
@@ -266,6 +267,13 @@ pub async fn k8s_kinds(k8s: State<'_, K8sState>, target: K8sTarget) -> Result<Ve
     let s = k8s.session(&target)?;
     let discovery = kinds::discover(&s.client, s.endpoint).await?;
     Ok(kinds::kinds_of(&discovery))
+}
+
+/// 상세 화면. 소유 관계, 컨테이너, 이벤트, YAML(Secret 값은 가림)을 한 번에 돌려준다.
+#[tauri::command]
+pub async fn k8s_get(k8s: State<'_, K8sState>, target: K8sTarget, kind: KindRef, namespace: Option<String>, name: String) -> Result<ObjectView, AppError> {
+    let s = k8s.session(&target)?;
+    detail::get(&s.client, &kind, namespace.as_deref(), &name, s.endpoint).await
 }
 
 /// Secret 키 하나의 값. 화면이 "값 보기"를 누를 때만 부른다. 값은 기록·오류에 넣지 않는다.

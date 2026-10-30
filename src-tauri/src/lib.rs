@@ -118,6 +118,7 @@ pub fn run() {
             k8s_commands::k8s_watch,
             k8s_commands::k8s_unwatch,
             k8s_commands::k8s_kinds,
+            k8s_commands::k8s_get,
             k8s_commands::k8s_secret_value,
         ])
         .run(tauri::generate_context!())

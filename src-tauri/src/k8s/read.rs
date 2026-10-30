@@ -9,6 +9,7 @@ use super::failure::{describe, failure_of, Endpoint, Failure};
 use super::rows::KindRef;
 use crate::error::AppError;
 
+pub mod detail;
 pub mod kinds;
 pub mod secret;
 pub mod values;
