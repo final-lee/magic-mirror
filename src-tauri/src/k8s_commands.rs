@@ -11,7 +11,7 @@ use tauri::State;
 use crate::commands::AppState;
 use crate::error::AppError;
 use crate::k8s::connect;
-use crate::k8s::failure::{describe, failure_of, Endpoint, NOT_OPENED};
+use crate::k8s::failure::{describe, failure_of, Endpoint, Failure, NOT_OPENED};
 use crate::k8s::kubeconfig::{self, Candidate, NO_CONTEXT};
 use crate::k8s::review::{self, Identity, Rules};
 use crate::k8s::target::{describe_cluster, K8sTarget};
@@ -112,7 +112,8 @@ pub async fn k8s_context(app: State<'_, AppState>, target: K8sTarget, kubeconfig
         let loaded = kubeconfig::load(&paths)?;
         (display_paths(&loaded.paths), kubeconfig::candidates(&loaded.config, &info.arn, &info.endpoint))
     };
-    let (chosen, saved_missing) = kubeconfig::choose(&candidates, saved.as_deref());
+    // kubeconfig가 없으면 저장값이 사라졌다는 안내는 의미가 없다
+    let (chosen, saved_missing) = if missing { (None, None) } else { kubeconfig::choose(&candidates, saved.as_deref()) };
     Ok(K8sContextInfo {
         arn: info.arn,
         endpoint: info.endpoint,
@@ -142,8 +143,12 @@ pub async fn k8s_open(app: State<'_, AppState>, k8s: State<'_, K8sState>, target
         .ok_or_else(|| AppError::other(NO_CONTEXT))?;
     let client = connect::connect(&loaded, &context, endpoint).await?;
     let identity = review::identity(&client, &candidate.user, endpoint).await?;
-    let version = client.apiserver_version().await.map_err(|e| describe(&failure_of(&e, "get", "version"), endpoint))?;
+    let version = tokio::time::timeout(connect::REQUEST_TIMEOUT, client.apiserver_version())
+        .await
+        .map_err(|_| describe(&Failure::Unreachable, endpoint))?
+        .map_err(|e| describe(&failure_of(&e, "get", "version"), endpoint))?;
     let session = Session { client, endpoint, context };
+    // `Session.context`는 KB4가 읽는다. 그때까지 dead code 경고가 나지 않게 여기서 읽는다
     let context = session.context.clone();
     if !k8s.keep(&target, started, session) {
         return Err(AppError::other(NOT_OPENED));

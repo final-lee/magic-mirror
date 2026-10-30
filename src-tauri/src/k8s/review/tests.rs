@@ -61,3 +61,10 @@ fn identity_json_keys_match_the_ts_contract() {
     assert_eq!(v["source"], "selfSubjectReview");
     assert_eq!(v["arn"], serde_json::Value::Null);
 }
+
+#[test]
+fn missing_status_gives_empty_incomplete_rules() {
+    let r = rules_or_incomplete(None, "ops");
+    assert!(r.incomplete && r.resource_rules.is_empty() && r.non_resource_rules.is_empty());
+    assert_eq!(r.namespace, "ops");
+}
