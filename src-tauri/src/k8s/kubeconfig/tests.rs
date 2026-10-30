@@ -150,7 +150,7 @@ fn a_secret_that_serde_would_quote_is_not_shown() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("config");
     std::fs::write(&path, "apiVersion: v1\nkind: Config\nclusters: SECRETVALUE\nusers:\n- name: u\n  user:\n    client-key-data: [ \"SECRETVALUE\" ]\n").unwrap();
-    let AppError::Other { message } = load(&[path.clone()]).err().unwrap() else { panic!() };
+    let AppError::Other { message } = load(&[path]).err().unwrap() else { panic!() };
     std::fs::remove_dir_all(&dir).ok();
     assert!(!message.contains("SECRETVALUE"), "{message}");
     assert!(message.contains(MALFORMED), "{message}");
