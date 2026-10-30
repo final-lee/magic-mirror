@@ -15,7 +15,7 @@
   - `overview.rs`, `breakdown.rs`: turn `CeTable`s into the contract shapes (pure).
   - `mock_aws.rs` (test only): a recording JSON-protocol HTTP client.
   - `hygiene.rs` (test only).
-  - `live_tests.rs` (`#[ignore]`).
+  - live tests: `#[ignore]` module `live_tests` inside `cost_commands.rs` (they drive the private `overview_with`/`breakdown_with`).
 - `src-tauri/src/cost_commands.rs` (new): `CostState` and the commands.
 - `src-tauri/src/lib.rs`: `mod cost; mod cost_commands;`, `app.manage(CostState)`, register the commands.
 
@@ -322,7 +322,7 @@ pub fn shape_breakdown(group: &CostGroupBy, current: &CeTable, compare: Option<&
 ### Task C1.5: Commands, state, hygiene and live test
 
 **Files:**
-- Create `src-tauri/src/cost_commands.rs`, `src-tauri/src/cost/hygiene.rs`, `src-tauri/src/cost/live_tests.rs`, `scripts/cost-live-test.sh`.
+- Create `src-tauri/src/cost_commands.rs` (with `#[cfg(test)] mod live_tests`), `src-tauri/src/cost/hygiene.rs`, `scripts/cost-live-test.sh`.
 - Modify `src-tauri/src/lib.rs`:
   - `mod cost_commands;`
   - `app.manage(cost_commands::CostState::new(dir.join("cost-cache.json")))`
@@ -366,8 +366,9 @@ async fn answer(ce: &aws_sdk_costexplorer::Client, cache: &mut CostCache, accoun
     - (c) In `src/cost/client.rs` the only `.get_`/`.list_` fluent calls are `get_cost_and_usage`, `get_cost_forecast` and `list_cost_allocation_tags`.
 - [ ] **Step 2: implement**, then register.
 - [ ] **Step 3: live test.**
-  - `live_tests.rs` holds `#[ignore]` tests reading `MM_COST_PROFILE`. They run one thisMonth overview (≈ 3 requests), check that `total` equals the sum of bucket totals and `unit == "USD"`, then run it again and assert `requests == 0`.
-  - `scripts/cost-live-test.sh <profile>` prints "Cost Explorer 요청 약 3건(≈ $0.03)이 들어요" and runs `cargo test --lib cost::live_tests -- --ignored --nocapture` with `MM_COST_PROFILE` set, using a temp cache path (`MM_COST_CACHE`, read only by the live tests).
+  - `cost_commands::live_tests` holds `#[ignore]` tests reading `MM_COST_PROFILE`. They run one thisMonth overview (≈ 3 requests) with a cache in a tempdir, check that `total` equals the sum of bucket totals and `unit == "USD"`, then run it again and a service breakdown, asserting `requests == 0` for both.
+  - `scripts/cost-live-test.sh <profile>` prints "Cost Explorer 요청 약 3건(≈ $0.03)이 들어요" and runs `cargo test --lib cost_commands::live_tests -- --ignored --nocapture` with `MM_COST_PROFILE` set.
+  - The hygiene SDK scope is `src/cost/` plus `src/cost_commands.rs`, which only builds the client and passes it on.
 - [ ] **Step 4:** `cargo test`, `cargo clippy --all-targets -- -D warnings`, then `scripts/cost-live-test.sh personal` once. Record its output in the task report.
 - [ ] **Step 5: commit** `feat(cost): cost overview, breakdown, tag key and usage commands`.
 
