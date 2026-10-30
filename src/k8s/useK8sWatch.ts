@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { AppError } from "../api/types";
 import { k8sApi } from "./api";
-import { targetKey } from "./targets";
+import { kindKey, targetKey } from "./targets";
 import type { K8sKindRef, K8sRow, K8sTarget } from "./types";
 import { watchRegistry, type WatchSnapshot } from "./watchRegistry";
 
@@ -26,7 +26,7 @@ export function useK8sWatch(
   enabled: boolean,
 ): { rows: K8sRow[]; status: "loading" | "ready" | "error"; error: AppError | null } {
   const tk = targetKey(target);
-  const key = `${tk}|${context}|${kind.group}/${kind.version}/${kind.plural}|${namespace ?? "*"}`;
+  const key = `${tk}|${context}|${kindKey(kind)}|${namespace ?? "*"}`;
   const [snap, setSnap] = useState<WatchSnapshot>(LOADING);
 
   useEffect(() => {

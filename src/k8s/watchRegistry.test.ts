@@ -5,7 +5,7 @@ import type { K8sRow, K8sWatchMessage } from "./types";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class {} }));
 
-const row = (uid: string, name = uid): K8sRow => ({ uid, name, namespace: null, resourceVersion: "1", createdAt: null, labels: {}, values: {} });
+const row = (uid: string, name = uid): K8sRow => ({ uid, name, namespace: null, resourceVersion: "1", createdAt: null, labels: {}, values: {}, problems: [] });
 const unwatchCalls = () => vi.mocked(invoke).mock.calls.filter((c) => c[0] === "k8s_unwatch").map((c) => c[1]);
 
 let n = 0;

@@ -9,7 +9,7 @@ import type { K8sRow } from "./types";
 type Channel = { onmessage: (m: unknown) => void };
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class { onmessage: ((m: unknown) => void) | null = null } }));
 
-const row = (uid: string, name: string, namespace: string | null = null): K8sRow => ({ uid, name, namespace, resourceVersion: "1", createdAt: null, labels: {}, values: {} });
+const row = (uid: string, name: string, namespace: string | null = null): K8sRow => ({ uid, name, namespace, resourceVersion: "1", createdAt: null, labels: {}, values: {}, problems: [] });
 
 let n = 0;
 beforeEach(() => {

@@ -2,9 +2,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { k8sApi } from "./api";
-import { closeK8s, k8sKeys, refreshK8s, useK8sContext, useK8sRules, useK8sSession } from "./queries";
+import { closeK8s, k8sKeys, refreshK8s, useK8sContext, useK8sKinds, useK8sObject, useK8sOverview, useK8sRules, useK8sSession } from "./queries";
 
-vi.mock("./api", () => ({ k8sApi: { context: vi.fn(), open: vi.fn(), close: vi.fn(), rules: vi.fn(), watch: vi.fn(), unwatch: vi.fn() } }));
+vi.mock("./api", () => ({ k8sApi: { context: vi.fn(), open: vi.fn(), close: vi.fn(), rules: vi.fn(), kinds: vi.fn(), get: vi.fn(), secretValue: vi.fn(), overview: vi.fn(), watch: vi.fn(), unwatch: vi.fn() } }));
 const api = vi.mocked(k8sApi);
 
 const T = { profile: "app", region: "r", cluster: "prod" };
@@ -103,4 +103,51 @@ test("refreshK8s closes, then reopens a mounted session and refetches the contex
   await waitFor(() => expect(api.context).toHaveBeenCalledTimes(2));
   expect(log).toEqual(["close", "open"]);
   expect(api.watch).not.toHaveBeenCalled();
+});
+
+const DEPLOY = { group: "apps", version: "v1", kind: "Deployment", plural: "deployments", namespaced: true };
+
+test("K2 keys live under the target and include the context", () => {
+  const ref = { kind: DEPLOY, namespace: "web", name: "api" };
+  expect(k8sKeys.kinds(T, "ctx")).toEqual(["k8s", "app|r|prod", "kinds", "ctx"]);
+  expect(k8sKeys.object(T, "ctx", ref, "7")).toEqual(["k8s", "app|r|prod", "object", "ctx", "apps/v1/deployments", "web", "api", "7"]);
+  expect(k8sKeys.overview(T, "ctx")).toEqual(["k8s", "app|r|prod", "overview", "ctx"]);
+});
+
+test("useK8sObject reads once per resourceVersion and waits for enabled", async () => {
+  const qc = client();
+  api.get.mockResolvedValue({ yaml: "a" } as never);
+  const ref = { kind: DEPLOY, namespace: "web", name: "api" };
+  const { rerender } = renderHook(({ rv, on }) => useK8sObject(T, "ctx", ref, rv, "p", on), { wrapper: wrap(qc), initialProps: { rv: "1", on: false } });
+  expect(api.get).not.toHaveBeenCalled();
+  rerender({ rv: "1", on: true });
+  await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+  expect(api.get).toHaveBeenCalledWith(T, DEPLOY, "web", "api", "p");
+  rerender({ rv: "2", on: true });
+  await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+});
+
+test("useK8sKinds and useK8sOverview need a context and enabled", async () => {
+  const qc = client();
+  api.kinds.mockResolvedValue([]);
+  api.overview.mockResolvedValue({ gaps: [] } as never);
+  renderHook(() => useK8sKinds(T, null, "p", true), { wrapper: wrap(qc) });
+  renderHook(() => useK8sOverview(T, "ctx", "p", false), { wrapper: wrap(qc) });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(api.kinds).not.toHaveBeenCalled();
+  expect(api.overview).not.toHaveBeenCalled();
+  const k = renderHook(() => useK8sKinds(T, "ctx", "p", true), { wrapper: wrap(qc) });
+  await waitFor(() => expect(k.result.current.isSuccess).toBe(true));
+  expect(api.kinds).toHaveBeenCalledWith(T, "p");
+});
+
+test("refreshK8s removes K2 data so it is read again on the new connection", async () => {
+  const qc = client();
+  qc.setQueryData(k8sKeys.kinds(T, "ctx"), []);
+  qc.setQueryData(k8sKeys.overview(T, "ctx"), { gaps: [] });
+  qc.setQueryData(k8sKeys.object(T, "ctx", { kind: DEPLOY, namespace: "web", name: "api" }, "1"), { yaml: "" });
+  await refreshK8s(qc, T, "p");
+  expect(qc.getQueryData(k8sKeys.kinds(T, "ctx"))).toBeUndefined();
+  expect(qc.getQueryData(k8sKeys.overview(T, "ctx"))).toBeUndefined();
+  expect(qc.getQueriesData({ queryKey: [...k8sKeys.root(T), "object"] })).toEqual([]);
 });

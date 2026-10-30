@@ -24,3 +24,6 @@ export function chooseContext(candidates: string[], saved: string | null): [stri
   if (candidates.length === 1) return [candidates[0], saved];
   return [null, saved];
 }
+
+/** 종류를 가리키는 키(감시 키, 쿼리 키에 쓴다) */
+export const kindKey = (k: K8sKindRef) => `${k.group}/${k.version}/${k.plural}`;

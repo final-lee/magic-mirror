@@ -51,3 +51,20 @@ test("watch hands a Channel whose messages reach the callback", async () => {
   args.onEvent.onmessage({ type: "reset", rows: [] });
   expect(got).toEqual([{ type: "reset", rows: [] }]);
 });
+
+test("K2 reads pass the exec profile at the top level", async () => {
+  vi.mocked(invoke).mockResolvedValue({});
+  const kind = { group: "apps", version: "v1", kind: "Deployment", plural: "deployments", namespaced: true };
+  await k8sApi.kinds(T, "prod-ro");
+  expect(invoke).toHaveBeenLastCalledWith("k8s_kinds", { target: T, profile: "prod-ro" });
+  await k8sApi.get(T, kind, "web", "api", "prod-ro");
+  expect(invoke).toHaveBeenLastCalledWith("k8s_get", { target: T, kind, namespace: "web", name: "api", profile: "prod-ro" });
+  await k8sApi.secretValue(T, "web", "db", "password", "prod-ro");
+  expect(invoke).toHaveBeenLastCalledWith("k8s_secret_value", { target: T, namespace: "web", name: "db", key: "password", profile: "prod-ro" });
+});
+
+test("overview reports SSO expiry for the app profile", async () => {
+  vi.mocked(invoke).mockResolvedValue({});
+  await k8sApi.overview(T);
+  expect(invoke).toHaveBeenLastCalledWith("k8s_overview", { target: T, profile: "app" });
+});
