@@ -207,6 +207,18 @@ pub async fn k8s_rules(k8s: State<'_, K8sState>, target: K8sTarget, namespace: S
     review::rules(&s.client, &namespace, s.endpoint).await
 }
 
+/// 작업이 끝나거나 패닉으로 풀릴 때 `watches`에서 자기 항목을 지운다
+struct ForgetWatch {
+    app: tauri::AppHandle,
+    id: u64,
+}
+
+impl Drop for ForgetWatch {
+    fn drop(&mut self) {
+        self.app.state::<K8sState>().forget_watch(self.id);
+    }
+}
+
 /// 목록을 지켜본다. 처음 목록은 `reset`, 이후 변경은 묶어서 `changes`로 채널에 흘린다. 반환값은 `k8s_unwatch`에 쓰는 번호.
 #[tauri::command]
 pub fn k8s_watch(
@@ -222,12 +234,11 @@ pub fn k8s_watch(
     let (client, endpoint) = (session.client.clone(), session.endpoint);
     k8s.register_watch(&target, started, |id| {
         let task = tauri::async_runtime::spawn(async move {
+            // 끝나는 길이 무엇이든(패닉 포함) 항목을 지운다
+            let _forget = ForgetWatch { app, id };
             watch::run(client, kind, namespace, endpoint, move |m| on_event.send(m).is_ok()).await;
-            app.state::<K8sState>().forget_watch(id);
         });
-        match task {
-            tauri::async_runtime::JoinHandle::Tokio(h) => h.abort_handle(),
-        }
+        task.inner().abort_handle()
     })
     .ok_or_else(|| AppError::other(NOT_OPENED))
 }

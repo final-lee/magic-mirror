@@ -72,32 +72,43 @@ impl Batcher {
     }
 }
 
-/// 첫 목록(시작, 다시 목록)이 `REQUEST_TIMEOUT` 안에 아무 소식 없이 멈추면 한 번 알리게 하는 시계.
-/// 토큰이 만료돼 exec 플러그인이 다시 도는 동안처럼 요청이 조용히 걸려 있을 때를 위한 것이다. 목록이 끝난 뒤의 watch는 원래 조용할 수 있어 재지 않는다.
+/// 목록 단계(시작, 다시 목록)가 `REQUEST_TIMEOUT` 안에 아무 소식 없이 멈추면 한 번 알리게 하는 시계.
+/// 토큰이 만료돼 exec 플러그인이 다시 도는 동안처럼 요청이 조용히 걸려 있을 때를 위한 것이다. `InitDone` 뒤의 watch는 원래 조용할 수 있어 재지 않는다.
+/// watch 도중의 오류는 watcher가 목록 없이 다시 watch하니(`Init` 없음) 목록 단계일 때만 다시 잰다.
 #[derive(Default)]
 pub struct Stall {
     since: Option<Instant>,
+    listing: bool,
 }
 
 impl Stall {
-    pub fn arm(&mut self, now: Instant) {
+    /// 목록 단계를 시작한다(처음, 또는 `Init`)
+    pub fn start(&mut self, now: Instant) {
+        self.listing = true;
         self.since = Some(now);
-    }
-
-    pub fn disarm(&mut self) {
-        self.since = None;
     }
 
     /// 이벤트가 오면 부른다. 목록 중이면 진행이 있었으니 다시 재고, 목록이 끝나면 멈춘다.
     pub fn on_event<K>(&mut self, ev: &Event<K>, now: Instant) {
         match ev {
-            Event::Init | Event::InitApply(_) => self.arm(now),
-            Event::InitDone => self.disarm(),
+            Event::Init => self.start(now),
+            Event::InitApply(_) => self.since = Some(now),
+            Event::InitDone => {
+                self.listing = false;
+                self.since = None;
+            }
             Event::Apply(_) | Event::Delete(_) => {}
         }
     }
 
-    /// 한도를 넘었으면 true, 한 번 알린 뒤에는 다시 켤 때까지 false
+    /// 오류 뒤 backoff로 목록 요청을 다시 하는 경우만 다시 잰다
+    pub fn on_error(&mut self, now: Instant) {
+        if self.listing {
+            self.since = Some(now);
+        }
+    }
+
+    /// 한도를 넘었으면 true, 한 번 알린 뒤에는 다시 켜질 때까지 false
     pub fn expired(&mut self, now: Instant) -> bool {
         match self.since {
             Some(t) if now.duration_since(t) >= REQUEST_TIMEOUT => {
@@ -144,7 +155,8 @@ where
 
     let gvk = GroupVersionKind::gvk(&kind.group, &kind.version, &kind.kind);
     let ar = ApiResource::from_gvk_with_plural(&gvk, &kind.plural);
-    let api: Api<DynamicObject> = match (&namespace, kind.namespaced) {
+    // 빈 이름은 모든 네임스페이스로 본다(빈 경로를 만들지 않는다)
+    let api: Api<DynamicObject> = match (namespace.as_deref().filter(|n| !n.is_empty()), kind.namespaced) {
         (Some(ns), true) => Api::namespaced_with(client, ns, &ar),
         _ => Api::all_with(client, &ar),
     };
@@ -152,7 +164,7 @@ where
     let mut batch = Batcher::default();
     let mut tick = tokio::time::interval(FLUSH_EVERY);
     let mut stall = Stall::default();
-    stall.arm(Instant::now());
+    stall.start(Instant::now());
     loop {
         tokio::select! {
             next = stream.next() => match next {
@@ -175,8 +187,7 @@ where
                 Some(Err(e)) => {
                     let failure = watch_failure(&e, &kind);
                     let fatal = is_fatal(&failure);
-                    // 오류 뒤 backoff로 다시 시도하니 그 목록 요청도 다시 잰다
-                    stall.arm(Instant::now());
+                    stall.on_error(Instant::now());
                     if !send(WatchMessage::Error { error: describe(&failure, endpoint), fatal }) || fatal {
                         return;
                     }
