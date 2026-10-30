@@ -65,6 +65,10 @@ export interface Settings {
   diffToolCommand?: string | null;
   /** RDS 대상 ARN → 그 대상에 접속할 DB 사용자 이름. 대상마다 처음 열 때 묻고 여기에 기억한다. */
   pgLogins?: Record<string, string>;
+  /** EKS 클러스터 ARN → 그 클러스터에 접속할 kubeconfig context 이름 */
+  k8sContexts?: Record<string, string>;
+  /** kubeconfig 파일 경로. 비우면 KUBECONFIG 또는 ~/.kube/config */
+  kubeconfigPath?: string | null;
 }
 
 export interface S3Entry {
