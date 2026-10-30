@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 use kube::api::{Api, ApiResource, DynamicObject, GroupVersionKind};
 use kube::runtime::watcher::{self, Event};
 use kube::runtime::WatchStreamExt;
+use tokio::time::Instant;
 
+use super::connect::REQUEST_TIMEOUT;
 use super::failure::{describe, failure_of, Endpoint, Failure};
 use super::rows::{row_of, KindRef, Row};
 use crate::error::AppError;
@@ -70,6 +72,43 @@ impl Batcher {
     }
 }
 
+/// 첫 목록(시작, 다시 목록)이 `REQUEST_TIMEOUT` 안에 아무 소식 없이 멈추면 한 번 알리게 하는 시계.
+/// 토큰이 만료돼 exec 플러그인이 다시 도는 동안처럼 요청이 조용히 걸려 있을 때를 위한 것이다. 목록이 끝난 뒤의 watch는 원래 조용할 수 있어 재지 않는다.
+#[derive(Default)]
+pub struct Stall {
+    since: Option<Instant>,
+}
+
+impl Stall {
+    pub fn arm(&mut self, now: Instant) {
+        self.since = Some(now);
+    }
+
+    pub fn disarm(&mut self) {
+        self.since = None;
+    }
+
+    /// 이벤트가 오면 부른다. 목록 중이면 진행이 있었으니 다시 재고, 목록이 끝나면 멈춘다.
+    pub fn on_event<K>(&mut self, ev: &Event<K>, now: Instant) {
+        match ev {
+            Event::Init | Event::InitApply(_) => self.arm(now),
+            Event::InitDone => self.disarm(),
+            Event::Apply(_) | Event::Delete(_) => {}
+        }
+    }
+
+    /// 한도를 넘었으면 true, 한 번 알린 뒤에는 다시 켤 때까지 false
+    pub fn expired(&mut self, now: Instant) -> bool {
+        match self.since {
+            Some(t) if now.duration_since(t) >= REQUEST_TIMEOUT => {
+                self.since = None;
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
 /// `Event<DynamicObject>`를 줄로 바꾼다(kube 4.2의 `Event`에는 `map`이 없다).
 fn rows_of(kind: &KindRef, ev: Event<DynamicObject>) -> Event<Row> {
     match ev {
@@ -112,11 +151,14 @@ where
     let mut stream = watcher::watcher(api, watcher::Config::default().page_size(PAGE_SIZE)).default_backoff().boxed();
     let mut batch = Batcher::default();
     let mut tick = tokio::time::interval(FLUSH_EVERY);
+    let mut stall = Stall::default();
+    stall.arm(Instant::now());
     loop {
         tokio::select! {
             next = stream.next() => match next {
                 None => return,
                 Some(Ok(ev)) => {
+                    stall.on_event(&ev, Instant::now());
                     if let Some(msg) = batch.on(rows_of(&kind, ev)) {
                         if !send(msg) {
                             return;
@@ -133,12 +175,17 @@ where
                 Some(Err(e)) => {
                     let failure = watch_failure(&e, &kind);
                     let fatal = is_fatal(&failure);
+                    // 오류 뒤 backoff로 다시 시도하니 그 목록 요청도 다시 잰다
+                    stall.arm(Instant::now());
                     if !send(WatchMessage::Error { error: describe(&failure, endpoint), fatal }) || fatal {
                         return;
                     }
                 }
             },
             _ = tick.tick() => {
+                if stall.expired(Instant::now()) && !send(WatchMessage::Error { error: describe(&Failure::Unreachable, endpoint), fatal: false }) {
+                    return;
+                }
                 if let Some(msg) = batch.take() {
                     if !send(msg) {
                         return;

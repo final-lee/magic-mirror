@@ -100,3 +100,30 @@ fn unauthorized_is_fatal_and_server_errors_are_not() {
     assert!(!is_fatal(&watch_failure(&watcher::Error::WatchFailed(kube::Error::Api(status(500))), &k)));
     assert!(!is_fatal(&watch_failure(&watcher::Error::NoResourceVersion, &k)));
 }
+
+#[test]
+fn stall_fires_once_after_the_limit_and_progress_resets_it() {
+    let t0 = Instant::now();
+    let mut s = Stall::default();
+    assert!(!s.expired(t0 + REQUEST_TIMEOUT)); // 켜기 전에는 울리지 않는다
+    s.arm(t0);
+    assert!(!s.expired(t0 + REQUEST_TIMEOUT - std::time::Duration::from_secs(1)));
+    s.on_event(&Event::<Row>::InitApply(row("a", "1")), t0 + std::time::Duration::from_secs(20));
+    assert!(!s.expired(t0 + REQUEST_TIMEOUT)); // 진행이 있어 다시 쟀다
+    assert!(s.expired(t0 + std::time::Duration::from_secs(50)));
+    assert!(!s.expired(t0 + std::time::Duration::from_secs(500))); // 한 번만
+    s.on_event(&Event::<Row>::Init, t0 + std::time::Duration::from_secs(600));
+    assert!(s.expired(t0 + std::time::Duration::from_secs(630)));
+}
+
+#[test]
+fn stall_stops_at_init_done_and_ignores_plain_changes() {
+    let t0 = Instant::now();
+    let mut s = Stall::default();
+    s.arm(t0);
+    s.on_event(&Event::<Row>::InitDone, t0);
+    assert!(!s.expired(t0 + std::time::Duration::from_secs(3600)));
+    s.arm(t0);
+    s.on_event(&Event::Apply(row("a", "1")), t0 + std::time::Duration::from_secs(29));
+    assert!(s.expired(t0 + REQUEST_TIMEOUT)); // Apply는 시계를 건드리지 않는다
+}
