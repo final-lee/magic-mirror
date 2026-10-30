@@ -29,6 +29,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            k8s::tls::install_crypto_provider();
             let dir = app.path().app_data_dir()?;
             app.manage(AppState {
                 ctx: aws::context::AwsContext::default(),
