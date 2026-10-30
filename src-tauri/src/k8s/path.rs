@@ -18,6 +18,14 @@ pub fn merge_path(shell: Option<&str>) -> String {
     parts.join(":")
 }
 
+const MARKER: &str = "__MM_PATH__";
+
+/// 로그인 셸의 stdout에서 마커 사이의 값만 꺼낸다. rc 파일이 앞뒤로 아무 글을 찍어도 PATH에 섞이지 않는다.
+pub fn parse_marked(stdout: &str) -> Option<&str> {
+    let rest = &stdout[stdout.find(MARKER)? + MARKER.len()..];
+    Some(&rest[..rest.find(MARKER)?])
+}
+
 static LOGIN_PATH: OnceCell<String> = OnceCell::const_new();
 
 /// 로그인 셸의 PATH를 한 번만 읽어 둔다. 실패하거나 3초를 넘기면 기본 경로만 쓴다.
@@ -25,9 +33,10 @@ pub async fn login_path() -> &'static str {
     LOGIN_PATH
         .get_or_init(|| async {
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-            let run = Command::new(shell).args(["-lc", "printf %s \"$PATH\""]).kill_on_drop(true).output();
+            let run = Command::new(shell).args(["-lc", "printf '__MM_PATH__%s__MM_PATH__' \"$PATH\""]).kill_on_drop(true).output();
             let out = tokio::time::timeout(SHELL_TIMEOUT, run).await.ok().and_then(Result::ok).filter(|o| o.status.success());
-            merge_path(out.as_ref().map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).as_deref())
+            let stdout = out.map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+            merge_path(stdout.as_deref().and_then(parse_marked))
         })
         .await
 }

@@ -137,3 +137,9 @@ fn other_is_redacted_and_capped() {
     assert!(!message.contains("secret"));
     assert_eq!(message.chars().count(), 300);
 }
+
+#[test]
+fn empty_api_message_gets_a_fixed_text() {
+    let e = kube::Error::Api(Status::failure("", "Reason").with_code(500).boxed());
+    assert_eq!(failure_of(&e, "list", "pods"), Failure::Other("클러스터가 오류를 돌려줬어요(HTTP 500)".into()));
+}
