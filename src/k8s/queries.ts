@@ -1,8 +1,8 @@
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import type { AppError } from "../api/types";
 import { k8sApi } from "./api";
-import { targetKey } from "./targets";
-import type { K8sContextInfo, K8sRules, K8sSession, K8sTarget } from "./types";
+import { kindKey, targetKey } from "./targets";
+import type { K8sContextInfo, K8sKind, K8sObjectView, K8sOverview, K8sRules, K8sSession, K8sTarget, ObjectRef } from "./types";
 import { watchRegistry } from "./watchRegistry";
 
 /** 쿼리 키. 대상별 데이터는 모두 ["k8s", targetKey(target), ...] 아래에 두어 한 번에 무효화하거나 지울 수 있다. */
@@ -11,6 +11,10 @@ export const k8sKeys = {
   context: (t: K8sTarget, kubeconfig: string | null, saved: string | null) => ["k8s", targetKey(t), "context", kubeconfig, saved] as const,
   session: (t: K8sTarget, context: string | null) => ["k8s", targetKey(t), "session", context] as const,
   rules: (t: K8sTarget, context: string | null, namespace: string | null) => ["k8s", targetKey(t), "rules", context, namespace] as const,
+  kinds: (t: K8sTarget, context: string | null) => ["k8s", targetKey(t), "kinds", context] as const,
+  object: (t: K8sTarget, context: string | null, ref: ObjectRef, resourceVersion: string | null) =>
+    ["k8s", targetKey(t), "object", context, kindKey(ref.kind), ref.namespace, ref.name, resourceVersion] as const,
+  overview: (t: K8sTarget, context: string | null) => ["k8s", targetKey(t), "overview", context] as const,
 };
 
 /** kubeconfig와 DescribeCluster를 읽는다. 인증 명령은 실행하지 않는다. */
@@ -43,6 +47,41 @@ export function useK8sRules(target: K8sTarget, context: string | null, namespace
     queryFn: () => k8sApi.rules(target, namespace!, ssoProfile),
     enabled: enabled && namespace !== null,
     staleTime: 5 * 60_000,
+    retry: false,
+  });
+}
+
+/** 클러스터가 내주는 종류. 연결이 바뀌면 refreshK8s가 지운다. */
+export function useK8sKinds(target: K8sTarget, context: string | null, ssoProfile: string, enabled: boolean) {
+  return useQuery<K8sKind[], AppError>({
+    queryKey: k8sKeys.kinds(target, context),
+    queryFn: () => k8sApi.kinds(target, ssoProfile),
+    enabled: enabled && context !== null,
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+/**
+ * 객체 상세. 목록의 resourceVersion을 키에 넣어, 목록이 바뀌면 상세도 다시 읽는다.
+ * 목록 밖의 객체(소유자로 옮겨 간 것)는 resourceVersion이 null이라 30초 동안만 그대로 쓴다.
+ */
+export function useK8sObject(target: K8sTarget, context: string | null, ref: ObjectRef | null, resourceVersion: string | null, ssoProfile: string, enabled: boolean) {
+  return useQuery<K8sObjectView, AppError>({
+    queryKey: ref ? k8sKeys.object(target, context, ref, resourceVersion) : ["k8s", targetKey(target), "object", "none"],
+    queryFn: () => k8sApi.get(target, ref!.kind, ref!.namespace, ref!.name, ssoProfile),
+    enabled: enabled && ref !== null && context !== null,
+    staleTime: resourceVersion === null ? 30_000 : Infinity,
+    retry: false,
+  });
+}
+
+export function useK8sOverview(target: K8sTarget, context: string | null, _ssoProfile: string, enabled: boolean) {
+  return useQuery<K8sOverview, AppError>({
+    queryKey: k8sKeys.overview(target, context),
+    queryFn: () => k8sApi.overview(target),
+    enabled: enabled && context !== null,
+    staleTime: 60_000,
     retry: false,
   });
 }

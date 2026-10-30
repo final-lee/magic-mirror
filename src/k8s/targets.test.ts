@@ -1,4 +1,4 @@
-import { chooseContext, k8sTabId, ssoProfileOf, targetKey } from "./targets";
+import { chooseContext, kindKey, k8sTabId, ssoProfileOf, targetKey } from "./targets";
 
 const T = { profile: "app", region: "ap-northeast-2", cluster: "prod" };
 const cand = { name: "c", cluster: "x", user: "u", namespace: null, execProfile: "cand-p" };
@@ -26,4 +26,9 @@ test("chooseContext", () => {
   expect(chooseContext(both, null)).toEqual([null, null]);
   expect(chooseContext([first], null)).toEqual([first, null]);
   expect(chooseContext([first], "gone")).toEqual([first, "gone"]);
+});
+
+test("kindKey names group, version and plural", () => {
+  expect(kindKey({ group: "", version: "v1", kind: "Pod", plural: "pods", namespaced: true })).toBe("/v1/pods");
+  expect(kindKey({ group: "apps", version: "v1", kind: "Deployment", plural: "deployments", namespaced: true })).toBe("apps/v1/deployments");
 });

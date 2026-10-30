@@ -52,7 +52,7 @@ const rules = (over: Partial<K8sRules> = {}): K8sRules => ({
   namespace: "default", incomplete: false, nonResourceRules: [],
   resourceRules: [{ verbs: ["get", "list"], apiGroups: ["", "apps"], resources: ["pods"], resourceNames: [] }, { verbs: ["*"], apiGroups: ["*"], resources: ["*"], resourceNames: ["x"] }], ...over,
 });
-const ns = (name: string): K8sRow => ({ uid: name, name, namespace: null, resourceVersion: "1", createdAt: null, labels: {}, values: {} });
+const ns = (name: string): K8sRow => ({ uid: name, name, namespace: null, resourceVersion: "1", createdAt: null, labels: {}, values: {}, problems: [] });
 
 let emit: (m: K8sWatchMessage) => void = () => {};
 let seeded: Settings;
