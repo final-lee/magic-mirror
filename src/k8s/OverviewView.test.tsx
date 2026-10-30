@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { onSsoExpired } from "../api/invoke";
 import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
 import { OverviewView } from "./OverviewView";
@@ -135,4 +136,48 @@ test("managed SSO retries a failed overview with the app profile", async () => {
   expect(m.overview).toHaveBeenCalledTimes(1);
   rendered.rerender(ui("app"));
   await vi.waitFor(() => expect(m.overview).toHaveBeenCalledTimes(2));
+});
+
+test.each([
+  ["cluster", "app"], ["nodegroups", "app"], ["fargate", "app"], ["addons", "app"], ["insights", "app"],
+  ["nodes", "exec"], ["metrics", "exec"], ["nodePools", "exec"], ["removedApis", "exec"],
+] as const)("an SSO-expired %s gap reports %s to the login manager", async (section, profile) => {
+  const seen: string[] = [];
+  const off = onSsoExpired((p) => seen.push(p));
+  m.overview.mockResolvedValue(overview({ gaps: [{ section, error: { kind: "ssoExpired" } }] }));
+  setup();
+  await screen.findByText(`SSO 세션이 만료됐어요 (${profile})`);
+  expect(seen).toEqual([profile]);
+  off();
+});
+
+test("SSO-expired gaps are reported once per profile and once per new response", async () => {
+  const seen: string[] = [];
+  const off = onSsoExpired((p) => seen.push(p));
+  const expired = (section: "cluster" | "addons" | "nodes") => ({ section, error: { kind: "ssoExpired" } as const });
+  m.overview.mockResolvedValueOnce(overview({ gaps: [expired("cluster"), expired("addons"), expired("nodes")] })).mockResolvedValueOnce(overview({ gaps: [expired("addons")] }));
+  setup();
+  await screen.findAllByText("SSO 세션이 만료됐어요 (app)");
+  expect(seen.sort()).toEqual(["app", "exec"]);
+  fireEvent.click(screen.getByRole("button", { name: REFRESH }));
+  await vi.waitFor(() => expect(m.overview).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => expect(seen.sort()).toEqual(["app", "app", "exec"]));
+  off();
+});
+
+test("other gaps are not reported as SSO expiry", async () => {
+  const seen: string[] = [];
+  const off = onSsoExpired((p) => seen.push(p));
+  m.overview.mockResolvedValue(overview({ addons: null, gaps: [{ section: "addons", error: { kind: "accessDenied", action: "eks:ListAddons" } }] }));
+  setup();
+  await screen.findByText("권한 없음 (eks:ListAddons)");
+  expect(seen).toEqual([]);
+  off();
+});
+
+test("an unreadable metrics API is not shown as a missing metrics-server", async () => {
+  m.overview.mockResolvedValue(overview({ metrics: false, gaps: [{ section: "metrics", error: { kind: "network", message: "timeout" } }] }));
+  setup();
+  await screen.findByText(gapText(SECTION_LABELS.metrics));
+  expect(screen.queryByText(NO_METRICS)).toBeNull();
 });

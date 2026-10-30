@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useSettings } from "../api/queries";
+import { ErrorState } from "../components/ErrorState";
 import { ContextPicker } from "./ContextPicker";
 import { EventsView } from "./EventsView";
 import { K8sError } from "./K8sError";
@@ -66,6 +67,8 @@ export function K8sTab({ target, onOpenIam }: Props) {
 
   const reconnect = () => void refreshK8s(qc, target, ssoProfile);
   const recheck = () => void ctx.refetch();
+  // 종류 발견은 로그인 관리자가 무효화하지 않는 쿼리라서, 다시 시도와 로그인 뒤 이 쿼리만 다시 읽는다(exec 프로필로)
+  const refetchKinds = () => void kinds.refetch();
 
   if (!settingsReady || ctx.isPending) return <div className="empty">{STATE_CONNECTING}</div>;
   if (ctx.isError) {
@@ -106,7 +109,18 @@ export function K8sTab({ target, onOpenIam }: Props) {
           ) : view === "overview" ? (
             <OverviewView target={target} context={chosen} ssoProfile={ssoProfile} live={live} onOpenNode={openNode} />
           ) : view === "workloads" ? (
-            <WorkloadsView target={target} context={chosen} sessionEpoch={session.dataUpdatedAt} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} kinds={kinds.data ?? []} focus={focus} onOpenIam={onOpenIam} />
+            <WorkloadsView
+              target={target}
+              context={chosen}
+              sessionEpoch={session.dataUpdatedAt}
+              ssoProfile={ssoProfile}
+              live={live}
+              namespace={nsOrAll}
+              kinds={kinds.data ?? []}
+              focus={focus}
+              onOpenIam={onOpenIam}
+              banner={kinds.isError && <ErrorState error={kinds.error} profile={ssoProfile} compact onRetry={refetchKinds} onLoggedIn={refetchKinds} />}
+            />
           ) : view === "events" ? (
             <EventsView target={target} context={chosen} sessionEpoch={session.dataUpdatedAt} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} />
           ) : rules.isError ? (

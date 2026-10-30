@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { reportSsoExpired } from "../api/invoke";
 import { ErrorState } from "../components/ErrorState";
 import { formatBytes, formatCpu, percent } from "./format";
 import { useK8sOverview } from "./queries";
@@ -37,6 +38,18 @@ function nodeStatus(n: K8sNodeView): string {
 export function OverviewView({ target, context, ssoProfile, live, onOpenNode }: Props) {
   const q = useK8sOverview(target, context, ssoProfile, live);
   const refetch = () => void q.refetch();
+  // 성공한 응답 안의 구역 오류는 거절된 명령이 아니라서 invoke가 SSO 만료를 알리지 못한다. 응답마다 프로필당 한 번 직접 알린다.
+  const gapList = q.data?.gaps;
+  useEffect(() => {
+    if (!gapList) return;
+    const expired = new Set<string>();
+    for (const g of gapList) {
+      if (g.error.kind === "ssoExpired") expired.add(EKS_SECTIONS.has(g.section) ? target.profile : ssoProfile);
+    }
+    for (const profile of expired) reportSsoExpired(profile);
+    // 같은 응답을 다시 그릴 때가 아니라 새 응답이 올 때만 알린다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q.dataUpdatedAt]);
   if (q.isError) return <ErrorState error={q.error} profile={target.profile} onRetry={refetch} onLoggedIn={refetch} />;
   if (!q.data) return <div className="empty">{LOADING}</div>;
   const o: K8sOverview = q.data;
@@ -104,7 +117,7 @@ export function OverviewView({ target, context, ssoProfile, live, onOpenNode }: 
             </tbody>
           </table>
         )}
-        {o.nodes && !o.metrics && <p className="dim">{NO_METRICS}</p>}
+        {o.nodes && !o.metrics && !o.gaps.some((g) => g.section === "metrics") && <p className="dim">{NO_METRICS}</p>}
         {o.requestsPartial && <p className="dim">{REQUESTS_PARTIAL}</p>}
       </Sect>
       <Sect title={SEC_NODEGROUPS}>
