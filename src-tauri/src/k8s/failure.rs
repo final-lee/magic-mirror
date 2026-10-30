@@ -15,6 +15,14 @@ const EXEC_LINE_MAX: usize = 300;
 /// kubeconfig에서 명령 이름을 알 수 없을 때(spawn 실패 오류가 이름을 싣지 않는다) 쓰는 기본 exec 명령.
 const DEFAULT_EXEC_COMMAND: &str = "aws";
 
+/// exec 플러그인 출력(ExecCredential)을 해석하지 못했을 때의 고정 사유. 해석 오류의 글에는 출력 조각(클라이언트 키 등)이 실릴 수 있어 쓰지 않는다.
+pub const EXEC_OUTPUT_UNPARSEABLE: &str = "인증 명령의 출력을 해석하지 못했어요";
+
+/// API가 메시지 없이 돌려준 오류의 문구
+pub fn api_error(code: u16) -> String {
+    format!("클러스터가 오류를 돌려줬어요(HTTP {code})")
+}
+
 pub fn exec_missing(command: &str) -> String {
     format!("kubeconfig의 인증 명령({command})을 찾지 못했어요. aws CLI가 설치돼 있는지 확인해 주세요")
 }
@@ -101,6 +109,13 @@ fn capped(text: &str) -> String {
     redact_secrets(text).chars().take(EXEC_LINE_MAX).collect()
 }
 
+/// 해석 오류의 사유: 첫 줄만(YAML 오류는 이어서 원문 조각을 그린다), 토큰을 가리고 300자로 자른다.
+pub fn short_reason(err: &impl std::fmt::Display) -> String {
+    let text = err.to_string();
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    capped(line)
+}
+
 pub fn describe(f: &Failure, endpoint: Endpoint) -> AppError {
     match f {
         Failure::SsoExpired => AppError::SsoExpired,
@@ -158,6 +173,7 @@ fn io_kind_failure(kind: ErrorKind) -> Option<Failure> {
 fn auth_failure(auth: &AuthError) -> Option<Failure> {
     match auth {
         AuthError::AuthExecStart(io) if io.kind() == ErrorKind::NotFound => Some(Failure::ExecMissing { command: DEFAULT_EXEC_COMMAND.into() }),
+        AuthError::AuthExecParse(_) => Some(Failure::ExecFailed { stderr: EXEC_OUTPUT_UNPARSEABLE.into() }),
         AuthError::AuthExecRun { out, .. } => Some(exec_failure(&String::from_utf8_lossy(&out.stderr))),
         _ => None,
     }
@@ -169,7 +185,7 @@ pub fn failure_of(e: &kube::Error, verb: &str, resource: &str) -> Failure {
             return match status.code {
                 401 => Failure::Unauthorized,
                 403 => Failure::Forbidden { verb: verb.into(), resource: resource.into() },
-                _ if status.message.is_empty() => Failure::Other(format!("클러스터가 오류를 돌려줬어요(HTTP {})", status.code)),
+                _ if status.message.is_empty() => Failure::Other(api_error(status.code)),
                 _ => Failure::Other(status.message.clone()),
             };
         }
@@ -181,9 +197,11 @@ pub fn failure_of(e: &kube::Error, verb: &str, resource: &str) -> Failure {
         }
         _ => {}
     }
-    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(e);
-    while let Some(c) = cause {
-        // 토큰 갱신 중의 exec 실패는 `Error::Service(Box<AuthError>)`로 온다.
+    // 먼저 종류로 알아볼 수 있는 것(exec 플러그인 오류, io, 시간 초과)을 체인 전체에서 찾고, 그다음에 글로 가른다.
+    // 바깥 `Error::Service`의 글에는 플러그인 stderr가 섞여 있어, 글을 먼저 보면 exec 실패가 인증서나 연결 문제로 잘못 가려진다.
+    // 토큰 갱신 중의 exec 실패는 `Error::Service(Box<AuthError>)`로 온다.
+    let chain = || std::iter::successors(Some(e as &(dyn std::error::Error + 'static)), |c| c.source());
+    for c in chain() {
         if let Some(f) = c.downcast_ref::<AuthError>().and_then(auth_failure) {
             return f;
         }
@@ -195,10 +213,11 @@ pub fn failure_of(e: &kube::Error, verb: &str, resource: &str) -> Failure {
         if c.downcast_ref::<tokio::time::error::Elapsed>().is_some() {
             return Failure::Unreachable;
         }
+    }
+    for c in chain() {
         if let Some(f) = failure_of_chain(&c.to_string()) {
             return f;
         }
-        cause = c.source();
     }
     Failure::Other(e.to_string())
 }

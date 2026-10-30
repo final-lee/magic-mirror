@@ -130,3 +130,16 @@ fn with_path_adds_path_once() {
 fn update_command_text() {
     assert_eq!(update_command("prod", "ap-northeast-2", "prod-ro"), "aws eks update-kubeconfig --name prod --region ap-northeast-2 --profile prod-ro");
 }
+
+#[test]
+fn a_malformed_kubeconfig_never_shows_its_source_text() {
+    let dir = std::env::temp_dir().join(format!("mm-k8s-kc-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config");
+    std::fs::write(&path, "apiVersion: v1\nkind: Config\nusers:\n- name: u\n  user:\n    client-key-data: SECRETVALUE\n    client-certificate-data: [unclosed\n").unwrap();
+    let AppError::Other { message } = load(&[path]).err().unwrap() else { panic!() };
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(message.starts_with("kubeconfig를 읽지 못했어요("));
+    assert!(!message.contains("SECRETVALUE"), "{message}");
+    assert!(!message.contains('\n'), "{message}");
+}
