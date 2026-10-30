@@ -54,6 +54,8 @@ tokio-postgres-rustls = "0.14"
 postgres-protocol = "0.6"
 rand = "0.10"
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "aws_lc_rs"] }
+aws-sdk-costexplorer = "1"
+rust_decimal = "1"
 
 [dev-dependencies]
 tempfile = "3"

@@ -1,6 +1,7 @@
 mod adapters;
 mod aws;
 mod commands;
+mod cost;
 mod error;
 mod explorer;
 mod explorer_commands;
