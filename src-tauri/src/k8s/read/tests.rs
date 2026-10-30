@@ -25,3 +25,26 @@ async fn api_for_builds_namespaced_and_cluster_urls() {
     let nodes = kind("", "v1", "Node", "nodes", false);
     assert_eq!(api_for(client(), &nodes, Some("web")).resource_url(), "/api/v1/nodes");
 }
+
+use kube::core::Status;
+
+use crate::error::AppError;
+use crate::k8s::failure::{Endpoint, UNREACHABLE_PUBLIC};
+
+const PUBLIC: Endpoint = Endpoint { public: true, private: false };
+
+#[tokio::test(start_paused = true)]
+async fn bounded_turns_a_slow_request_into_unreachable() {
+    let slow = async {
+        tokio::time::sleep(std::time::Duration::from_secs(31)).await;
+        Ok::<(), kube::Error>(())
+    };
+    assert_eq!(bounded(slow, "list", "pods", PUBLIC).await, Err(AppError::Network { message: UNREACHABLE_PUBLIC.into() }));
+}
+
+#[tokio::test]
+async fn bounded_maps_forbidden_to_the_verb_and_resource() {
+    let denied = async { Err::<(), _>(kube::Error::Api(Box::new(Status::failure("no", "Forbidden").with_code(403)))) };
+    assert_eq!(bounded(denied, "get", "secrets", PUBLIC).await, Err(AppError::AccessDenied { action: "get secrets".into() }));
+    assert_eq!(bounded(async { Ok::<_, kube::Error>(7) }, "get", "x", PUBLIC).await, Ok(7));
+}
