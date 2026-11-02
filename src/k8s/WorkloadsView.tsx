@@ -7,7 +7,7 @@ import { ObjectDetail } from "./ObjectDetail";
 import { ObjectList } from "./ObjectList";
 import { kindKey } from "./targets";
 import { CAT_CUSTOM } from "./text";
-import type { K8sKind, K8sKindRef, K8sTarget, ObjectRef } from "./types";
+import type { K8sChange, K8sKind, K8sKindRef, K8sTarget, ObjectRef } from "./types";
 import { useK8sWatch } from "./useK8sWatch";
 
 export interface WorkloadsFocus {
@@ -27,6 +27,8 @@ interface Props {
   kinds: K8sKind[];
   focus: WorkloadsFocus | null;
   onOpenIam?: (arn: string) => void;
+  changeMode?: boolean;
+  onChange?: (change: K8sChange) => void;
   /** 목록 위에 붙이는 알림(종류 발견 실패 등). 종류 트리와 기본 종류 탐색은 그대로 쓴다. */
   banner?: ReactNode;
   /** 북마크 화면: 이 종류만 보이고 종류 트리는 숨긴다 */
@@ -42,7 +44,7 @@ interface Props {
 }
 
 /** 종류 트리 + 감시 목록 + 상세 스택 */
-export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live, namespace, kinds, focus, onOpenIam, banner, fixedKind, bookmarked, onToggleBookmark, lanes }: Props) {
+export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live, namespace, kinds, focus, onOpenIam, banner, fixedKind, bookmarked, onToggleBookmark, lanes, changeMode, onChange }: Props) {
   const [picked, setKind] = useState<K8sKindRef>(PODS);
   const kind = fixedKind ?? picked;
   const [stack, setStack] = useState<ObjectRef[]>([]);
@@ -102,6 +104,8 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
             onBack={stack.length > 1 ? () => setStack((s) => s.slice(0, -1)) : null}
             onClose={() => setStack([])}
             onOpenIam={onOpenIam}
+            changeMode={changeMode}
+            onChange={onChange}
             widthPct={detailPct}
           />
         )}

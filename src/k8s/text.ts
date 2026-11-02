@@ -230,3 +230,37 @@ export const SECTION_LABELS: Record<K8sOverviewSection, string> = {
   cluster: "클러스터", nodes: "노드", metrics: "사용량", nodegroups: "노드그룹", fargate: "Fargate 프로필",
   nodePools: "Karpenter NodePool", addons: "애드온", insights: "Upgrade Insights", removedApis: "제거되는 API",
 };
+
+export const CHANGE_MODE = "변경";
+export const CHANGE_LOG = "변경 기록";
+export const CHANGE_DONE = "변경을 적용했어요";
+export const CHANGE_PREVIEW = "변경 미리보기";
+export const CHANGE_UNDO_PREVIEW = "되돌리기 미리보기";
+export const CHANGE_LOADING = "미리보기를 불러오는 중이에요…";
+export const CHANGE_STALE = "미리보기 이후 바뀌었어요. 미리보기를 다시 받아 주세요.";
+export const CHANGE_RETRY = "미리보기 다시 받기";
+export const CHANGE_CANCEL = "취소";
+export const CHANGE_APPLY = "적용";
+export const CHANGE_APPLYING = "적용 중…";
+export const CHANGE_CALLS = "API 호출";
+export const CHANGE_BODY = "본문";
+export const CHANGE_DIFF = "필드 변경";
+export const CHANGE_IMPACT = "영향";
+export const CHANGE_WARNINGS = "경고";
+export const CHANGE_CONFIRM = "확인할 이름";
+export const CHANGE_SCALE = "크기 조절";
+export const CHANGE_REPLICAS = "복제본 수";
+export const CHANGE_RESTART = "롤아웃 재시작";
+export const CHANGE_ROLLOUT_UNDO = "롤아웃 되돌리기";
+export const CHANGE_REVISION = "리비전";
+export const CHANGE_DELETE = "삭제";
+export const CHANGE_RERUN = "재실행";
+export const CHANGE_RUN_NOW = "바로 실행";
+export const CHANGE_JOB_NAME = "새 Job 이름";
+export const CHANGE_SUSPEND = "일시정지";
+export const CHANGE_RESUME = "재개";
+export const CHANGE_UNDO = "되돌리기";
+export const CHANGE_SUCCESS = "성공";
+export const CHANGE_FAILED = "실패";
+export const CHANGE_NO_LOG = "변경 기록이 없어요";
+export const CHANGE_DENIED = (verb: string, resource: string) => `${resource}에 ${verb} 권한이 없어요`;
