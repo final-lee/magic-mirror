@@ -133,3 +133,17 @@ fn system_namespace_and_cluster_scoped_deletion_require_exact_name() {
     assert_eq!(p.preview.confirm_name.as_deref(), Some("sample"));
     assert_eq!(p.preview.calls[0].path, "/api/v1/nodes/sample");
 }
+
+#[test]
+fn cordon_and_uncordon_preview_inverse_and_resource_version() {
+    let mut node = change("", "Node", Operation::Cordon { unschedulable: true });
+    node.target.kind.namespaced = false;
+    node.target.kind.plural = "nodes".into();
+    node.target.namespace = None;
+    let obj = json!({"apiVersion":"v1","kind":"Node","metadata":{"name":"sample","resourceVersion":"7"},"spec":{}});
+    let plan = plan(&node, Some(&obj), None, "").unwrap();
+    assert_eq!(plan.preview.calls[0].body["metadata"]["resourceVersion"], "7");
+    assert_eq!(plan.preview.diff[0].before, false);
+    assert_eq!(plan.preview.diff[0].after, true);
+    assert_eq!(plan.inverse.unwrap().operation, Operation::Cordon { unschedulable: false });
+}

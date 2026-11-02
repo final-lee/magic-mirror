@@ -18,6 +18,7 @@ pub const DELETE_IMPACT: &str = "객체를 삭제합니다";
 pub const RECREATE_IMPACT: &str = "삭제한 객체를 다시 만듭니다";
 pub const SUSPEND_IMPACT: &str = "CronJob 예약 실행 상태를 바꿉니다";
 pub const RERUN_IMPACT: &str = "새 Job을 만듭니다";
+pub const CORDON_IMPACT: &str = "노드의 새 Pod 스케줄을 바꿉니다";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,6 +39,7 @@ pub enum Operation {
     Rerun { #[serde(rename = "jobName")] job_name: String },
     Suspend { suspend: bool },
     Recreate { object: Value },
+    Cordon { unschedulable: bool },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -193,6 +195,13 @@ pub fn plan(change: &Change, current: Option<&Value>, revision: Option<&Value>, 
             diff.push(FieldDiff { path: "spec.replicas".into(), before, after: json!(replicas) });
             impact.push(SCALE_IMPACT.into());
             ("PATCH", json!({"metadata":{"resourceVersion":version},"spec":{"replicas":replicas}}), false)
+        }
+        Operation::Cordon { unschedulable } if group.is_empty() && kind == "Node" => {
+            let before = obj.pointer("/spec/unschedulable").and_then(Value::as_bool).unwrap_or(false);
+            undo = Some(inverse(change, Operation::Cordon { unschedulable: before }));
+            diff.push(FieldDiff { path: "spec.unschedulable".into(), before: json!(before), after: json!(unschedulable) });
+            impact.push(CORDON_IMPACT.into());
+            ("PATCH", json!({"metadata":{"resourceVersion":version},"spec":{"unschedulable":unschedulable}}), false)
         }
         Operation::Restart if group == "apps" && matches!(kind, "Deployment" | "StatefulSet" | "DaemonSet") => {
             let before = obj.pointer("/spec/template/metadata/annotations/kubectl.kubernetes.io~1restartedAt").cloned().unwrap_or(Value::Null);

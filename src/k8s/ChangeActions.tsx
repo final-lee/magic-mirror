@@ -57,6 +57,8 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, onSt
   const revisionDenied = patch ?? denied("get") ?? denied("list", "apps", revisionResource, false);
   const validReplicas = /^\d+$/.test(replicas) && Number.isSafeInteger(Number(replicas)) && Number(replicas) <= 2147483647;
   const suspended = view.row.values.suspend === "true";
+  const node = kind.group === "" && kind.kind === "Node";
+  const cordoned = view.row.values.status?.includes("SchedulingDisabled") ?? false;
 
   return (
     <div className="k8s-actions">
@@ -98,6 +100,13 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, onSt
       )}
       {cron && <ActionButton label={suspended ? t.CHANGE_RESUME : t.CHANGE_SUSPEND} reason={patch}
         onClick={() => onStart({ ...objectRef, type: "suspend", suspend: !suspended })} />}
+      {node && (
+        <ActionButton
+          label={cordoned ? t.CHANGE_UNCORDON : t.CHANGE_CORDON}
+          reason={patch}
+          onClick={() => onStart({ ...objectRef, type: "cordon", unschedulable: !cordoned })}
+        />
+      )}
       <ActionButton label={t.CHANGE_DELETE} reason={denied("delete")} onClick={() => onStart({ ...objectRef, type: "delete" })} />
     </div>
   );
