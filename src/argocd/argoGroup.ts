@@ -144,9 +144,9 @@ export interface Group {
 }
 
 /**
- * rows를 dim으로 묶는다. 환경은 정해진 순서, 나머지는 빨강(오류) → 노랑(주의) → 정상, 같으면 이름 순.
- * 값이 없는 묶음("없음")은 늘 맨 뒤. ApplicationSet 기준일 때만 sets의 것도 만들고(앱이 없는 것 포함),
- * 조건을 걸었을 때(filtering)는 앱이 하나도 안 남은 ApplicationSet을 감춘다.
+ * rows를 dim으로 묶는다. 순서는 어느 기준이든 빨강(오류) → 노랑(주의) → 정상이 먼저다(사용자 결정 2026-11-02: 정상보다 문제 묶음이 밑에 오면 안 된다).
+ * 같은 색 안에서는 값이 없는 묶음("없음")이 맨 뒤, 그 밖은 환경이면 정해진 순서, 나머지는 이름 순.
+ * ApplicationSet 기준일 때만 sets의 것도 만들고(앱이 없는 것 포함), 조건을 걸었을 때(filtering)는 앱이 하나도 안 남은 ApplicationSet을 감춘다.
  */
 export function buildGroups(dim: Exclude<GroupDim, "none">, rows: ArgoAppRow[], sets: ArgoAppSetRow[], filtering: boolean): Group[] {
   const byKey = new Map<string, Group>();
@@ -163,11 +163,10 @@ export function buildGroups(dim: Exclude<GroupDim, "none">, rows: ArgoAppRow[], 
     g.apps.push(r);
     byKey.set(b.key, g);
   }
-  const real = [...byKey.values()].filter((g) => g.apps.length > 0 || !filtering);
-  if (dim === "env") real.sort((a, b) => ARGO_ENVS.indexOf(a.key as (typeof ARGO_ENVS)[number]) - ARGO_ENVS.indexOf(b.key as (typeof ARGO_ENVS)[number]));
-  else {
-    const rank = (g: Group) => LEVEL_RANK[groupLevel(g.set, tally(g.apps))];
-    real.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
-  }
-  return none.apps.length > 0 ? [...real, none] : real;
+  const groups = [...byKey.values()].filter((g) => g.apps.length > 0 || !filtering);
+  if (none.apps.length > 0) groups.push(none);
+  const rank = (g: Group) => LEVEL_RANK[groupLevel(g.set, tally(g.apps))];
+  const envRank = (g: Group) => ARGO_ENVS.indexOf(g.key as (typeof ARGO_ENVS)[number]);
+  const sameTier = (a: Group, b: Group) => (dim === "env" ? envRank(a) - envRank(b) : a.name.localeCompare(b.name));
+  return groups.sort((a, b) => rank(a) - rank(b) || Number(a.key === null) - Number(b.key === null) || sameTier(a, b));
 }
