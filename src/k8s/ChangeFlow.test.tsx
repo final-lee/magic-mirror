@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ChangeActions } from "./ChangeActions";
 import { ChangeDialog, useK8sChange } from "./ChangeFlow";
 import { k8sApi } from "./api";
-import { CRONJOBS, DEPLOYMENTS } from "./kinds";
+import { CRONJOBS, DEPLOYMENTS, NODES } from "./kinds";
 import * as t from "./text";
 import type { K8sChange, K8sObjectView, K8sRules } from "./types";
 
@@ -82,6 +82,23 @@ test("CronJob run name is editable and suspend action follows its status", () =>
   rerender(renderActions({ ...cronView, row: { ...cronView.row, values: { suspend: "true" } } }));
   fireEvent.click(screen.getByRole("button", { name: t.CHANGE_RESUME }));
   expect(start).toHaveBeenCalledWith({ ...cronRef, type: "suspend", suspend: false });
+});
+
+test("node scheduling actions reflect permissions and the current state", () => {
+  const start = vi.fn();
+  const nodeRef = { kind: NODES, namespace: null, name: "node" };
+  const nodeView = { ...view, kind: NODES, row: { ...view.row, name: "node", namespace: null, values: { status: "Ready" } } };
+  const renderActions = (current: K8sObjectView, permissions: K8sRules) => (
+    <ChangeActions target={target} ssoProfile="p" objectRef={nodeRef} view={current} rules={permissions} onStart={start} />
+  );
+  const { rerender } = render(renderActions(nodeView, rules));
+  expect(screen.getByRole("button", { name: t.CHANGE_CORDON })).toBeDisabled();
+  rerender(renderActions(nodeView, { ...rules, incomplete: true }));
+  fireEvent.click(screen.getByRole("button", { name: t.CHANGE_CORDON }));
+  expect(start).toHaveBeenCalledWith({ ...nodeRef, type: "cordon", unschedulable: true });
+  rerender(renderActions({ ...nodeView, row: { ...nodeView.row, values: { status: "Ready,SchedulingDisabled" } } }, { ...rules, incomplete: true }));
+  fireEvent.click(screen.getByRole("button", { name: t.CHANGE_UNCORDON }));
+  expect(start).toHaveBeenCalledWith({ ...nodeRef, type: "cordon", unschedulable: false });
 });
 
 /** 작업 버튼에서 고른 변경을 실제 미리보기 흐름으로 넘긴다. */
