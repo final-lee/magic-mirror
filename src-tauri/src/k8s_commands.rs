@@ -40,6 +40,8 @@ pub struct K8sState {
     next_watch: AtomicU64,
     /// lnav를 띄운 로그 흐름(키 입력, 크기 조절, 뒷정리). 번호는 watch 번호와 같다. 항목을 지우면 lnav도 끝나고 로그 파일도 지워진다.
     terminals: Mutex<HashMap<u64, Terminal>>,
+    /// 앱이 끝나는 중이면 새 lnav를 띄우지 않는다
+    closing: std::sync::atomic::AtomicBool,
 }
 
 struct Terminal {
@@ -147,12 +149,19 @@ impl K8sState {
         }
     }
 
-    /// 앱이 끝날 때: 떠 있는 lnav를 모두 그 자리에서 끝내고 로그 파일을 지운다(종료는 작업을 버리지 않고 프로세스를 끝내므로 여기서 직접 한다)
+    /// 앱이 끝날 때: 새 lnav를 막고, 떠 있는 lnav를 모두 그 자리에서 끝내고, 이 앱의 로그 폴더를 통째로 지운다
+    /// (종료는 비동기 작업을 버리지 않고 프로세스를 끝내므로 여기서 직접 한다. 막 만들어지던 파일도 폴더와 함께 지워지고, 그보다 늦은 것은 다음 실행의 `sweep_stale`이 지운다).
     pub fn shutdown(&self) {
+        self.closing.store(true, Ordering::SeqCst);
         let all: Vec<Terminal> = locked(&self.terminals).drain().map(|(_, t)| t).collect();
         for mut t in all {
             t.cleanup.finish_now();
         }
+        let _ = std::fs::remove_dir_all(lnav::process_dir(&lnav::logs_root()));
+    }
+
+    fn closing(&self) -> bool {
+        self.closing.load(Ordering::SeqCst)
     }
 }
 
@@ -366,10 +375,13 @@ pub async fn k8s_lnav(
     on_event: tauri::ipc::Channel<LnavMessage>,
 ) -> Result<u64, AppError> {
     let program = lnav::find_lnav().await.ok_or_else(|| AppError::other(LNAV_MISSING))?;
+    if k8s.closing() {
+        return Err(AppError::other(NOT_OPENED));
+    }
     let started = k8s.epoch(&target);
     let session = k8s.session(&target)?;
     let (client, endpoint) = (session.client.clone(), session.endpoint);
-    let (path, mut file) = lnav::log_file(&std::env::temp_dir().join("magic-mirror-logs")).map_err(|_| AppError::other(LOG_FILE_FAILED))?;
+    let (path, mut file) = lnav::log_file(&lnav::logs_root()).map_err(|_| AppError::other(LOG_FILE_FAILED))?;
     let spawned = lnav::spawn(&program, &[path.as_path()], cols, rows, login_path().await);
     let Spawned { child, reader, writer, master } = match spawned {
         Ok(s) => s,
@@ -380,6 +392,11 @@ pub async fn k8s_lnav(
     };
     // 항목을 지우거나(작업 끝) 등록하지 못해 버려지면(그사이 대상이 닫힘) lnav를 끝내고 파일을 지운다
     let terminal = Terminal { input: lnav::input_worker(writer), master, cleanup: Cleanup::new(child, path) };
+    if k8s.closing() {
+        // 버리면 그 자리에서 파일을 지우고 lnav를 죽인다
+        drop(terminal);
+        return Err(AppError::other(NOT_OPENED));
+    }
     k8s.register_watch(&target, started, |id| {
         k8s.put_terminal(id, terminal);
         // 첫 실행 전에 중단돼도 항목이 남지 않도록 지킴이를 먼저 만들어 작업에 넘긴다

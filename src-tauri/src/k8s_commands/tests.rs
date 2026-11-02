@@ -185,18 +185,17 @@ fn shutdown_ends_every_lnav_and_removes_its_log_file_before_returning() {
     // 끝난 흐름의 입력·크기 조절은 조용히 버린다
     k8s.terminal_input(1, b"q");
     k8s.terminal_resize(2, 100, 30);
+    // 끝나는 중에는 새 lnav를 띄우지 않는다
+    assert!(k8s.closing());
 }
 
 #[test]
-fn forgetting_a_terminal_ends_its_lnav_and_removes_the_file() {
+fn forgetting_a_terminal_removes_its_log_file_at_once_and_ends_lnav() {
     let dir = tempfile::tempdir().unwrap();
     let k8s = K8sState::default();
     let (t, path) = running_terminal(dir.path());
     k8s.put_terminal(7, t);
     k8s.forget_terminal(7);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while path.exists() && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    // 파일은 그 자리에서 지워진다(거두기만 따로 스레드에서)
     assert!(!path.exists());
 }
