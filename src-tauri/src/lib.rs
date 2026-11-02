@@ -1,6 +1,8 @@
 mod adapters;
 mod aws;
 mod commands;
+mod cost;
+mod cost_commands;
 mod error;
 mod explorer;
 mod explorer_commands;
@@ -42,6 +44,7 @@ pub fn run() {
             app.manage(iam_commands::IamState::new(dir.join("iam-changes.jsonl")));
             app.manage(k8s_commands::K8sState::default());
             app.manage(pg_commands::PgState::new(dir.join("db-changes.jsonl")));
+            app.manage(cost_commands::CostState::new(dir.join("cost-cache.json")));
             pg_commands::spawn_sweeper(app.handle().clone());
             std::thread::spawn(explorer::external::sweep_stale);
             mouse_nav::install(app.handle().clone());
@@ -90,6 +93,10 @@ pub fn run() {
             iam_commands::iam_preview_batch,
             iam_commands::iam_apply_batch,
             iam_commands::iam_undo_batch,
+            cost_commands::cost_overview,
+            cost_commands::cost_breakdown,
+            cost_commands::cost_tag_keys,
+            cost_commands::cost_usage,
             pg_commands::pg_target,
             pg_commands::pg_open,
             pg_commands::pg_database,
