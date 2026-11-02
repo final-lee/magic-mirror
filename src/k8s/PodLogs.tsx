@@ -1,17 +1,16 @@
-import { useQuery } from "@tanstack/react-query";
-import { FitAddon } from "@xterm/addon-fit";
-import { Terminal } from "@xterm/xterm";
-import "@xterm/xterm/css/xterm.css";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { reportSsoExpired } from "../api/invoke";
 import { desktop } from "../api/desktop";
 import { ErrorState } from "../components/ErrorState";
 import { k8sApi } from "./api";
+import { JsonLogLine } from "./JsonLogLine";
+import { lineTone, type LogTone } from "./jsonLog";
 import { EMPTY_BUFFER, KEEP_LINES, appendLines, type LogBuffer } from "./logBuffer";
+import { highlight, matchRanges, searchPattern } from "./logSearch";
 import {
-  COPIED, COPY, LNAV_EXITED, LNAV_MISSING, LNAV_OPENING, LOG_CONTAINER, LOG_EMPTY, LOG_ENDED, LOG_FOLLOW, LOG_OPENING, LOG_PAUSE, LOG_PREVIOUS,
-  LOG_RESTART, LOG_RESUME, LOG_SEARCH, LOG_TAIL, LOG_TO_BOTTOM, LOG_VIEW_LABEL, LOG_VIEW_LNAV, LOG_VIEW_TEXT, logMatches, logPending, logTailOption,
-  logTrimmed,
+  COPIED, COPY, LOG_CONTAINER, LOG_EMPTY, LOG_ENDED, LOG_FOLLOW, LOG_LEVEL_NAMES, LOG_LEVEL_NONE, LOG_LEVEL_OTHER_TITLE, LOG_LEVELS, LOG_OPENING, LOG_PAUSE,
+  LOG_PREVIOUS, LOG_RESTART, LOG_RESUME, LOG_SEARCH, LOG_TAIL, LOG_TO_BOTTOM, LOG_VIEW_LABEL, LOG_VIEW_PRETTY, LOG_VIEW_RAW, logMatches, logPending,
+  logTailOption, logTrimmed,
 } from "./text";
 import { targetKey } from "./targets";
 import type { K8sContainer, K8sLogOptions, K8sTarget } from "./types";
@@ -70,43 +69,24 @@ export function usePodLogs(target: K8sTarget, ssoProfile: string, live: boolean,
   return { buf, status, error };
 }
 
-/** 대소문자를 가리지 않는 찾기. 원래 글의 위치로 맞추므로(소문자로 바꾸면 길이가 달라지는 글자가 있다) 정규식으로 찾는다. */
-export function searchPattern(query: string): RegExp | null {
-  return query ? new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "giu") : null;
-}
-
-/** 줄 안의 일치를 원래 글의 [시작, 끝]으로 */
-export function matchRanges(line: string, re: RegExp): [number, number][] {
-  const out: [number, number][] = [];
-  re.lastIndex = 0;
-  for (let m = re.exec(line); m; m = re.exec(line)) {
-    out.push([m.index, m.index + m[0].length]);
-    if (m[0].length === 0) re.lastIndex++;
-  }
-  return out;
-}
-
-/** 묶음 하나. 다 찬 묶음은 배열이 바뀌지 않아 다시 그리지 않는다. */
-const Chunk = memo(function Chunk({ lines, query }: { lines: string[]; query: string }) {
+/**
+ * 묶음 하나. 다 찬 묶음은 배열이 바뀌지 않아 다시 그리지 않는다.
+ * 정리 보기면 `{`로 시작하는 줄을 JSON 로그로 그리고(`JsonLogLine`), 나머지 줄은 원문 그대로 둔다.
+ */
+const Chunk = memo(function Chunk({ lines, query, pretty }: { lines: string[]; query: string; pretty: boolean }) {
   const re = searchPattern(query);
-  if (!re) return <>{lines.join("\n") + "\n"}</>;
+  if (!re && !pretty) return <>{lines.join("\n") + "\n"}</>;
   const out: ReactNode[] = [];
   let plain = "";
   lines.forEach((line, i) => {
-    const ranges = matchRanges(line, re);
-    if (ranges.length === 0) {
+    const json = pretty && line.trimStart().startsWith("{");
+    if (!json && (!re || matchRanges(line, re).length === 0)) {
       plain += line + "\n";
       return;
     }
     if (plain) out.push(plain);
     plain = "";
-    let at = 0;
-    for (const [from, to] of ranges) {
-      if (from > at) out.push(line.slice(at, from));
-      out.push(<mark key={`${i}:${from}`}>{line.slice(from, to)}</mark>);
-      at = to;
-    }
-    out.push(line.slice(at) + "\n");
+    out.push(json ? <JsonLogLine key={i} line={line} query={query} /> : <span key={i}>{highlight(line, re)}{"\n"}</span>);
   });
   if (plain) out.push(plain);
   return <>{out}</>;
@@ -125,6 +105,36 @@ function matchingLines(lines: string[], query: string, re: RegExp): number {
   return n;
 }
 
+type Level = LogTone | "other";
+const LEVELS: Level[] = ["error", "warn", "info", "debug", "other"];
+
+/** 묶음마다 줄의 레벨을 기억한다. 다 찬 묶음은 한 번만 읽는다. */
+const leveled = new WeakMap<string[], Level[]>();
+function levelsOf(lines: string[]): Level[] {
+  let got = leveled.get(lines);
+  if (!got) {
+    got = lines.map((l) => lineTone(l) ?? "other");
+    leveled.set(lines, got);
+  }
+  return got;
+}
+
+/**
+ * 고른 레벨의 줄만. 고른 것이 없으면 모든 줄(같은 배열이라 묶음별 기억이 그대로 쓰인다).
+ * 걸러 낸 배열도 묶음마다 기억해, 다 찬 묶음은 다시 그리지도 다시 세지도 않는다.
+ */
+const picked = new WeakMap<string[], { key: string; lines: string[] }>();
+function pickLevels(lines: string[], levels: ReadonlySet<Level>): string[] {
+  if (levels.size === 0) return lines;
+  const key = LEVELS.filter((l) => levels.has(l)).join();
+  const hit = picked.get(lines);
+  if (hit?.key === key) return hit.lines;
+  const ls = levelsOf(lines);
+  const out = lines.filter((_, i) => levels.has(ls[i]));
+  picked.set(lines, { key, lines: out });
+  return out;
+}
+
 interface Props {
   target: K8sTarget;
   ssoProfile: string;
@@ -135,10 +145,7 @@ interface Props {
   containers: K8sContainer[];
 }
 
-/**
- * 4열 상세의 로그 탭. 위 막대에서 컨테이너·이전 컨테이너·따라가기·처음 줄 수를 고르고, 보기는 기본 lnav(설치돼 있을 때), 원하면 텍스트.
- * lnav가 없으면 텍스트로 보여 주고 설치 방법을 알려 준다.
- */
+/** 4열 상세의 로그 탭. 위 막대에서 컨테이너·이전 컨테이너·따라가기·처음 줄 수를 고르고, 보기는 JSON 정리(기본) 또는 원문. */
 export function PodLogs({ target, ssoProfile, live, namespace, pod, containers }: Props) {
   const names = containers.map((c) => c.name);
   const firstApp = containers.find((c) => !c.init)?.name ?? names[0] ?? null;
@@ -146,20 +153,18 @@ export function PodLogs({ target, ssoProfile, live, namespace, pod, containers }
   const [previous, setPrevious] = useState(false);
   const [follow, setFollow] = useState(true);
   const [tailLines, setTail] = useState(DEFAULT_TAIL);
+  const [pretty, setPretty] = useState(true);
   const options = useMemo<K8sLogOptions>(() => ({ container, follow, tailLines, previous }), [container, follow, tailLines, previous]);
-  const lnav = useQuery({ queryKey: ["lnav-available"], queryFn: k8sApi.lnavAvailable, staleTime: Infinity, retry: false });
-  const [picked, setPicked] = useState<"lnav" | "text">("lnav");
-  const mode = lnav.data === false || lnav.isError ? "text" : picked;
 
   return (
     <div className="k8s-logs">
       <div className="k8s-log-bar">
         <div className="k8s-seg" role="group" aria-label={LOG_VIEW_LABEL}>
-          <button aria-pressed={mode === "lnav"} disabled={lnav.data !== true} onClick={() => setPicked("lnav")}>
-            {LOG_VIEW_LNAV}
+          <button aria-pressed={pretty} onClick={() => setPretty(true)}>
+            {LOG_VIEW_PRETTY}
           </button>
-          <button aria-pressed={mode === "text"} onClick={() => setPicked("text")}>
-            {LOG_VIEW_TEXT}
+          <button aria-pressed={!pretty} onClick={() => setPretty(false)}>
+            {LOG_VIEW_RAW}
           </button>
         </div>
         {names.length > 1 && (
@@ -190,14 +195,7 @@ export function PodLogs({ target, ssoProfile, live, namespace, pod, containers }
           ))}
         </select>
       </div>
-      {lnav.data === false && <p className="dim k8s-hint">{LNAV_MISSING}</p>}
-      {lnav.isPending ? (
-        <p className="dim k8s-hint">{LOG_OPENING}</p>
-      ) : mode === "lnav" ? (
-        <LnavLogs key={JSON.stringify(options)} target={target} ssoProfile={ssoProfile} live={live} namespace={namespace} pod={pod} options={options} />
-      ) : (
-        <PlainLogs target={target} ssoProfile={ssoProfile} live={live} namespace={namespace} pod={pod} options={options} />
-      )}
+      <LogView target={target} ssoProfile={ssoProfile} live={live} namespace={namespace} pod={pod} options={options} pretty={pretty} />
     </div>
   );
 }
@@ -209,30 +207,44 @@ interface ViewProps {
   namespace: string;
   pod: string;
   options: K8sLogOptions;
+  pretty: boolean;
 }
 
-/** 텍스트 보기: 찾기, 일시정지, 복사, 맨 아래 따라가기 */
-function PlainLogs({ target, ssoProfile, live, namespace, pod, options }: ViewProps) {
+/** 로그 보기: 레벨 거르기(여러 개), 찾기, 일시정지, 복사(보이는 줄의 원문), 맨 아래 따라가기 */
+function LogView({ target, ssoProfile, live, namespace, pod, options, pretty }: ViewProps) {
   const [nonce, setNonce] = useState(0);
   const { buf, status, error } = usePodLogs(target, ssoProfile, live, namespace, pod, options, nonce);
   const restart = () => setNonce((n) => n + 1);
 
   const [query, setQuery] = useState("");
+  const [levels, setLevels] = useState<ReadonlySet<Level>>(new Set());
   const [paused, setPaused] = useState<LogBuffer | null>(null);
   const shown = paused ?? buf;
   const [copied, setCopied] = useState(false);
+  const visible = useMemo(() => shown.chunks.map((c) => ({ id: c.id, lines: pickLevels(c.lines, levels) })), [shown, levels]);
+  const counts = useMemo(() => {
+    const n: Record<Level, number> = { error: 0, warn: 0, info: 0, debug: 0, other: 0 };
+    for (const c of shown.chunks) for (const l of levelsOf(c.lines)) n[l]++;
+    return n;
+  }, [shown]);
   const matches = useMemo(() => {
     const re = searchPattern(query);
-    return re ? shown.chunks.reduce((n, c) => n + matchingLines(c.lines, query, re), 0) : 0;
-  }, [shown, query]);
+    return re ? visible.reduce((n, c) => n + matchingLines(c.lines, query, re), 0) : 0;
+  }, [visible, query]);
+  const toggleLevel = (l: Level) =>
+    setLevels((s) => {
+      const next = new Set(s);
+      if (!next.delete(l)) next.add(l);
+      return next;
+    });
 
   // 맨 아래에 붙어 있으면 새 줄을 따라 내려간다. 위로 올려 읽는 중이면 그대로 둔다.
-  const box = useRef<HTMLPreElement>(null);
+  const box = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
   useLayoutEffect(() => {
     const el = box.current;
     if (el && atBottom) el.scrollTop = el.scrollHeight;
-  }, [shown, atBottom]);
+  }, [visible, atBottom]);
   const onScroll = () => {
     const el = box.current;
     if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 24);
@@ -241,31 +253,40 @@ function PlainLogs({ target, ssoProfile, live, namespace, pod, options }: ViewPr
   useEffect(() => setPaused(null), [options, nonce]);
 
   const copy = async () => {
-    await desktop.copy(shown.chunks.map((c) => c.lines.join("\n")).join("\n"));
+    await desktop.copy(visible.map((c) => c.lines.join("\n")).join("\n"));
     setCopied(true);
   };
+  const visibleCount = visible.reduce((n, c) => n + c.lines.length, 0);
 
   return (
     <>
       <div className="k8s-log-bar">
+        <div className="k8s-levels" role="group" aria-label={LOG_LEVELS}>
+          {LEVELS.map((l) => (
+            <button key={l} className={`k8s-lvl k8s-lvl-${l}`} aria-pressed={levels.has(l)} title={l === "other" ? LOG_LEVEL_OTHER_TITLE : undefined} onClick={() => toggleLevel(l)}>
+              {LOG_LEVEL_NAMES[l]} <span className="k8s-lvl-n">{counts[l].toLocaleString("ko-KR")}</span>
+            </button>
+          ))}
+        </div>
         <input type="search" className="k8s-filter" aria-label={LOG_SEARCH} placeholder={LOG_SEARCH} value={query} onChange={(e) => setQuery(e.target.value)} />
         {query && <span className="dim k8s-log-count">{logMatches(matches)}</span>}
         <button className="btn" aria-pressed={paused !== null} onClick={() => setPaused((p) => (p ? null : buf))}>
           {paused ? LOG_RESUME : LOG_PAUSE}
         </button>
         {paused && buf.received > paused.received && <span className="dim k8s-log-count">{logPending(buf.received - paused.received)}</span>}
-        <button className="btn" disabled={shown.size === 0} onClick={() => void copy()} onBlur={() => setCopied(false)}>
+        <button className="btn" disabled={visibleCount === 0} onClick={() => void copy()} onBlur={() => setCopied(false)}>
           {copied ? COPIED : COPY}
         </button>
       </div>
       {status === "error" && <ErrorState error={error} profile={ssoProfile} compact onRetry={restart} onLoggedIn={restart} />}
       {shown.trimmed && <p className="dim k8s-hint">{logTrimmed(KEEP_LINES)}</p>}
+      {shown.size > 0 && visibleCount === 0 && <p className="dim k8s-hint">{LOG_LEVEL_NONE}</p>}
       <div className="k8s-log-wrap">
-        <pre ref={box} className="k8s-log mono" onScroll={onScroll} aria-label={pod}>
-          {shown.chunks.map((c) => (
-            <Chunk key={c.id} lines={c.lines} query={query} />
+        <div ref={box} className="k8s-log mono" onScroll={onScroll} aria-label={pod}>
+          {visible.map((c) => (
+            <Chunk key={c.id} lines={c.lines} query={query} pretty={pretty} />
           ))}
-        </pre>
+        </div>
         {!atBottom && (
           <button
             className="btn k8s-log-bottom"
@@ -288,114 +309,6 @@ function PlainLogs({ target, ssoProfile, live, namespace, pod, options }: ViewPr
           </button>
         </p>
       )}
-    </>
-  );
-}
-
-/** base64 PTY 출력 → 바이트(터미널이 UTF-8 경계를 이어 붙인다) */
-function bytesOf(data: string): Uint8Array {
-  const bin = atob(data);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-/** 앱의 어두운 테마에 맞춘 터미널 색 */
-const TERM_THEME = {
-  background: "#1a1a1c", foreground: "#e6e6e8", cursor: "#e6e6e8", selectionBackground: "#0a84ff55",
-  black: "#1e1e20", red: "#ff453a", green: "#30d158", yellow: "#ffd60a", blue: "#0a84ff", magenta: "#bf5af2", cyan: "#64d2ff", white: "#e6e6e8",
-  brightBlack: "#6e6e73", brightRed: "#ff6961", brightGreen: "#4ae08a", brightYellow: "#ffe45c", brightBlue: "#409cff", brightMagenta: "#da8fff", brightCyan: "#8de3ff", brightWhite: "#ffffff",
-};
-
-/** lnav 보기: 터미널(xterm.js) 안에서 lnav가 로그 파일을 따라간다. 키 입력과 크기는 lnav로 간다. */
-function LnavLogs({ target, ssoProfile, live, namespace, pod, options }: ViewProps) {
-  const host = useRef<HTMLDivElement>(null);
-  const [nonce, setNonce] = useState(0);
-  const [state, setState] = useState<"opening" | "running" | "exited" | "error">("opening");
-  const [error, setError] = useState<unknown>(null);
-  const [logError, setLogError] = useState<unknown>(null);
-  const [logEnded, setLogEnded] = useState(false);
-  const restart = () => setNonce((n) => n + 1);
-
-  useEffect(() => {
-    setState("opening");
-    setError(null);
-    setLogError(null);
-    setLogEnded(false);
-    const el = host.current;
-    if (!live || !el) return;
-    const term = new Terminal({ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, theme: TERM_THEME, scrollback: 0, cursorBlink: false });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(el);
-    fit.fit();
-    let gone = false;
-    let id: number | null = null;
-    const startedAt = Date.now();
-    k8sApi
-      .lnav(target, namespace, pod, options, term.cols, term.rows, ssoProfile, (m) => {
-        if (gone) return;
-        if (m.type === "output") {
-          term.write(bytesOf(m.data));
-          setState((s) => (s === "opening" ? "running" : s));
-        } else if (m.type === "exit") {
-          setState("exited");
-        } else if (m.type === "logEnd") {
-          setLogEnded(true);
-        } else {
-          if (m.error.kind === "ssoExpired") reportSsoExpired(ssoProfile, startedAt);
-          setLogError(m.error);
-        }
-      })
-      .then((n) => {
-        if (gone) {
-          void k8sApi.unwatch(n);
-          return;
-        }
-        id = n;
-        term.focus();
-      })
-      .catch((e: unknown) => {
-        if (gone) return;
-        setError(e);
-        setState("error");
-      });
-    const input = term.onData((d) => {
-      if (id !== null) void k8sApi.lnavInput(id, d);
-    });
-    const resize = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => {
-      fit.fit();
-      if (id !== null) void k8sApi.lnavResize(id, term.cols, term.rows);
-    });
-    resize?.observe(el);
-    return () => {
-      gone = true;
-      resize?.disconnect();
-      input.dispose();
-      term.dispose();
-      if (id !== null) void k8sApi.unwatch(id);
-    };
-    // 옵션은 이 컴포넌트의 key가 담는다(바뀌면 새로 띄운다)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nonce, live, ssoProfile]);
-
-  return (
-    <>
-      {state === "error" && <ErrorState error={error} profile={ssoProfile} compact onRetry={restart} onLoggedIn={restart} />}
-      {logError !== null && <ErrorState error={logError} profile={ssoProfile} compact onRetry={restart} onLoggedIn={restart} />}
-      <div className="k8s-log-wrap">
-        <div ref={host} className="k8s-term" aria-label={pod} />
-        {state === "exited" && (
-          <div className="k8s-term-over">
-            <p>{LNAV_EXITED}</p>
-            <button className="btn" onClick={restart}>
-              {LOG_RESTART}
-            </button>
-          </div>
-        )}
-      </div>
-      {state === "opening" && <p className="dim k8s-hint">{LNAV_OPENING}</p>}
-      {logEnded && <p className="dim k8s-hint">{LOG_ENDED}</p>}
     </>
   );
 }
