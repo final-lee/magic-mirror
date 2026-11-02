@@ -93,6 +93,7 @@ export type K8sChange = K8sChangeObject & (
   | { type: "rerun"; jobName: string }
   | { type: "suspend"; suspend: boolean }
   | { type: "cordon"; unschedulable: boolean }
+  | { type: "drain" }
   | { type: "recreate"; object: Record<string, unknown> }
 );
 
@@ -113,6 +114,30 @@ export interface K8sFieldDiff {
   after: unknown;
 }
 
+/** drain 미리보기의 옮길 Pod 하나 */
+export interface K8sDrainPod {
+  namespace: string;
+  name: string;
+  uid: string;
+  emptyDir: boolean;
+  unmanaged: boolean;
+  /** 허용량이 0인 PodDisruptionBudget의 이름 */
+  blockedBy: string | null;
+}
+
+export interface K8sSkippedPod {
+  namespace: string;
+  name: string;
+  reason: "daemonSet" | "mirror" | "terminating";
+}
+
+export interface K8sDrainPlan {
+  nodeCordoned: boolean;
+  evict: K8sDrainPod[];
+  skipped: K8sSkippedPod[];
+  budgetsUnknown: boolean;
+}
+
 export interface K8sPreview {
   calls: K8sApiCall[];
   diff: K8sFieldDiff[];
@@ -120,7 +145,29 @@ export interface K8sPreview {
   warnings: string[];
   confirmName: string | null;
   reversible: boolean;
+  /** drain일 때만 온다 */
+  drain?: K8sDrainPlan | null;
 }
+
+export type K8sDrainPodState = "pending" | "evicting" | "evicted" | "blocked" | "failed";
+
+export interface K8sDrainCounts {
+  total: number;
+  pending: number;
+  evicting: number;
+  evicted: number;
+  blocked: number;
+  failed: number;
+}
+
+export type K8sDrainOutcome = "completed" | "stopped" | "timedOut" | "failed";
+
+/** `k8s_drain` 채널 메시지. `finished`가 마지막이다. */
+export type K8sDrainMessage =
+  | { type: "started"; pods: K8sDrainPod[]; counts: K8sDrainCounts }
+  | { type: "cordoned" }
+  | { type: "pod"; namespace: string; name: string; state: K8sDrainPodState; error: string | null; counts: K8sDrainCounts }
+  | { type: "finished"; outcome: K8sDrainOutcome; counts: K8sDrainCounts; error: AppError | null };
 
 export interface K8sApplyResult {
   logId: string;

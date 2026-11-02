@@ -529,3 +529,175 @@ async fn workload_changes_dry_run_apply_undo_and_conflict() {
     let (_, result) = commit::apply_plan(client, PRIVATE, &undo, &plan, "", None).await.unwrap();
     result.unwrap();
 }
+
+/// 워커 노드를 drain한다: PodDisruptionBudget이 막는 Pod와 보통 Pod, 컨트롤러 없는 emptyDir Pod를 두고
+/// 미리보기 → cordon → Eviction → 막힘으로 멈춤 → 막힘을 풀고 다시 → uncordon 되돌리기까지 이어서 본다.
+/// 스크립트가 kind 클러스터에 워커 노드를 함께 만든다. 컨트롤 플레인만 있으면 이 시험은 멈춘다(그 노드를 drain하지 않는다).
+#[tokio::test]
+#[ignore]
+async fn drain_moves_pods_off_a_worker_around_a_budget_then_uncordons() {
+    use super::change::{Change, ChangeObject, Operation};
+    use super::drain::apply::{apply, Job};
+    use super::drain::run::{DrainMessage, Limits, Outcome, PodState};
+    use super::{commit, log, read};
+    use k8s_openapi::api::core::v1::{Node, Pod};
+    use kube::api::{DynamicObject, ListParams, PostParams};
+
+    let client = admin().await;
+    let nodes: kube::Api<Node> = kube::Api::all(client.clone());
+    let worker = nodes
+        .list(&ListParams::default())
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|node| !node.metadata.labels.as_ref().is_some_and(|labels| labels.contains_key("node-role.kubernetes.io/control-plane")))
+        .and_then(|node| node.metadata.name)
+        .expect("워커 노드가 필요해요. scripts/k8s-live-test.sh가 만든 클러스터로 돌려 주세요");
+
+    /// 시험이 중간에 멈춰도 뒤의 시험이 막히지 않게 노드를 되돌리고 네임스페이스를 지운다
+    struct Cleanup(String);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            for args in [vec!["uncordon", self.0.as_str()], vec!["delete", "namespace", "mm-drain", "--wait=false", "--ignore-not-found"]] {
+                let _ = Command::new("kubectl").arg("--kubeconfig").arg(kubeconfig_path()).args(args).output();
+            }
+        }
+    }
+    let _cleanup = Cleanup(worker.clone());
+
+    let create = |kind: KindRef, object: Value| {
+        let client = client.clone();
+        async move {
+            let api = read::api_for(client, &kind, Some("mm-drain"));
+            let object: DynamicObject = serde_json::from_value(object).unwrap();
+            api.create(&PostParams::default(), &object).await.unwrap();
+        }
+    };
+    kubectl(&["create", "namespace", "mm-drain"]);
+    let pin = json!({"nodeSelector": {"kubernetes.io/hostname": worker}});
+    let deployment = |name: &str| {
+        json!({"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":name,"namespace":"mm-drain"},"spec":{"replicas":1,"selector":{"matchLabels":{"app":name}},
+            "template":{"metadata":{"labels":{"app":name}},"spec":{"nodeSelector":pin["nodeSelector"],"containers":[{"name":"app","image":"registry.k8s.io/pause:3.10"}]}}}})
+    };
+    create(kind_ref("apps", "v1", "Deployment", "deployments"), deployment("free")).await;
+    create(kind_ref("apps", "v1", "Deployment", "deployments"), deployment("held")).await;
+    create(
+        kind_ref("policy", "v1", "PodDisruptionBudget", "poddisruptionbudgets"),
+        json!({"apiVersion":"policy/v1","kind":"PodDisruptionBudget","metadata":{"name":"held","namespace":"mm-drain"},"spec":{"minAvailable":1,"selector":{"matchLabels":{"app":"held"}}}}),
+    )
+    .await;
+    create(
+        kind_ref("", "v1", "Pod", "pods"),
+        json!({"apiVersion":"v1","kind":"Pod","metadata":{"name":"bare","namespace":"mm-drain"},"spec":{"nodeSelector":pin["nodeSelector"],
+            "volumes":[{"name":"scratch","emptyDir":{}}],"containers":[{"name":"app","image":"registry.k8s.io/pause:3.10"}]}}),
+    )
+    .await;
+    kubectl(&["-n", "mm-drain", "wait", "--for=condition=Ready", "pod", "--all", "--timeout=120s"]);
+    kubectl(&["-n", "mm-drain", "wait", "pdb/held", "--for=jsonpath={.status.currentHealthy}=1", "--timeout=60s"]);
+
+    let change = Change {
+        target: ChangeObject {
+            kind: KindRef { group: String::new(), version: "v1".into(), kind: "Node".into(), plural: "nodes".into(), namespaced: false },
+            namespace: None,
+            name: worker.clone(),
+        },
+        operation: Operation::Drain,
+    };
+    // 미리보기: 서버 dry-run을 거쳐, 옮길 Pod와 경고를 알린다
+    let seen = commit::dry_plan(client.clone(), PRIVATE, &change, "2026-01-01T00:00:00Z").await.unwrap();
+    let drain = seen.preview.drain.clone().unwrap();
+    assert!(!drain.budgets_unknown && !drain.node_cordoned);
+    assert_eq!(seen.preview.confirm_name.as_deref(), Some(worker.as_str()));
+    let mine: Vec<_> = drain.evict.iter().filter(|pod| pod.namespace == "mm-drain").collect();
+    assert_eq!(mine.iter().map(|pod| pod.name.starts_with("free-") || pod.name.starts_with("held-") || pod.name == "bare").collect::<Vec<_>>(), [true, true, true]);
+    let bare = mine.iter().find(|pod| pod.name == "bare").unwrap();
+    assert!(bare.empty_dir && bare.unmanaged, "{bare:?}");
+    let held = mine.iter().find(|pod| pod.name.starts_with("held-")).unwrap();
+    assert_eq!(held.blocked_by.as_deref(), Some("held"));
+    let free = mine.iter().find(|pod| pod.name.starts_with("free-")).unwrap();
+    assert!(free.blocked_by.is_none() && !free.unmanaged);
+    assert!(drain.skipped.iter().any(|pod| pod.reason == super::drain::SkipReason::DaemonSet), "kindnet 같은 DaemonSet Pod는 건너뛰어요: {:?}", drain.skipped);
+    assert!(seen.preview.warnings.iter().any(|w| w.starts_with(super::drain::EMPTY_DIR_WARNING)));
+    assert!(seen.preview.warnings.iter().any(|w| w.starts_with(super::drain::BLOCKED_WARNING)));
+    let current = commit::make_plan(client.clone(), PRIVATE, &change, "").await.unwrap();
+    commit::check_drain(Some(&seen), &current, Some(&worker)).unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let log_path = dir.path().join("k8s-changes.jsonl");
+    let target = super::target::K8sTarget { profile: "live".into(), region: "local".into(), cluster: "kind".into() };
+    let job = |plan| Job {
+        client: client.clone(),
+        endpoint: PRIVATE,
+        log_path: log_path.clone(),
+        target: target.clone(),
+        change: change.clone(),
+        plan,
+        at: "2026-01-01T00:00:00Z".into(),
+        // 막힌 Pod는 8초만 기다린다
+        limits: Limits { stall: Duration::from_secs(8), first_delay: Duration::from_secs(1), max_delay: Duration::from_secs(2) },
+    };
+    let run = |plan| {
+        let job = job(plan);
+        async move {
+            let (_keep, cancel) = tokio::sync::watch::channel(false);
+            let mut messages = Vec::new();
+            apply(job, cancel, |m| {
+                messages.push(m);
+                true
+            })
+            .await;
+            messages
+        }
+    };
+    let pods: kube::Api<Pod> = kube::Api::namespaced(client.clone(), "mm-drain");
+    let alive = |pods: Vec<Pod>, app: &str| {
+        pods.into_iter()
+            .filter(|pod| pod.metadata.labels.as_ref().and_then(|l| l.get("app")).is_some_and(|a| a == app) || pod.metadata.name.as_deref() == Some(app))
+            .filter(|pod| pod.metadata.deletion_timestamp.is_none())
+            .filter(|pod| pod.spec.as_ref().and_then(|s| s.node_name.as_deref()) == Some(worker.as_str()))
+            .count()
+    };
+
+    // 첫 번째: PDB가 막은 Pod 때문에 5분 대신 짧은 한도에서 멈춘다. 나머지는 옮겨진다.
+    let messages = run(drain.clone()).await;
+    let Some(DrainMessage::Finished { outcome, counts, .. }) = messages.last() else { panic!("{messages:?}") };
+    assert_eq!(*outcome, Outcome::TimedOut, "{messages:?}");
+    assert_eq!(counts.blocked, 1);
+    assert!(messages.iter().any(|m| matches!(m, DrainMessage::Cordoned)));
+    assert!(messages.iter().any(|m| matches!(m, DrainMessage::Pod { name, state: PodState::Blocked, .. } if name.starts_with("held-"))));
+    assert!(messages.iter().any(|m| matches!(m, DrainMessage::Pod { name, state: PodState::Evicted, .. } if name == "bare")));
+    let node = nodes.get(&worker).await.unwrap();
+    assert_eq!(node.spec.and_then(|s| s.unschedulable), Some(true));
+    let listed = pods.list(&ListParams::default()).await.unwrap().items;
+    assert_eq!(alive(listed.clone(), "free"), 0, "free는 옮겨졌어요");
+    assert_eq!(alive(listed.clone(), "bare"), 0, "컨트롤러 없는 Pod는 지워졌어요");
+    assert_eq!(alive(listed, "held"), 1, "막힌 Pod는 그대로예요");
+    let entries = log::read_all(&log_path);
+    assert_eq!(entries.len(), 2, "{entries:?}");
+    assert_eq!(entries[0].change.operation, Operation::Cordon { unschedulable: true });
+    assert!(entries[0].ok);
+    assert_eq!(entries[0].inverse.as_ref().map(|c| c.operation.clone()), Some(Operation::Cordon { unschedulable: false }));
+    assert_eq!(entries[1].change.operation, Operation::Drain);
+    assert!(!entries[1].ok && entries[1].summary.contains("1개 막힘"), "{:?}", entries[1]);
+
+    // 막힘을 풀고(PDB 삭제) 다시: 이미 중지된 노드라 cordon 없이 남은 Pod만 옮긴다
+    kubectl(&["-n", "mm-drain", "delete", "pdb", "held"]);
+    let again = commit::make_plan(client.clone(), PRIVATE, &change, "").await.unwrap();
+    let again_plan = again.preview.drain.clone().unwrap();
+    assert!(again_plan.node_cordoned && !again.preview.reversible);
+    assert!(again_plan.evict.iter().any(|pod| pod.name.starts_with("held-")));
+    let messages = run(again_plan).await;
+    let Some(DrainMessage::Finished { outcome, .. }) = messages.last() else { panic!("{messages:?}") };
+    assert_eq!(*outcome, Outcome::Completed, "{messages:?}");
+    assert_eq!(alive(pods.list(&ListParams::default()).await.unwrap().items, "held"), 0);
+    assert_eq!(log::read_all(&log_path).len(), 3);
+
+    // 되돌리기는 uncordon만: 기록된 역변경을 미리보기하고 적용한다
+    let undo = entries[0].inverse.clone().unwrap();
+    let plan = commit::dry_plan(client.clone(), PRIVATE, &undo, "").await.unwrap();
+    let (_, result) = commit::apply_plan(client.clone(), PRIVATE, &undo, &plan, "", None).await.unwrap();
+    result.unwrap();
+    let node = nodes.get(&worker).await.unwrap();
+    assert!(node.spec.and_then(|s| s.unschedulable) != Some(true));
+}

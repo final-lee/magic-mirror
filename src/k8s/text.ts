@@ -261,6 +261,7 @@ export const CHANGE_SUSPEND = "일시정지";
 export const CHANGE_RESUME = "재개";
 export const CHANGE_CORDON = "스케줄 중지";
 export const CHANGE_UNCORDON = "스케줄 재개";
+export const CHANGE_DRAIN = "drain";
 export const CHANGE_UNDO = "되돌리기";
 export const CHANGE_SUCCESS = "성공";
 export const CHANGE_FAILED = "실패";
@@ -271,3 +272,37 @@ export const CHANGE_BEFORE = "이전";
 export const CHANGE_AFTER = "이후";
 export const ROLLOUT_PROGRESS = (ready: number, desired: number) => `새 Pod ${ready}/${desired} 준비`;
 export const ROLLOUT_WAITING = "롤아웃 상태를 기다리는 중이에요";
+
+export const DRAIN_TITLE = (node: string) => `노드 drain: ${node}`;
+export const DRAIN_PLAN_EVICT = "옮길 Pod";
+export const DRAIN_PLAN_SKIPPED = "건너뛸 Pod";
+export const DRAIN_POD = "Pod";
+export const DRAIN_STATE = "상태";
+export const DRAIN_NOTE = "비고";
+export const DRAIN_FLAG_EMPTY_DIR = "emptyDir 데이터 손실";
+export const DRAIN_FLAG_UNMANAGED = "컨트롤러 없음";
+export const DRAIN_FLAG_BLOCKED = (budget: string) => `PDB ${budget}이(가) 막음`;
+export const DRAIN_SKIP_REASON = { daemonSet: "DaemonSet", mirror: "미러(static) Pod", terminating: "이미 종료 중" } as const;
+export const DRAIN_POD_STATE = {
+  pending: "대기",
+  evicting: "옮기는 중",
+  evicted: "옮김",
+  blocked: "막힘, 다시 시도 중",
+  failed: "실패",
+} as const;
+export const DRAIN_PHASE_CORDON = "노드를 스케줄 중지하는 중…";
+export const DRAIN_PHASE_EVICT = "Pod를 하나씩 옮기는 중…";
+export const DRAIN_PHASE_STOPPING = "중단하는 중… 지금 하는 Eviction을 마치고 멈춰요";
+export const DRAIN_OUTCOME = {
+  completed: "drain을 마쳤어요",
+  stopped: "중단했어요. 이미 옮긴 Pod는 그대로예요",
+  timedOut: "PodDisruptionBudget이 5분 넘게 막아 멈췄어요. 이미 옮긴 Pod는 그대로예요",
+  failed: "옮기지 못한 Pod가 있어요",
+} as const;
+export const DRAIN_COUNTS = (c: { total: number; evicted: number; blocked: number; failed: number; pending: number; evicting: number }) =>
+  `전체 ${c.total} · 옮김 ${c.evicted} · 옮기는 중 ${c.evicting} · 대기 ${c.pending} · 막힘 ${c.blocked} · 실패 ${c.failed}`;
+export const DRAIN_STOP = "중단";
+export const DRAIN_CLOSE = "닫기";
+export const DRAIN_UNDO_HINT = "스케줄 중지는 변경 기록에서 되돌릴 수 있어요";
+export const DRAIN_NO_PODS = "옮길 Pod가 없어요";
+export const DRAIN_ERROR = "오류";

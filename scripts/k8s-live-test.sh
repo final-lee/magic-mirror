@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# kind 클러스터 두 버전을 띄우고 EKS 탭의 #[ignore] 시험(k8s::live_tests)을 돌린다. 평소 cargo test에서는 건너뛴다.
+# kind 클러스터(컨트롤 플레인 + 워커) 두 버전을 띄우고 EKS 탭의 #[ignore] 시험(k8s::live_tests)을 돌린다. 평소 cargo test에서는 건너뛴다.
 #   scripts/k8s-live-test.sh            # 기본 이미지 둘
 #   KIND_IMAGES="kindest/node:v1.33.1" scripts/k8s-live-test.sh
 # 필요: docker, kind, kubectl, yq, jq (brew install kind kubernetes-cli yq jq)
@@ -15,7 +15,10 @@ trap cleanup EXIT
 for image in $IMAGES; do
   name="mm-live-$(echo "${image##*:}" | tr '.' '-')"
   kc="$WORK/$name.yaml"
-  kind create cluster --name "$name" --image "$image" --kubeconfig "$kc" --wait 120s
+  # 컨트롤 플레인 하나와 워커 하나: drain 시험이 워커를 비운다(컨트롤 플레인에는 taint가 남아 일반 Pod는 워커로 간다)
+  printf 'kind: Cluster\napiVersion: kind.x-k8s.io/v1alpha4\nnodes:\n  - role: control-plane\n  - role: worker\n' > "$WORK/kind.yaml"
+  kind create cluster --name "$name" --image "$image" --config "$WORK/kind.yaml" --kubeconfig "$kc" --wait 120s
+  kubectl --kubeconfig "$kc" wait --for=condition=Ready node --all --timeout=120s
 
   # 권한이 제한된 ServiceAccount: mm-live 네임스페이스의 pods를 get/list/watch만 할 수 있다
   kubectl --kubeconfig "$kc" create namespace mm-live

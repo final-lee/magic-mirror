@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+use super::drain::DrainPlan;
 use super::rows::KindRef;
 use crate::error::AppError;
 
@@ -40,6 +41,8 @@ pub enum Operation {
     Suspend { suspend: bool },
     Recreate { object: Value },
     Cordon { unschedulable: bool },
+    /// 노드를 스케줄 중지하고 Pod를 하나씩 옮긴다. 적용은 스트림(`k8s_drain`)으로 한다.
+    Drain,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -76,6 +79,8 @@ pub struct Preview {
     pub warnings: Vec<String>,
     pub confirm_name: Option<String>,
     pub reversible: bool,
+    /// drain 미리보기에서만 채운다: 옮길 Pod, 건너뛸 Pod와 경고 대상
+    pub drain: Option<DrainPlan>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -88,7 +93,7 @@ pub struct Plan {
 }
 
 /// 상태와 서버 관리 필드를 제외한 객체 전체의 해시.
-fn fingerprint(object: &Value) -> [u8; 32] {
+pub fn fingerprint(object: &Value) -> [u8; 32] {
     let mut value = object.clone();
     if let Some(root) = value.as_object_mut() {
         root.remove("status");
@@ -295,7 +300,7 @@ pub fn plan(change: &Change, current: Option<&Value>, revision: Option<&Value>, 
         path(target, collection)
     };
     Ok(Plan {
-        preview: Preview { calls: vec![ApiCall { verb: verb.into(), path: call_path, body }], diff, impact, warnings, confirm_name: dangerous.then(|| target.name.clone()), reversible: undo.is_some() },
+        preview: Preview { calls: vec![ApiCall { verb: verb.into(), path: call_path, body }], diff, impact, warnings, confirm_name: dangerous.then(|| target.name.clone()), reversible: undo.is_some(), drain: None },
         inverse: undo,
         version,
         fingerprint: current.map(fingerprint),

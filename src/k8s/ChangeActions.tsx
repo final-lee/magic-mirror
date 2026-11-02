@@ -48,9 +48,9 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, onSt
   }, [picking, target, objectRef, ssoProfile]);
 
   /** 불완전한 규칙은 서버 판단에 맡기고 확실히 거부된 요청만 끈다. */
-  const denied = (verb: string, group = kind.group, resource = kind.plural, named = true) => {
-    const result = rules && can(rules, { verb, group, resource, ...(named ? { name } : {}) });
-    return result === "no" ? t.CHANGE_DENIED(verb, resource) : undefined;
+  const denied = (verb: string, group = kind.group, resource = kind.plural, named = true, subresource?: string) => {
+    const result = rules && can(rules, { verb, group, resource, ...(subresource ? { subresource } : {}), ...(named ? { name } : {}) });
+    return result === "no" ? t.CHANGE_DENIED(verb, subresource ? `${resource}/${subresource}` : resource) : undefined;
   };
   const patch = denied("patch");
   const revisionResource = kind.kind === "Deployment" ? "replicasets" : "controllerrevisions";
@@ -59,6 +59,8 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, onSt
   const suspended = view.row.values.suspend === "true";
   const node = kind.group === "" && kind.kind === "Node";
   const cordoned = view.row.values.status?.includes("SchedulingDisabled") ?? false;
+  // drain은 노드를 cordon(patch)하고 Pod마다 Eviction(pods/eviction create)을 보낸다
+  const drainDenied = patch ?? denied("create", "", "pods", false, "eviction");
 
   return (
     <div className="k8s-actions">
@@ -105,6 +107,13 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, onSt
           label={cordoned ? t.CHANGE_UNCORDON : t.CHANGE_CORDON}
           reason={patch}
           onClick={() => onStart({ ...objectRef, type: "cordon", unschedulable: !cordoned })}
+        />
+      )}
+      {node && (
+        <ActionButton
+          label={t.CHANGE_DRAIN}
+          reason={drainDenied}
+          onClick={() => onStart({ ...objectRef, type: "drain" })}
         />
       )}
       <ActionButton label={t.CHANGE_DELETE} reason={denied("delete")} onClick={() => onStart({ ...objectRef, type: "delete" })} />

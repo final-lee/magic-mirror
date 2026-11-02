@@ -14,6 +14,14 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub const EXEC_TIMEOUT_REASON: &str = "30초 안에 끝나지 않았어요";
 
+/// 이 앱의 모든 클라이언트가 쓰는 설정. kube의 기본 재시도(429·503·504를 `Retry-After`만큼 기다리며 최대 15번)는 끈다:
+/// drain의 Eviction은 PodDisruptionBudget이 막으면 429를 곧바로 받아야 자기 간격과 5분 한도로 다시 시도할 수 있고,
+/// 요청마다 `REQUEST_TIMEOUT`을 따로 두는 읽기도 라이브러리가 몰래 기다리지 않는 편이 낫다.
+pub fn tune(cfg: &mut Config) {
+    cfg.connect_timeout = Some(CONNECT_TIMEOUT);
+    cfg.default_retry = false;
+}
+
 /// kubeconfig 해석 오류의 글은 원문 조각(토큰, 키)을 싣고 있을 수 있어, 고정 문구와 위치만 보여 준다(`kubeconfig::reason`).
 pub async fn client_for(config: &Kubeconfig, context: &str, endpoint: Endpoint) -> Result<Client, AppError> {
     client_for_with_timeout(config, context, endpoint, REQUEST_TIMEOUT).await
@@ -25,7 +33,7 @@ pub async fn client_for_with_timeout(config: &Kubeconfig, context: &str, endpoin
     let command = exec_command(config, context);
     let options = KubeConfigOptions { context: Some(context.to_string()), ..Default::default() };
     let mut cfg = Config::from_custom_kubeconfig(config.clone(), &options).await.map_err(|e| AppError::other(reason(&e)))?;
-    cfg.connect_timeout = Some(CONNECT_TIMEOUT);
+    tune(&mut cfg);
     let build = tokio::task::spawn_blocking(move || Client::try_from(cfg));
     match tokio::time::timeout(limit, build).await {
         Err(_) => Err(AppError::other(exec_failed(EXEC_TIMEOUT_REASON))),
