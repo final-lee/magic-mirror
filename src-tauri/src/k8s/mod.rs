@@ -2,6 +2,7 @@
 pub mod connect;
 pub mod failure;
 pub mod kubeconfig;
+pub mod lnav;
 pub mod logs;
 pub mod path;
 pub mod read;
