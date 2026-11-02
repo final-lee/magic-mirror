@@ -19,7 +19,7 @@ export interface DrainRun {
   finished: { outcome: K8sDrainOutcome; error: AppError | null } | null;
 }
 
-const NONE: K8sDrainCounts = { total: 0, pending: 0, evicting: 0, evicted: 0, blocked: 0, failed: 0 };
+const NONE: K8sDrainCounts = { total: 0, pending: 0, evicting: 0, evicted: 0, blocked: 0, terminating: 0, lingering: 0, failed: 0 };
 
 export function startRun(node: string): DrainRun {
   return { node, id: null, cordoned: false, rows: [], counts: NONE, stopping: false, finished: null };

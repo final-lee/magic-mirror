@@ -17,8 +17,8 @@ const view: K8sObjectView = { kind: NODES, row: { uid: "u", name: "worker-1", na
 const rule = (verbs: string[], resources: string[], apiGroups = [""]) => ({ verbs, apiGroups, resources, resourceNames: [] });
 const rules = (...resourceRules: K8sRules["resourceRules"]): K8sRules => ({ namespace: "default", incomplete: false, resourceRules, nonResourceRules: [] });
 
-const pod = (name: string, extra: Partial<K8sDrainPod> = {}): K8sDrainPod => ({ namespace: "app", name, uid: `uid-${name}`, emptyDir: false, unmanaged: false, blockedBy: null, ...extra });
-const counts = (extra: Partial<K8sDrainCounts>): K8sDrainCounts => ({ total: 0, pending: 0, evicting: 0, evicted: 0, blocked: 0, failed: 0, ...extra });
+const pod = (name: string, extra: Partial<K8sDrainPod> = {}): K8sDrainPod => ({ namespace: "app", name, uid: `uid-${name}`, emptyDir: false, unmanaged: false, blockedBy: null, graceSeconds: 30, ...extra });
+const counts = (extra: Partial<K8sDrainCounts>): K8sDrainCounts => ({ total: 0, pending: 0, evicting: 0, evicted: 0, blocked: 0, terminating: 0, lingering: 0, failed: 0, ...extra });
 const preview: K8sPreview = {
   calls: [{ verb: "PATCH", path: "/api/v1/nodes/worker-1", body: { spec: { unschedulable: true } } }],
   diff: [{ path: "spec.unschedulable", before: false, after: true }],
@@ -189,6 +189,22 @@ describe("drain progress", () => {
     expect(rowOf("held")).toHaveTextContent(t.DRAIN_POD_STATE.blocked);
     expect(rowOf("held")).toHaveTextContent(t.DRAIN_FLAG_BLOCKED("held-pdb"));
     expect(screen.getByText(t.DRAIN_COUNTS(counts({ total: 3, evicted: 1, failed: 1, blocked: 1 })))).toBeInTheDocument();
+  });
+
+  test("an accepted pod shows as terminating until it is gone, and a slow one as lingering", async () => {
+    const channel = await start();
+    channel.emit({ type: "started", pods: preview.drain!.evict, counts: counts({ total: 3, pending: 3 }) });
+    channel.emit({ type: "cordoned" });
+    channel.emit({ type: "pod", namespace: "app", name: "web", state: "terminating", error: null, counts: counts({ total: 3, pending: 2, terminating: 1 }) });
+    expect(rowOf("web")).toHaveTextContent(t.DRAIN_POD_STATE.terminating);
+    expect(screen.getByText(t.DRAIN_COUNTS(counts({ total: 3, pending: 2, terminating: 1 })))).toBeInTheDocument();
+    channel.emit({ type: "pod", namespace: "app", name: "web", state: "evicted", error: null, counts: counts({ total: 3, pending: 2, evicted: 1 }) });
+    expect(rowOf("web")).toHaveTextContent(t.DRAIN_POD_STATE.evicted);
+    channel.emit({ type: "pod", namespace: "app", name: "cache", state: "lingering", error: "종료 지연: 40초 넘게 남아 있어요", counts: counts({ total: 3, pending: 1, evicted: 1, lingering: 1 }) });
+    expect(rowOf("cache")).toHaveTextContent(t.DRAIN_POD_STATE.lingering);
+    expect(rowOf("cache")).toHaveTextContent("40초 넘게 남아 있어요");
+    channel.emit({ type: "finished", outcome: "lingering", counts: counts({ total: 3, evicted: 2, lingering: 1 }), error: null });
+    expect(screen.getByRole("status")).toHaveTextContent(t.DRAIN_OUTCOME.lingering);
   });
 
   test("messages that arrive before the call returns are kept", async () => {
