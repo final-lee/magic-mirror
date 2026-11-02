@@ -183,6 +183,7 @@
 - K7 백엔드는 소유자 UID로 리비전을 고르고 scale·restart·rollout undo·삭제·Job 재실행·CronJob 일시정지와 재개를 수행한다. 삭제 재생성에는 서버가 채운 메타데이터와 상태를 빼며, 새 Job 이름은 미리보기에서 정한다.
 - 워크로드 변경 화면: 상단 변경 토글을 켜면 상세에서 작업을 고르고 미리보기에서 호출·필드 변경·영향·경고를 확인한다. 변경 기록의 되돌리기도 같은 미리보기를 거친다.
 - 상세의 rollout 진행은 watch 행의 ready·updated·desired를 이용한다. StatefulSet 행에는 updated 수가 없어 ready 수만 보여 준다.
+- rollout undo 리비전 선택은 대상 get과 ReplicaSet 또는 ControllerRevision list 권한도 확인한다.
 
 ### B. 노드 조작
 - cordon·uncordon: 서로 되돌리기.
