@@ -5,7 +5,7 @@ import { DEPLOYMENTS, NODES, PODS, SECRETS, SERVICE_ACCOUNTS } from "./kinds";
 import { ObjectDetail } from "./ObjectDetail";
 import {
   BACK, CHILDREN_TRUNCATED, CLOSE, NO_RECENT_EVENTS, NO_SECRET_PERMISSION, OPEN_IN_IAM, SEC_CHILDREN, SEC_OWNERS, SHOW_VALUE,
-  TAB_YAML, YAML_SECRET_NOTE, openNode,
+  TAB_LOGS, TAB_YAML, YAML_SECRET_NOTE, openNode,
 } from "./text";
 import type { K8sKind, K8sObjectView, K8sRow } from "./types";
 
@@ -91,11 +91,21 @@ test("service account role opens IAM", async () => {
   expect(h.onOpenIam).toHaveBeenCalledWith("arn:aws:iam::1:role/web");
 });
 
-test("YAML tab", async () => {
+test("YAML tab is colored and keeps the text as is; only pods get a logs tab", async () => {
   m.get.mockResolvedValue(view());
   setup();
-  fireEvent.click(await screen.findByRole("tab", { name: TAB_YAML }));
-  expect(screen.getByText(/kind: Pod/)).toBeInTheDocument();
+  expect(await screen.findByRole("tab", { name: TAB_LOGS })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: TAB_YAML }));
+  const pre = document.querySelector(".k8s-yaml") as HTMLElement;
+  expect(pre.textContent).toBe("apiVersion: v1\nkind: Pod\n");
+  expect(Array.from(pre.querySelectorAll(".y-key")).map((e) => e.textContent)).toEqual(["apiVersion", "kind"]);
+});
+
+test("no logs tab for other kinds", async () => {
+  m.get.mockResolvedValue(view({ kind: DEPLOYMENTS }));
+  setup({ objectRef: { kind: DEPLOYMENTS, namespace: "prod", name: "web" } });
+  await screen.findByRole("tab", { name: TAB_YAML });
+  expect(screen.queryByRole("tab", { name: TAB_LOGS })).toBeNull();
 });
 
 test("secret: keys with a permission pre-check and a masked YAML note", async () => {

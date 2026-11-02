@@ -19,6 +19,7 @@ use crate::k8s::read::kinds::{self, Kind};
 use crate::k8s::read::overview::{self, Overview};
 use crate::k8s::read::secret::{self, SecretValue};
 use crate::k8s::review::{self, Identity, Rules};
+use crate::k8s::logs::{self, LogMessage, LogOptions};
 use crate::k8s::rows::KindRef;
 use crate::k8s::target::{describe_cluster, K8sTarget};
 use crate::k8s::watch::{self, WatchMessage};
@@ -257,9 +258,34 @@ pub fn k8s_watch(
     .ok_or_else(|| AppError::other(NOT_OPENED))
 }
 
+/// watch와 로그 흐름을 멈춘다(번호는 `k8s_watch`·`k8s_logs`가 돌려준 것)
 #[tauri::command]
 pub fn k8s_unwatch(k8s: State<'_, K8sState>, watch_id: u64) {
     k8s.unwatch(watch_id);
+}
+
+/// Pod 컨테이너 로그를 채널로 흘린다. watch처럼 대상이 닫히면 멈추고, 반환값은 `k8s_unwatch`에 쓰는 번호.
+#[tauri::command]
+pub fn k8s_logs(
+    app: tauri::AppHandle,
+    k8s: State<'_, K8sState>,
+    target: K8sTarget,
+    namespace: String,
+    pod: String,
+    options: LogOptions,
+    on_event: tauri::ipc::Channel<LogMessage>,
+) -> Result<u64, AppError> {
+    let started = k8s.epoch(&target);
+    let session = k8s.session(&target)?;
+    let (client, endpoint) = (session.client.clone(), session.endpoint);
+    k8s.register_watch(&target, started, |id| {
+        let task = tauri::async_runtime::spawn(async move {
+            let _forget = ForgetWatch { app, id };
+            logs::run(client, namespace, pod, options, endpoint, move |m| on_event.send(m).is_ok()).await;
+        });
+        task.inner().abort_handle()
+    })
+    .ok_or_else(|| AppError::other(NOT_OPENED))
 }
 
 /// 클러스터가 내주는 종류(목록·watch가 되는 것). 사용자 정의 리소스 목록을 만든다.
