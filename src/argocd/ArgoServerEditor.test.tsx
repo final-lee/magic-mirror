@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { ArgoServerEditor } from "./ArgoServerEditor";
+import { ArgoServerEditor, ArgoServerForm } from "./ArgoServerEditor";
 import { SERVER_ADD, SERVER_DUPLICATE, SERVER_INVALID, SERVER_NAME, SERVER_URL, serverRemoveLabel } from "./text";
 import type { ArgocdServer } from "./types";
 
@@ -15,44 +15,50 @@ const fill = (name: string, url: string) => {
 };
 
 test("lists the servers with their addresses", () => {
-  render(<ArgoServerEditor servers={SERVERS} onChange={vi.fn()} />);
+  render(<ArgoServerEditor servers={SERVERS} onAdd={vi.fn()} onRemove={vi.fn()} />);
   expect(screen.getByText("stg")).toBeInTheDocument();
   expect(screen.getByText("http://ops.example")).toBeInTheDocument();
 });
 
-test("adding appends a trimmed name and an address without the trailing slash, then clears the inputs", () => {
-  const onChange = vi.fn();
-  render(<ArgoServerEditor servers={SERVERS} onChange={onChange} />);
+test("adding sends a trimmed name and an address without the trailing slash, then clears the inputs", () => {
+  const onAdd = vi.fn();
+  render(<ArgoServerForm servers={SERVERS} onAdd={onAdd} />);
   fill("  dev ", " https://dev.example/// ");
-  expect(onChange).toHaveBeenCalledWith([...SERVERS, { name: "dev", url: "https://dev.example" }]);
+  expect(onAdd).toHaveBeenCalledWith({ name: "dev", url: "https://dev.example" });
   expect(screen.getByLabelText(SERVER_NAME)).toHaveValue("");
   expect(screen.getByLabelText(SERVER_URL)).toHaveValue("");
 });
 
+test("an empty name becomes the address's host", () => {
+  const onAdd = vi.fn();
+  render(<ArgoServerForm servers={SERVERS} onAdd={onAdd} />);
+  fill("", "http://argocd.internal:8080/");
+  expect(onAdd).toHaveBeenCalledWith({ name: "argocd.internal:8080", url: "http://argocd.internal:8080" });
+});
+
 test.each([
-  ["no name", "", "https://dev.example"],
-  ["not an http(s) address", "dev", "ftp://dev.example"],
-  ["no host", "dev", "https://"],
-  ["a bare word", "dev", "dev.example"],
-])("%s is refused with a message and nothing is saved", (_why, name, url) => {
-  const onChange = vi.fn();
-  render(<ArgoServerEditor servers={SERVERS} onChange={onChange} />);
-  fill(name, url);
-  expect(onChange).not.toHaveBeenCalled();
+  ["not an http(s) address", "ftp://dev.example"],
+  ["no host", "https://"],
+  ["a bare word", "dev.example"],
+])("%s is refused with a message and nothing is added", (_why, url) => {
+  const onAdd = vi.fn();
+  render(<ArgoServerForm servers={SERVERS} onAdd={onAdd} />);
+  fill("dev", url);
+  expect(onAdd).not.toHaveBeenCalled();
   expect(screen.getByRole("alert")).toHaveTextContent(SERVER_INVALID);
 });
 
 test("an address that is already there (even with a trailing slash) is refused", () => {
-  const onChange = vi.fn();
-  render(<ArgoServerEditor servers={SERVERS} onChange={onChange} />);
+  const onAdd = vi.fn();
+  render(<ArgoServerForm servers={SERVERS} onAdd={onAdd} />);
   fill("again", "https://stg.example/");
-  expect(onChange).not.toHaveBeenCalled();
+  expect(onAdd).not.toHaveBeenCalled();
   expect(screen.getByRole("alert")).toHaveTextContent(SERVER_DUPLICATE);
 });
 
-test("removing drops exactly that server", () => {
-  const onChange = vi.fn();
-  render(<ArgoServerEditor servers={SERVERS} onChange={onChange} />);
+test("removing names exactly that server", () => {
+  const onRemove = vi.fn();
+  render(<ArgoServerEditor servers={SERVERS} onAdd={vi.fn()} onRemove={onRemove} />);
   fireEvent.click(screen.getByRole("button", { name: serverRemoveLabel("stg") }));
-  expect(onChange).toHaveBeenCalledWith([SERVERS[1]]);
+  expect(onRemove).toHaveBeenCalledWith("https://stg.example");
 });

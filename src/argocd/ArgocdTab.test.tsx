@@ -4,18 +4,21 @@ import type { Settings } from "../api/types";
 import { renderWithClient } from "../test/utils";
 import { argocdApi } from "./api";
 import { ArgocdTab } from "./ArgocdTab";
-import { DEFAULT_SERVERS } from "./servers";
 import {
-  ARGO_NO_APPS, LOADING, RETRY, SERVER_ADD, SERVER_EDIT, SERVER_LABEL, SERVER_NAME, SERVER_URL, TOKEN_CANCEL, TOKEN_CHANGE, TOKEN_FORGET, TOKEN_HTTP_WARNING,
-  TOKEN_INVALID, TOKEN_LABEL, TOKEN_MISSING, TOKEN_SUBMIT, serverRemoveLabel,
+  ARGO_NO_APPS, LOADING, RETRY, SERVER_ADD, SERVER_EDIT, SERVER_HELP, SERVER_LABEL, SERVER_NAME, SERVER_NEXT, SERVER_URL, STEPS_LABEL, STEP_SERVER, STEP_TOKEN,
+  TOKEN_CANCEL, TOKEN_CHANGE, TOKEN_FORGET, TOKEN_HTTP_WARNING, TOKEN_INVALID, TOKEN_LABEL, TOKEN_MISSING, TOKEN_SUBMIT, serverRemoveLabel, tokenFor,
 } from "./text";
-import type { ArgoAppRow, ArgocdSession } from "./types";
+import type { ArgoAppRow, ArgocdServer, ArgocdSession } from "./types";
 
 vi.mock("../api/client", () => ({ api: { getSettings: vi.fn(), saveSettings: vi.fn() } }));
 vi.mock("./api", () => ({ argocdApi: { session: vi.fn(), setToken: vi.fn(), forgetToken: vi.fn(), apps: vi.fn(), appsets: vi.fn(), app: vi.fn(), tree: vi.fn(), refresh: vi.fn(), sync: vi.fn() } }));
 const a = vi.mocked(argocdApi);
-const [STG, OPS] = DEFAULT_SERVERS;
-const SETTINGS: Settings = { enabledServices: [], favorites: [], lastProfile: null, lastRegion: null };
+const STG: ArgocdServer = { name: "stg", url: "https://stg.example" };
+const OPS: ArgocdServer = { name: "ops", url: "http://ops.example" };
+const DEV: ArgocdServer = { name: "dev", url: "https://dev.example" };
+const EMPTY: Settings = { enabledServices: [], favorites: [], lastProfile: null, lastRegion: null };
+/** 대부분의 시험은 서버 두 개를 넣어 둔 상태에서 시작한다 */
+const SETTINGS: Settings = { ...EMPTY, argocdServers: [STG, OPS] };
 
 const session = (url: string): ArgocdSession => ({ url, username: "admin", version: url === OPS.url ? "v3.3.6" : "v3.4.5" });
 const row = (name: string): ArgoAppRow => ({ name, namespace: "argocd", resourceVersion: "1", values: { sync: "Synced", health: "Healthy", project: "default" } });
@@ -43,53 +46,92 @@ beforeEach(() => {
   a.appsets.mockResolvedValue([]);
 });
 
+const currentStep = () => within(screen.getByRole("list", { name: STEPS_LABEL })).getByText((_, el) => el?.getAttribute("aria-current") === "step").textContent;
+
+describe("first connection: server, then token", () => {
+  test("with no servers the tab starts at step 1 and asks the server for nothing", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue(EMPTY);
+    renderWithClient(<ArgocdTab active />);
+    expect(await screen.findByText(SERVER_HELP)).toBeInTheDocument();
+    expect(currentStep()).toBe(STEP_SERVER);
+    expect(screen.queryByLabelText(TOKEN_LABEL)).toBeNull();
+    expect(screen.queryByRole("combobox", { name: SERVER_LABEL })).toBeNull();
+    expect(a.session).not.toHaveBeenCalled();
+  });
+
+  test("the first server is saved and selected, then step 2 asks for that server's token, then the list", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue(EMPTY);
+    renderWithClient(<ArgocdTab active />);
+    fireEvent.change(await screen.findByLabelText(SERVER_URL), { target: { value: "https://argocd.example.com/" } });
+    fireEvent.click(screen.getByRole("button", { name: SERVER_NEXT }));
+    // 이름을 비우면 주소의 호스트가 이름이 된다
+    const added = { name: "argocd.example.com", url: "https://argocd.example.com" };
+    await waitFor(() => expect(api.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ argocdServers: [added] })));
+    expect(await screen.findByLabelText(TOKEN_LABEL)).toBeInTheDocument();
+    expect(currentStep()).toBe(STEP_TOKEN);
+    expect(screen.getByText(tokenFor(added.name, added.url))).toBeInTheDocument();
+    expect(a.session).toHaveBeenCalledWith(added.url);
+    submitToken("secret");
+    expect(await screen.findByText("stg-app")).toBeInTheDocument();
+    expect(a.setToken).toHaveBeenCalledWith(added.url, "secret");
+  });
+
+  test("a bad address stays at step 1 with a message and saves nothing", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue(EMPTY);
+    renderWithClient(<ArgocdTab active />);
+    fireEvent.change(await screen.findByLabelText(SERVER_URL), { target: { value: "argocd.example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: SERVER_NEXT }));
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(currentStep()).toBe(STEP_SERVER);
+    expect(api.saveSettings).not.toHaveBeenCalled();
+  });
+});
+
 describe("servers", () => {
-  test("with empty settings the stg and ops defaults are offered and stg is first", async () => {
+  test("servers from settings are offered in order and the first is selected", async () => {
     renderWithClient(<ArgocdTab active />);
     await screen.findByLabelText(TOKEN_LABEL);
     expect(within(serverSelect()).getAllByRole("option").map((o) => [o.textContent, (o as HTMLOptionElement).value])).toEqual([
-      ["stg", "https://argocd.taileada8.ts.net"],
-      ["ops", "http://ops.example"],
+      ["stg", STG.url],
+      ["ops", OPS.url],
     ]);
     expect(serverSelect()).toHaveValue(STG.url);
     expect(a.session).toHaveBeenCalledWith(STG.url);
   });
 
-  test("an empty server list in settings also falls back to the defaults", async () => {
-    vi.mocked(api.getSettings).mockResolvedValue({ ...SETTINGS, argocdServers: [] });
-    renderWithClient(<ArgocdTab active />);
-    await screen.findByLabelText(TOKEN_LABEL);
-    expect(within(serverSelect()).getAllByRole("option")).toHaveLength(2);
-  });
-
-  test("servers from settings replace the defaults", async () => {
-    vi.mocked(api.getSettings).mockResolvedValue({ ...SETTINGS, argocdServers: [{ name: "dev", url: "https://dev.example" }] });
-    renderWithClient(<ArgocdTab active />);
-    await screen.findByLabelText(TOKEN_LABEL);
-    expect(within(serverSelect()).getAllByRole("option").map((o) => o.textContent)).toEqual(["dev"]);
-    expect(a.session).toHaveBeenCalledWith("https://dev.example");
-  });
-
-  test("adding a server saves it to settings (defaults included) and offers it", async () => {
+  test("adding a server from the editor saves it and goes to its token step", async () => {
     renderWithClient(<ArgocdTab active />);
     fireEvent.click(await screen.findByRole("button", { name: SERVER_EDIT }));
-    fireEvent.change(screen.getByLabelText(SERVER_NAME), { target: { value: "dev" } });
     fireEvent.change(screen.getByLabelText(SERVER_URL), { target: { value: "https://dev.example/" } });
+    fireEvent.change(screen.getByLabelText(SERVER_NAME), { target: { value: "dev" } });
     fireEvent.click(screen.getByRole("button", { name: SERVER_ADD }));
-    await waitFor(() => expect(api.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ argocdServers: [...DEFAULT_SERVERS, { name: "dev", url: "https://dev.example" }] })));
-    expect(within(serverSelect()).getAllByRole("option").map((o) => o.textContent)).toEqual(["stg", "ops", "dev"]);
+    await waitFor(() => expect(api.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ argocdServers: [STG, OPS, DEV] })));
+    expect(serverSelect()).toHaveValue(DEV.url);
+    expect(await screen.findByText(tokenFor(DEV.name, DEV.url))).toBeInTheDocument();
+    expect(a.session).toHaveBeenCalledWith(DEV.url);
   });
 
-  test("removing a server saves the rest; removing the selected one falls back to the first", async () => {
-    vi.mocked(api.getSettings).mockResolvedValue({ ...SETTINGS, argocdServers: [...DEFAULT_SERVERS, { name: "dev", url: "https://dev.example" }] });
+  test("removing a server saves the rest, forgets its token and falls back to the first", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue({ ...EMPTY, argocdServers: [STG, OPS, DEV] });
     renderWithClient(<ArgocdTab active />);
     await screen.findByLabelText(TOKEN_LABEL);
-    fireEvent.change(serverSelect(), { target: { value: "https://dev.example" } });
+    fireEvent.change(serverSelect(), { target: { value: DEV.url } });
     fireEvent.click(screen.getByRole("button", { name: SERVER_EDIT }));
     fireEvent.click(screen.getByRole("button", { name: serverRemoveLabel("dev") }));
-    await waitFor(() => expect(api.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ argocdServers: DEFAULT_SERVERS })));
+    await waitFor(() => expect(api.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ argocdServers: [STG, OPS] })));
+    expect(a.forgetToken).toHaveBeenCalledWith(DEV.url);
     expect(within(serverSelect()).getAllByRole("option").map((o) => o.textContent)).toEqual(["stg", "ops"]);
     expect(serverSelect()).toHaveValue(STG.url);
+  });
+
+  test("removing the last server goes back to step 1", async () => {
+    vi.mocked(api.getSettings).mockResolvedValue({ ...EMPTY, argocdServers: [DEV] });
+    renderWithClient(<ArgocdTab active />);
+    await screen.findByLabelText(TOKEN_LABEL);
+    fireEvent.click(screen.getByRole("button", { name: SERVER_EDIT }));
+    fireEvent.click(screen.getByRole("button", { name: serverRemoveLabel("dev") }));
+    expect(await screen.findByText(SERVER_HELP)).toBeInTheDocument();
+    expect(currentStep()).toBe(STEP_SERVER);
   });
 
   test("the server list editor opens and closes", async () => {

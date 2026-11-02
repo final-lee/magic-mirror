@@ -11,14 +11,23 @@ export const H_MESSAGE = "메시지";
 export const SERVER_LABEL = "ArgoCD 서버";
 export const SERVER_EDIT = "서버 목록 편집";
 export const SERVER_NAME = "서버 이름";
+export const SERVER_NAME_PLACEHOLDER = "이름(비우면 주소의 호스트)";
 export const SERVER_URL = "서버 주소";
 export const SERVER_ADD = "서버 추가";
+export const SERVER_NEXT = "다음";
 export const SERVER_REMOVE = "삭제";
 export const SERVER_URL_PLACEHOLDER = "https://argocd.example.com";
-export const SERVER_INVALID = "이름과 http(s):// 주소를 넣어 주세요";
+export const SERVER_INVALID = "http:// 또는 https://로 시작하는 서버 주소를 넣어 주세요";
 export const SERVER_DUPLICATE = "이미 있는 서버 주소예요";
 export const serverRemoveLabel = (name: string) => `${name} 삭제`;
 export const sessionLine = (username: string, version: string) => `${username} · ${version}`;
+
+// 처음 연결: 1단계 서버 주소 → 2단계 API 토큰
+export const STEPS_LABEL = "ArgoCD 연결 단계";
+export const STEP_SERVER = "1. 서버 주소";
+export const STEP_TOKEN = "2. API 토큰";
+export const SERVER_HELP = "연결할 ArgoCD 서버 주소를 넣어 주세요. ArgoCD 웹 화면을 여는 주소와 같아요.";
+export const tokenFor = (name: string, url: string) => `${name} (${url})`;
 
 // 토큰
 export const TOKEN_INVALID = "ArgoCD 토큰이 만료됐거나 맞지 않아요. 새 토큰을 넣어 주세요";

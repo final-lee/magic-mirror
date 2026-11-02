@@ -5,6 +5,8 @@ import { TOKEN_INVALID, TOKEN_MISSING } from "./text";
 
 /** 서버마다 따로 쌓는다. 토큰을 바꾸거나 지우면 data 아래만 비운다(session은 따로 갱신). */
 export const argoKeys = {
+  /** 서버 하나에 딸린 모든 것(목록에서 서버를 뺄 때 지운다) */
+  server: (url: string) => ["argocd", url] as const,
   session: (url: string) => ["argocd", url, "session"] as const,
   data: (url: string) => ["argocd", url, "data"] as const,
   apps: (url: string) => ["argocd", url, "data", "apps"] as const,
