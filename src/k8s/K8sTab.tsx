@@ -4,6 +4,7 @@ import { useSettings } from "../api/queries";
 import { ErrorState } from "../components/ErrorState";
 import { DoneNotice } from "../components/DoneNotice";
 import { useApplyNotices } from "../iam/useApplyFlow";
+import { BatchDialog, useK8sBatch } from "./ChangeBatch";
 import { ChangeDialog, useK8sChange } from "./ChangeFlow";
 import { ChangeLog } from "./ChangeLog";
 import { CHANGE_DONE } from "./text";
@@ -20,6 +21,7 @@ import { OverviewView } from "./OverviewView";
 import { NAMESPACES, chooseContext, ssoProfileOf } from "./targets";
 import { ALL, TopBar, type K8sConnection } from "./TopBar";
 import { WorkloadsView, type WorkloadsFocus } from "./WorkloadsView";
+import { YamlCreate } from "./YamlCreate";
 import { BOOKMARK_MISSING, savedMissing, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNECTING, updateCommand } from "./text";
 import { refreshK8s, useK8sContext, useK8sKinds, useK8sRules, useK8sSession } from "./queries";
 import type { K8sChange, K8sKindRef, K8sTarget } from "./types";
@@ -64,6 +66,12 @@ export function K8sTab({ target, onOpenIam }: Props) {
     setAppliedChange(applied);
     void qc.invalidateQueries({ queryKey: ["k8s-change-log"] });
   });
+  const batch = useK8sBatch(target, ssoProfile, (applied) => {
+    notices.announce(CHANGE_DONE, []);
+    setAppliedChange(applied[applied.length - 1]);
+    void qc.invalidateQueries({ queryKey: ["k8s-change-log"] });
+  });
+  const [creating, setCreating] = useState(false);
   const namespaces = useK8sWatch(target, chosen ?? "", session.dataUpdatedAt, ssoProfile, NAMESPACES, null, live);
   const names = namespaces.rows.map((r) => r.name);
 
@@ -143,11 +151,24 @@ export function K8sTab({ target, onOpenIam }: Props) {
         onReconnect={reconnect}
         changeMode={changeMode}
         onChangeMode={setChangeMode}
+        onCreateYaml={() => setCreating(true)}
       />
       {missing && <p className="err k8s-notes">{savedMissing(missing)}</p>}
       {namespaces.error && <K8sError error={namespaces.error} target={target} ssoProfile={ssoProfile} compact />}
       {notices.notices.map((notice) => <DoneNotice key={notice.id} notice={notice} onDismiss={() => notices.dismissNotice(notice.id)} />)}
-      {change.pending && <ChangeDialog pending={change.pending} apply={change.apply} retry={change.retry} cancel={change.cancel} />}
+      {change.pending && <ChangeDialog pending={change.pending} apply={change.apply} retry={change.retry} cancel={change.cancel} force={change.force} />}
+      {creating && changeMode && !batch.batch && (
+        <YamlCreate
+          kinds={kinds.data ?? []}
+          namespace={nsOrAll}
+          onPreview={(entries) => {
+            setCreating(false);
+            batch.api.start(entries);
+          }}
+          onClose={() => setCreating(false)}
+        />
+      )}
+      {batch.batch && <BatchDialog batch={batch.batch} api={batch.api} />}
       <div className="pg-main">
         <K8sNav
           view={view}

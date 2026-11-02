@@ -17,7 +17,7 @@ const T = { profile: "app", region: "r", cluster: "c" };
 const row = (over: Partial<K8sRow> = {}): K8sRow => ({ uid: "u1", name: "web-1", namespace: "prod", resourceVersion: "1", createdAt: "2026-10-30T11:00:00Z", labels: { app: "web" }, values: {}, problems: [], ...over });
 const view = (over: Partial<K8sObjectView> = {}): K8sObjectView => ({
   kind: PODS, row: row(), annotations: {}, owners: [], children: [], childrenTruncated: false, childrenError: null,
-  containers: [], conditions: [], events: [], eventsError: null, yaml: "apiVersion: v1\nkind: Pod\n", secretKeys: null, ...over,
+  containers: [], conditions: [], events: [], eventsError: null, yaml: "apiVersion: v1\nkind: Pod\n", editYaml: "apiVersion: v1\nkind: Pod\n", secretKeys: null, ...over,
 });
 const widgetKind: K8sKind = { group: "mm.example.com", version: "v1", kind: "Widget", plural: "widgets", namespaced: true, verbs: ["list", "watch"], custom: true };
 

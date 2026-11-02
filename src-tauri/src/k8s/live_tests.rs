@@ -529,3 +529,156 @@ async fn workload_changes_dry_run_apply_undo_and_conflict() {
     let (_, result) = commit::apply_plan(client, PRIVATE, &undo, &plan, "", None).await.unwrap();
     result.unwrap();
 }
+
+/// 이 시험은 스크립트가 만든 kind 클러스터에서만 쓰기 요청을 보낸다.
+#[tokio::test]
+#[ignore]
+async fn yaml_apply_diff_conflict_force_create_and_undo() {
+    use super::change::{Change, ChangeObject, Operation};
+    use super::{commit, read};
+    use kube::api::{Patch, PatchParams};
+
+    let client = admin().await;
+    let object_ref = |group: &str, version: &str, kind: &str, plural: &str, name: &str| ChangeObject {
+        kind: KindRef { group: group.into(), version: version.into(), kind: kind.into(), plural: plural.into(), namespaced: true },
+        namespace: Some("mm-k2".into()),
+        name: name.into(),
+    };
+    let config = object_ref("", "v1", "ConfigMap", "configmaps", "mm-e-config");
+    let apply = |target: &ChangeObject, object: Value, force: bool| Change { target: target.clone(), operation: Operation::Apply { object, force } };
+    let config_doc = |value: &str| json!({"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"mm-e-config"},"data":{"key":value,"other":"x"}});
+    let get = |target: ChangeObject| {
+        let client = client.clone();
+        async move { commit::current(client, PRIVATE, &target).await.unwrap() }
+    };
+    let apply_all = |client: kube::Client, change: Change, plan: super::change::Plan, typed: Option<&'static str>| async move {
+        commit::apply_plan(client, PRIVATE, &change, &plan, "", typed).await
+    };
+
+    // 새로 만들기: 객체 전체가 한 항목이고, 되돌리기는 삭제다. 문서에 네임스페이스가 없어도 대상의 것을 쓴다
+    let create = apply(&config, config_doc("one"), false);
+    let plan = commit::dry_plan(client.clone(), PRIVATE, &create, "").await.unwrap();
+    assert!(get(config.clone()).await.is_none(), "dry-run은 만들지 않아요");
+    assert_eq!(plan.preview.diff.len(), 1);
+    assert_eq!(plan.preview.diff[0].before, Value::Null);
+    assert_eq!(plan.preview.diff[0].after["data"]["key"], "one");
+    assert_eq!(plan.inverse.as_ref().unwrap().operation, Operation::Delete);
+    let (_, result) = apply_all(client.clone(), create.clone(), plan, None).await.unwrap();
+    result.unwrap();
+    let created = get(config.clone()).await.unwrap();
+    assert_eq!(created["data"]["key"], "one");
+    let managers: Vec<&str> = created["metadata"]["managedFields"].as_array().unwrap().iter().filter_map(|m| m["manager"].as_str()).collect();
+    assert!(managers.contains(&"magic-mirror"), "{managers:?}");
+
+    // 고치기: 바뀐 필드만 diff에 나오고, 역변경은 정리한 이전 객체의 apply다
+    let edit = apply(&config, config_doc("two"), false);
+    let plan = commit::dry_plan(client.clone(), PRIVATE, &edit, "").await.unwrap();
+    assert_eq!(plan.preview.diff.iter().map(|d| d.path.as_str()).collect::<Vec<_>>(), ["data.key"]);
+    assert_eq!((&plan.preview.diff[0].before, &plan.preview.diff[0].after), (&json!("one"), &json!("two")));
+    assert!(plan.preview.conflicts.is_empty());
+    assert_eq!(get(config.clone()).await.unwrap()["data"]["key"], "one");
+    let inverse = plan.inverse.clone().unwrap();
+    let (_, result) = apply_all(client.clone(), edit.clone(), plan, None).await.unwrap();
+    result.unwrap();
+    assert_eq!(get(config.clone()).await.unwrap()["data"]["key"], "two");
+    let undo_plan = commit::dry_plan(client.clone(), PRIVATE, &inverse, "").await.unwrap();
+    assert_eq!(undo_plan.preview.diff.iter().map(|d| d.path.as_str()).collect::<Vec<_>>(), ["data.key"]);
+    let (_, result) = apply_all(client.clone(), inverse, undo_plan, None).await.unwrap();
+    result.unwrap();
+    assert_eq!(get(config.clone()).await.unwrap()["data"]["key"], "one");
+
+    // 같은 내용이면 바뀌는 것이 없다는 경고
+    let same = commit::dry_plan(client.clone(), PRIVATE, &apply(&config, config_doc("one"), false), "").await.unwrap();
+    assert!(same.preview.diff.is_empty());
+    assert!(same.preview.warnings.contains(&super::change::NOOP_WARNING.to_string()));
+
+    // 다른 manager가 가진 필드: 충돌은 필드와 소유 manager로 나오고 적용은 막힌다. 강제 적용은 이름을 입력받는다
+    let other = json!({"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"mm-e-config","namespace":"mm-k2"},"data":{"key":"theirs"}});
+    let api = read::api_for(client.clone(), &config.kind, config.namespace.as_deref());
+    api.patch("mm-e-config", &PatchParams::apply("other-mgr").force(), &Patch::Apply(&other)).await.unwrap();
+    let mine = apply(&config, config_doc("mine"), false);
+    let conflicted = commit::dry_plan(client.clone(), PRIVATE, &mine, "").await.unwrap();
+    assert_eq!(conflicted.preview.conflicts.len(), 1, "{:?}", conflicted.preview.conflicts);
+    assert_eq!(conflicted.preview.conflicts[0].field, ".data.key");
+    assert_eq!(conflicted.preview.conflicts[0].manager, "other-mgr");
+    assert!(commit::check(Some(&conflicted), &conflicted, None).is_err());
+    assert!(commit::apply_plan(client.clone(), PRIVATE, &mine, &conflicted, "", None).await.is_err());
+    assert_eq!(get(config.clone()).await.unwrap()["data"]["key"], "theirs");
+    let forced = apply(&config, config_doc("mine"), true);
+    let plan = commit::dry_plan(client.clone(), PRIVATE, &forced, "").await.unwrap();
+    assert!(plan.preview.conflicts.is_empty());
+    assert_eq!(plan.preview.confirm_name.as_deref(), Some("mm-e-config"));
+    assert!(plan.preview.calls[0].path.ends_with("&force=true"));
+    assert!(commit::apply_plan(client.clone(), PRIVATE, &forced, &plan, "", None).await.is_err(), "이름 없이는 강제 적용하지 않아요");
+    assert_eq!(get(config.clone()).await.unwrap()["data"]["key"], "theirs");
+    let (_, result) = apply_all(client.clone(), forced, plan, Some("mm-e-config")).await.unwrap();
+    result.unwrap();
+    assert_eq!(get(config.clone()).await.unwrap()["data"]["key"], "mine");
+
+    // 미리보기 뒤에 내용이 바뀌면 낡은 미리보기다
+    let stale = apply(&config, config_doc("mine2"), false);
+    let seen = commit::dry_plan(client.clone(), PRIVATE, &stale, "").await.unwrap();
+    kubectl(&["-n", "mm-k2", "patch", "configmap", "mm-e-config", "--type=merge", "-p", r#"{"data":{"other":"changed"}}"#]);
+    assert_eq!(commit::apply_plan(client.clone(), PRIVATE, &stale, &seen, "", None).await.unwrap_err(), AppError::other(super::exec::STALE));
+    assert_eq!(get(config.clone()).await.unwrap()["data"]["key"], "mine");
+
+    // 서버가 받지 않는 객체는 서버의 이유가 나온다
+    let deployment = object_ref("apps", "v1", "Deployment", "deployments", "mm-e-bad");
+    let bad = apply(&deployment, json!({"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"mm-e-bad"},"spec":{"replicas":-1,"selector":{"matchLabels":{"a":"b"}},"template":{"metadata":{"labels":{"a":"b"}},"spec":{"containers":[{"name":"c","image":"registry.k8s.io/pause:3.10"}]}}}}), false);
+    let AppError::Other { message } = commit::dry_plan(client.clone(), PRIVATE, &bad, "").await.unwrap_err() else { panic!("다른 오류예요") };
+    assert!(message.starts_with(super::exec::REJECTED), "{message}");
+    assert!(message.contains("replicas"), "{message}");
+
+    // 여러 문서를 순서대로 만들고(ConfigMap, Deployment), 만든 순서의 반대로 삭제해 되돌린다
+    let web = object_ref("apps", "v1", "Deployment", "deployments", "mm-e-web");
+    let second = apply(&web, json!({"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"mm-e-web"},"spec":{"replicas":0,"selector":{"matchLabels":{"app":"mm-e"}},"template":{"metadata":{"labels":{"app":"mm-e"}},"spec":{"containers":[{"name":"app","image":"registry.k8s.io/pause:3.10"}]}}}}), false);
+    let extra = object_ref("", "v1", "ConfigMap", "configmaps", "mm-e-extra");
+    let first = apply(&extra, json!({"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"mm-e-extra"},"data":{"a":"1"}}), false);
+    let mut undo = Vec::new();
+    for change in [first, second] {
+        let plan = commit::dry_plan(client.clone(), PRIVATE, &change, "").await.unwrap();
+        undo.push(plan.inverse.clone().unwrap());
+        let (_, result) = apply_all(client.clone(), change, plan, None).await.unwrap();
+        result.unwrap();
+    }
+    assert!(get(extra.clone()).await.is_some() && get(web.clone()).await.is_some());
+    for change in undo.into_iter().rev() {
+        assert_eq!(change.operation, Operation::Delete);
+        // 만든 직후에는 컨트롤러가 객체에 어노테이션을 더할 수 있어, 낡았다고 하면 사용자처럼 미리보기를 다시 받는다
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            let plan = commit::dry_plan(client.clone(), PRIVATE, &change, "").await.unwrap();
+            match apply_all(client.clone(), change.clone(), plan, None).await {
+                Ok((_, result)) => break result.unwrap(),
+                Err(error) if error == AppError::other(super::exec::STALE) && attempts < 5 => tokio::time::sleep(Duration::from_secs(1)).await,
+                Err(error) => panic!("{error:?}"),
+            }
+        }
+    }
+    assert!(get(extra).await.is_none() && get(web).await.is_none());
+
+    // Secret: 가린 값은 현재 값으로 남고 새 값만 stringData로 들어간다. 미리보기와 diff에는 값이 없고, 되돌릴 수 없다
+    let secret = object_ref("", "v1", "Secret", "secrets", "mm-e-secret");
+    let first = apply(&secret, json!({"apiVersion":"v1","kind":"Secret","metadata":{"name":"mm-e-secret"},"stringData":{"keep":"keep-value","change":"before-value"}}), false);
+    let plan = commit::dry_plan(client.clone(), PRIVATE, &first, "").await.unwrap();
+    let (_, result) = apply_all(client.clone(), first, plan, None).await.unwrap();
+    result.unwrap();
+    let edited = apply(&secret, json!({"apiVersion":"v1","kind":"Secret","metadata":{"name":"mm-e-secret"},"data":{"keep":"••••"},"stringData":{"change":"after-value","added":"added-value"}}), false);
+    let plan = commit::dry_plan(client.clone(), PRIVATE, &edited, "").await.unwrap();
+    let shown = serde_json::to_string(&plan.preview.displayed()).unwrap();
+    for value in ["keep-value", "before-value", "after-value", "added-value", "a2VlcC12YWx1ZQ==", "YWZ0ZXItdmFsdWU="] {
+        assert!(!shown.contains(value), "{value} 가 미리보기에 있어요");
+    }
+    let mut paths: Vec<&str> = plan.preview.diff.iter().map(|d| d.path.as_str()).collect();
+    paths.sort();
+    assert_eq!(paths, ["data.added", "data.change"]);
+    assert!(plan.inverse.is_none() && !plan.preview.reversible);
+    let (_, result) = apply_all(client.clone(), edited, plan, None).await.unwrap();
+    result.unwrap();
+    let stored = get(secret.clone()).await.unwrap();
+    let decode = |key: &str| String::from_utf8(base64::Engine::decode(&base64::engine::general_purpose::STANDARD, stored["data"][key].as_str().unwrap()).unwrap()).unwrap();
+    assert_eq!((decode("keep"), decode("change"), decode("added")), ("keep-value".into(), "after-value".into(), "added-value".into()));
+
+    kubectl(&["-n", "mm-k2", "delete", "configmap/mm-e-config", "secret/mm-e-secret", "--ignore-not-found"]);
+}

@@ -136,6 +136,7 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
             changeMode={changeMode}
             onChange={onChange ? startChange : undefined}
             rolloutProgress={progress}
+            appliedChange={appliedChange}
             widthPct={detailPct}
           />
         )}
