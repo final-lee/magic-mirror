@@ -25,14 +25,33 @@ fn find_in_path_takes_the_first_executable_and_skips_plain_files() {
 }
 
 #[test]
-fn log_files_are_private_and_never_reused() {
+fn log_files_are_private_per_process_and_never_reused() {
     let root = tempfile::tempdir().unwrap();
-    let dir = root.path().join("logs");
-    let (p1, _) = log_file(&dir).unwrap();
-    let (p2, _) = log_file(&dir).unwrap();
+    let logs = root.path().join("logs");
+    let (p1, _) = log_file(&logs).unwrap();
+    let (p2, _) = log_file(&logs).unwrap();
     assert_ne!(p1, p2);
-    assert_eq!(fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
+    assert_eq!(p1.parent().unwrap(), process_dir(&logs));
+    assert_eq!(fs::metadata(&logs).unwrap().permissions().mode() & 0o777, 0o700);
+    assert_eq!(fs::metadata(process_dir(&logs)).unwrap().permissions().mode() & 0o777, 0o700);
     assert_eq!(fs::metadata(&p1).unwrap().permissions().mode() & 0o777, 0o600);
+}
+
+#[test]
+fn sweeping_removes_folders_of_ended_apps_and_loose_files_but_keeps_running_ones() {
+    let root = tempfile::tempdir().unwrap();
+    let logs = root.path();
+    let (mine, _) = log_file(logs).unwrap();
+    // 1(launchd)은 늘 살아 있다. 4000000은 macOS의 프로세스 번호 범위 밖이라 없는 프로세스다.
+    fs::create_dir(logs.join("1")).unwrap();
+    fs::create_dir(logs.join("4000000")).unwrap();
+    fs::write(logs.join("4000000").join("0-1.log"), "secret").unwrap();
+    fs::write(logs.join("123-0-1.log"), "old layout").unwrap();
+    sweep_stale(logs);
+    assert!(mine.exists());
+    assert!(logs.join("1").exists());
+    assert!(!logs.join("4000000").exists());
+    assert!(!logs.join("123-0-1.log").exists());
 }
 
 #[test]

@@ -33,6 +33,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             k8s::tls::install_crypto_provider();
+            // 끝난 앱이 남긴 로그 임시 폴더(EKS 로그 탭의 lnav용)를 지운다
+            std::thread::spawn(|| k8s::lnav::sweep_stale(&k8s::lnav::logs_root()));
             let dir = app.path().app_data_dir()?;
             app.manage(AppState {
                 ctx: aws::context::AwsContext::default(),
