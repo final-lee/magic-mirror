@@ -5,6 +5,7 @@ import { can } from "./can";
 import { Problems, valueKeys } from "./columns";
 import { age } from "./format";
 import { NODES, isPod, isSecret, isServiceAccount, resolveLink } from "./kinds";
+import { DETAIL_PCT } from "./lanes";
 import { useK8sObject, useK8sRules } from "./queries";
 import { SecretKeys } from "./SecretKeys";
 import {
@@ -28,8 +29,8 @@ interface Props {
   onClose: () => void;
   onOpenIam?: (arn: string) => void;
   now?: number;
-  /** 끌어서 바꾼 너비(px). 없으면 CSS 기본값 */
-  width?: number;
+  /** 3열 목록 너비 중 덮는 비율(%). 없으면 DETAIL_PCT */
+  widthPct?: number;
 }
 
 function Links({ title, links, kinds, onOpen }: { title: string; links: K8sLink[]; kinds: K8sKind[]; onOpen: (ref: ObjectRef) => void }) {
@@ -180,7 +181,7 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sO
 }
 
 /** 객체 하나의 상세(요약·YAML). 소유자·자식·노드 링크는 onOpen으로 상세 스택에 쌓는다. */
-export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose, onOpenIam, now, width }: Props) {
+export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose, onOpenIam, now, widthPct = DETAIL_PCT }: Props) {
   const [tab, setTab] = useState<"summary" | "yaml">("summary");
   const q = useK8sObject(target, context, objectRef, resourceVersion, ssoProfile, live);
   const secret = isSecret(objectRef.kind);
@@ -188,7 +189,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
   const canRead = rules.data ? can(rules.data, { verb: "get", group: "", resource: "secrets", name: objectRef.name }) : "unknown";
   const at = now ?? Date.now();
   return (
-    <aside className="k8s-detail" aria-label={DETAIL_LABEL} style={width ? { width } : undefined}>
+    <aside className="k8s-detail" aria-label={DETAIL_LABEL} style={{ width: `${widthPct}%` }}>
       <div className="k8s-detail-head">
         {onBack && <button className="btn" onClick={onBack}>{BACK}</button>}
         <b>{objectRef.kind.kind}</b>

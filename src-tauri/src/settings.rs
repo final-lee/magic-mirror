@@ -13,13 +13,13 @@ pub struct Favorite {
     pub type_id: String,
 }
 
-/// EKS 탭 레인 너비(px). 비어 있으면 화면의 기본값을 쓴다.
+/// EKS 탭 레인 너비. 메뉴(1열)·종류(2열)는 px, 상세(4열)는 목록(3열) 너비에 대한 %. 비어 있으면 화면의 기본값을 쓴다.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct K8sLaneWidths {
     pub nav: Option<u32>,
     pub tree: Option<u32>,
-    pub detail: Option<u32>,
+    pub detail_pct: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -143,7 +143,7 @@ mod tests {
         let kind = |group: &str, kind: &str, plural: &str| KindRef { group: group.into(), version: "v1".into(), kind: kind.into(), plural: plural.into(), namespaced: true };
         let s = Settings {
             k8s_bookmarks: vec![kind("apps", "Deployment", "deployments"), kind("", "Pod", "pods")],
-            k8s_lane_widths: K8sLaneWidths { nav: Some(220), tree: None, detail: Some(640) },
+            k8s_lane_widths: K8sLaneWidths { nav: Some(220), tree: None, detail_pct: Some(64) },
             ..Default::default()
         };
         save(&path, &s).unwrap();
@@ -152,7 +152,10 @@ mod tests {
         assert_eq!(back.k8s_lane_widths, s.k8s_lane_widths);
         let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(json["k8sBookmarks"][0]["plural"], "deployments");
-        assert_eq!(json["k8sLaneWidths"]["detail"], 640);
+        assert_eq!(json["k8sLaneWidths"]["detailPct"], 64);
+        // 예전 px 값(detail)은 읽지 않는다
+        let old = load_text(r#"{"k8sLaneWidths":{"nav":200,"detail":640}}"#);
+        assert_eq!(old.k8s_lane_widths, K8sLaneWidths { nav: Some(200), tree: None, detail_pct: None });
     }
 
     #[test]

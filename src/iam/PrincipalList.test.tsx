@@ -76,7 +76,8 @@ test("arrow keys move the selection through the sorted rows", () => {
   fireEvent.keyDown(list, { key: "ArrowDown" });
   expect(onSelect).toHaveBeenLastCalledWith(bob.arn);
   fireEvent.keyDown(list, { key: "ArrowUp" });
-  expect(onSelect).toHaveBeenLastCalledWith(alice.arn); // 맨 위에서 더 올라가지 않는다
+  // 맨 위(선택은 그대로 alice)에서 더 올라가지 않고, 같은 행을 다시 고르지도 않는다
+  expect(onSelect).toHaveBeenCalledTimes(1);
 });
 
 test("marks the selected row", () => {

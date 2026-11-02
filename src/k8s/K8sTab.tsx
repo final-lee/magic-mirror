@@ -140,7 +140,7 @@ export function K8sTab({ target, onOpenIam }: Props) {
           onRemoveBookmark={removeBookmark}
           width={lanes.width("nav")}
         />
-        <LaneResizer lane="nav" side="before" onResize={lanes.resize} onCommit={lanes.commit} />
+        <LaneResizer lane="nav" onResize={lanes.resize} onCommit={lanes.commit} />
         <div className={`k8s-body${listView ? " flush" : ""}`}>
           {session.isError ? (
             <K8sError error={session.error} target={target} ssoProfile={ssoProfile} />

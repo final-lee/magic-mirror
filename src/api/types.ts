@@ -77,10 +77,11 @@ export interface Settings {
   k8sLaneWidths?: K8sLaneWidths;
 }
 
+/** 메뉴(1열)·종류(2열)는 px, 상세(4열)는 목록(3열) 너비에 대한 % */
 export interface K8sLaneWidths {
   nav?: number | null;
   tree?: number | null;
-  detail?: number | null;
+  detailPct?: number | null;
 }
 
 export interface S3Entry {
