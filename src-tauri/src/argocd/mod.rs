@@ -34,6 +34,8 @@ pub struct ArgoAppRow {
     pub namespace: String,
     pub resource_version: String,
     pub values: BTreeMap<String, String>,
+    /// Application 자체의 레이블(환경 추론·레이블 필터·묶기에 쓴다)
+    pub labels: BTreeMap<String, String>,
 }
 
 /// Application 응답에서 목록 행을 만든다.
@@ -88,6 +90,14 @@ pub fn app_row(d: &Value) -> ArgoAppRow {
         namespace: text(d, "/metadata/namespace").unwrap_or_default().into(),
         resource_version: text(d, "/metadata/resourceVersion").unwrap_or_default().into(),
         values,
+        labels: d.pointer("/metadata/labels")
+            .and_then(Value::as_object)
+            .map(|m| {
+                m.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_owned())))
+                    .collect()
+            })
+            .unwrap_or_default(),
     }
 }
 

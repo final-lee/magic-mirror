@@ -4,6 +4,18 @@ export interface ArgocdServer {
   url: string;
 }
 
+/** 서버 하나의 목록 화면 상태(설정에 서버 주소별로 남긴다). 묶기 기준은 GroupDim 글, 레이블은 `key=value`·`key`. 검색어는 남기지 않는다. */
+export interface ArgoViewState {
+  sync: string[];
+  health: string[];
+  envs: string[];
+  clusters: string[];
+  projects: string[];
+  labels: string[];
+  groupBy: string | null;
+  thenBy: string | null;
+}
+
 /** 토큰으로 확인한 로그인 상태 */
 export interface ArgocdSession {
   url: string;
@@ -17,6 +29,8 @@ export interface ArgoAppRow {
   namespace: string;
   resourceVersion: string;
   values: Record<string, string>;
+  /** Application의 metadata.labels(레이블 필터·묶기·환경 추정에 쓴다) */
+  labels: Record<string, string>;
 }
 
 export interface ArgoAppSetRow {

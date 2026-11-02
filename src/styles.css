@@ -951,8 +951,8 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 /* ArgoCD: 서버 막대·토큰 폼·요약 칩(.k8s-lvl 모양)·표·트리·상세 */
 .argo { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .argo-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
-.argo-bar select, .argo-bar .k8s-filter, .argo-token input, .argo-server-add input { background: #1c1c1e; border: 1px solid #444; border-radius: 6px; padding: 3px 8px; color: var(--text); font: inherit; font-size: 12px; }
-.argo-bar .k8s-filter { flex: 0 1 200px; }
+.argo-bar select, .argo-bar input, .argo-bar .k8s-filter, .argo-token input, .argo-server-add input { background: #1c1c1e; border: 1px solid #444; border-radius: 6px; padding: 3px 8px; color: var(--text); font: inherit; font-size: 12px; }
+.argo-bar .k8s-filter { flex: 0 1 240px; }
 .argo-top { background: var(--panel); }
 .argo-session { color: var(--dim); }
 .argo-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
@@ -977,6 +977,36 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .argo-lvl-Synced::before, .argo-lvl-Healthy::before { background: var(--green); }
 .argo-lvl-OutOfSync::before, .argo-lvl-Progressing::before { background: var(--yellow); }
 .argo-lvl-Degraded::before, .argo-lvl-Missing::before { background: var(--red); }
+/* 환경: 칩의 점과 이름표가 같은 색(--env)을 쓴다. 상태 색(초록·노랑·빨강)과 겹치지 않는 색만 */
+.argo-env-dev { --env: #64d2ff; }
+.argo-env-stg { --env: #bf5af2; }
+.argo-env-prd { --env: #ff9f0a; }
+.argo-env-ops { --env: #98989d; }
+.argo-env-demo { --env: #ff6bb5; }
+.argo-env-preview { --env: #ff9ad2; }
+.argo-env-unknown { --env: #6e6e73; }
+.k8s-lvl[class*="argo-env-"]::before { background: var(--env); }
+.argo-envb { display: inline-block; padding: 0 7px; line-height: 17px; border-radius: 9px; font-size: 11px; white-space: nowrap; color: var(--env); background: color-mix(in srgb, var(--env) 16%, transparent); }
+/* 여러 개 고르는 목록(클러스터·프로젝트) */
+.argo-ms { position: relative; }
+.argo-ms-btn { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border: 1px solid #444; border-radius: 6px; background: #1c1c1e; color: var(--dim); font: inherit; font-size: 12px; cursor: pointer; }
+.argo-ms-btn.on, .argo-ms-btn[aria-expanded="true"] { color: var(--text); border-color: var(--accent); }
+.argo-ms-caret { font-size: 9px; }
+.argo-ms-pop { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; min-width: 220px; max-width: 360px; max-height: 300px; overflow: auto; padding: 4px; background: var(--panel); border: 1px solid #444; border-radius: 8px; box-shadow: 0 8px 24px #0008; display: flex; flex-direction: column; }
+.argo-ms-opt { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+.argo-ms-opt:hover, .argo-labels-pop li:hover, .argo-labels-pop li.on { background: #ffffff12; }
+.argo-ms-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.argo-ms-clear { align-self: flex-start; margin: 2px 4px 4px; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 11px; cursor: pointer; }
+/* 레이블 필터: 칩 + 입력(후보 목록은 입력 아래) */
+.argo-labels { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.argo-lchip { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px 0 9px; line-height: 19px; border: 1px solid var(--accent); border-radius: 11px; background: #0a84ff1f; font-size: 12px; font-family: ui-monospace, Menlo, monospace; }
+.argo-lchip button { padding: 0 3px; border: 0; background: none; color: var(--dim); font-size: 13px; line-height: 1; cursor: pointer; }
+.argo-lchip button:hover { color: var(--text); }
+.argo-labels-in { position: relative; }
+.argo-labels-in input { width: 170px; }
+.argo-labels-pop { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; min-width: 260px; max-height: 280px; overflow: auto; margin: 0; padding: 4px; list-style: none; background: var(--panel); border: 1px solid #444; border-radius: 8px; box-shadow: 0 8px 24px #0008; }
+.argo-labels-pop li { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 4px; font-size: 12px; font-family: ui-monospace, Menlo, monospace; cursor: pointer; }
+.argo-group-pick { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); white-space: nowrap; }
 .argo-badge { display: inline-block; padding: 0 7px; line-height: 17px; border-radius: 9px; font-size: 11px; white-space: nowrap; background: #ffffff12; color: var(--dim); }
 .argo-badge.argo-ok { background: #30d15822; color: var(--green); }
 .argo-badge.argo-warn { background: #ffd60a22; color: var(--yellow); }
@@ -1012,6 +1042,14 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .argo-tally-caution { background: var(--dim); }
 .argo-card-rows { table-layout: fixed; }
 .argo-card-rows td:first-child { padding-left: 30px; box-shadow: inset 16px 0 0 -14px var(--line); }
+/* 카드 안의 2단계 묶음: 소제목 줄 + 한 단계 더 들인 행 */
+.argo-subgroup td { padding: 0; background: #28282c; border-bottom: 1px solid var(--line); }
+.argo-subband { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; width: 100%; padding: 4px 12px 4px 30px; border: 0; background: none; color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.argo-subband:hover { background: #ffffff0a; }
+.argo-subband:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.argo-subband .argo-badge { font-size: 10px; line-height: 15px; padding: 0 6px; }
+.argo-card-rows .argo-in-sub td:first-child { padding-left: 46px; }
+.argo-card-rows .argo-subgroup td:first-child { padding-left: 0; box-shadow: none; }
 .argo-card-rows tr:last-child td { border-bottom: 0; }
 .argo-chip { margin-left: 6px; }
 .argo-chip-warn { background: #ffd60a22; color: var(--yellow); }

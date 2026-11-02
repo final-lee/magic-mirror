@@ -5,10 +5,10 @@ import { renderWithClient } from "../test/utils";
 import { argocdApi } from "./api";
 import { ArgocdTab } from "./ArgocdTab";
 import {
-  ARGO_NO_APPS, LOADING, RETRY, SERVER_ADD, SERVER_EDIT, SERVER_HELP, SERVER_LABEL, SERVER_NAME, SERVER_NEXT, SERVER_URL, STEPS_LABEL, STEP_SERVER, STEP_TOKEN,
+  ARGO_GROUP_BY, ARGO_NO_APPS, LOADING, RETRY, SERVER_ADD, SERVER_EDIT, SERVER_HELP, SERVER_LABEL, SERVER_NAME, SERVER_NEXT, SERVER_URL, STEPS_LABEL, STEP_SERVER, STEP_TOKEN,
   TOKEN_CANCEL, TOKEN_CHANGE, TOKEN_FORGET, TOKEN_HTTP_WARNING, TOKEN_INVALID, TOKEN_LABEL, TOKEN_MISSING, TOKEN_SUBMIT, serverRemoveLabel, tokenFor,
 } from "./text";
-import type { ArgoAppRow, ArgocdServer, ArgocdSession } from "./types";
+import type { ArgoAppRow, ArgocdServer, ArgocdSession, ArgoViewState } from "./types";
 
 vi.mock("../api/client", () => ({ api: { getSettings: vi.fn(), saveSettings: vi.fn() } }));
 vi.mock("./api", () => ({ argocdApi: { session: vi.fn(), setToken: vi.fn(), forgetToken: vi.fn(), apps: vi.fn(), appsets: vi.fn(), app: vi.fn(), tree: vi.fn(), refresh: vi.fn(), sync: vi.fn() } }));
@@ -21,7 +21,7 @@ const EMPTY: Settings = { enabledServices: [], favorites: [], lastProfile: null,
 const SETTINGS: Settings = { ...EMPTY, argocdServers: [STG, OPS] };
 
 const session = (url: string): ArgocdSession => ({ url, username: "admin", version: url === OPS.url ? "v3.3.6" : "v3.4.5" });
-const row = (name: string): ArgoAppRow => ({ name, namespace: "argocd", resourceVersion: "1", values: { sync: "Synced", health: "Healthy", project: "default" } });
+const row = (name: string): ArgoAppRow => ({ name, namespace: "argocd", resourceVersion: "1", values: { sync: "Synced", health: "Healthy", project: "default" }, labels: {} });
 const serverSelect = () => screen.getByRole("combobox", { name: SERVER_LABEL });
 const submitToken = (token: string) => {
   fireEvent.change(screen.getByLabelText(TOKEN_LABEL), { target: { value: token } });
@@ -111,14 +111,15 @@ describe("servers", () => {
     expect(a.session).toHaveBeenCalledWith(DEV.url);
   });
 
-  test("removing a server saves the rest, forgets its token and falls back to the first", async () => {
-    vi.mocked(api.getSettings).mockResolvedValue({ ...EMPTY, argocdServers: [STG, OPS, DEV] });
+  test("removing a server saves the rest, forgets its token and its filters, and falls back to the first", async () => {
+    const view: ArgoViewState = { sync: [], health: [], envs: [], clusters: [], projects: [], labels: [], groupBy: "env", thenBy: null };
+    vi.mocked(api.getSettings).mockResolvedValue({ ...EMPTY, argocdServers: [STG, OPS, DEV], argocdViews: { [STG.url]: view, [DEV.url]: view } });
     renderWithClient(<ArgocdTab active />);
     await screen.findByLabelText(TOKEN_LABEL);
     fireEvent.change(serverSelect(), { target: { value: DEV.url } });
     fireEvent.click(screen.getByRole("button", { name: SERVER_EDIT }));
     fireEvent.click(screen.getByRole("button", { name: serverRemoveLabel("dev") }));
-    await waitFor(() => expect(api.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ argocdServers: [STG, OPS] })));
+    await waitFor(() => expect(api.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ argocdServers: [STG, OPS], argocdViews: { [STG.url]: view } })));
     expect(a.forgetToken).toHaveBeenCalledWith(DEV.url);
     expect(within(serverSelect()).getAllByRole("option").map((o) => o.textContent)).toEqual(["stg", "ops"]);
     expect(serverSelect()).toHaveValue(STG.url);
@@ -295,6 +296,25 @@ describe("switching servers", () => {
     expect(screen.queryByLabelText(TOKEN_LABEL)).toBeNull();
     expect(a.apps).toHaveBeenCalledWith(STG.url);
     expect(a.apps).toHaveBeenCalledWith(OPS.url);
+  });
+
+  test("each server remembers its own filters and grouping", async () => {
+    const view = (groupBy: string): ArgoViewState => ({ sync: [], health: [], envs: [], clusters: [], projects: [], labels: [], groupBy, thenBy: null });
+    vi.mocked(api.getSettings).mockResolvedValue({ ...SETTINGS, argocdViews: { [OPS.url]: view("project") } });
+    keychain = new Set([STG.url, OPS.url]);
+    renderWithClient(<ArgocdTab active />);
+    await screen.findByText("stg-app");
+    const groupSel = () => screen.getByRole("combobox", { name: ARGO_GROUP_BY });
+    expect(groupSel()).toHaveValue("set");
+    fireEvent.change(groupSel(), { target: { value: "env" } });
+    await waitFor(() => expect(api.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ argocdViews: { [OPS.url]: view("project"), [STG.url]: { ...view("env"), thenBy: "none" } } })));
+
+    fireEvent.change(serverSelect(), { target: { value: OPS.url } });
+    await screen.findByText("ops-app");
+    expect(groupSel()).toHaveValue("project");
+    fireEvent.change(serverSelect(), { target: { value: STG.url } });
+    await screen.findByText("stg-app");
+    expect(groupSel()).toHaveValue("env");
   });
 
   test("a half-typed token does not follow you to another server", async () => {
