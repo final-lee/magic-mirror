@@ -86,20 +86,45 @@ fn a_program_runs_in_a_pty_and_cleanup_kills_it_and_removes_the_file() {
     let text: String = got.lock().unwrap().iter().filter(|m| matches!(m, LnavMessage::Output { .. })).map(decode).collect();
     assert!(text.contains("from the log file"), "{text:?}");
     assert_eq!(got.lock().unwrap().last(), Some(&LnavMessage::Exit));
-    drop(Cleanup { child: s.child, path: path.clone() });
+    Cleanup::new(s.child, path.clone()).finish_now();
     assert!(!path.exists());
 }
 
 #[test]
-fn cleanup_stops_a_program_that_would_run_forever() {
+fn dropping_the_cleanup_stops_a_program_that_would_run_forever_off_the_calling_thread() {
     let root = tempfile::tempdir().unwrap();
     let (path, _) = log_file(root.path()).unwrap();
     let mut s = spawn(Path::new("/bin/sleep"), &[Path::new("600")], 80, 24, "/usr/bin:/bin").unwrap();
     assert!(s.child.try_wait().unwrap().is_none());
     let reader = s.reader;
     let pumped = std::thread::spawn(move || pump(reader, |_| true));
-    drop(Cleanup { child: s.child, path: path.clone() });
+    drop(Cleanup::new(s.child, path.clone()));
     // 죽으면 PTY가 닫혀 읽기도 끝난다
     pumped.join().unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while path.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     assert!(!path.exists());
+}
+
+#[test]
+fn keys_reach_the_program_through_the_input_worker() {
+    // cat은 받은 입력을 그대로 PTY에 되돌려 준다
+    let s = spawn(Path::new("/bin/cat"), &[], 80, 24, "/usr/bin:/bin").unwrap();
+    let input = input_worker(s.writer);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let reader = s.reader;
+    std::thread::spawn(move || pump(reader, move |m| tx.send(m).is_ok()));
+    input.send(b"typed-keys\r".to_vec()).unwrap();
+    let mut seen = String::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !seen.contains("typed-keys") && std::time::Instant::now() < deadline {
+        if let Ok(m @ LnavMessage::Output { .. }) = rx.recv_timeout(std::time::Duration::from_millis(200)) {
+            seen.push_str(&decode(&m));
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    Cleanup::new(s.child, root.path().join("none")).finish_now();
+    assert!(seen.contains("typed-keys"), "{seen:?}");
 }

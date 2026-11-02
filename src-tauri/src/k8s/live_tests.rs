@@ -486,7 +486,7 @@ async fn lnav_draws_pod_logs_written_to_its_file() {
         }
         screen.push_str(&chunk);
     }
-    drop(lnav::Cleanup { child: s.child, path: path.clone() });
+    lnav::Cleanup::new(s.child, path.clone()).finish_now();
     assert!(screen.contains(&piece), "lnav did not draw {piece:?}");
     assert!(!path.exists());
 }

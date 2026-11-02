@@ -18,6 +18,7 @@ use crate::error::AppError;
 pub const LNAV_MISSING: &str = "lnav를 찾지 못했어요. brew install lnav로 설치하면 로그를 lnav로 볼 수 있어요";
 pub const LNAV_FAILED: &str = "lnav를 띄우지 못했어요";
 pub const LOG_FILE_FAILED: &str = "로그를 담을 임시 파일을 만들지 못했어요";
+pub const LOG_WRITE_FAILED: &str = "로그를 임시 파일에 더 쓰지 못해 받기를 멈췄어요. 디스크 공간을 확인해 주세요";
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -86,9 +87,12 @@ pub fn size(cols: u16, rows: u16) -> PtySize {
     PtySize { rows: rows.max(2), cols: cols.max(10), pixel_width: 0, pixel_height: 0 }
 }
 
-/// `program args…`을 새 PTY에서 띄운다(lnav에는 로그 파일 경로 하나를 넘긴다)
+/// `program args…`을 새 PTY에서 띄운다(lnav에는 로그 파일 경로 하나를 넘긴다).
+/// 실패할 수 있는 PTY 손잡이(읽기·쓰기)를 먼저 얻고 나서 띄운다. 띄운 뒤에는 실패할 일이 없어 자식이 관리 밖으로 새지 않는다.
 pub fn spawn(program: &Path, args: &[&Path], cols: u16, rows: u16, path_env: &str) -> Result<Spawned, AppError> {
     let pair = native_pty_system().openpty(size(cols, rows)).map_err(|_| AppError::other(LNAV_FAILED))?;
+    let reader = pair.master.try_clone_reader().map_err(|_| AppError::other(LNAV_FAILED))?;
+    let writer = pair.master.take_writer().map_err(|_| AppError::other(LNAV_FAILED))?;
     let mut cmd = CommandBuilder::new(program);
     for a in args {
         cmd.arg(a);
@@ -102,23 +106,58 @@ pub fn spawn(program: &Path, args: &[&Path], cols: u16, rows: u16, path_env: &st
     let child = pair.slave.spawn_command(cmd).map_err(|_| AppError::other(LNAV_FAILED))?;
     // 자식이 끝나면 읽기가 EOF를 받도록 이쪽의 slave는 닫는다
     drop(pair.slave);
-    let reader = pair.master.try_clone_reader().map_err(|_| AppError::other(LNAV_FAILED))?;
-    let writer = pair.master.take_writer().map_err(|_| AppError::other(LNAV_FAILED))?;
     Ok(Spawned { child, reader, writer, master: pair.master })
 }
 
-/// 끝날 때(정상 종료, 패닉, 작업 중단) lnav를 죽이고 로그 파일을 지운다
+/// lnav를 죽이고(기다려 거두고) 로그 파일을 지운다
+fn finish(child: Option<Box<dyn Child + Send + Sync>>, path: &Path) {
+    if let Some(mut c) = child {
+        let _ = c.kill();
+        let _ = c.wait();
+    }
+    let _ = fs::remove_file(path);
+}
+
+/// lnav 하나의 뒷정리. `finish_now`는 그 자리에서 끝내고(앱 종료), 그냥 버리면 따로 스레드에서 끝낸다
+/// (kill과 wait가 잠깐 막힐 수 있어 비동기 런타임의 일꾼 스레드를 붙잡지 않게).
 pub struct Cleanup {
-    pub child: Box<dyn Child + Send + Sync>,
-    pub path: PathBuf,
+    child: Option<Box<dyn Child + Send + Sync>>,
+    path: PathBuf,
+}
+
+impl Cleanup {
+    pub fn new(child: Box<dyn Child + Send + Sync>, path: PathBuf) -> Self {
+        Cleanup { child: Some(child), path }
+    }
+
+    pub fn finish_now(&mut self) {
+        finish(self.child.take(), &self.path);
+    }
 }
 
 impl Drop for Cleanup {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        let _ = fs::remove_file(&self.path);
+        let child = self.child.take();
+        if child.is_none() && !self.path.exists() {
+            return;
+        }
+        let path = std::mem::take(&mut self.path);
+        std::thread::spawn(move || finish(child, &path));
     }
+}
+
+/// 화면의 키 입력을 PTY에 쓰는 스레드. 큰 붙여넣기로 PTY가 막혀도 부른 쪽(메인 스레드, 등록부 잠금)은 기다리지 않는다.
+/// 보내는 쪽이 모두 사라지거나 쓰기가 실패하면 끝난다.
+pub fn input_worker(mut writer: Box<dyn Write + Send>) -> std::sync::mpsc::Sender<Vec<u8>> {
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    std::thread::spawn(move || {
+        for data in rx {
+            if writer.write_all(&data).and_then(|_| writer.flush()).is_err() {
+                return;
+            }
+        }
+    });
+    tx
 }
 
 /// PTY 출력을 끝(EOF)까지 읽어 보낸다. 보내기가 실패하면 멈춘다. 블로킹이라 따로 스레드에서 돈다.

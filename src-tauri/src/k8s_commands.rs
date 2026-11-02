@@ -2,7 +2,6 @@
 //! 열기는 시작할 때 대상의 닫힌 횟수(`epoch`)를 읽어 두고, 끝날 때 그사이 닫혔으면 연결을 버린다(PG 탭과 같은 규칙).
 //! 잠금 순서: `epochs`, `sessions`, `watches`. 두 잠금을 함께 잡는 곳은 모두 이 순서를 지킨다. `terminals`는 `watches` 다음에만 잡는다.
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -20,7 +19,7 @@ use crate::k8s::read::kinds::{self, Kind};
 use crate::k8s::read::overview::{self, Overview};
 use crate::k8s::read::secret::{self, SecretValue};
 use crate::k8s::review::{self, Identity, Rules};
-use crate::k8s::lnav::{self, Cleanup, LnavMessage, Spawned, LNAV_MISSING, LOG_FILE_FAILED};
+use crate::k8s::lnav::{self, Cleanup, LnavMessage, Spawned, LNAV_MISSING, LOG_FILE_FAILED, LOG_WRITE_FAILED};
 use crate::k8s::logs::{self, LogMessage, LogOptions};
 use crate::k8s::path::login_path;
 use crate::k8s::rows::KindRef;
@@ -39,13 +38,15 @@ pub struct K8sState {
     epochs: Mutex<HashMap<K8sTarget, u64>>,
     watches: Mutex<HashMap<u64, WatchEntry>>,
     next_watch: AtomicU64,
-    /// lnav를 띄운 로그 흐름의 PTY(키 입력, 크기 조절). 번호는 watch 번호와 같다.
+    /// lnav를 띄운 로그 흐름(키 입력, 크기 조절, 뒷정리). 번호는 watch 번호와 같다. 항목을 지우면 lnav도 끝나고 로그 파일도 지워진다.
     terminals: Mutex<HashMap<u64, Terminal>>,
 }
 
 struct Terminal {
-    writer: Box<dyn Write + Send>,
+    /// `lnav::input_worker`로 가는 키 입력
+    input: std::sync::mpsc::Sender<Vec<u8>>,
     master: Box<dyn portable_pty::MasterPty + Send>,
+    cleanup: Cleanup,
 }
 
 /// 돌고 있는 watch 하나. 대상이 닫히면 같은 대상의 것을 모두 멈춘다.
@@ -128,19 +129,29 @@ impl K8sState {
     }
 
     fn forget_terminal(&self, id: u64) {
-        locked(&self.terminals).remove(&id);
+        // 뒷정리(Cleanup)는 잠금을 놓은 뒤에 버린다
+        let gone = locked(&self.terminals).remove(&id);
+        drop(gone);
     }
 
-    /// 화면의 키 입력을 lnav에 넘긴다. 이미 끝난 흐름이면 버린다.
+    /// 화면의 키 입력을 lnav에 넘긴다(쓰기는 입력 스레드가 한다). 이미 끝난 흐름이면 버린다.
     pub fn terminal_input(&self, id: u64, data: &[u8]) {
-        if let Some(t) = locked(&self.terminals).get_mut(&id) {
-            let _ = t.writer.write_all(data).and_then(|_| t.writer.flush());
+        if let Some(t) = locked(&self.terminals).get(&id) {
+            let _ = t.input.send(data.to_vec());
         }
     }
 
     pub fn terminal_resize(&self, id: u64, cols: u16, rows: u16) {
         if let Some(t) = locked(&self.terminals).get(&id) {
             let _ = t.master.resize(lnav::size(cols, rows));
+        }
+    }
+
+    /// 앱이 끝날 때: 떠 있는 lnav를 모두 그 자리에서 끝내고 로그 파일을 지운다(종료는 작업을 버리지 않고 프로세스를 끝내므로 여기서 직접 한다)
+    pub fn shutdown(&self) {
+        let all: Vec<Terminal> = locked(&self.terminals).drain().map(|(_, t)| t).collect();
+        for mut t in all {
+            t.cleanup.finish_now();
         }
     }
 }
@@ -367,20 +378,24 @@ pub async fn k8s_lnav(
             return Err(e);
         }
     };
-    // 등록하지 못하면(그사이 대상이 닫힘) 닫는 김에 lnav를 죽이고 파일을 지운다
-    let cleanup = Cleanup { child, path };
+    // 항목을 지우거나(작업 끝) 등록하지 못해 버려지면(그사이 대상이 닫힘) lnav를 끝내고 파일을 지운다
+    let terminal = Terminal { input: lnav::input_worker(writer), master, cleanup: Cleanup::new(child, path) };
     k8s.register_watch(&target, started, |id| {
-        k8s.put_terminal(id, Terminal { writer, master });
+        k8s.put_terminal(id, terminal);
+        // 첫 실행 전에 중단돼도 항목이 남지 않도록 지킴이를 먼저 만들어 작업에 넘긴다
+        let forget = (ForgetWatch { app: app.clone(), id }, ForgetTerminal { app, id });
         let task = tauri::async_runtime::spawn(async move {
-            let _forget = ForgetWatch { app: app.clone(), id };
-            let _terminal = ForgetTerminal { app, id };
-            let _cleanup = cleanup;
+            let _forget = forget;
             let out = on_event.clone();
             let mut pump = tokio::task::spawn_blocking(move || lnav::pump(reader, move |m| out.send(m).is_ok()));
             let logs = logs::run(client, namespace, pod, options, endpoint, move |m| match lnav::write_log(&mut file, m) {
                 Ok(None) => true,
                 Ok(Some(msg)) => on_event.send(msg).is_ok(),
-                Err(_) => false,
+                // 디스크가 가득 차는 등: 알리고 받기를 멈춘다(lnav는 받은 데까지 계속 보여준다)
+                Err(_) => {
+                    let _ = on_event.send(LnavMessage::LogError { error: AppError::other(LOG_WRITE_FAILED) });
+                    false
+                }
             });
             // 로그가 먼저 끝나면(따라가지 않을 때) lnav는 사용자가 닫을 때까지 둔다. lnav가 먼저 끝나면 로그도 멈춘다.
             tokio::select! {
