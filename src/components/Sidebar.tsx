@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useResources } from "../api/queries";
 import type { Favorite, ResourceType, ServiceInfo } from "../api/types";
+import { ARGOCD_TITLE } from "../argocd/text";
 import { COST_TITLE } from "../cost/text";
 import { ServiceBadge } from "./ServiceBadge";
 
@@ -16,9 +17,11 @@ interface Props {
   onOpenIam?: () => void;
   /** 💰 비용 탭을 연다. 주면 서비스 묶음 위에 "💰 비용" 줄이 보인다. */
   onOpenCost?: () => void;
+  /** 🐙 ArgoCD 탭을 연다. 주면 EKS 서비스 아래 첫 항목으로 "🐙 ArgoCD"가 보인다. */
+  onOpenArgocd?: () => void;
 }
 
-export function Sidebar({ services, profile, region, selection, favorites, onSelect, onToggleFavorite, onOpenIam, onOpenCost }: Props) {
+export function Sidebar({ services, profile, region, selection, favorites, onSelect, onToggleFavorite, onOpenIam, onOpenCost, onOpenArgocd }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(selection ? [selection.service] : []));
 
   const toggle = (id: string) =>
@@ -79,6 +82,11 @@ export function Sidebar({ services, profile, region, selection, favorites, onSel
           </div>
           {expanded.has(svc.id) && (
             <>
+              {svc.id === "eks" && onOpenArgocd && (
+                <div className="typ argocd-open" role="button" onClick={() => onOpenArgocd()}>
+                  <span>{ARGOCD_TITLE}</span>
+                </div>
+              )}
               {svc.id === "iam" && onOpenIam && (
                 <div className="typ iam-open" role="button" onClick={() => onOpenIam()}>
                   <span>🔐 IAM 관리</span>

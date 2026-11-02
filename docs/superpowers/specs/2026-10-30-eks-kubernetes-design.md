@@ -91,9 +91,27 @@
 - 검색과 하이라이트, 일시정지와 자동 스크롤, 파일로 저장(보관 중인 줄).
 - 화면 보관은 최근 5만 줄. 백엔드는 줄을 묶어(100ms 또는 500줄) Tauri 채널로 보낸다.
 - 지금 된 것(2026-11-02, K3 일부 먼저): 4열 상세의 Pod "로그" 탭. 컨테이너(init 포함) 고르기, 이전 컨테이너, 따라가기, 처음 받을 줄 수(100~50,000). 명령 `k8s_logs`(채널, `k8s_unwatch`로 멈춤, 탭을 닫으면 같이 멈춤). 남은 것: 워크로드 단위 합친 로그(Pod별 색, 새 Pod 따라 붙기), 최근 N분, 파일로 저장.
-- 보기 방식(사용자 결정, 2026-11-02): 기본은 **lnav**, 원하면 **텍스트**로 바꾼다. lnav는 앱에 넣지 않고 설치된 것을 쓴다(로그인 셸의 PATH에서 찾음). 없으면 텍스트로 열고 `brew install lnav`를 안내한다.
-  - lnav: 로그 줄을 본인만 읽는 임시 파일(`$TMPDIR/magic-mirror-logs/`, 폴더 0700·파일 0600)에 이어 쓰고, lnav를 PTY(`portable-pty`)에서 그 파일로 띄운다. 화면은 xterm.js(앱 테마 색)이고 키 입력·크기 조절을 lnav로 보낸다. lnav의 터미널 질의(커서 위치, 장치 속성)는 xterm.js가 답한다. 탭·Pod·옵션이 바뀌거나 lnav를 닫으면 lnav를 끝내고 파일을 지운다. 명령 `k8s_lnav_available`, `k8s_lnav`(채널: PTY 출력 base64, 로그 오류·끝, lnav 종료), `k8s_lnav_input`, `k8s_lnav_resize`, 멈춤은 `k8s_unwatch`.
-  - 텍스트: 찾기(대소문자 무시, 일치 줄 수), 일시정지(대기 줄 수), 맨 아래 따라가기, 복사(클립보드), 최근 5만 줄 보관.
+- 보기 방식(사용자 결정, 2026-11-02): lnav로 보던 방식은 버리고(설치된 lnav를 PTY로 띄웠으나 서비스 JSON 로그를 제대로 읽지 못했다) 앱 안에서 그린다. 기본은 **JSON 정리**, 원하면 **원문**.
+  - JSON 정리: `{`로 시작하는 줄을 JSON 객체로 읽어 ▸ 시각(로컬 `MM-DD HH:mm:ss.SSS`, 원래 값은 툴팁) · 레벨(색) · 메시지를 한 줄로 보인다. 흔한 로거의 이름을 읽는다: 시각 `timestamp`·`@timestamp`·`time`·`ts`(ISO 또는 epoch 초·밀리초·마이크로초·나노초), 레벨 `log.level`·`level`·`severity`(pino 숫자 레벨 포함), 메시지 `message`·`msg`. 나머지 필드는 접어 두고, 오류 필드(`error*`, `err*`, `exception`, `stack*`)와 찾는 말이 든 필드는 메시지 옆에 `key=value`로 붙인다. ▸를 누르면 필드 전체(값의 종류별 색)와 JSON 복사. JSON이 아닌 줄은 원문 그대로.
+  - 레벨 거르기: 오류·경고·정보·디버그·기타(레벨을 알 수 없는 줄) 칩을 여러 개 함께 고른다. 아무것도 고르지 않으면 모든 줄. 칩마다 줄 수. JSON이 아닌 줄은 맨 앞의 레벨 낱말(`[WARNING] …`, `ERROR: …`)이나 logfmt `level=`로 레벨을 정한다. 찾기의 일치 줄 수와 복사는 보이는 줄만.
+  - 공통: 찾기(대소문자 무시, 일치 줄 수), 일시정지(대기 줄 수), 맨 아래 따라가기, 복사(보이는 줄의 원문), 최근 5만 줄 보관.
+
+### ArgoCD (사용자 결정, 2026-11-02)
+- 위치: 클러스터 탭 안이 아니라 **사이드바 EKS 밑 "🐙 ArgoCD"** 항목. 누르면 단일 탭이 열리고 AWS 프로필과 무관하다(프로필을 바꿔도 닫히지 않는다).
+- 연결: 운영 중인 **ArgoCD API 서버**에 **API 토큰**으로 붙는다(비밀번호 로그인 없음). 미리 넣어 둔 서버는 없다. 처음에는 **1단계 서버 주소**(http(s)://, 이름은 비우면 호스트) → **2단계 API 토큰** 순으로 연결하고, 새로 넣은 서버는 곧바로 골라 토큰을 묻는다(사용자 결정, 2026-11-02). 서버는 여러 개(설정 `argocdServers: [{name, url}]`), 탭에서 고르고 목록을 고친다. 목록에서 빼면 그 서버의 토큰도 키체인에서 지우고, 마지막 서버를 빼면 1단계로 돌아간다.
+- 토큰: ArgoCD UI Settings → Accounts → 계정 → Tokens나 `argocd account generate-token`으로 만들어 붙여 넣는다. `/api/v1/session/userinfo`로 확인된 토큰만 **macOS 키체인**(service `magic-mirror.argocd`, account = 서버 URL)에 저장하고, 앱은 메모리 캐시를 둔다. 키체인 호출은 블로킹 스레드에서 한다. 설정 파일·로그·오류에 토큰을 넣지 않는다. `http://` 서버는 평문 전송 경고를 보인다. 401이면 토큰 입력으로 돌아간다(토큰은 지우지 않는다).
+- 목록(10초마다 다시 읽음, 탭이 안 보이면 멈춤): 앱 심각도는 오류(오류 조건, Degraded·Missing, 작업 Failed·Error) > 주의(OutOfSync, Progressing 등 그 밖의 문제) > 정상이고, 심한 앱이 먼저. 대상 열의 `https://kubernetes.default.svc`·`in-cluster`는 "이 클러스터"(필터·묶기에서도 한 값).
+- 거르기(사용자 결정 2026-11-02, 두 서버의 메타데이터를 보고 정함): 종류마다 다중 선택, 종류 안 OR·종류 사이 AND. 선택지 옆 개수는 그 종류의 선택만 뺀 나머지 조건 기준(Sync·Health 칩은 둘 다 뺀 기준).
+  - Sync·Health 칩, 환경 칩, 대상 클러스터·프로젝트 체크 목록, 레이블 필터(`key=value` 또는 `key`, 입력하면 데이터에 있는 후보와 개수, Enter는 고른 후보 → 입력과 같은 후보 → 첫 후보 → 후보가 없을 때만 입력 그대로; 같은 키는 OR, 다른 키는 AND), 검색(이름·레이블 값·대상 네임스페이스).
+  - 환경은 레이블이 들쭉날쭉해 추론한다: `preview=true` → 레이블 `environment` → `env`(마지막 토막, `ai-dev` → dev) → 이름 토막 → 대상 네임스페이스 → 대상 클러스터(`dev2` → dev). prod·production → prd, staging·stage → stg, development → dev. 값은 dev·stg·prd·ops·demo·preview·미분류(이 순서로 보인다). 이름 옆 환경 열의 배지(상태색과 겹치지 않는 색)에 마우스를 올리면 어디서 읽었는지 보인다. 환경으로 묶으면 환경 열은 뺀다.
+- 묶기: "묶기"와 "그 안에서" 두 단계, 기준은 ApplicationSet·환경·대상 클러스터·프로젝트·네임스페이스·레이블 키(데이터에 있는 키마다)·없음. 기본은 ApplicationSet 한 단계. 2단계는 1단계와 같을 수 없고 1단계가 없음이면 쓰지 않는다. 순서는 환경이면 위의 고정 순서, 나머지는 빨강 → 노랑 → 정상(이름 순)이고 값이 없는 묶음(ApplicationSet 없음, 레이블 없음, 미분류)은 마지막.
+  - 1단계는 각진 카드(사용자 결정 2026-11-02). 카드 왼쪽 굵은 줄과 테두리로 상태를 구분한다(오류 빨강 8px, 주의 노랑 8px, 정상 파랑 4px; ApplicationSet 자체가 Error여도 빨강). 머리 줄은 색을 바꾸지 않고 ▾/▸·이름·상태 막대(이름 바로 뒤, 묶음마다 같은 자리)·요약 칩(오류·OutOfSync·주의·정상, 앱 하나는 한 칸)·앱 수. ApplicationSet으로 묶을 때만 generator·상태·Error 메시지와 앱 없는 ApplicationSet 카드. 표 머리는 위에 하나, 열 너비를 고정해 카드 사이에 열이 맞는다.
+  - 2단계는 카드 안의 얇은 소제목 줄(▾/▸·이름·요약 칩·앱 수) 아래에 그 묶음의 행.
+  - 카드와 소제목은 처음에 모두 펼치고, 사용자가 눌러 접는다(탭이 열린 동안 기억).
+- 서버마다 마지막으로 고른 필터·묶기를 설정 `argocdViews`(서버 주소 → Sync·Health·환경·클러스터·프로젝트·레이블·묶기 두 단계)에 남겨 다시 열면 그대로 보인다. 검색어는 남기지 않는다. 서버를 지우면 함께 지운다. 읽지 못하는 묶기 값은 기본값으로.
+- 상세: 개요(상태, 마지막 작업과 실패 리소스, 조건 전문, 소스·values 파일, 대상, 동기화 정책, 이미지, ApplicationSet), 리소스 트리(`resource-tree` API의 부모 관계로 Deployment → ReplicaSet → Pod 들여쓰기, 노드별 Health·info, Application의 Sync 상태·hook·삭제 예정 표시), 동기화 이력, YAML/JSON(Application 전체).
+- 실행: Refresh·Hard refresh(`GET …?refresh=`), Sync(확인 창, Prune·Dry run 기본 끔, `POST …/sync`). 권한 판단과 요청자 기록은 ArgoCD 서버가 한다. 진행 중이면 Sync를 끈다. 클러스터에 직접 쓰지 않으므로 `k8s::hygiene` 예외는 없다.
+- 명령: `argocd_set_token`, `argocd_forget_token`, `argocd_session`, `argocd_apps`, `argocd_appsets`, `argocd_app`, `argocd_tree`, `argocd_refresh`, `argocd_sync` (`src-tauri/src/argocd/`, `src-tauri/src/argocd_commands.rs`, 프론트 `src/argocd/`).
 
 ### 네트워크
 - Service·Ingress → ALB·NLB: AWS Load Balancer Controller 태그(`elbv2.k8s.aws/cluster`, `service.k8s.aws/stack`, `ingress.k8s.aws/stack`)와 status 호스트명으로 짝을 찾는다. 리스너, 대상 그룹 상태.
