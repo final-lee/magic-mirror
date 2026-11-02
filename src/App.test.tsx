@@ -11,7 +11,7 @@ import { vpcApi } from "./vpcmap/api";
 import { sampleTopology } from "./vpcmap/fixtures";
 import { dbRow, eksService, makeResource, rdsService, renderWithClient, sampleServices } from "./test/utils";
 import { k8sApi } from "./k8s/api";
-import { SIDEBAR_ROW, tabTitle } from "./k8s/text";
+import { tabTitle } from "./k8s/text";
 
 vi.mock("./api/client", () => ({
   api: {
@@ -788,16 +788,6 @@ describe("EKS 탭", () => {
     await open("prod");
     expect(k8sTabs()).toHaveLength(1);
     expect(screen.getByRole("tab", { name: tabTitle("prod") })).toHaveAttribute("aria-selected", "true");
-  });
-
-  test("the sidebar row opens the picker and choosing a cluster opens its tab", async () => {
-    renderWithClient(<App />);
-    fireEvent.click(await screen.findByText("EKS"));
-    fireEvent.click(await screen.findByText(SIDEBAR_ROW));
-    const dialog = await screen.findByRole("dialog", { name: "EKS 클러스터" });
-    fireEvent.click(await within(dialog).findByText("staging"));
-    expect(await screen.findByRole("tab", { name: tabTitle("staging") })).toHaveAttribute("aria-selected", "true");
-    expect(screen.queryByRole("dialog", { name: "EKS 클러스터" })).not.toBeInTheDocument();
   });
 
   test("closing the tab calls k8s close once and returns to the resources tab", async () => {

@@ -1,7 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { Sidebar } from "./Sidebar";
-import { eksService, makeResource, renderWithClient, sampleServices } from "../test/utils";
-import { SIDEBAR_ROW } from "../k8s/text";
+import { makeResource, renderWithClient, sampleServices } from "../test/utils";
 import { api } from "../api/client";
 
 vi.mock("../api/client", () => ({
@@ -109,26 +108,5 @@ describe("IAM 관리 entry", () => {
     fireEvent.click(screen.getByText("IAM"));
     fireEvent.click(screen.getByText("🔐 IAM 관리"));
     expect(onSelect).not.toHaveBeenCalled();
-  });
-});
-
-describe("클러스터 관리 entry", () => {
-  const withEks = { ...base, services: [...sampleServices, eksService] };
-
-  test("is the first row under an expanded EKS group and calls onOpenK8s", () => {
-    const onOpenK8s = vi.fn();
-    renderWithClient(<Sidebar {...withEks} onOpenK8s={onOpenK8s} />);
-    expect(screen.queryByText(SIDEBAR_ROW)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText("EKS"));
-    const entry = screen.getByText(SIDEBAR_ROW);
-    expect(entry.compareDocumentPosition(screen.getByText("Clusters")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.click(entry);
-    expect(onOpenK8s).toHaveBeenCalledTimes(1);
-  });
-
-  test("is not shown when the app gives no handler", () => {
-    renderWithClient(<Sidebar {...withEks} />);
-    fireEvent.click(screen.getByText("EKS"));
-    expect(screen.queryByText(SIDEBAR_ROW)).not.toBeInTheDocument();
   });
 });

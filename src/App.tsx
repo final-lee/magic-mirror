@@ -14,7 +14,6 @@ import { ExplorerTab } from "./explorer/ExplorerTab";
 import { refKey, refName } from "./explorer/rows";
 import type { DiffTool, FileRef, TransferRequest } from "./explorer/types";
 import { useTransfers } from "./explorer/useTransfers";
-import { ClusterPicker } from "./k8s/ClusterPicker";
 import { K8sTab } from "./k8s/K8sTab";
 import { closeK8s, refreshK8s } from "./k8s/queries";
 import { k8sTabId } from "./k8s/targets";
@@ -56,7 +55,6 @@ export default function App() {
   const [pgTabs, setPgTabs] = useState<{ id: string; target: PgTarget; title: string }[]>([]);
   // 클러스터마다 탭 하나(id는 리전과 이름). 탭을 닫거나 프로필을 바꾸면 그 클러스터의 연결과 감시도 닫는다.
   const [k8sTabs, setK8sTabs] = useState<{ id: string; target: K8sTarget }[]>([]);
-  const [showK8sPicker, setShowK8sPicker] = useState(false);
   // IAM 탭은 하나뿐이다(id "iam"). focus는 리소스 목록에서 넘어온 대상 ARN, nonce는 열 때마다 올라가 같은 대상도 다시 이동시킨다.
   const [iamTab, setIamTab] = useState<{ focus: string | null; nonce: number } | null>(null);
   const iamOverview = useIamOverview(iamTab ? profile : null);
@@ -139,7 +137,6 @@ export default function App() {
   const enabled = services.data.filter((s) => settings.enabledServices.includes(s.id));
 
   const s3Service = services.data.find((s) => s.id === "s3");
-  const eksService = services.data.find((s) => s.id === "eks");
 
   const openDiff = (left: FileRef, right: FileRef) => {
     const id = `diff:${refKey(left)}|${refKey(right)}`;
@@ -272,7 +269,6 @@ export default function App() {
             onSelect={select}
             onToggleFavorite={toggleFavorite}
             onOpenIam={() => openIam()}
-            onOpenK8s={() => setShowK8sPicker(profile !== null)}
           />
           <MainArea
             key={mainKey}
@@ -340,18 +336,6 @@ export default function App() {
             />
           </div>
         ))}
-        {showK8sPicker && profile && eksService && (
-          <ClusterPicker
-            service={eksService}
-            profile={profile}
-            region={region}
-            onPick={(cluster) => {
-              setShowK8sPicker(false);
-              openK8s({ profile, region, cluster });
-            }}
-            onClose={() => setShowK8sPicker(false)}
-          />
-        )}
         {showSettings && (
           <ServiceSettings
             services={services.data}

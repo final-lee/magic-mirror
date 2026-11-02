@@ -22,9 +22,6 @@ export const profileMismatch = (execProfile: string, profile: string) => `kubeco
 export const RULES_INCOMPLETE = "이 네임스페이스의 권한 목록이 완전하지 않아요. 버튼은 켜 두고 실제 요청에서 서버가 판단해요";
 
 export const tabTitle = (cluster: string) => `☸️ ${cluster}`;
-export const SIDEBAR_ROW = "☸️ 클러스터 관리";
-export const PICKER_TITLE = "EKS 클러스터";
-export const PICKER_EMPTY = "이 리전에 EKS 클러스터가 없어요";
 
 export const LABEL_CONTEXT = "context";
 export const LABEL_IDENTITY = "신원";
