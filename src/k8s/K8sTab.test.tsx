@@ -39,6 +39,8 @@ import {
 import { DEPLOYMENTS, EVENTS, NODES, PODS } from "./kinds";
 import type { K8sContextCandidate, K8sContextInfo, K8sRow, K8sRules, K8sSession, K8sTarget, K8sWatchMessage } from "./types";
 
+// 터미널(xterm)은 PodTerminal.test에서 본다
+vi.mock("./PodTerminal", () => ({ PodTerminal: () => null }));
 vi.mock("./api", () => ({
   k8sApi: { context: vi.fn(), open: vi.fn(), close: vi.fn(), rules: vi.fn(), watch: vi.fn(), unwatch: vi.fn(), kinds: vi.fn(), get: vi.fn(), secretValue: vi.fn(), overview: vi.fn() },
 }));

@@ -32,7 +32,7 @@ export function ChangeLog({ target, onStart, changeMode }: Props) {
             <tr key={entry.id}>
               <td>{formatDateTime(entry.at)}</td>
               <td>{entry.summary}</td>
-              <td>{entry.ok ? t.CHANGE_SUCCESS : `${t.CHANGE_FAILED}: ${entry.error ?? ""}`}</td>
+              <td>{entry.ok ? t.CHANGE_SUCCESS : `${t.CHANGE_FAILED}: ${entry.error ?? ""}`}{entry.closedAt ? ` · ${t.SHELL_CLOSED_AT(formatDateTime(entry.closedAt))}` : ""}</td>
               <td>
                 {changeMode && entry.ok && entry.inverse && !entry.undone && (
                   <button className="btn small" disabled={busy !== null} onClick={() => void prepare(entry.id, async () => {

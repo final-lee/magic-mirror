@@ -44,6 +44,7 @@ export const BUILTIN: K8sKindRef[] = CATEGORIES.flatMap((c) => c.kinds);
 export const sameKind = (a: K8sKindRef, b: K8sKindRef) => kindKey(a) === kindKey(b);
 export const isSecret = (k: K8sKindRef) => k.group === "" && k.kind === "Secret";
 export const isPod = (k: K8sKindRef) => k.group === "" && k.kind === "Pod";
+export const isService = (k: K8sKindRef) => k.group === "" && k.kind === "Service";
 export const isServiceAccount = (k: K8sKindRef) => k.group === "" && k.kind === "ServiceAccount";
 
 const strip = ({ group, version, kind, plural, namespaced }: K8sKindRef): K8sKindRef => ({ group, version, kind, plural, namespaced });

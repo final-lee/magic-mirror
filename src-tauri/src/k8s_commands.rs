@@ -1,6 +1,6 @@
 //! EKS 탭의 명령. 대상(프로필·리전·클러스터)마다 열린 연결 하나(`Session`)를 둔다.
 //! 열기는 시작할 때 대상의 닫힌 횟수(`epoch`)를 읽어 두고, 끝날 때 그사이 닫혔으면 연결을 버린다(PG 탭과 같은 규칙).
-//! 잠금 순서: `epochs`, `sessions`, `watches`. 두 잠금을 함께 잡는 곳은 모두 이 순서를 지킨다.
+//! 잠금 순서: `epochs`, `sessions`, `watches`, 그리고 맨 뒤에 `shells`·`forwards`(각자 안의 잠금). 두 잠금을 함께 잡는 곳은 모두 이 순서를 지킨다.
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -13,11 +13,12 @@ use crate::commands::AppState;
 use crate::error::AppError;
 use crate::iam::clock::{iso, now_secs};
 use crate::iam::commit::{new_log_id, plan::PlanStore};
-use crate::k8s::change::{Change, ChangeObject, Operation, Plan, Preview, INVALID_CHANGE};
+use crate::k8s::change::{self, Change, ChangeObject, Operation, Plan, Preview, INVALID_CHANGE};
 use crate::k8s::drain::apply::{self as drain_apply, Job};
 use crate::k8s::drain::run::{DrainMessage, Limits};
-use crate::k8s::{commit, exec, log};
+use crate::k8s::{commit, exec, log, node_shell};
 use crate::k8s::connect;
+use crate::k8s::forward::{self, Forward, ForwardRequest, Forwards};
 use crate::k8s::failure::{describe, failure_of, Endpoint, Failure, NOT_OPENED};
 use crate::k8s::kubeconfig::{self, Candidate, NO_CONTEXT};
 use crate::k8s::read::detail::{self, ObjectView};
@@ -27,9 +28,12 @@ use crate::k8s::read::secret::{self, SecretValue};
 use crate::k8s::review::{self, Identity, Rules};
 use crate::k8s::logs::{self, LogMessage, LogOptions};
 use crate::k8s::rows::KindRef;
+use crate::k8s::shell::{self, ShellMessage, ShellMode, ShellOpened, ShellTarget, Shells};
 use crate::k8s::target::{describe_cluster, K8sTarget};
 use crate::k8s::watch::{self, WatchMessage};
 
+/// 앱을 끌 때 노드 셸 Pod 지우기를 기다리는 시간
+const CLEANUP_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 pub const RECORD_FAILED: &str = "변경 결과를 기록하지 못했어요";
 pub const UNDO_RECORD_FAILED: &str = "되돌리기 기록을 갱신하지 못했어요";
 
@@ -47,6 +51,8 @@ pub struct K8sState {
     epochs: Mutex<HashMap<K8sTarget, u64>>,
     watches: Mutex<HashMap<u64, WatchEntry>>,
     next_watch: AtomicU64,
+    shells: Arc<Shells>,
+    forwards: Arc<Forwards>,
     plans: Mutex<PlanStore<StoredPlan>>,
     log_path: PathBuf,
 }
@@ -107,6 +113,8 @@ impl K8sState {
                 }
                 !same
             });
+            self.shells.close_target(t);
+            self.forwards.close_target(t);
         }
         true
     }
@@ -122,6 +130,24 @@ impl K8sState {
             }
             !same
         });
+        self.shells.close_target(t);
+        self.forwards.close_target(t);
+    }
+
+    /// 앱을 끌 때: 모든 셸과 port-forward를 닫는다(셸 기록에 닫은 시각을 남기고, 노드 셸 Pod 지우기가 끝나길 잠깐 기다린다).
+    pub async fn close_streams(&self) {
+        self.shells.close_all();
+        self.forwards.close_all();
+        self.shells.settle(CLEANUP_WAIT).await;
+    }
+
+    /// 시작할 때의 `epoch`와 같을 때만 `register`를 실행한다(실행하는 동안 `epochs` 잠금을 쥔다). 다르면(그사이 닫힘) None.
+    pub fn while_current<T>(&self, t: &K8sTarget, started: u64, register: impl FnOnce() -> T) -> Option<T> {
+        let epochs = locked(&self.epochs);
+        if *epochs.get(t).unwrap_or(&0) != started {
+            return None;
+        }
+        Some(register())
     }
 
     /// 시작할 때의 `epoch`와 같을 때만 `spawn`으로 watch를 띄워 등록한다. 다르면(그사이 닫힘) None.
@@ -344,6 +370,138 @@ pub fn k8s_logs(
     .ok_or_else(|| AppError::other(NOT_OPENED))
 }
 
+/// 셸(exec) 세션을 연다. 터미널 출력은 채널로 흐르고 반환값의 번호로 입력·크기·닫기를 한다.
+/// 위험한 네임스페이스·Pod(`change::dangerous`)는 `confirm_text`가 Pod 이름과 같아야 한다. 열고 닫은 시각은 변경 기록에 남는다.
+#[tauri::command]
+pub async fn k8s_shell_open(
+    k8s: State<'_, K8sState>,
+    target: K8sTarget,
+    namespace: String,
+    pod: String,
+    container: String,
+    confirm_text: Option<String>,
+    on_event: tauri::ipc::Channel<ShellMessage>,
+) -> Result<ShellOpened, AppError> {
+    open_shell(&k8s, ShellMode::Exec, target, namespace, pod, container, confirm_text, on_event).await
+}
+
+/// 컨테이너의 주 프로세스에 attach한다. 입력은 컨테이너에 `stdin`과 `tty`가 켜져 있을 때만 간다(`input`).
+#[tauri::command]
+pub async fn k8s_attach_open(
+    k8s: State<'_, K8sState>,
+    target: K8sTarget,
+    namespace: String,
+    pod: String,
+    container: String,
+    confirm_text: Option<String>,
+    on_event: tauri::ipc::Channel<ShellMessage>,
+) -> Result<ShellOpened, AppError> {
+    open_shell(&k8s, ShellMode::Attach, target, namespace, pod, container, confirm_text, on_event).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn open_shell(
+    k8s: &K8sState,
+    mode: ShellMode,
+    target: K8sTarget,
+    namespace: String,
+    pod: String,
+    container: String,
+    confirm_text: Option<String>,
+    on_event: tauri::ipc::Channel<ShellMessage>,
+) -> Result<ShellOpened, AppError> {
+    shell::check_confirm(&namespace, &pod, confirm_text.as_deref())?;
+    let started = k8s.epoch(&target);
+    let session = k8s.session(&target)?;
+    let connected = shell::connect(session.client.clone(), mode, &namespace, &pod, &container, &shell::SHELL_COMMAND, session.endpoint).await?;
+    let info = ShellTarget { target: target.clone(), namespace, pod, container, mode };
+    k8s.while_current(&target, started, || k8s.shells.start(&k8s.log_path, info, connected, None, move |m| on_event.send(m).is_ok()))
+        .ok_or_else(|| AppError::other(NOT_OPENED))?
+}
+
+/// 셸·attach를 열 때 입력해야 하는 이름. 위험하지 않으면 없다(화면이 확인 창에 입력칸을 둘지 정한다).
+#[tauri::command]
+pub fn k8s_shell_confirm_name(namespace: String, pod: String) -> Option<String> {
+    change::confirm_name(Some(&namespace), &pod)
+}
+
+/// 노드 셸을 연다: 변경 틀로 만든 노드 셸 Pod가 준비되길 기다렸다가 노드의 PID 1 네임스페이스로 들어가는 셸을 연다.
+/// 열지 못하면, 그리고 셸을 닫거나 탭을 닫거나 앱을 끌 때 Pod를 지운다(변경 기록에 남는다).
+#[tauri::command]
+pub async fn k8s_node_shell_open(
+    k8s: State<'_, K8sState>,
+    target: K8sTarget,
+    namespace: String,
+    pod: String,
+    on_event: tauri::ipc::Channel<ShellMessage>,
+) -> Result<ShellOpened, AppError> {
+    let started = k8s.epoch(&target);
+    let session = k8s.session(&target)?;
+    let (client, endpoint) = (session.client.clone(), session.endpoint);
+    let remove = {
+        let (client, target, namespace, pod, log_path) = (client.clone(), target.clone(), namespace.clone(), pod.clone(), k8s.log_path.clone());
+        move || node_shell::remove(client.clone(), endpoint, target.clone(), namespace.clone(), pod.clone(), log_path.clone())
+    };
+    let opened = async {
+        node_shell::wait_ready(client.clone(), &namespace, &pod, endpoint).await?;
+        let mut command = change::NODE_SHELL_COMMAND.to_vec();
+        command.push("sh");
+        let connected = shell::connect(client.clone(), ShellMode::Exec, &namespace, &pod, change::NODE_SHELL_CONTAINER, &command, endpoint).await?;
+        let info = ShellTarget { target: target.clone(), namespace: namespace.clone(), pod: pod.clone(), container: change::NODE_SHELL_CONTAINER.into(), mode: ShellMode::Exec };
+        let cleanup: shell::Cleanup = Box::new({
+            let remove = remove.clone();
+            move || Box::pin(remove())
+        });
+        k8s.while_current(&target, started, || k8s.shells.start(&k8s.log_path, info, connected, Some(cleanup), move |m| on_event.send(m).is_ok()))
+            .ok_or_else(|| AppError::other(NOT_OPENED))?
+    }
+    .await;
+    if opened.is_err() {
+        remove().await;
+    }
+    opened
+}
+
+/// 터미널 입력(키 입력)을 보낸다. 이미 끝난 세션이면 무시한다.
+#[tauri::command]
+pub async fn k8s_shell_input(k8s: State<'_, K8sState>, shell_id: u64, data: String) -> Result<(), AppError> {
+    k8s.shells.input(shell_id, data);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn k8s_shell_resize(k8s: State<'_, K8sState>, shell_id: u64, cols: u16, rows: u16) -> Result<(), AppError> {
+    k8s.shells.resize(shell_id, cols, rows);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn k8s_shell_close(k8s: State<'_, K8sState>, shell_id: u64) {
+    k8s.shells.close(shell_id);
+}
+
+/// 로컬 `127.0.0.1` 포트를 Pod나 Service에 이어 준다. 포트는 지정하지 않으면 자동.
+#[tauri::command]
+pub async fn k8s_forward_open(k8s: State<'_, K8sState>, target: K8sTarget, request: ForwardRequest) -> Result<Forward, AppError> {
+    let started = k8s.epoch(&target);
+    let session = k8s.session(&target)?;
+    let prepared = forward::prepare(session.client.clone(), &request, session.endpoint).await?;
+    let listener = forward::bind_local(request.local_port, request.remote_port).await?;
+    k8s.while_current(&target, started, || k8s.forwards.start(target.clone(), &request, prepared, listener, session.client.clone(), session.endpoint))
+        .ok_or_else(|| AppError::other(NOT_OPENED))?
+}
+
+/// 열려 있는 port-forward 전체(모든 탭). 붙은 Pod와 최근 오류는 지금 값이다.
+#[tauri::command]
+pub fn k8s_forward_list(k8s: State<'_, K8sState>) -> Vec<Forward> {
+    k8s.forwards.list()
+}
+
+#[tauri::command]
+pub fn k8s_forward_close(k8s: State<'_, K8sState>, id: u64) {
+    k8s.forwards.close(id);
+}
+
 /// 클러스터가 내주는 종류(목록·watch가 되는 것). 사용자 정의 리소스 목록을 만든다.
 #[tauri::command]
 pub async fn k8s_kinds(k8s: State<'_, K8sState>, target: K8sTarget) -> Result<Vec<Kind>, AppError> {
@@ -453,6 +611,7 @@ pub async fn k8s_apply(k8s: State<'_, K8sState>, target: K8sTarget, change: Chan
         inverse,
         undo_of: undo_of.clone(),
         undone: false,
+        closed_at: None,
     };
     log::append(&k8s.log_path, &entry).map_err(|_| AppError::other(RECORD_FAILED))?;
     if outcome.is_ok() {

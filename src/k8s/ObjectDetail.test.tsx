@@ -1,16 +1,19 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
-import { DEPLOYMENTS, NODES, PODS, SECRETS, SERVICE_ACCOUNTS } from "./kinds";
+import { DEPLOYMENTS, NODES, PODS, SECRETS, SERVICES, SERVICE_ACCOUNTS } from "./kinds";
 import { ObjectDetail } from "./ObjectDetail";
 import {
   BACK, CHILDREN_TRUNCATED, CLOSE, NO_RECENT_EVENTS, NO_SECRET_PERMISSION, OPEN_IN_IAM, SEC_CHILDREN, SEC_OWNERS, SHOW_VALUE,
-  TAB_LOGS, TAB_YAML, YAML_SECRET_NOTE, openNode,
+  CHANGE_NODE_SHELL, CHANGE_NODE_SHELL_IMAGE, FORWARD_PORT, FORWARD_START, SHELL_OPEN, TAB_LOGS, TAB_SHELL, TAB_YAML, YAML_SECRET_NOTE, forwardPortLabel, noStreamPermission, openNode,
 } from "./text";
 import type { K8sKind, K8sObjectView, K8sRow } from "./types";
 
 vi.mock("./api", () => ({ k8sApi: { get: vi.fn(), rules: vi.fn(), secretValue: vi.fn(), logs: vi.fn(), unwatch: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
+// 터미널(xterm)은 PodTerminal.test에서 본다
+const terminalProps: Record<string, unknown>[] = [];
+vi.mock("./PodTerminal", () => ({ PodTerminal: (p: Record<string, unknown>) => (terminalProps.push(p), null) }));
 const m = vi.mocked(k8sApi);
 const T = { profile: "app", region: "r", cluster: "c" };
 
@@ -33,7 +36,11 @@ function setup(props: Partial<Parameters<typeof ObjectDetail>[0]> = {}) {
   return handlers;
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  // Pod·Service 상세가 셸·port-forward 버튼의 권한을 읽는다. 시험이 따로 정하지 않으면 아무 권한도 없다
+  m.rules.mockResolvedValue({ namespace: "prod", resourceRules: [], nonResourceRules: [], incomplete: false });
+});
 
 test("change actions appear only while change mode is enabled", async () => {
   m.get.mockResolvedValue(view());
@@ -178,4 +185,98 @@ test("the logs tab keeps its stream while the pod's detail is read again for a n
   expect(screen.getByLabelText("web-1")).toBeInTheDocument();
   expect(m.logs).toHaveBeenCalledTimes(1);
   expect(m.unwatch).not.toHaveBeenCalled();
+});
+
+const grant = (...resources: string[]) => ({
+  namespace: "prod", resourceRules: [{ verbs: ["create"], apiGroups: [""], resources, resourceNames: [] }], nonResourceRules: [], incomplete: false,
+});
+const running = { name: "app", image: "x", init: false, state: "running" as const, ready: true, restarts: 0, reason: null, message: null, lastTermination: null };
+
+test("a pod gets a shell tab with the container picker, gated by pods/exec", async () => {
+  m.get.mockResolvedValue(view({ containers: [running] }));
+  m.rules.mockResolvedValue(grant("pods/exec"));
+  setup({ changeMode: true, onChange: vi.fn() });
+  await screen.findByRole("tab", { name: TAB_SHELL });
+  fireEvent.click(screen.getByRole("tab", { name: TAB_SHELL }));
+  expect(await screen.findByRole("button", { name: SHELL_OPEN })).toBeEnabled();
+  expect(within(screen.getByRole("combobox")).getByRole("option", { name: "app" })).toBeInTheDocument();
+});
+
+test("without pods/exec the shell button is off with the reason", async () => {
+  m.get.mockResolvedValue(view({ containers: [running] }));
+  m.rules.mockResolvedValue(grant("pods/log"));
+  setup({ changeMode: true, onChange: vi.fn() });
+  fireEvent.click(await screen.findByRole("tab", { name: TAB_SHELL }));
+  expect(await screen.findByText(noStreamPermission("pods/exec"))).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: SHELL_OPEN })).toBeDisabled();
+});
+
+test("a service has no shell tab but a port-forward picker over its service ports", async () => {
+  const ports = [{ name: "web", port: 80, container: null, target: "8080" }];
+  m.get.mockResolvedValue(view({ kind: SERVICES, row: row({ name: "web" }), ports }));
+  m.rules.mockResolvedValue(grant("pods/portforward"));
+  setup({ objectRef: { kind: SERVICES, namespace: "prod", name: "web" }, changeMode: true, onChange: vi.fn() });
+  const start = await screen.findByRole("button", { name: FORWARD_START });
+  expect(screen.queryByRole("tab", { name: TAB_SHELL })).not.toBeInTheDocument();
+  await waitFor(() => expect(start).toBeEnabled());
+  fireEvent.click(start);
+  expect(within(screen.getByLabelText(FORWARD_PORT)).getByRole("option", { name: forwardPortLabel(ports[0]) })).toBeInTheDocument();
+});
+
+test("port-forward is off on a pod when pods/portforward is missing", async () => {
+  m.get.mockResolvedValue(view());
+  m.rules.mockResolvedValue(grant("pods/exec"));
+  setup({ changeMode: true, onChange: vi.fn() });
+  const start = await screen.findByRole("button", { name: FORWARD_START });
+  await waitFor(() => expect(start).toHaveAttribute("title", noStreamPermission("pods/portforward")));
+  expect(start).toBeDisabled();
+});
+
+test("shell and port-forward belong to the change mode: with it off a pod shows neither", async () => {
+  m.get.mockResolvedValue(view({ containers: [running] }));
+  m.rules.mockResolvedValue(grant("pods/exec", "pods/portforward"));
+  setup();
+  await screen.findByRole("tab", { name: TAB_LOGS });
+  expect(screen.queryByRole("tab", { name: TAB_SHELL })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: FORWARD_START })).not.toBeInTheDocument();
+});
+
+const nodeView = () => view({ kind: NODES, row: row({ name: "node-1", namespace: null, values: { status: "Ready" } }) });
+
+test("a node offers a node shell that previews a debug pod in the chosen namespace, with the image editable", async () => {
+  m.get.mockResolvedValue(nodeView());
+  m.rules.mockResolvedValue({ namespace: "dev", resourceRules: [{ verbs: ["create"], apiGroups: [""], resources: ["pods", "pods/exec"], resourceNames: [] }], nonResourceRules: [], incomplete: false });
+  const onChange = vi.fn();
+  setup({ objectRef: { kind: NODES, namespace: null, name: "node-1" }, changeMode: true, shellNamespace: "dev", onChange });
+  const button = await screen.findByRole("button", { name: CHANGE_NODE_SHELL });
+  await waitFor(() => expect(button).toBeEnabled());
+  expect(m.rules).toHaveBeenCalledWith(T, "dev", "p");
+  fireEvent.change(screen.getByLabelText(CHANGE_NODE_SHELL_IMAGE), { target: { value: "alpine:3.20" } });
+  fireEvent.click(button);
+  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ type: "nodeShell", node: "node-1", image: "alpine:3.20", namespace: "dev", kind: PODS, name: expect.stringMatching(/^mm-node-shell-[a-z0-9]+$/) }));
+});
+
+test("a node shell needs pods create and pods/exec; without them the button is off with the reason", async () => {
+  m.get.mockResolvedValue(nodeView());
+  m.rules.mockResolvedValue(grant("pods/exec"));
+  setup({ objectRef: { kind: NODES, namespace: null, name: "node-1" }, changeMode: true, onChange: vi.fn() });
+  const button = await screen.findByRole("button", { name: CHANGE_NODE_SHELL });
+  await waitFor(() => expect(button).toBeDisabled());
+});
+
+test("after the node shell change is applied the node detail opens the terminal on that pod; a stale change does not", async () => {
+  m.get.mockResolvedValue(nodeView());
+  const applied = { kind: PODS, namespace: "dev", name: "mm-node-shell-x", type: "nodeShell" as const, node: "node-1", image: "busybox:1.36" };
+  const props = { objectRef: { kind: NODES, namespace: null, name: "node-1" }, changeMode: true, onChange: vi.fn() };
+  const view1 = (change: typeof applied | null) => withClientAndSso(
+    <ObjectDetail target={T} context="ctx" ssoProfile="p" live resourceVersion="1" kinds={[]} onOpen={vi.fn()} onBack={null} onClose={vi.fn()} appliedChange={change} {...props} />,
+    qc, ssoLoginStub());
+  const qc = newQueryClient();
+  const r = render(view1(applied));
+  await screen.findByRole("tab", { name: TAB_YAML });
+  // 마운트 전에 이미 적용돼 있던 변경으로는 열지 않는다
+  expect(screen.queryByRole("tab", { name: TAB_SHELL })).not.toBeInTheDocument();
+  r.rerender(view1({ ...applied }));
+  expect(await screen.findByRole("tab", { name: TAB_SHELL })).toHaveAttribute("aria-selected", "true");
+  expect(terminalProps[terminalProps.length - 1]).toMatchObject({ mode: "node", namespace: "dev", pod: "mm-node-shell-x" });
 });

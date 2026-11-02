@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { errorMessage } from "../api/errors";
 import { k8sApi } from "./api";
 import { can } from "./can";
+import { PODS } from "./kinds";
+import { streamPermission } from "./streams";
 import * as t from "./text";
 import type { K8sChange, K8sObjectView, K8sRevision, K8sRules, K8sTarget, ObjectRef } from "./types";
 
@@ -11,11 +13,19 @@ interface Props {
   objectRef: ObjectRef;
   view: K8sObjectView;
   rules: K8sRules | undefined;
+  /** 노드 셸 Pod를 만들 네임스페이스(고른 네임스페이스, 모든 네임스페이스면 default) */
+  shellNamespace?: string;
   onStart: (change: K8sChange) => void;
 }
 
+/** 노드 셸 디버그 Pod의 기본 이미지(미리보기 전에 고칠 수 있다) */
+export const NODE_SHELL_IMAGE = "busybox:1.36";
+
+/** 노드 셸 Pod 이름: 소문자 DNS 라벨 */
+const nodeShellPodName = () => `mm-node-shell-${Date.now().toString(36)}`;
+
 /** 객체 종류와 권한에 맞는 워크로드 변경을 고른다. */
-export function ChangeActions({ target, ssoProfile, objectRef, view, rules, onStart }: Props) {
+export function ChangeActions({ target, ssoProfile, objectRef, view, rules, shellNamespace = "default", onStart }: Props) {
   const { kind, name } = objectRef;
   const workload = kind.group === "apps" && ["Deployment", "StatefulSet", "DaemonSet"].includes(kind.kind);
   const scalable = workload && kind.kind !== "DaemonSet";
@@ -27,6 +37,7 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, onSt
   const [revision, setRevision] = useState("");
   const [revisionError, setRevisionError] = useState("");
   const [picking, setPicking] = useState(false);
+  const [shellImage, setShellImage] = useState(NODE_SHELL_IMAGE);
 
   useEffect(() => {
     if (!picking) return;
@@ -58,6 +69,9 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, onSt
   const validReplicas = /^\d+$/.test(replicas) && Number.isSafeInteger(Number(replicas)) && Number(replicas) <= 2147483647;
   const suspended = view.row.values.suspend === "true";
   const node = kind.group === "" && kind.kind === "Node";
+  // 노드 셸: 디버그 Pod 만들기(pods create)와 그 Pod에 들어가기(pods/exec)
+  const nodeShellDenied =
+    (rules && can(rules, { verb: "create", group: "", resource: "pods" }) === "no" ? t.CHANGE_DENIED("create", "pods") : undefined) ?? streamPermission(rules, "exec").reason ?? undefined;
   const cordoned = view.row.values.status?.includes("SchedulingDisabled") ?? false;
   // drain은 노드를 cordon(patch)하고 Pod마다 Eviction(pods/eviction create)을 보낸다
   const drainDenied = patch ?? denied("create", "", "pods", false, "eviction");
@@ -110,11 +124,22 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, onSt
         />
       )}
       {node && (
-        <ActionButton
-          label={t.CHANGE_DRAIN}
-          reason={drainDenied}
-          onClick={() => onStart({ ...objectRef, type: "drain" })}
-        />
+        <>
+          <ActionButton
+            label={t.CHANGE_DRAIN}
+            reason={drainDenied}
+            onClick={() => onStart({ ...objectRef, type: "drain" })}
+          />
+          <label>
+            {t.CHANGE_NODE_SHELL_IMAGE} <input value={shellImage} onChange={(e) => setShellImage(e.target.value)} />
+          </label>
+          <ActionButton
+            label={t.CHANGE_NODE_SHELL}
+            reason={nodeShellDenied}
+            invalid={!shellImage.trim() || /\s/.test(shellImage.trim())}
+            onClick={() => onStart({ kind: PODS, namespace: shellNamespace, name: nodeShellPodName(), type: "nodeShell", node: name, image: shellImage.trim() })}
+          />
+        </>
       )}
       <ActionButton label={t.CHANGE_DELETE} reason={denied("delete")} onClick={() => onStart({ ...objectRef, type: "delete" })} />
     </div>

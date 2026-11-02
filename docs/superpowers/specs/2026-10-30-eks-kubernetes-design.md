@@ -34,7 +34,7 @@
 
 ### 진행 예정: Lens·k9s 대비 빈 기능 (2026-11-02 정리)
 지금 된 것은 K1·K2와 K3 일부(Pod 로그)다. Lens·k9s의 주요 기능 중 없는 것:
-1. 클러스터를 바꾸는 조작: Pod 셸(exec)·port-forward(K9), scale·rollout restart·rollout undo·삭제(K7 A), cordon·uncordon·drain(K7 B), YAML 편집·적용·새로 만들기(K8 E). 설계에 없는 것: 컨테이너 attach, 노드 셸(디버그 Pod), CronJob 바로 실행(K7 A의 Job 재실행에 포함)·일시정지.
+1. 클러스터를 바꾸는 조작: Pod 셸(exec)·port-forward(K9), scale·rollout restart·rollout undo·삭제(K7 A), cordon·uncordon·drain(K7 B), YAML 편집·적용·새로 만들기(K8 E). 컨테이너 attach와 노드 셸(디버그 Pod)은 C 절에 들어왔고(2026-11-02) 구현했다. CronJob 바로 실행은 K7 A의 Job 재실행에 포함, 일시정지는 K7 A.
 2. 로그: 워크로드 합친 로그(Pod별 색, 새 Pod 따라 붙기)·since(최근 N분)·파일 저장(K3 남은 것), 모든 컨테이너 한꺼번에, 서버 타임스탬프·줄바꿈 토글.
 3. 리소스 사용량: Pod·컨테이너 CPU/메모리 열(metrics-server, 지금은 개요의 노드 사용량만), request·limit 대비 %, Prometheus 그래프, 워크로드·네임스페이스 집계.
 4. 트리에 없는 내장 종류: HPA, PDB, ResourceQuota, LimitRange, PriorityClass, RuntimeClass, Lease, Mutating·ValidatingWebhookConfiguration, EndpointSlice, IngressClass, Role·ClusterRole·RoleBinding·ClusterRoleBinding, CustomResourceDefinition 자체.
@@ -205,6 +205,17 @@
 - 셸: `kube-rs` `exec`(웹소켓). `/bin/bash`, 없으면 `/bin/sh`. 터미널은 xterm.js, 크기 변경을 전달한다. 열 때 확인, 위험 네임스페이스면 이름 입력. 기록은 열고 닫은 시각과 대상만.
 - port-forward: `kube-rs` `portforward`. 로컬은 `127.0.0.1`만, 포트는 자동(직접 지정 가능). Service는 준비된 Pod 하나로, 그 Pod가 사라지면 다른 Pod로 다시 붙는다. 포트포워딩 화면에서 보고 닫는다. 탭을 닫거나 앱을 끄면 모두 닫는다.
 - attach(2026-11-02 추가): 컨테이너의 주 프로세스에 붙는다(`kube-rs` `attach`). `stdin`·`tty`가 켜진 컨테이너만 입력을 보낸다(아니면 출력만). 셸과 같은 터미널. "입력·Ctrl-C가 주 프로세스로 간다" 경고와 함께 연다.
+- 지금 된 것(2026-11-02, K9 셸·attach·port-forward·노드 셸. 변경 공통 틀에 합쳤다):
+  - 백엔드: `k8s/shell.rs`(exec·attach), `k8s/forward.rs`(port-forward). `kube`에 `ws` 기능을 켰다. 세션은 `K8sState`의 `shells`·`forwards`가 쥐고 `k8s_close`(탭 닫기)와 앱 종료(`RunEvent::Exit`)에서 모두 닫는다. 같은 대상을 닫지 않고 다시 열어도(재연결) 옛 세션을 닫는다.
+  - 셸: 명령은 `/bin/sh -c '[ -x /bin/bash ] && exec /bin/bash; exec /bin/sh'`(bash가 있으면 bash, 없으면 sh). tty로 열고 크기 변경을 전달한다. 입력은 출력과 다른 작업이 써서 큰 붙여넣기가 출력을 막지 않는다. 출력은 UTF-8 경계를 이어 붙여 글로 보내고, 끝나면 `exit`(종료 코드 또는 사유, 코드 없이 닫히면 연결이 끊긴 것)를 보낸다. 열기 전에 Pod를 읽어 컨테이너가 있고 실행 중인지 본다.
+  - attach(`k8s_attach_open`): 컨테이너 설정의 `stdin`·`tty`가 둘 다 켜졌을 때만 입력(`input: true`). tty가 아니면 stderr도 받고, tty면 stdout만(서버가 tty와 stderr 동시 요청을 거절한다). 화면은 "입력·Ctrl-C가 주 프로세스로 간다" 경고를 열기 전 확인과 세션 동안 보여 주고, 입력이 없으면 "출력만 볼 수 있어요"를 보인다.
+  - 확인과 위험 판단: 위험한 대상(네임스페이스가 `kube-system`이거나 이름에 `prod`, 또는 객체 이름에 `prod`)은 `confirmText`가 Pod 이름과 같아야 열린다. 판단은 변경 공통 틀의 `change::dangerous`·`confirm_name` 하나다(미리보기의 `confirmName`과 셸 확인이 같은 함수를 쓴다). 화면은 규칙을 따로 갖지 않고 `k8s_shell_confirm_name`으로 입력할 이름을 묻는다.
+  - 기록: 셸·attach·노드 셸 세션은 변경 기록(`k8s-changes.jsonl`)에 한 줄(`Operation::Shell { container, mode }`, 대상 Pod, 되돌리기 없음)로 남고 닫을 때 `closedAt`이 채워진다(열고 닫은 시각과 대상만, 입력·출력은 어디에도 없다). 기록을 쓰지 못하면 열지 않는다. 변경 기록 화면이 이 줄을 "닫음 시각"과 함께 보인다(되돌리기 버튼 없음). `k8s-shell.jsonl`은 없앴다.
+  - port-forward: 로컬은 `127.0.0.1`만. 로컬 포트를 정하지 않으면 원격과 같은 번호(1024 이상)를 먼저 시도하고 안 되면 운영체제가 고른 포트. 열기 전에 대상을 읽고 웹소켓을 한 번 열어 보고 닫아 권한·연결 오류를 바로 알린다. 로컬 연결이 올 때마다 `pods/portforward`를 하나씩 연다. Service는 셀렉터의 준비된(Ready, 지워지는 중 아님) Pod 중 이름순 첫 Pod에 붙고(붙어 있던 Pod가 아직 준비돼 있으면 옮기지 않는다), Pod를 지켜보다가 그 Pod가 사라지거나 준비가 풀리면 다른 Pod로 옮긴다(이름 있는 `targetPort`는 고른 Pod의 컨테이너 포트 이름으로 푼다). 준비된 Pod가 없으면 연결 하나가 최대 15초 기다린다. TCP 포트만.
+  - 화면: 변경 토글이 켜졌을 때만 Pod 상세에 "셸" 탭(컨테이너 고르기, 셸/attach, 확인 창)과 터미널(xterm.js, 다른 탭을 봐도 세션 유지, Pod를 바꾸거나 세션을 닫으면 끊김), Pod·Service 상세에 "포트포워딩" 버튼(`k8s_get`의 `ports`에서 고르거나 직접 입력, 로컬 포트는 비우면 자동)이 보인다. 왼쪽 메뉴 "포트포워딩"(이 클러스터의 목록: 브라우저로 열기, 주소 복사, 닫기)은 토글과 무관하게 늘 보인다: 읽기이고, 닫는 것은 이 컴퓨터의 소켓이지 클러스터 변경이 아니다. 권한은 `pods/exec`·`pods/attach`·`pods/portforward`의 `create`를 내 권한(`can`)으로 보고, 없으면 버튼을 끄고 이유를 보인다.
+  - 계약에 더한 것: `k8s_attach_open`, `k8s_shell_confirm_name(namespace, pod): string | null`, `k8s_node_shell_open(target, namespace, pod, channel): ShellId`, `ShellId = { id, input }`, `K8sForward`의 `target`·`namespace`·`kind`·`name`·`remotePort`·`pod`·`error`, `k8s_get` 결과의 `ports`(Pod는 컨테이너 포트, Service는 Service 포트와 `target`), 변경 종류 `shell`(기록 전용)·`nodeShell`, 변경 기록 `closedAt`.
+  - 노드 셸(구현): Node 상세(변경 토글 켜짐)의 "노드 셸" 버튼(이미지 입력칸, 기본 `busybox:1.36`, 권한은 pods create와 pods/exec)이 변경 틀의 `nodeShell` 변경을 시작한다. 대상은 만들 Pod(`mm-node-shell-<시각>`, 고른 네임스페이스, 모든 네임스페이스면 `default`), 노드는 변경의 `node`. 미리보기는 `POST /api/v1/namespaces/<ns>/pods`와 본문(`nodeName`, `hostPID`·`hostNetwork`·`hostIPC`, privileged, 노드 루트를 `/host`에 마운트, 모든 taint 허용, 8시간 `activeDeadlineSeconds`와 `terminationGracePeriodSeconds: 0`)과 경고를 보이고, 입력할 이름은 늘 노드 이름이다. 서버 dry-run을 거치고(Pod 보안 정책이 막으면 미리보기에서 실패) 적용은 변경 기록에 남는다. 적용이 끝나면 노드 상세가 `k8s_node_shell_open`으로 Pod의 `shell` 컨테이너가 실행될 때까지(최대 60초) 기다렸다가 `nsenter -t 1 -m -u -i -n -p -- sh`로 들어간다. Pod는 앱이 붙인 표시(`app.kubernetes.io/managed-by=magic-mirror`와 `magic-mirror.io/node-shell=true`)가 있는 것만 다룬다. 열지 못하거나 세션이 끝나거나(셸 종료, 세션 닫기, 탭 닫기, 앱 종료) 하면 같은 변경 틀(미리보기·재확인·`exec.rs`)로 Pod를 지우고 그 지우기도 변경 기록에 남긴다(앱 종료는 최대 10초 기다린다). 끝난 노드 셸은 "다시 열기"가 없다.
+  - 남은 것: 없음(K9 범위).
 - 노드 셸(2026-11-02 추가, `kubectl debug node`와 같은 방식): 그 노드에 고정한(`nodeName`) 디버그 Pod를 만든다. `hostPID`·`hostNetwork`·`hostIPC`, `privileged`, 노드 루트를 `/host`에 마운트, 이미지는 미리보기에서 고칠 수 있는 기본값(busybox), 명령은 `nsenter -t 1 -m -u -i -n -p -- sh`. Pod 만들기는 변경 공통 틀(미리보기·이름 입력 필수·기록)을 거치고, 셸을 닫으면 Pod를 지운다(지우기도 기록). 네임스페이스는 고른 네임스페이스, 모든 네임스페이스면 `default`.
 
 ### D. 권한 변경
@@ -245,12 +256,15 @@ k8s_apply(target, K8sChange, confirmText | null, undoOf | null): K8sApplyResult
 k8s_preview_batch(target, K8sChange[]): K8sBatchPreview
 k8s_apply_batch(target, K8sChange[], confirmText | null, undoOf: string[] | null): K8sBatchResult
 k8s_drain(target, node, confirmText, channel): StreamId        // 진행 상황을 채널로. 중단은 k8s_unwatch(streamId)
-k8s_shell_open(target, namespace, pod, container, confirmText | null, channel): ShellId
+k8s_shell_open(target, namespace, pod, container, confirmText | null, channel): ShellId   // ShellId = { id, input }
+k8s_attach_open(target, namespace, pod, container, confirmText | null, channel): ShellId  // 셸과 같은 채널·입력·크기·닫기. 입력은 컨테이너에 stdin·tty가 켜져 있을 때만(input)
 k8s_shell_input(shellId, data: string): void
 k8s_shell_resize(shellId, cols, rows): void
 k8s_shell_close(shellId): void
-k8s_forward_open(target, K8sForwardRequest): K8sForward        // { id, localPort }
-k8s_forward_list(): K8sForward[]
+k8s_shell_confirm_name(namespace, pod): string | null            // 위험하지 않으면 null. 셸·attach 확인 창이 입력칸을 둘지 정한다
+k8s_node_shell_open(target, namespace, pod, channel): ShellId    // 변경 틀로 만든 노드 셸 Pod에 들어간다. 닫으면 Pod를 지운다
+k8s_forward_open(target, K8sForwardRequest): K8sForward        // { id, localPort, target, namespace, kind, name, remotePort, pod, error }
+k8s_forward_list(): K8sForward[]                                // 모든 탭의 것. pod(지금 붙은 Pod)와 error(최근 실패)는 지금 값
 k8s_forward_close(id): void
 k8s_change_log(): K8sChangeLogEntry[]
 k8s_undo(logId): K8sUndo

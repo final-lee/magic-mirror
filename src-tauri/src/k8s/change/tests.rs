@@ -147,3 +147,66 @@ fn cordon_and_uncordon_preview_inverse_and_resource_version() {
     assert_eq!(plan.preview.diff[0].after, true);
     assert_eq!(plan.inverse.unwrap().operation, Operation::Cordon { unschedulable: false });
 }
+
+fn node_shell(pod: &str, node: &str, image: &str) -> Change {
+    Change { target: pod_object("default", pod), operation: Operation::NodeShell { node: node.into(), image: image.into() } }
+}
+
+#[test]
+fn danger_covers_system_and_prod_namespaces_and_prod_names() {
+    assert!(dangerous(Some("kube-system"), "coredns"));
+    assert!(dangerous(Some("shop-prod"), "web"));
+    assert!(dangerous(Some("dev"), "Prod-db-0"));
+    assert!(!dangerous(Some("dev"), "web-1"));
+    assert!(!dangerous(None, "node-1"));
+    assert_eq!(confirm_name(Some("kube-system"), "coredns").as_deref(), Some("coredns"));
+    assert_eq!(confirm_name(Some("dev"), "web-1"), None);
+}
+
+#[test]
+fn node_shell_previews_a_privileged_pod_pinned_to_the_node_and_needs_the_node_name() {
+    let c = node_shell("mm-node-shell-1", "ip-10-0-1-2", "busybox:1.36");
+    // 만들 Pod는 아직 없다: 읽은 객체 없이 계획한다
+    let p = plan(&c, None, None, "").unwrap();
+    let call = &p.preview.calls[0];
+    assert_eq!((call.verb.as_str(), call.path.as_str()), ("POST", "/api/v1/namespaces/default/pods"));
+    assert_eq!(call.body["spec"]["nodeName"], "ip-10-0-1-2");
+    assert_eq!(call.body["spec"]["containers"][0]["image"], "busybox:1.36");
+    assert_eq!(call.body["spec"]["containers"][0]["securityContext"]["privileged"], true);
+    assert!(["hostPID", "hostNetwork", "hostIPC"].iter().all(|k| call.body["spec"][k] == true));
+    assert_eq!(call.body["spec"]["volumes"][0]["hostPath"]["path"], "/");
+    assert_eq!(call.body["spec"]["containers"][0]["volumeMounts"][0]["mountPath"], "/host");
+    // 앱이 지울 Pod를 알아보는 표시
+    assert_eq!(call.body["metadata"]["labels"][NODE_SHELL_MANAGED_KEY], NODE_SHELL_MANAGED_VALUE);
+    assert_eq!(call.body["metadata"]["labels"][NODE_SHELL_LABEL], "true");
+    assert!(!p.preview.warnings.is_empty() && !p.preview.reversible && p.inverse.is_none());
+    // 이름 입력은 늘 필요하고, 입력할 이름은 노드 이름이다
+    assert_eq!(p.preview.confirm_name.as_deref(), Some("ip-10-0-1-2"));
+    assert!(commit::check(Some(&p), &p, None).is_err());
+    assert!(commit::check(Some(&p), &p, Some("mm-node-shell-1")).is_err());
+    assert!(commit::check(Some(&p), &p, Some("ip-10-0-1-2")).is_ok());
+}
+
+#[test]
+fn node_shell_image_is_editable_and_the_same_request_plans_the_same_way() {
+    let a = plan(&node_shell("mm-node-shell-1", "n", "alpine:3.20"), None, None, "").unwrap();
+    let b = plan(&node_shell("mm-node-shell-1", "n", "alpine:3.20"), None, None, "later").unwrap();
+    assert_eq!(a.preview.calls[0].body["spec"]["containers"][0]["image"], "alpine:3.20");
+    // 재확인이 미리보기와 같은 계획으로 통과해야 적용된다
+    assert!(same_except_version(&a, &b));
+}
+
+#[test]
+fn node_shell_rejects_bad_names_and_images() {
+    for (pod, node, image) in [("", "n", "i"), ("Has-Upper", "n", "i"), ("-lead", "n", "i"), ("trail-", "n", "i"), ("ok", "", "i"), ("ok", "n", ""), ("ok", "n", "bad image"), ("ok", "n", "bad\nimage")] {
+        assert!(plan(&node_shell(pod, node, image), None, None, "").is_err(), "{pod:?} {node:?} {image:?}");
+    }
+    assert!(plan(&node_shell(&"a".repeat(64), "n", "i"), None, None, "").is_err());
+    assert!(plan(&node_shell(&"a".repeat(63), "n", "i"), None, None, "").is_ok());
+}
+
+#[test]
+fn a_shell_record_is_not_a_plannable_change() {
+    let c = Change { target: pod_object("default", "web-1"), operation: Operation::Shell { container: "app".into(), mode: ShellMode::Exec } };
+    assert!(plan(&c, Some(&json!({"metadata":{"resourceVersion":"1"}})), None, "").is_err());
+}

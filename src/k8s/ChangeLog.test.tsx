@@ -4,7 +4,8 @@ import { k8sApi } from "./api";
 import { ChangeDialog, useK8sChange } from "./ChangeFlow";
 import { ChangeLog } from "./ChangeLog";
 import { DEPLOYMENTS } from "./kinds";
-import { CHANGE_UNDO } from "./text";
+import { CHANGE_UNDO, SHELL_CLOSED_AT } from "./text";
+import { formatDateTime } from "../iam/format";
 import type { K8sChange } from "./types";
 
 vi.mock("./api", () => ({ k8sApi: { changeLog: vi.fn(), undo: vi.fn(), preview: vi.fn(), apply: vi.fn() } }));
@@ -59,4 +60,15 @@ test("undo opens the shared preview and sends undoOf when applied", async () => 
   expect(k8sApi.preview).toHaveBeenCalledWith(target, change, "p");
   fireEvent.click(screen.getByRole("button", { name: "적용" }));
   await waitFor(() => expect(k8sApi.apply).toHaveBeenCalledWith(target, change, null, "one", "p"));
+});
+
+test("a shell session shows when it was opened and closed and can never be undone", async () => {
+  const session: K8sChange = { kind: { group: "", version: "v1", kind: "Pod", plural: "pods", namespaced: true }, namespace: "dev", name: "web-1", type: "shell", container: "app", mode: "exec" };
+  vi.mocked(k8sApi.changeLog).mockResolvedValue([
+    { id: "s1", at: "2026-10-30T11:00:00Z", target, change: session, summary: "Pod 셸 열기: dev/web-1 (app)", ok: true, error: null, inverse: null, undoOf: null, undone: false, closedAt: "2026-10-30T11:05:00Z" },
+  ]);
+  render(withClientAndSso(<ChangeLog target={target} onStart={vi.fn()} changeMode />, newQueryClient(), ssoLoginStub()));
+  expect(await screen.findByText("Pod 셸 열기: dev/web-1 (app)")).toBeInTheDocument();
+  expect(screen.getByText(new RegExp(SHELL_CLOSED_AT(formatDateTime("2026-10-30T11:05:00Z"))))).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: CHANGE_UNDO })).not.toBeInTheDocument();
 });

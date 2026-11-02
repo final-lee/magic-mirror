@@ -88,6 +88,18 @@ pub struct EventView {
     pub object: String,
 }
 
+/// port-forward로 고를 수 있는 TCP 포트 하나(Pod는 컨테이너 포트, Service는 Service 포트)
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortView {
+    pub name: Option<String>,
+    pub port: u16,
+    /// Pod: 이 포트를 가진 컨테이너
+    pub container: Option<String>,
+    /// Service: Pod로 가는 포트(번호 또는 이름). 정하지 않았으면 없다.
+    pub target: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectView {
@@ -104,6 +116,8 @@ pub struct ObjectView {
     pub events_error: Option<AppError>,
     pub yaml: String,
     pub secret_keys: Option<Vec<SecretKey>>,
+    /// Pod와 Service만. TCP 포트만 담는다.
+    pub ports: Vec<PortView>,
 }
 
 fn opt(v: &Value, key: &str) -> Option<String> {
@@ -276,6 +290,37 @@ pub fn events_of(items: &[DynamicObject]) -> Vec<EventView> {
     out
 }
 
+/// Pod의 컨테이너 포트나 Service의 포트 중 TCP인 것
+pub fn ports_of(kind: &KindRef, d: &Value) -> Vec<PortView> {
+    let tcp = |p: &Value| p["protocol"].as_str().is_none_or(|x| x == "TCP");
+    let number = |v: &Value| v.as_u64().and_then(|n| u16::try_from(n).ok());
+    if kind.group.is_empty() && kind.kind == "Pod" {
+        return list(d, "/spec/containers")
+            .iter()
+            .flat_map(|c| list(c, "/ports").iter().map(move |p| (c, p)))
+            .filter(|(_, p)| tcp(p))
+            .filter_map(|(c, p)| {
+                Some(PortView { name: opt(p, "name"), port: number(&p["containerPort"])?, container: opt(c, "name"), target: None })
+            })
+            .collect();
+    }
+    if kind.group.is_empty() && kind.kind == "Service" {
+        return list(d, "/spec/ports")
+            .iter()
+            .filter(|p| tcp(p))
+            .filter_map(|p| {
+                let target = match &p["targetPort"] {
+                    Value::Number(n) => Some(n.to_string()),
+                    Value::String(s) => Some(s.clone()),
+                    _ => None,
+                };
+                Some(PortView { name: opt(p, "name"), port: number(&p["port"])?, container: None, target })
+            })
+            .collect();
+    }
+    vec![]
+}
+
 /// 객체 하나에서 만들 수 있는 것. 자식과 이벤트는 `get`이 따로 채운다.
 pub fn view_of(kind: &KindRef, obj: &DynamicObject) -> Result<ObjectView, AppError> {
     let mut json = serde_json::to_value(obj).map_err(|_| AppError::other(YAML_FAILED))?;
@@ -308,6 +353,7 @@ pub fn view_of(kind: &KindRef, obj: &DynamicObject) -> Result<ObjectView, AppErr
         events_error: None,
         yaml: view_yaml(kind, &json)?,
         secret_keys,
+        ports: ports_of(kind, &json),
     })
 }
 

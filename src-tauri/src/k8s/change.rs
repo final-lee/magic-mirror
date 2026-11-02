@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 
 use super::drain::DrainPlan;
 use super::rows::KindRef;
+use super::shell::ShellMode;
 use crate::error::AppError;
 
 pub const INVALID_CHANGE: &str = "이 리소스에는 이 변경을 적용할 수 없어요";
@@ -20,6 +21,18 @@ pub const RECREATE_IMPACT: &str = "삭제한 객체를 다시 만듭니다";
 pub const SUSPEND_IMPACT: &str = "CronJob 예약 실행 상태를 바꿉니다";
 pub const RERUN_IMPACT: &str = "새 Job을 만듭니다";
 pub const CORDON_IMPACT: &str = "노드의 새 Pod 스케줄을 바꿉니다";
+pub const NODE_SHELL_IMPACT: &str = "그 노드에 디버그 Pod를 만들어 노드 셸을 엽니다. 셸을 닫으면 Pod를 지웁니다";
+pub const NODE_SHELL_WARNING: &str = "노드의 루트 권한(privileged, 호스트 PID·네트워크·IPC, 노드 루트 파일 시스템)을 가진 Pod를 만들어요";
+/// 노드 셸 Pod를 알아보는 표시. 앱이 지울 수 있는 Pod는 이 표시가 붙은 것뿐이다.
+pub const NODE_SHELL_MANAGED_KEY: &str = "app.kubernetes.io/managed-by";
+pub const NODE_SHELL_MANAGED_VALUE: &str = "magic-mirror";
+pub const NODE_SHELL_LABEL: &str = "magic-mirror.io/node-shell";
+pub const NODE_SHELL_NODE_ANNOTATION: &str = "magic-mirror.io/node";
+pub const NODE_SHELL_CONTAINER: &str = "shell";
+/// 노드 셸 Pod의 최대 수명(초)
+pub const NODE_SHELL_MAX_SECS: u64 = 28_800;
+/// 노드 셸로 들어갈 명령: 노드의 PID 1 네임스페이스로 들어가 노드의 sh를 연다
+pub const NODE_SHELL_COMMAND: [&str; 9] = ["nsenter", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--"];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,6 +56,10 @@ pub enum Operation {
     Cordon { unschedulable: bool },
     /// 노드를 스케줄 중지하고 Pod를 하나씩 옮긴다. 적용은 스트림(`k8s_drain`)으로 한다.
     Drain,
+    /// 셸·attach 세션을 연 기록. 클러스터에 쓰지 않으니 미리보기·적용 대상이 아니다.
+    Shell { container: String, mode: ShellMode },
+    /// 노드 셸 디버그 Pod 만들기. 대상(`Change.target`)은 만들 Pod, `node`는 고정할 노드.
+    NodeShell { node: String, image: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -159,6 +176,70 @@ fn inverse(change: &Change, operation: Operation) -> Change {
     Change { target: change.target.clone(), operation }
 }
 
+/// 네임스페이스의 Pod 하나를 가리키는 변경 대상
+pub fn pod_object(namespace: &str, name: &str) -> ChangeObject {
+    ChangeObject {
+        kind: KindRef { group: String::new(), version: "v1".into(), kind: "Pod".into(), plural: "pods".into(), namespaced: true },
+        namespace: Some(namespace.to_string()),
+        name: name.to_string(),
+    }
+}
+
+/// 이름 입력이 필요한 위험한 대상: `kube-system` 네임스페이스, 이름에 `prod`가 들어간 네임스페이스나 객체.
+/// 변경 미리보기와 셸·attach 열기가 같은 규칙을 쓴다.
+pub fn dangerous(namespace: Option<&str>, name: &str) -> bool {
+    namespace == Some("kube-system") || namespace.is_some_and(|ns| ns.to_ascii_lowercase().contains("prod")) || name.to_ascii_lowercase().contains("prod")
+}
+
+/// 위험한 대상이면 입력해야 하는 이름(대상 이름)
+pub fn confirm_name(namespace: Option<&str>, name: &str) -> Option<String> {
+    dangerous(namespace, name).then(|| name.to_string())
+}
+
+/// 노드 셸 Pod 이름: 소문자 DNS 라벨(63자 이내). 노드 이름과 이미지는 비어 있지 않고 공백·제어 문자가 없어야 한다.
+fn valid_node_shell(pod: &str, node: &str, image: &str) -> bool {
+    let label = !pod.is_empty()
+        && pod.len() <= 63
+        && pod.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && !pod.starts_with('-')
+        && !pod.ends_with('-');
+    let plain = |s: &str| !s.is_empty() && !s.chars().any(|c| c.is_whitespace() || c.is_control());
+    label && plain(node) && plain(image)
+}
+
+/// 그 노드에 고정한 디버그 Pod(`kubectl debug node`와 같은 방식): 호스트 PID·네트워크·IPC, privileged, 노드 루트를 `/host`에.
+pub fn node_shell_pod(name: &str, namespace: &str, node: &str, image: &str) -> Value {
+    json!({
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": name,
+            "namespace": namespace,
+            "labels": { NODE_SHELL_MANAGED_KEY: NODE_SHELL_MANAGED_VALUE, NODE_SHELL_LABEL: "true" },
+            "annotations": { NODE_SHELL_NODE_ANNOTATION: node },
+        },
+        "spec": {
+            "nodeName": node,
+            "hostPID": true,
+            "hostNetwork": true,
+            "hostIPC": true,
+            "restartPolicy": "Never",
+            "terminationGracePeriodSeconds": 0,
+            // 앱이 비정상으로 끝나 지우지 못해도 이 시간이 지나면 끝난다
+            "activeDeadlineSeconds": NODE_SHELL_MAX_SECS,
+            "tolerations": [{ "operator": "Exists" }],
+            "containers": [{
+                "name": NODE_SHELL_CONTAINER,
+                "image": image,
+                "command": ["sleep", NODE_SHELL_MAX_SECS.to_string()],
+                "securityContext": { "privileged": true },
+                "volumeMounts": [{ "name": "host-root", "mountPath": "/host" }],
+            }],
+            "volumes": [{ "name": "host-root", "hostPath": { "path": "/" } }],
+        },
+    })
+}
+
 /// API 경로·본문, 필드 차이와 위험 확인을 같은 입력에서 만든다.
 pub fn plan(change: &Change, current: Option<&Value>, revision: Option<&Value>, now: &str) -> Result<Plan, AppError> {
     let target = &change.target;
@@ -172,7 +253,7 @@ pub fn plan(change: &Change, current: Option<&Value>, revision: Option<&Value>, 
     if target.name.is_empty() || target.kind.namespaced != target.namespace.as_ref().is_some_and(|s| !s.is_empty()) {
         return Err(AppError::other(INVALID_CHANGE));
     }
-    let recreate = matches!(change.operation, Operation::Recreate { .. });
+    let recreate = matches!(change.operation, Operation::Recreate { .. } | Operation::NodeShell { .. });
     let version = current.and_then(|v| v.pointer("/metadata/resourceVersion")).and_then(Value::as_str).map(str::to_owned);
     if !recreate && version.is_none() {
         return Err(AppError::other(MISSING_VERSION));
@@ -186,7 +267,7 @@ pub fn plan(change: &Change, current: Option<&Value>, revision: Option<&Value>, 
         }
     }
     let owned = obj.pointer("/metadata/ownerReferences").and_then(Value::as_array).is_some_and(|a| !a.is_empty());
-    let dangerous = target.namespace.as_deref() == Some("kube-system") || target.name.to_ascii_lowercase().contains("prod")
+    let dangerous = dangerous(target.namespace.as_deref(), &target.name)
         || (matches!(change.operation, Operation::Delete) && (owned || matches!(kind, "Namespace" | "Node" | "CustomResourceDefinition" | "PersistentVolume")));
     let mut warnings = Vec::new();
     let mut diff = Vec::new();
@@ -290,6 +371,14 @@ pub fn plan(change: &Change, current: Option<&Value>, revision: Option<&Value>, 
             impact.push(RERUN_IMPACT.into());
             ("POST", json!({"apiVersion":"batch/v1","kind":"Job","metadata":metadata,"spec":spec}), true)
         }
+        Operation::NodeShell { node, image } if group.is_empty() && kind == "Pod" => {
+            if !valid_node_shell(&target.name, node, image) {
+                return Err(AppError::other(INVALID_CHANGE));
+            }
+            warnings.push(NODE_SHELL_WARNING.into());
+            impact.push(NODE_SHELL_IMPACT.into());
+            ("POST", node_shell_pod(&target.name, target.namespace.as_deref().unwrap_or_default(), node, image), true)
+        }
         _ => return Err(AppError::other(INVALID_CHANGE)),
     };
     let call_path = if matches!(change.operation, Operation::Rerun { .. }) {
@@ -299,8 +388,13 @@ pub fn plan(change: &Change, current: Option<&Value>, revision: Option<&Value>, 
     } else {
         path(target, collection)
     };
+    // 노드 셸은 늘 노드 이름을 입력해야 한다(Pod 이름이 아니라 루트 권한을 얻는 노드)
+    let confirm_name = match &change.operation {
+        Operation::NodeShell { node, .. } => Some(node.clone()),
+        _ => dangerous.then(|| target.name.clone()),
+    };
     Ok(Plan {
-        preview: Preview { calls: vec![ApiCall { verb: verb.into(), path: call_path, body }], diff, impact, warnings, confirm_name: dangerous.then(|| target.name.clone()), reversible: undo.is_some(), drain: None },
+        preview: Preview { calls: vec![ApiCall { verb: verb.into(), path: call_path, body }], diff, impact, warnings, confirm_name, reversible: undo.is_some(), drain: None },
         inverse: undo,
         version,
         fingerprint: current.map(fingerprint),

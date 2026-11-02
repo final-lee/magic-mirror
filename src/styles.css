@@ -1082,3 +1082,24 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .argo-node-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
 .argo-node .argo-pre { margin-top: 2px; }
 .argo-raw { margin: 0; }
+
+/* 셸·attach 터미널과 port-forward(K9) */
+.k8s-shell-host { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.k8s-shell-host[hidden] { display: none; }
+.k8s-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.k8s-shell-form, .k8s-confirm, .k8s-forward-panel { display: grid; gap: 8px; padding: 10px 12px; justify-items: start; }
+.k8s-confirm { border: 1px solid var(--line); border-radius: 6px; margin: 8px 12px; }
+.k8s-forward-panel { flex-basis: 100%; padding: 8px 0 0; }
+.k8s-forward-done { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.k8s-field { display: grid; gap: 4px; font-size: 12px; color: var(--dim); }
+.k8s-shell-bar { display: flex; align-items: center; gap: 8px; padding: 4px 12px; border-bottom: 1px solid var(--line); }
+.k8s-shell-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.k8s-term-box { flex: 1; min-height: 0; position: relative; display: flex; }
+.k8s-term-note { position: absolute; top: 0; left: 0; }
+.k8s-term { flex: 1; min-width: 0; min-height: 0; padding: 4px 0 0 6px; background: #1a1a1c; overflow: hidden; }
+.k8s-term .xterm { height: 100%; }
+.k8s-term-over { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 8px; background: #1a1a1ccc; }
+.k8s-term-over p { margin: 0; }
+.k8s-term-over .btn { width: auto; margin: 0; padding: 4px 14px; }
+.k8s-forwards { display: grid; gap: 8px; }
+.k8s-actions { flex-wrap: wrap; }
