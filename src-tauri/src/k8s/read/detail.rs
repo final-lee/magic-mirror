@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use super::secret::{is_secret, keys, mask, SecretKey};
 use super::values::{event_count, event_last_seen, event_object, list, text, Problem};
-use super::yaml::{view_yaml, YAML_FAILED};
+use super::yaml::{edit_yaml, view_yaml, YAML_FAILED};
 use super::{api_for, bounded};
 use crate::error::AppError;
 use crate::k8s::failure::Endpoint;
@@ -103,6 +103,8 @@ pub struct ObjectView {
     pub events: Vec<EventView>,
     pub events_error: Option<AppError>,
     pub yaml: String,
+    /// 편집기에 넣는 YAML(서버가 채우는 필드를 뺀 것)
+    pub edit_yaml: String,
     pub secret_keys: Option<Vec<SecretKey>>,
 }
 
@@ -307,6 +309,7 @@ pub fn view_of(kind: &KindRef, obj: &DynamicObject) -> Result<ObjectView, AppErr
         events: vec![],
         events_error: None,
         yaml: view_yaml(kind, &json)?,
+        edit_yaml: edit_yaml(kind, &json)?,
         secret_keys,
     })
 }

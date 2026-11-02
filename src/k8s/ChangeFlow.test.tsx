@@ -11,9 +11,9 @@ const api = vi.mocked(k8sApi);
 const target = { profile: "p", region: "r", cluster: "c" };
 const objectRef = { kind: DEPLOYMENTS, namespace: "prod", name: "web" };
 const change: K8sChange = { ...objectRef, type: "restart" };
-const view: K8sObjectView = { kind: DEPLOYMENTS, row: { uid: "u", name: "web", namespace: "prod", resourceVersion: "1", createdAt: null, labels: {}, values: { desired: "3" }, problems: [] }, annotations: {}, owners: [], children: [], childrenTruncated: false, childrenError: null, containers: [], conditions: [], events: [], eventsError: null, yaml: "", secretKeys: null };
+const view: K8sObjectView = { kind: DEPLOYMENTS, row: { uid: "u", name: "web", namespace: "prod", resourceVersion: "1", createdAt: null, labels: {}, values: { desired: "3" }, problems: [] }, annotations: {}, owners: [], children: [], childrenTruncated: false, childrenError: null, containers: [], conditions: [], events: [], eventsError: null, yaml: "", editYaml: "", secretKeys: null };
 const rules: K8sRules = { namespace: "prod", incomplete: false, resourceRules: [], nonResourceRules: [] };
-const preview = { calls: [{ verb: "PATCH", path: "/web", body: { x: 1 } }], diff: [{ path: "spec.x", before: 1, after: 2 }], impact: ["impact"], warnings: ["warning"], confirmName: "web", reversible: true };
+const preview = { calls: [{ verb: "PATCH", path: "/web", body: { x: 1 } }], diff: [{ path: "spec.x", before: 1, after: 2 }], impact: ["impact"], warnings: ["warning"], confirmName: "web", reversible: true, conflicts: [] };
 beforeEach(() => { vi.resetAllMocks(); });
 
 test("permissions explain disabled actions and scale validates the input", () => {

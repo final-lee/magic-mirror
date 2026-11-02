@@ -6,6 +6,15 @@ use sha2::{Digest, Sha256};
 use super::rows::KindRef;
 use crate::error::AppError;
 
+pub mod apply;
+
+pub const APPLY_IMPACT: &str = "server-side apply로 객체를 바꿉니다";
+pub const CREATE_IMPACT: &str = "새 객체를 만듭니다";
+pub const SECRET_APPLY_WARNING: &str = "Secret 변경은 값을 기록하지 않아 되돌릴 수 없어요";
+pub const FORCE_WARNING: &str = "다른 manager가 가진 필드를 강제로 가져옵니다";
+pub const AWS_AUTH_WARNING: &str = "aws-auth는 access entry로 옮기세요. 잘못 고치면 노드나 사용자가 클러스터에 접근하지 못해요";
+pub const NOOP_WARNING: &str = "바뀌는 것이 없어요";
+
 pub const INVALID_CHANGE: &str = "이 리소스에는 이 변경을 적용할 수 없어요";
 pub const MISSING_VERSION: &str = "리소스 버전을 읽지 못했어요. 다시 미리보기 해 주세요";
 pub const OWNER_WARNING: &str = "소유자가 이 객체를 다시 만들 수 있어요";
@@ -38,6 +47,8 @@ pub enum Operation {
     Rerun { #[serde(rename = "jobName")] job_name: String },
     Suspend { suspend: bool },
     Recreate { object: Value },
+    /// YAML 객체 하나를 server-side apply한다. 없는 객체면 만들고, `force`면 다른 manager의 필드도 가져온다.
+    Apply { object: Value, #[serde(default)] force: bool },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -74,6 +85,23 @@ pub struct Preview {
     pub warnings: Vec<String>,
     pub confirm_name: Option<String>,
     pub reversible: bool,
+    /// server-side apply에서 다른 manager와 겹친 필드. 비어 있지 않으면 강제 적용 없이는 적용되지 않는다.
+    #[serde(default)]
+    pub conflicts: Vec<apply::FieldConflict>,
+}
+
+impl Preview {
+    /// 화면으로 보내는 사본. Secret 본문의 값과 last-applied 어노테이션은 가린다.
+    pub fn displayed(&self) -> Preview {
+        let mut shown = self.clone();
+        for call in &mut shown.calls {
+            let secret = call.body.get("kind").and_then(Value::as_str) == Some("Secret") && call.body.get("apiVersion").and_then(Value::as_str) == Some("v1");
+            if secret {
+                crate::k8s::read::secret::mask(&mut call.body);
+            }
+        }
+        shown
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -165,9 +193,10 @@ pub fn plan(change: &Change, current: Option<&Value>, revision: Option<&Value>, 
     if target.name.is_empty() || target.kind.namespaced != target.namespace.as_ref().is_some_and(|s| !s.is_empty()) {
         return Err(AppError::other(INVALID_CHANGE));
     }
-    let recreate = matches!(change.operation, Operation::Recreate { .. });
+    let creating = matches!(change.operation, Operation::Recreate { .. } | Operation::Apply { .. });
     let version = current.and_then(|v| v.pointer("/metadata/resourceVersion")).and_then(Value::as_str).map(str::to_owned);
-    if !recreate && version.is_none() {
+    // 새로 만드는 변경은 현재 객체가 없어도 되지만, 있는 객체는 버전을 읽어야 한다
+    if version.is_none() && (!creating || current.is_some()) {
         return Err(AppError::other(MISSING_VERSION));
     }
     let obj = current.unwrap_or(&Value::Null);
@@ -232,6 +261,28 @@ pub fn plan(change: &Change, current: Option<&Value>, revision: Option<&Value>, 
             impact.push(RECREATE_IMPACT.into());
             ("POST", clean_object(object.clone()), true)
         }
+        Operation::Apply { object, force } => {
+            let body = apply::body(target, object, current, version.as_deref())?;
+            if apply::is_secret(target) {
+                warnings.push(SECRET_APPLY_WARNING.into());
+            } else {
+                undo = Some(inverse(
+                    change,
+                    match current {
+                        Some(current) => Operation::Apply { object: clean_object(current.clone()), force: false },
+                        None => Operation::Delete,
+                    },
+                ));
+            }
+            if *force {
+                warnings.push(FORCE_WARNING.into());
+            }
+            if kind == "ConfigMap" && target.name == "aws-auth" && target.namespace.as_deref() == Some("kube-system") {
+                warnings.push(AWS_AUTH_WARNING.into());
+            }
+            impact.push(format!("{kind} {}: {}", target.name, if current.is_some() { APPLY_IMPACT } else { CREATE_IMPACT }));
+            ("PATCH", body, false)
+        }
         Operation::Suspend { suspend } if group == "batch" && kind == "CronJob" => {
             let before = obj.pointer("/spec/suspend").cloned().unwrap_or(json!(false));
             undo = Some(inverse(change, Operation::Suspend { suspend: before.as_bool().unwrap_or(false) }));
@@ -278,15 +329,28 @@ pub fn plan(change: &Change, current: Option<&Value>, revision: Option<&Value>, 
         }
         _ => return Err(AppError::other(INVALID_CHANGE)),
     };
-    let call_path = if matches!(change.operation, Operation::Rerun { .. }) {
+    let mut call_path = if matches!(change.operation, Operation::Rerun { .. }) {
         let mut job_target = target.clone();
         job_target.kind.plural = "jobs".into();
         path(&job_target, true)
     } else {
         path(target, collection)
     };
+    let forced = matches!(change.operation, Operation::Apply { force: true, .. });
+    if matches!(change.operation, Operation::Apply { .. }) {
+        call_path.push_str(&format!("?fieldManager={}{}", apply::FIELD_MANAGER, if forced { "&force=true" } else { "" }));
+    }
     Ok(Plan {
-        preview: Preview { calls: vec![ApiCall { verb: verb.into(), path: call_path, body }], diff, impact, warnings, confirm_name: dangerous.then(|| target.name.clone()), reversible: undo.is_some() },
+        preview: Preview {
+            calls: vec![ApiCall { verb: verb.into(), path: call_path, body }],
+            diff,
+            impact,
+            warnings,
+            // 강제 적용은 다른 manager의 필드를 가져오므로 위험한 변경처럼 이름을 입력받는다
+            confirm_name: (dangerous || forced).then(|| target.name.clone()),
+            reversible: undo.is_some(),
+            conflicts: Vec::new(),
+        },
         inverse: undo,
         version,
         fingerprint: current.map(fingerprint),
