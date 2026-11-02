@@ -37,6 +37,8 @@ pub struct Session {
     pub client: kube::Client,
     pub endpoint: Endpoint,
     pub context: String,
+    /// 로그인 PATH를 넣은 kubeconfig. 재시도 없는 Eviction용 클라이언트를 drain 때 만든다.
+    pub kubeconfig: kube::config::Kubeconfig,
 }
 
 #[derive(Default)]
@@ -251,13 +253,13 @@ pub async fn k8s_open(app: State<'_, AppState>, k8s: State<'_, K8sState>, target
         .into_iter()
         .find(|c| c.name == context)
         .ok_or_else(|| AppError::other(NO_CONTEXT))?;
-    let client = connect::connect(&loaded, &context, endpoint).await?;
+    let (client, kubeconfig) = connect::connect(&loaded, &context, endpoint).await?;
     let identity = review::identity(&client, &candidate.user, endpoint).await?;
     let version = tokio::time::timeout(connect::REQUEST_TIMEOUT, client.apiserver_version())
         .await
         .map_err(|_| describe(&Failure::Unreachable, endpoint))?
         .map_err(|e| describe(&failure_of(&e, "get", "version"), endpoint))?;
-    let session = Session { client, endpoint, context };
+    let session = Session { client, endpoint, context, kubeconfig };
     let context = session.context.clone();
     if !k8s.keep(&target, started, session) {
         return Err(AppError::other(NOT_OPENED));
@@ -485,8 +487,11 @@ pub async fn k8s_drain(
     let current = commit::make_plan(session.client.clone(), session.endpoint, &change, &seen.at).await?;
     commit::check_drain(Some(&seen.plan), &current, confirm_text.as_deref())?;
     let plan = current.preview.drain.ok_or_else(|| AppError::other(INVALID_CHANGE))?;
+    // Eviction만 재시도 없는 클라이언트로 보낸다: 429를 곧바로 받아야 PDB 막힘을 우리 간격과 한도로 다룰 수 있다
+    let evict_client = connect::eviction_client(&session.kubeconfig, &session.context, session.endpoint).await?;
     let job = Job {
         client: session.client.clone(),
+        evict_client,
         endpoint: session.endpoint,
         log_path: k8s.log_path.clone(),
         target: target.clone(),

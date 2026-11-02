@@ -32,8 +32,10 @@ fn pod(name: &str) -> DrainPod {
 /// 이미 스케줄이 중지된 노드의 작업. cordon을 건너뛰므로 클라이언트는 요청을 보내지 않는다.
 fn job(dir: &tempfile::TempDir, pods: Vec<DrainPod>) -> Job {
     install_crypto_provider();
+    let client = Client::try_from(Config::new("http://127.0.0.1:9".parse().unwrap())).unwrap();
     Job {
-        client: Client::try_from(Config::new("http://127.0.0.1:9".parse().unwrap())).unwrap(),
+        evict_client: client.clone(),
+        client,
         endpoint: Endpoint { public: true, private: false },
         log_path: dir.path().join("k8s-changes.jsonl"),
         target: K8sTarget { profile: "p".into(), region: "r".into(), cluster: "c".into() },
