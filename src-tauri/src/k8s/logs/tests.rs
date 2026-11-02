@@ -34,20 +34,30 @@ fn params_clamp_the_tail_and_drop_non_positive_since() {
 }
 
 #[test]
-fn line_of_strips_line_endings_replaces_bad_bytes_and_clips_long_lines() {
-    assert_eq!(line_of(b"hello\r\n".to_vec()), "hello");
-    assert_eq!(line_of(b"no newline".to_vec()), "no newline");
-    assert_eq!(line_of(vec![b'a', 0xff, b'b', b'\n']), "a\u{fffd}b");
-    let long = line_of(vec![b'x'; MAX_LINE + 10]);
-    assert_eq!(long.chars().count(), MAX_LINE + 1);
-    assert!(long.ends_with('…'));
+fn line_of_strips_a_carriage_return_replaces_bad_bytes_and_marks_clipped_lines() {
+    assert_eq!(line_of(b"hello\r".to_vec(), false), "hello");
+    assert_eq!(line_of(vec![b'a', 0xff, b'b'], false), "a\u{fffd}b");
+    assert_eq!(line_of(b"cut\r".to_vec(), true), "cut\r…");
 }
 
 #[tokio::test]
-async fn lines_of_keeps_going_past_invalid_utf8() {
-    let reader = Cursor::new(b"one\n\xff\xfe\nthree".to_vec());
+async fn lines_of_keeps_going_past_invalid_utf8_and_across_small_reads() {
+    // 7바이트씩 읽게 해 줄이 여러 번에 걸쳐 들어오게 한다
+    let reader = futures::io::BufReader::with_capacity(7, Cursor::new(b"one\r\n\xff\xfe\na longer line here\nthree".to_vec()));
     let got: Vec<String> = lines_of(reader).map(|l| l.unwrap()).collect().await;
-    assert_eq!(got, ["one", "\u{fffd}\u{fffd}", "three"]);
+    assert_eq!(got, ["one", "\u{fffd}\u{fffd}", "a longer line here", "three"]);
+}
+
+#[tokio::test]
+async fn a_huge_line_keeps_only_its_head_and_the_next_line_is_whole() {
+    let mut bytes = vec![b'x'; MAX_LINE * 40];
+    bytes.extend_from_slice(b"\nnext\n");
+    let reader = futures::io::BufReader::with_capacity(4096, Cursor::new(bytes));
+    let got: Vec<String> = lines_of(reader).map(|l| l.unwrap()).collect().await;
+    assert_eq!(got.len(), 2);
+    assert_eq!(got[0].len(), MAX_LINE + '…'.len_utf8());
+    assert!(got[0].starts_with("xxx") && got[0].ends_with('…'));
+    assert_eq!(got[1], "next");
 }
 
 #[tokio::test(start_paused = true)]

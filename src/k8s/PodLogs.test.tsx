@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import * as invokeModule from "../api/invoke";
 import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
-import { PodLogs } from "./PodLogs";
+import { PodLogs, matchRanges, searchPattern } from "./PodLogs";
 import { LOG_CONTAINER, LOG_EMPTY, LOG_ENDED, LOG_PAUSE, LOG_PREVIOUS, LOG_RESUME, LOG_SEARCH, logMatches, logPending } from "./text";
 import type { K8sContainer, K8sLogMessage, K8sLogOptions } from "./types";
 
@@ -93,6 +93,22 @@ test("search marks the matches and counts the matching lines", async () => {
   expect(screen.getByText(logMatches(2))).toBeInTheDocument();
   expect(Array.from(document.querySelectorAll(".k8s-log mark")).map((e) => e.textContent)).toEqual(["GET", "get"]);
   expect(logText()).toBe("GET /a 200\nPOST /b 500\nget /c 200\n");
+});
+
+test("highlights stay on the matched text when case folding changes the length (İ)", () => {
+  expect(matchRanges("İabc", searchPattern("a")!)).toEqual([[1, 2]]);
+  expect(matchRanges("a.b a.b", searchPattern("A.B")!)).toEqual([[0, 3], [4, 7]]);
+  expect(matchRanges("axb", searchPattern("a.b")!)).toEqual([]);
+});
+
+test("the match count follows new lines while following", async () => {
+  setup();
+  await vi.waitFor(() => expect(emit).toHaveLength(1));
+  fireEvent.change(screen.getByLabelText(LOG_SEARCH), { target: { value: "err" } });
+  send(0, { type: "lines", lines: Array.from({ length: 1500 }, (_, i) => (i % 500 === 0 ? `ERR ${i}` : `ok ${i}`)) });
+  expect(screen.getByText(logMatches(3))).toBeInTheDocument();
+  send(0, { type: "lines", lines: ["err again"] });
+  expect(screen.getByText(logMatches(4))).toBeInTheDocument();
 });
 
 test("pause holds the view and counts what is waiting; resume shows it", async () => {
