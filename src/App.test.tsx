@@ -56,6 +56,8 @@ vi.mock("./pg/api", () => ({
     close: vi.fn(async () => null),
   },
 }));
+// 터미널(xterm)은 k8s/PodTerminal.test에서 본다
+vi.mock("./k8s/PodTerminal", () => ({ PodTerminal: () => null }));
 vi.mock("./k8s/api", () => ({
   k8sApi: { context: vi.fn(), open: vi.fn(), close: vi.fn(async () => null), rules: vi.fn(), watch: vi.fn(), unwatch: vi.fn() },
 }));
