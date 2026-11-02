@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { Sidebar } from "./Sidebar";
-import { makeResource, renderWithClient, sampleServices } from "../test/utils";
+import { eksService, makeResource, renderWithClient, sampleServices } from "../test/utils";
 import { api } from "../api/client";
 
 vi.mock("../api/client", () => ({
@@ -107,6 +107,39 @@ describe("IAM 관리 entry", () => {
     renderWithClient(<Sidebar {...base} onSelect={onSelect} onOpenIam={vi.fn()} />);
     fireEvent.click(screen.getByText("IAM"));
     fireEvent.click(screen.getByText("🔐 IAM 관리"));
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+});
+
+describe("🐙 ArgoCD entry", () => {
+  const withEks = { ...base, services: [...sampleServices, eksService] };
+
+  test("is the first row under an expanded EKS group and opens the ArgoCD tab", () => {
+    const onOpenArgocd = vi.fn();
+    renderWithClient(<Sidebar {...withEks} onOpenArgocd={onOpenArgocd} />);
+    expect(screen.queryByText("🐙 ArgoCD")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("EKS"));
+    const entry = screen.getByText("🐙 ArgoCD");
+    // 다른 타입 행(Clusters)보다 앞에 놓인다
+    expect(entry.compareDocumentPosition(screen.getByText("Clusters")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(entry);
+    expect(onOpenArgocd).toHaveBeenCalledTimes(1);
+  });
+
+  test("other services do not get it, and neither does EKS without a handler", () => {
+    renderWithClient(<Sidebar {...withEks} onOpenArgocd={vi.fn()} />);
+    fireEvent.click(screen.getByText("EC2"));
+    expect(screen.queryByText("🐙 ArgoCD")).not.toBeInTheDocument();
+    renderWithClient(<Sidebar {...withEks} />);
+    fireEvent.click(screen.getAllByText("EKS")[1]);
+    expect(screen.queryByText("🐙 ArgoCD")).not.toBeInTheDocument();
+  });
+
+  test("clicking it does not select a resource type", () => {
+    const onSelect = vi.fn();
+    renderWithClient(<Sidebar {...withEks} onSelect={onSelect} onOpenArgocd={vi.fn()} />);
+    fireEvent.click(screen.getByText("EKS"));
+    fireEvent.click(screen.getByText("🐙 ArgoCD"));
     expect(onSelect).not.toHaveBeenCalled();
   });
 });

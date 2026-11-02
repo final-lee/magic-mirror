@@ -1,4 +1,6 @@
 mod adapters;
+mod argocd;
+mod argocd_commands;
 mod aws;
 mod commands;
 mod cost;
@@ -43,6 +45,7 @@ pub fn run() {
             app.manage(explorer_commands::ExplorerState::default());
             app.manage(iam_commands::IamState::new(dir.join("iam-changes.jsonl")));
             app.manage(k8s_commands::K8sState::default());
+            app.manage(argocd::ArgocdState::default());
             app.manage(pg_commands::PgState::new(dir.join("db-changes.jsonl")));
             app.manage(cost_commands::CostState::new(dir.join("cost-cache.json")));
             pg_commands::spawn_sweeper(app.handle().clone());
@@ -129,6 +132,15 @@ pub fn run() {
             k8s_commands::k8s_overview,
             k8s_commands::k8s_secret_value,
             k8s_commands::k8s_logs,
+            argocd_commands::argocd_set_token,
+            argocd_commands::argocd_forget_token,
+            argocd_commands::argocd_session,
+            argocd_commands::argocd_apps,
+            argocd_commands::argocd_appsets,
+            argocd_commands::argocd_app,
+            argocd_commands::argocd_tree,
+            argocd_commands::argocd_refresh,
+            argocd_commands::argocd_sync,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

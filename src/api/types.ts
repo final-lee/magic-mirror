@@ -1,4 +1,5 @@
 import type { K8sKindRef } from "../k8s/types";
+import type { ArgocdServer } from "../argocd/types";
 
 export type ColumnKind = "text" | "mono" | "state" | "datetime" | "bytes";
 
@@ -75,6 +76,8 @@ export interface Settings {
   k8sBookmarks?: K8sKindRef[];
   /** EKS 탭 레인 너비(px). 비어 있으면 기본값 */
   k8sLaneWidths?: K8sLaneWidths;
+  /** ArgoCD API 서버 목록(이름과 주소). 토큰은 넣지 않는다(키체인에 있다). 비어 있으면 기본 서버 목록을 쓴다. */
+  argocdServers?: ArgocdServer[];
 }
 
 /** 메뉴(1열)·종류(2열)는 px, 상세(4열)는 목록(3열) 너비에 대한 % */
