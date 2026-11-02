@@ -1,4 +1,6 @@
 mod adapters;
+mod argocd;
+mod argocd_commands;
 mod aws;
 mod commands;
 mod cost;
@@ -33,8 +35,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             k8s::tls::install_crypto_provider();
-            // 끝난 앱이 남긴 로그 임시 폴더(EKS 로그 탭의 lnav용)를 지운다
-            std::thread::spawn(|| k8s::lnav::sweep_stale(&k8s::lnav::logs_root()));
             let dir = app.path().app_data_dir()?;
             app.manage(AppState {
                 ctx: aws::context::AwsContext::default(),
@@ -45,6 +45,7 @@ pub fn run() {
             app.manage(explorer_commands::ExplorerState::default());
             app.manage(iam_commands::IamState::new(dir.join("iam-changes.jsonl")));
             app.manage(k8s_commands::K8sState::default());
+            app.manage(argocd::ArgocdState::default());
             app.manage(pg_commands::PgState::new(dir.join("db-changes.jsonl")));
             app.manage(cost_commands::CostState::new(dir.join("cost-cache.json")));
             pg_commands::spawn_sweeper(app.handle().clone());
@@ -131,20 +132,16 @@ pub fn run() {
             k8s_commands::k8s_overview,
             k8s_commands::k8s_secret_value,
             k8s_commands::k8s_logs,
-            k8s_commands::k8s_lnav_available,
-            k8s_commands::k8s_lnav,
-            k8s_commands::k8s_lnav_input,
-            k8s_commands::k8s_lnav_resize,
+            argocd_commands::argocd_set_token,
+            argocd_commands::argocd_forget_token,
+            argocd_commands::argocd_session,
+            argocd_commands::argocd_apps,
+            argocd_commands::argocd_appsets,
+            argocd_commands::argocd_app,
+            argocd_commands::argocd_tree,
+            argocd_commands::argocd_refresh,
+            argocd_commands::argocd_sync,
         ])
-        .build(tauri::generate_context!())
-        .expect("error while running tauri application")
-        .run(|app, event| {
-            // 종료는 비동기 작업을 버리지 않고 프로세스를 끝내므로, 떠 있는 lnav와 로그 임시 파일은 여기서 직접 정리한다
-            if let tauri::RunEvent::Exit = event {
-                use tauri::Manager;
-                if let Some(k8s) = app.try_state::<k8s_commands::K8sState>() {
-                    k8s.shutdown();
-                }
-            }
-        });
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }

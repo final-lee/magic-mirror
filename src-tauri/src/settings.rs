@@ -21,6 +21,27 @@ pub struct K8sLaneWidths {
     pub tree: Option<u32>,
     pub detail_pct: Option<u32>,
 }
+/// ArgoCD API 서버의 표시 이름과 주소.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArgocdServer {
+    pub name: String,
+    pub url: String,
+}
+
+/// ArgoCD 서버 하나의 목록 화면 상태: 마지막으로 고른 필터와 묶기 기준. 검색어는 남기지 않는다.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ArgocdView {
+    pub sync: Vec<String>,
+    pub health: Vec<String>,
+    pub envs: Vec<String>,
+    pub clusters: Vec<String>,
+    pub projects: Vec<String>,
+    /// `key=value` 또는 `key`
+    pub labels: Vec<String>,
+    pub group_by: Option<String>,
+    pub then_by: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -41,6 +62,10 @@ pub struct Settings {
     /// EKS 탭 왼쪽 메뉴에 북마크한 리소스 종류. 북마크한 순서(드래그로 바꾼 순서)대로 둔다.
     pub k8s_bookmarks: Vec<KindRef>,
     pub k8s_lane_widths: K8sLaneWidths,
+    /// ArgoCD 서버 목록. 토큰은 설정이 아니라 키체인에 저장한다.
+    pub argocd_servers: Vec<ArgocdServer>,
+    /// ArgoCD 서버 주소 → 그 서버 목록의 필터·묶기 상태
+    pub argocd_views: BTreeMap<String, ArgocdView>,
 }
 
 #[derive(Deserialize, Default)]
@@ -58,6 +83,8 @@ struct RawSettings {
     kubeconfig_path: Option<String>,
     k8s_bookmarks: Vec<KindRef>,
     k8s_lane_widths: K8sLaneWidths,
+    argocd_servers: Vec<ArgocdServer>,
+    argocd_views: BTreeMap<String, ArgocdView>,
 }
 
 fn defaults(all_services: &[&str]) -> Settings {
@@ -87,6 +114,8 @@ pub fn load(path: &Path, all_services: &[&str]) -> Settings {
                 kubeconfig_path: raw.kubeconfig_path,
                 k8s_bookmarks: raw.k8s_bookmarks,
                 k8s_lane_widths: raw.k8s_lane_widths,
+                argocd_servers: raw.argocd_servers,
+                argocd_views: raw.argocd_views,
             },
             Err(_) => defaults(all_services),
         },
@@ -123,6 +152,53 @@ mod tests {
         fs::write(&path, text).unwrap();
         load(&path, &["ec2", "s3"])
     }
+    #[test]
+    fn argocd_servers_roundtrip_and_default() {
+        assert!(load_text("{}").argocd_servers.is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let settings = Settings {
+            argocd_servers: vec![ArgocdServer {
+                name: "stg".into(),
+                url: "https://example.test".into(),
+            }],
+            ..Default::default()
+        };
+        save(&path, &settings).unwrap();
+        assert_eq!(load(&path, &[]).argocd_servers, settings.argocd_servers);
+        let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(json["argocdServers"][0]["name"], "stg");
+    }
+
+    #[test]
+    fn argocd_views_roundtrip_and_partial_entries() {
+        assert!(load_text("{}").argocd_views.is_empty());
+        // 빠진 칸은 비운 채로 읽는다(앞으로 칸이 늘어도 옛 설정이 깨지지 않는다)
+        let partial = load_text(r#"{"argocdViews":{"https://a.test":{"envs":["prd"],"groupBy":"env"}}}"#);
+        let view = &partial.argocd_views["https://a.test"];
+        assert_eq!(view.envs, ["prd"]);
+        assert_eq!(view.group_by.as_deref(), Some("env"));
+        assert!(view.labels.is_empty());
+        assert_eq!(view.then_by, None);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let settings = Settings {
+            argocd_views: BTreeMap::from([(
+                "https://a.test".to_string(),
+                ArgocdView {
+                    labels: vec!["type=api".into()],
+                    then_by: Some("label:type".into()),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+        save(&path, &settings).unwrap();
+        assert_eq!(load(&path, &[]).argocd_views, settings.argocd_views);
+        let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(json["argocdViews"]["https://a.test"]["thenBy"], "label:type");
+    }
+
 
     #[test]
     fn k8s_fields_roundtrip_and_default() {

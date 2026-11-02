@@ -21,6 +21,8 @@ import { tabTitle } from "./k8s/text";
 import type { K8sTarget } from "./k8s/types";
 import { IamTab } from "./iam/IamTab";
 import { refreshIam, useIamOverview } from "./iam/queries";
+import { ArgocdTab } from "./argocd/ArgocdTab";
+import { ARGOCD_TITLE } from "./argocd/text";
 import { CostTab } from "./cost/CostTab";
 import { refreshCost } from "./cost/queries";
 import { COST_TITLE } from "./cost/text";
@@ -63,6 +65,8 @@ export default function App() {
   const iamOverview = useIamOverview(iamTab ? profile : null);
   // 비용 탭도 프로필마다 하나다(id "cost"). 리전과 상관없다.
   const [costTab, setCostTab] = useState(false);
+  // ArgoCD 탭도 하나뿐이다(id "argocd"). AWS 프로필과 상관없어 프로필을 바꿔도 닫지 않는다.
+  const [argocdTab, setArgocdTab] = useState(false);
   const onTransferSettled = useCallback(
     (_req: TransferRequest) => {
       void qc.invalidateQueries({ queryKey: ["s3"] });
@@ -184,8 +188,14 @@ export default function App() {
     setActiveTab("cost");
     setFilter("");
   };
+  const openArgocd = () => {
+    setArgocdTab(true);
+    setActiveTab("argocd");
+    setFilter("");
+  };
   const closeTab = (id: string) => {
     if (id === "iam") setIamTab(null);
+    if (id === "argocd") setArgocdTab(false);
     if (id === "cost") setCostTab(false);
     const pg = pgTabs.find((t) => t.id === id);
     if (pg) void closePg(qc, pg.target);
@@ -210,6 +220,7 @@ export default function App() {
     { id: "resources", title: "리소스", closable: false },
     ...(iamTab ? [{ id: "iam", title: iamOverview.data ? `🔐 IAM · ${iamOverview.data.accountId}` : "🔐 IAM", closable: true }] : []),
     ...(costTab ? [{ id: "cost", title: COST_TITLE, closable: true }] : []),
+    ...(argocdTab ? [{ id: "argocd", title: ARGOCD_TITLE, closable: true }] : []),
     ...explorerTabs.map((t) => ({ id: t.id, title: `S3: ${t.location.bucket}`, closable: true })),
     ...vpcTabs.map((t) => ({ id: t.id, title: `🗺 ${t.name}`, closable: true })),
     ...pgTabs.map((t) => ({ id: t.id, title: t.title, closable: true })),
@@ -285,6 +296,7 @@ export default function App() {
             onToggleFavorite={toggleFavorite}
             onOpenIam={() => openIam()}
             onOpenCost={openCost}
+            onOpenArgocd={openArgocd}
           />
           <MainArea
             key={mainKey}
@@ -311,6 +323,11 @@ export default function App() {
         {profile && costTab && (
           <div className="tabpane" hidden={activeTab !== "cost"}>
             <CostTab key={profile} profile={profile} />
+          </div>
+        )}
+        {argocdTab && (
+          <div className="tabpane" hidden={activeTab !== "argocd"}>
+            <ArgocdTab active={activeTab === "argocd"} />
           </div>
         )}
         {explorerTabs.map((t) => (
