@@ -175,6 +175,7 @@
 | rollout restart | Deployment, StatefulSet, DaemonSet | 불가(rollout undo 안내) |
 | rollout undo | Deployment(ReplicaSet 리비전), StatefulSet·DaemonSet(ControllerRevision) | 원래 리비전으로 |
 | Pod 삭제 | Pod | 불가. 컨트롤러 없는 Pod는 경고 |
+| 삭제 | 목록·watch가 되는 모든 종류(Pod 제외 위 행) | 컨트롤러·소유자가 없으면 기록한 정리된 객체로 다시 만들기(Secret은 값을 기록하지 않아 불가). Namespace·Node·CRD·PV 삭제와 소유자가 있는 객체(컨트롤러가 다시 만든다는 경고)는 이름 입력 |
 | Job 재실행 | Job, CronJob → 새 Job | 만든 Job 삭제 |
 | 일시정지·재개 | CronJob(`suspend`) | 반대 |
 - 적용 후 rollout 진행(준비된 새 Pod 수)을 보여준다.
@@ -186,6 +187,8 @@
 ### C. 셸과 port-forward
 - 셸: `kube-rs` `exec`(웹소켓). `/bin/bash`, 없으면 `/bin/sh`. 터미널은 xterm.js, 크기 변경을 전달한다. 열 때 확인, 위험 네임스페이스면 이름 입력. 기록은 열고 닫은 시각과 대상만.
 - port-forward: `kube-rs` `portforward`. 로컬은 `127.0.0.1`만, 포트는 자동(직접 지정 가능). Service는 준비된 Pod 하나로, 그 Pod가 사라지면 다른 Pod로 다시 붙는다. 포트포워딩 화면에서 보고 닫는다. 탭을 닫거나 앱을 끄면 모두 닫는다.
+- attach(2026-11-02 추가): 컨테이너의 주 프로세스에 붙는다(`kube-rs` `attach`). `stdin`·`tty`가 켜진 컨테이너만 입력을 보낸다(아니면 출력만). 셸과 같은 터미널. "입력·Ctrl-C가 주 프로세스로 간다" 경고와 함께 연다.
+- 노드 셸(2026-11-02 추가, `kubectl debug node`와 같은 방식): 그 노드에 고정한(`nodeName`) 디버그 Pod를 만든다. `hostPID`·`hostNetwork`·`hostIPC`, `privileged`, 노드 루트를 `/host`에 마운트, 이미지는 미리보기에서 고칠 수 있는 기본값(busybox), 명령은 `nsenter -t 1 -m -u -i -n -p -- sh`. Pod 만들기는 변경 공통 틀(미리보기·이름 입력 필수·기록)을 거치고, 셸을 닫으면 Pod를 지운다(지우기도 기록). 네임스페이스는 고른 네임스페이스, 모든 네임스페이스면 `default`.
 
 ### D. 권한 변경
 - RBAC: 바인딩 추가·제거, 바인딩의 주체 추가·빼기. 권한 표에서 셀로 담는 장바구니(최대 50), 한 번에 미리보기. 미리보기는 실효 권한 계산기로 "누가 무엇을 얻고 잃는지". 적용은 하나씩, 첫 실패에서 멈추고 이미 적용한 것은 되돌리기를 제안한다(IAM 할당 표와 같다). 제거는 원래 객체 전체를 기록해 되돌릴 때 다시 만든다.
