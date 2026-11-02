@@ -52,6 +52,7 @@ pub struct K8sState {
     watches: Mutex<HashMap<u64, WatchEntry>>,
     next_watch: AtomicU64,
     shells: Arc<Shells>,
+    node_shells: Arc<node_shell::NodeShells>,
     forwards: Arc<Forwards>,
     plans: Mutex<PlanStore<StoredPlan>>,
     log_path: PathBuf,
@@ -114,6 +115,7 @@ impl K8sState {
                 !same
             });
             self.shells.close_target(t);
+            self.node_shells.close_target(t);
             self.forwards.close_target(t);
         }
         true
@@ -131,14 +133,17 @@ impl K8sState {
             !same
         });
         self.shells.close_target(t);
+        self.node_shells.close_target(t);
         self.forwards.close_target(t);
     }
 
     /// 앱을 끌 때: 모든 셸과 port-forward를 닫는다(셸 기록에 닫은 시각을 남기고, 노드 셸 Pod 지우기가 끝나길 잠깐 기다린다).
     pub async fn close_streams(&self) {
         self.shells.close_all();
+        self.node_shells.close_all();
         self.forwards.close_all();
         self.shells.settle(CLEANUP_WAIT).await;
+        self.node_shells.settle(CLEANUP_WAIT).await;
     }
 
     /// 시작할 때의 `epoch`와 같을 때만 `register`를 실행한다(실행하는 동안 `epochs` 잠금을 쥔다). 다르면(그사이 닫힘) None.
@@ -438,26 +443,32 @@ pub async fn k8s_node_shell_open(
     let started = k8s.epoch(&target);
     let session = k8s.session(&target)?;
     let (client, endpoint) = (session.client.clone(), session.endpoint);
-    let remove = {
-        let (client, target, namespace, pod, log_path) = (client.clone(), target.clone(), namespace.clone(), pod.clone(), k8s.log_path.clone());
-        move || node_shell::remove(client.clone(), endpoint, target.clone(), namespace.clone(), pod.clone(), log_path.clone())
-    };
+    // 변경 틀로 확인해 만든 Pod(UID까지 같은 것)만 연다. 표시만 같은 Pod(YAML 적용으로 만든 것 등)는 거부한다.
+    let claimed = k8s.node_shells.claim(&target, &namespace, &pod)?;
+    let remove = claimed.remove.clone();
     let opened = async {
-        node_shell::wait_ready(client.clone(), &namespace, &pod, endpoint).await?;
+        node_shell::wait_ready(client.clone(), &namespace, &pod, &claimed.uid, endpoint).await?;
         let mut command = change::NODE_SHELL_COMMAND.to_vec();
         command.push("sh");
         let connected = shell::connect(client.clone(), ShellMode::Exec, &namespace, &pod, change::NODE_SHELL_CONTAINER, &command, endpoint).await?;
         let info = ShellTarget { target: target.clone(), namespace: namespace.clone(), pod: pod.clone(), container: change::NODE_SHELL_CONTAINER.into(), mode: ShellMode::Exec };
+        // 세션이 끝나면 Pod를 지우고 등록을 잊는다
         let cleanup: shell::Cleanup = Box::new({
-            let remove = remove.clone();
-            move || Box::pin(remove())
+            let (remove, node_shells, namespace, pod) = (remove.clone(), k8s.node_shells.clone(), namespace.clone(), pod.clone());
+            move || {
+                Box::pin(async move {
+                    (*remove)().await;
+                    node_shells.forget(&namespace, &pod);
+                })
+            }
         });
         k8s.while_current(&target, started, || k8s.shells.start(&k8s.log_path, info, connected, Some(cleanup), move |m| on_event.send(m).is_ok()))
             .ok_or_else(|| AppError::other(NOT_OPENED))?
     }
     .await;
     if opened.is_err() {
-        remove().await;
+        (*remove)().await;
+        k8s.node_shells.forget(&namespace, &pod);
     }
     opened
 }
@@ -593,6 +604,25 @@ pub async fn k8s_apply(k8s: State<'_, K8sState>, target: K8sTarget, change: Chan
         return Err(AppError::other(log::UNDO_UNAVAILABLE));
     }
     let (plan, outcome) = commit::apply_plan(session.client.clone(), session.endpoint, &change, &seen.plan, &seen.at, confirm_text.as_deref()).await?;
+    // 확인한 노드 셸 적용으로 만든 Pod는 만든 즉시 UID와 함께 등록한다. 그러면 터미널을 열기 전에 탭이 닫히거나 기록·열기가 실패해도 지워지고,
+    // 이 Pod만 터미널을 열 수 있다(같은 표시를 단 다른 Pod는 열 수 없다).
+    let mut tracked: Option<(String, String)> = None;
+    let mut untracked = false;
+    if let (Operation::NodeShell { .. }, true) = (&change.operation, outcome.is_ok()) {
+        let (namespace, pod) = (change.target.namespace.clone().unwrap_or_default(), change.target.name.clone());
+        match node_shell::read_uid(session.client.clone(), session.endpoint, &namespace, &pod).await {
+            Some(uid) => {
+                let remove = node_shell::remover(session.client.clone(), session.endpoint, target.clone(), namespace.clone(), pod.clone(), Some(uid.clone()), k8s.log_path.clone());
+                k8s.node_shells.track(target.clone(), &namespace, &pod, uid, remove);
+                tracked = Some((namespace, pod));
+            }
+            None => {
+                // 만든 Pod를 확인하지 못하면 터미널을 열 수 없으니, 방금 만든 것(표시 확인)을 이름으로 지운다
+                node_shell::remove(session.client.clone(), session.endpoint, target.clone(), namespace, pod, None, k8s.log_path.clone()).await;
+                untracked = true;
+            }
+        }
+    }
     let now = now_secs();
     let id = new_log_id(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
     let inverse = if outcome.is_ok() {
@@ -614,13 +644,21 @@ pub async fn k8s_apply(k8s: State<'_, K8sState>, target: K8sTarget, change: Chan
         undone: false,
         closed_at: None,
     };
-    log::append(&k8s.log_path, &entry).map_err(|_| AppError::other(RECORD_FAILED))?;
+    if log::append(&k8s.log_path, &entry).is_err() {
+        if let Some((namespace, pod)) = &tracked {
+            k8s.node_shells.discard(namespace, pod);
+        }
+        return Err(AppError::other(RECORD_FAILED));
+    }
     if outcome.is_ok() {
         if let Some(original) = undo_of {
             log::mark_undone(&k8s.log_path, &original).map_err(|_| AppError::other(UNDO_RECORD_FAILED))?;
         }
     }
     outcome?;
+    if untracked {
+        return Err(AppError::other(node_shell::UID_UNKNOWN));
+    }
     Ok(K8sApplyResult { log_id: id })
 }
 
