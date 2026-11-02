@@ -1,8 +1,8 @@
 import { Channel } from "@tauri-apps/api/core";
 import { invoke } from "../api/invoke";
 import type {
-  K8sContextInfo, K8sForward, K8sForwardRequest, K8sKind, K8sKindRef, K8sLogMessage, K8sLogOptions, K8sObjectView, K8sOverview, K8sSecretValue, K8sRules,
-  K8sSession, K8sShellMessage, K8sShellOpened, K8sTarget, K8sWatchMessage,
+  K8sApplyResult, K8sChange, K8sChangeLogEntry, K8sChangeObject, K8sContextInfo, K8sForward, K8sForwardRequest, K8sKind, K8sKindRef, K8sLogMessage, K8sLogOptions,
+  K8sObjectView, K8sOverview, K8sPreview, K8sRevision, K8sSecretValue, K8sRules, K8sSession, K8sShellMessage, K8sShellOpened, K8sTarget, K8sUndo, K8sWatchMessage,
 } from "./types";
 
 // 명령 이름과 인자 이름은 K1 계획의 Contract와 같아야 한다. target은 객체 하나로 넘긴다.
@@ -40,6 +40,14 @@ export const k8sApi = {
     onEvent.onmessage = onMessage;
     return invoke<K8sShellOpened>("k8s_attach_open", { target, namespace, pod, container, confirmText, onEvent, profile: ssoProfile });
   },
+  /** 셸·attach를 열 때 입력해야 하는 이름. 위험하지 않으면 null(규칙은 백엔드 change::dangerous 하나) */
+  shellConfirmName: (namespace: string, pod: string) => invoke<string | null>("k8s_shell_confirm_name", { namespace, pod }),
+  /** 변경 틀로 만든 노드 셸 Pod가 준비되면 노드로 들어가는 셸을 연다. 닫으면 Pod를 지운다 */
+  nodeShellOpen: (target: K8sTarget, namespace: string, pod: string, ssoProfile: string, onMessage: (m: K8sShellMessage) => void) => {
+    const onEvent = new Channel<K8sShellMessage>();
+    onEvent.onmessage = onMessage;
+    return invoke<K8sShellOpened>("k8s_node_shell_open", { target, namespace, pod, onEvent, profile: ssoProfile });
+  },
   shellInput: (shellId: number, data: string) => invoke<null>("k8s_shell_input", { shellId, data }),
   shellResize: (shellId: number, cols: number, rows: number) => invoke<null>("k8s_shell_resize", { shellId, cols, rows }),
   shellClose: (shellId: number) => invoke<null>("k8s_shell_close", { shellId }),
@@ -55,4 +63,12 @@ export const k8sApi = {
     invoke<K8sSecretValue>("k8s_secret_value", { target, namespace, name, key, profile: ssoProfile }),
   /** 개요가 던지는 오류는 앱 프로필의 AWS 설정에서만 나온다(쿠버네티스 쪽 실패는 gaps에 담긴다) */
   overview: (target: K8sTarget) => invoke<K8sOverview>("k8s_overview", { target, profile: target.profile }),
+  revisions: (target: K8sTarget, object: K8sChangeObject, ssoProfile: string) =>
+    invoke<K8sRevision[]>("k8s_revisions", { target, object, profile: ssoProfile }),
+  preview: (target: K8sTarget, change: K8sChange, ssoProfile: string) =>
+    invoke<K8sPreview>("k8s_preview", { target, change, profile: ssoProfile }),
+  apply: (target: K8sTarget, change: K8sChange, confirmText: string | null, undoOf: string | null, ssoProfile: string) =>
+    invoke<K8sApplyResult>("k8s_apply", { target, change, confirmText, undoOf, profile: ssoProfile }),
+  changeLog: () => invoke<K8sChangeLogEntry[]>("k8s_change_log"),
+  undo: (logId: string) => invoke<K8sUndo>("k8s_undo", { logId }),
 };

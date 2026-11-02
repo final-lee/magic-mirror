@@ -11,6 +11,10 @@ use tauri::{Manager, State};
 
 use crate::commands::AppState;
 use crate::error::AppError;
+use crate::iam::clock::{iso, now_secs};
+use crate::iam::commit::{new_log_id, plan::PlanStore};
+use crate::k8s::change::{self, Change, ChangeObject, Operation, Plan, Preview};
+use crate::k8s::{commit, exec, log, node_shell};
 use crate::k8s::connect;
 use crate::k8s::forward::{self, Forward, ForwardRequest, Forwards};
 use crate::k8s::failure::{describe, failure_of, Endpoint, Failure, NOT_OPENED};
@@ -26,6 +30,11 @@ use crate::k8s::shell::{self, ShellMessage, ShellMode, ShellOpened, ShellTarget,
 use crate::k8s::target::{describe_cluster, K8sTarget};
 use crate::k8s::watch::{self, WatchMessage};
 
+/// 앱을 끌 때 노드 셸 Pod 지우기를 기다리는 시간
+const CLEANUP_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+pub const RECORD_FAILED: &str = "변경 결과를 기록하지 못했어요";
+pub const UNDO_RECORD_FAILED: &str = "되돌리기 기록을 갱신하지 못했어요";
+
 pub struct Session {
     pub client: kube::Client,
     pub endpoint: Endpoint,
@@ -40,6 +49,8 @@ pub struct K8sState {
     next_watch: AtomicU64,
     shells: Arc<Shells>,
     forwards: Arc<Forwards>,
+    plans: Mutex<PlanStore<StoredPlan>>,
+    log_path: PathBuf,
 }
 
 /// 돌고 있는 watch 하나. 대상이 닫히면 같은 대상의 것을 모두 멈춘다.
@@ -48,11 +59,23 @@ struct WatchEntry {
     handle: tokio::task::AbortHandle,
 }
 
+#[derive(Clone)]
+struct StoredPlan {
+    plan: Plan,
+    at: String,
+    epoch: u64,
+    session: Arc<Session>,
+}
+
 fn locked<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 impl K8sState {
+    pub fn new(log_path: PathBuf) -> Self {
+        Self { log_path, ..Self::default() }
+    }
+
     pub fn epoch(&self, t: &K8sTarget) -> u64 {
         *locked(&self.epochs).get(t).unwrap_or(&0)
     }
@@ -94,10 +117,11 @@ impl K8sState {
         self.forwards.close_target(t);
     }
 
-    /// 앱을 끌 때: 모든 셸과 port-forward를 닫는다(셸 기록에 닫은 시각을 남긴다).
-    pub fn close_streams(&self) {
+    /// 앱을 끌 때: 모든 셸과 port-forward를 닫는다(셸 기록에 닫은 시각을 남기고, 노드 셸 Pod 지우기가 끝나길 잠깐 기다린다).
+    pub async fn close_streams(&self) {
         self.shells.close_all();
         self.forwards.close_all();
+        self.shells.settle(CLEANUP_WAIT).await;
     }
 
     /// 시작할 때의 `epoch`와 같을 때만 `register`를 실행한다(실행하는 동안 `epochs` 잠금을 쥔다). 다르면(그사이 닫힘) None.
@@ -312,11 +336,9 @@ pub fn k8s_logs(
 }
 
 /// 셸(exec) 세션을 연다. 터미널 출력은 채널로 흐르고 반환값의 번호로 입력·크기·닫기를 한다.
-/// 위험한 네임스페이스(`kube-system`, 이름에 `prod`)는 `confirm_text`가 Pod 이름과 같아야 한다.
+/// 위험한 네임스페이스·Pod(`change::dangerous`)는 `confirm_text`가 Pod 이름과 같아야 한다. 열고 닫은 시각은 변경 기록에 남는다.
 #[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn k8s_shell_open(
-    app: tauri::AppHandle,
     k8s: State<'_, K8sState>,
     target: K8sTarget,
     namespace: String,
@@ -325,14 +347,12 @@ pub async fn k8s_shell_open(
     confirm_text: Option<String>,
     on_event: tauri::ipc::Channel<ShellMessage>,
 ) -> Result<ShellOpened, AppError> {
-    open_shell(&app, &k8s, ShellMode::Exec, target, namespace, pod, container, confirm_text, on_event).await
+    open_shell(&k8s, ShellMode::Exec, target, namespace, pod, container, confirm_text, on_event).await
 }
 
 /// 컨테이너의 주 프로세스에 attach한다. 입력은 컨테이너에 `stdin`과 `tty`가 켜져 있을 때만 간다(`input`).
 #[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn k8s_attach_open(
-    app: tauri::AppHandle,
     k8s: State<'_, K8sState>,
     target: K8sTarget,
     namespace: String,
@@ -341,12 +361,11 @@ pub async fn k8s_attach_open(
     confirm_text: Option<String>,
     on_event: tauri::ipc::Channel<ShellMessage>,
 ) -> Result<ShellOpened, AppError> {
-    open_shell(&app, &k8s, ShellMode::Attach, target, namespace, pod, container, confirm_text, on_event).await
+    open_shell(&k8s, ShellMode::Attach, target, namespace, pod, container, confirm_text, on_event).await
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn open_shell(
-    app: &tauri::AppHandle,
     k8s: &K8sState,
     mode: ShellMode,
     target: K8sTarget,
@@ -357,13 +376,55 @@ async fn open_shell(
     on_event: tauri::ipc::Channel<ShellMessage>,
 ) -> Result<ShellOpened, AppError> {
     shell::check_confirm(&namespace, &pod, confirm_text.as_deref())?;
-    let log = app.path().app_data_dir().map_err(|e| AppError::other(e.to_string()))?.join(shell::RECORD_FILE);
     let started = k8s.epoch(&target);
     let session = k8s.session(&target)?;
-    let connected = shell::connect(session.client.clone(), mode, &namespace, &pod, &container, session.endpoint).await?;
+    let connected = shell::connect(session.client.clone(), mode, &namespace, &pod, &container, &shell::SHELL_COMMAND, session.endpoint).await?;
     let info = ShellTarget { target: target.clone(), namespace, pod, container, mode };
-    k8s.while_current(&target, started, || k8s.shells.start(&log, info, connected, move |m| on_event.send(m).is_ok()))
+    k8s.while_current(&target, started, || k8s.shells.start(&k8s.log_path, info, connected, None, move |m| on_event.send(m).is_ok()))
         .ok_or_else(|| AppError::other(NOT_OPENED))?
+}
+
+/// 셸·attach를 열 때 입력해야 하는 이름. 위험하지 않으면 없다(화면이 확인 창에 입력칸을 둘지 정한다).
+#[tauri::command]
+pub fn k8s_shell_confirm_name(namespace: String, pod: String) -> Option<String> {
+    change::confirm_name(Some(&namespace), &pod)
+}
+
+/// 노드 셸을 연다: 변경 틀로 만든 노드 셸 Pod가 준비되길 기다렸다가 노드의 PID 1 네임스페이스로 들어가는 셸을 연다.
+/// 열지 못하면, 그리고 셸을 닫거나 탭을 닫거나 앱을 끌 때 Pod를 지운다(변경 기록에 남는다).
+#[tauri::command]
+pub async fn k8s_node_shell_open(
+    k8s: State<'_, K8sState>,
+    target: K8sTarget,
+    namespace: String,
+    pod: String,
+    on_event: tauri::ipc::Channel<ShellMessage>,
+) -> Result<ShellOpened, AppError> {
+    let started = k8s.epoch(&target);
+    let session = k8s.session(&target)?;
+    let (client, endpoint) = (session.client.clone(), session.endpoint);
+    let remove = {
+        let (client, target, namespace, pod, log_path) = (client.clone(), target.clone(), namespace.clone(), pod.clone(), k8s.log_path.clone());
+        move || node_shell::remove(client.clone(), endpoint, target.clone(), namespace.clone(), pod.clone(), log_path.clone())
+    };
+    let opened = async {
+        node_shell::wait_ready(client.clone(), &namespace, &pod, endpoint).await?;
+        let mut command = change::NODE_SHELL_COMMAND.to_vec();
+        command.push("sh");
+        let connected = shell::connect(client.clone(), ShellMode::Exec, &namespace, &pod, change::NODE_SHELL_CONTAINER, &command, endpoint).await?;
+        let info = ShellTarget { target: target.clone(), namespace: namespace.clone(), pod: pod.clone(), container: change::NODE_SHELL_CONTAINER.into(), mode: ShellMode::Exec };
+        let cleanup: shell::Cleanup = Box::new({
+            let remove = remove.clone();
+            move || Box::pin(remove())
+        });
+        k8s.while_current(&target, started, || k8s.shells.start(&k8s.log_path, info, connected, Some(cleanup), move |m| on_event.send(m).is_ok()))
+            .ok_or_else(|| AppError::other(NOT_OPENED))?
+    }
+    .await;
+    if opened.is_err() {
+        remove().await;
+    }
+    opened
 }
 
 /// 터미널 입력(키 입력)을 보낸다. 이미 끝난 세션이면 무시한다.
@@ -434,6 +495,105 @@ pub async fn k8s_overview(app: State<'_, AppState>, k8s: State<'_, K8sState>, ta
 pub async fn k8s_secret_value(k8s: State<'_, K8sState>, target: K8sTarget, namespace: String, name: String, key: String) -> Result<SecretValue, AppError> {
     let s = k8s.session(&target)?;
     secret::secret_value(&s.client, &namespace, &name, &key, s.endpoint).await
+}
+
+/// 롤아웃 대상의 소유 리비전만 고른다.
+#[tauri::command]
+pub async fn k8s_revisions(k8s: State<'_, K8sState>, target: K8sTarget, object: ChangeObject) -> Result<Vec<commit::Revision>, AppError> {
+    let session = k8s.session(&target)?;
+    commit::revisions(session.client.clone(), session.endpoint, &object).await
+}
+
+/// 되살릴 객체는 이 클러스터의 변경 기록에서 나온 역변경이어야 한다.
+fn check_recreate(k8s: &K8sState, target: &K8sTarget, change: &Change) -> Result<(), AppError> {
+    if matches!(change.operation, Operation::Recreate { .. })
+        && !log::read_all(&k8s.log_path).iter().any(|entry| entry.target == *target && entry.ok && !entry.undone && entry.inverse.as_ref() == Some(change))
+    {
+        return Err(AppError::other(log::UNDO_UNAVAILABLE));
+    }
+    Ok(())
+}
+
+
+#[tauri::command]
+pub async fn k8s_preview(k8s: State<'_, K8sState>, target: K8sTarget, change: Change) -> Result<Preview, AppError> {
+    check_recreate(&k8s, &target, &change)?;
+    let session = k8s.session(&target)?;
+    let epoch = k8s.epoch(&target);
+    let now = now_secs();
+    let at = iso(now);
+    let plan = commit::dry_plan(session.client.clone(), session.endpoint, &change, &at).await?;
+    if k8s.epoch(&target) != epoch || !Arc::ptr_eq(&session, &k8s.session(&target)?) {
+        return Err(AppError::other(NOT_OPENED));
+    }
+    let preview = plan.preview.clone();
+    locked(&k8s.plans).remember(&target.profile, &(&target, &change), StoredPlan { plan, at, epoch, session }, now);
+    Ok(preview)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct K8sApplyResult {
+    log_id: String,
+}
+
+#[tauri::command]
+pub async fn k8s_apply(k8s: State<'_, K8sState>, target: K8sTarget, change: Change, confirm_text: Option<String>, undo_of: Option<String>) -> Result<K8sApplyResult, AppError> {
+    let session = k8s.session(&target)?;
+    let seen = locked(&k8s.plans).take(&target.profile, &(&target, &change), now_secs()).ok_or_else(|| AppError::other(exec::STALE))?;
+    if k8s.epoch(&target) != seen.epoch || !Arc::ptr_eq(&session, &seen.session) {
+        return Err(AppError::other(exec::STALE));
+    }
+    check_recreate(&k8s, &target, &change)?;
+    if let Some(id) = &undo_of {
+        let undo = log::undo(&log::read_all(&k8s.log_path), id)?;
+        if undo.target != target || undo.change != change {
+            return Err(AppError::other(log::UNDO_UNAVAILABLE));
+        }
+    } else if matches!(change.operation, Operation::Recreate { .. }) {
+        return Err(AppError::other(log::UNDO_UNAVAILABLE));
+    }
+    let (plan, outcome) = commit::apply_plan(session.client.clone(), session.endpoint, &change, &seen.plan, &seen.at, confirm_text.as_deref()).await?;
+    let now = now_secs();
+    let id = new_log_id(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+    let inverse = if outcome.is_ok() {
+        plan.inverse
+    } else {
+        None
+    };
+    let entry = log::Entry {
+        id: id.clone(),
+        at: iso(now),
+        target,
+        change,
+        summary: plan.preview.impact.join(", "),
+        ok: outcome.is_ok(),
+        error: outcome.as_ref().err().map(ToString::to_string),
+        inverse,
+        undo_of: undo_of.clone(),
+        undone: false,
+        closed_at: None,
+    };
+    log::append(&k8s.log_path, &entry).map_err(|_| AppError::other(RECORD_FAILED))?;
+    if outcome.is_ok() {
+        if let Some(original) = undo_of {
+            log::mark_undone(&k8s.log_path, &original).map_err(|_| AppError::other(UNDO_RECORD_FAILED))?;
+        }
+    }
+    outcome?;
+    Ok(K8sApplyResult { log_id: id })
+}
+
+#[tauri::command]
+pub fn k8s_change_log(k8s: State<'_, K8sState>) -> Vec<log::Entry> {
+    let mut entries = log::read_all(&k8s.log_path);
+    entries.reverse();
+    entries
+}
+
+#[tauri::command]
+pub fn k8s_undo(k8s: State<'_, K8sState>, log_id: String) -> Result<log::Undo, AppError> {
+    log::undo(&log::read_all(&k8s.log_path), &log_id)
 }
 
 #[cfg(test)]

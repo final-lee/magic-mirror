@@ -35,7 +35,7 @@ const { terms, FakeTerm } = vi.hoisted(() => {
 vi.mock("@xterm/xterm", () => ({ Terminal: FakeTerm }));
 vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: class { fit() {} } }));
-vi.mock("./api", () => ({ k8sApi: { shellOpen: vi.fn(), attachOpen: vi.fn(), shellInput: vi.fn(), shellResize: vi.fn(), shellClose: vi.fn() } }));
+vi.mock("./api", () => ({ k8sApi: { shellOpen: vi.fn(), attachOpen: vi.fn(), nodeShellOpen: vi.fn(), shellInput: vi.fn(), shellResize: vi.fn(), shellClose: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 const m = vi.mocked(k8sApi);
 const T = { profile: "app", region: "r", cluster: "c" };
@@ -59,6 +59,10 @@ beforeEach(() => {
   };
   m.shellOpen.mockImplementation(opener);
   m.attachOpen.mockImplementation(opener);
+  m.nodeShellOpen.mockImplementation(async (_t, _ns, _pod, _p, onMessage) => {
+    emit.push(onMessage);
+    return { id: 11, input: true };
+  });
 });
 
 test("opens the shell for the container, draws output, sends keystrokes and the size, and closes on unmount", async () => {
@@ -122,4 +126,16 @@ test("a refused open (no permission) shows the error and no session closes", asy
   await act(async () => {});
   expect(screen.getByText(/pods\/exec/)).toBeInTheDocument();
   expect(m.shellClose).not.toHaveBeenCalled();
+});
+
+test("a node shell opens on the debug pod with no container or confirmation, and cannot be reopened once it ends", async () => {
+  setup({ mode: "node", pod: "mm-node-shell-x", container: "", confirmText: null });
+  await act(async () => {});
+  expect(m.nodeShellOpen).toHaveBeenCalledWith(T, "dev", "mm-node-shell-x", "p", expect.any(Function));
+  expect(m.shellOpen).not.toHaveBeenCalled();
+  terms[0].onDataCb("hostname\r");
+  expect(m.shellInput).toHaveBeenCalledWith(11, "hostname\r");
+  act(() => emit[0]({ type: "exit", code: 0, reason: null }));
+  expect(screen.getByText(shellExited(0, null))).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: SHELL_REOPEN })).not.toBeInTheDocument();
 });

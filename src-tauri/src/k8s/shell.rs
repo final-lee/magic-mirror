@@ -1,5 +1,5 @@
 //! Pod 셸(exec)과 컨테이너 attach 세션. 웹소켓으로 열고 출력을 채널로 흘린다. 클러스터에 터미널을 여는 곳은 이 파일뿐이다(`hygiene`이 지킨다).
-//! 셸 입력·출력은 어디에도 남기지 않는다. 기록은 열고 닫은 시각과 대상뿐이다(`k8s-shell.jsonl`, 변경 기록 틀이 들어오면 그쪽으로 합친다).
+//! 셸 입력·출력은 어디에도 남기지 않는다. 기록은 열고 닫은 시각과 대상뿐이고 변경 기록(`k8s-changes.jsonl`)에 한 줄로 남는다.
 //! 세션은 `Shells`가 쥔다. 대상 탭을 닫거나 앱을 끄면 모두 닫는다.
 use std::collections::HashMap;
 use std::future::Future;
@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use futures::future::FutureExt;
+use futures::future::{BoxFuture, FutureExt};
 use futures::{Sink, SinkExt};
 use k8s_openapi::api::core::v1::Pod;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Status;
@@ -18,12 +18,15 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 
+use super::change::{self, Change, Operation};
 use super::connect::REQUEST_TIMEOUT;
 use super::failure::{describe, short_reason, stream_failure_of, Endpoint, Failure};
+use super::log;
 use super::read::bounded;
 use super::target::K8sTarget;
 use crate::error::AppError;
 use crate::iam::clock::{iso, now_secs};
+use crate::iam::commit::new_log_id;
 
 /// bash가 있으면 bash, 없으면 sh. 셸이 하나도 없는 이미지(distroless)는 exec 오류가 그대로 보인다.
 pub const SHELL_COMMAND: [&str; 3] = ["/bin/sh", "-c", "[ -x /bin/bash ] && exec /bin/bash; exec /bin/sh"];
@@ -31,8 +34,9 @@ pub const SHELL_COMMAND: [&str; 3] = ["/bin/sh", "-c", "[ -x /bin/bash ] && exec
 const READ_CHUNK: usize = 16 * 1024;
 /// 프로세스가 끝났다고 알린 뒤(또는 출력이 모두 닫힌 뒤) 남은 출력이나 상태를 기다리는 시간
 const DRAIN_GRACE: Duration = Duration::from_secs(2);
-/// 기록으로 남기는 셸 세션 파일 이름(앱 데이터 폴더)
-pub const RECORD_FILE: &str = "k8s-shell.jsonl";
+/// 변경 기록에 남기는 세션 요약
+pub const SUMMARY_EXEC: &str = "Pod 셸 열기";
+pub const SUMMARY_ATTACH: &str = "컨테이너 attach 열기";
 
 pub const CONFIRM_MISMATCH: &str = "위험한 네임스페이스예요. Pod 이름을 정확히 입력해 주세요";
 pub const NO_SUCH_CONTAINER: &str = "Pod에 그 컨테이너가 없어요";
@@ -70,17 +74,12 @@ pub struct ShellOpened {
     pub input: bool,
 }
 
-/// 셸·attach를 열 때 확인 문구가 필요한 네임스페이스: `kube-system`이거나 이름에 `prod`가 들어간다(변경 공통 틀의 위험 규칙과 같다).
-pub fn needs_typed_name(namespace: &str) -> bool {
-    namespace == "kube-system" || namespace.to_lowercase().contains("prod")
-}
-
-/// 위험한 네임스페이스면 Pod 이름을 그대로 입력해야 한다.
+/// 위험한 네임스페이스·Pod면 Pod 이름을 그대로 입력해야 한다. 규칙은 변경 공통 틀의 것(`change::confirm_name`)을 쓴다.
 pub fn check_confirm(namespace: &str, pod: &str, typed: Option<&str>) -> Result<(), AppError> {
-    if !needs_typed_name(namespace) || typed == Some(pod) {
-        return Ok(());
+    match change::confirm_name(Some(namespace), pod) {
+        Some(needed) if typed != Some(needed.as_str()) => Err(AppError::other(CONFIRM_MISMATCH)),
+        _ => Ok(()),
     }
-    Err(AppError::other(CONFIRM_MISMATCH))
 }
 
 /// 컨테이너에 맞춘 열기 계획
@@ -143,13 +142,13 @@ pub struct Connected {
     pub input: bool,
 }
 
-/// Pod를 읽어 계획을 세우고 exec(`mode`가 `Exec`) 또는 attach로 연결한다.
-pub async fn connect(client: kube::Client, mode: ShellMode, namespace: &str, pod: &str, container: &str, endpoint: Endpoint) -> Result<Connected, AppError> {
+/// Pod를 읽어 계획을 세우고 exec(`mode`가 `Exec`, `command`를 실행) 또는 attach(`command`는 안 쓴다)로 연결한다.
+pub async fn connect(client: kube::Client, mode: ShellMode, namespace: &str, pod: &str, container: &str, command: &[&str], endpoint: Endpoint) -> Result<Connected, AppError> {
     let api: Api<Pod> = Api::namespaced(client, namespace);
     let found = bounded(api.get(pod), "get", "pods", endpoint).await?;
     let plan = plan_of(mode, &found, container)?;
     let process = match mode {
-        ShellMode::Exec => bounded_stream(api.exec(pod, SHELL_COMMAND, &plan.params), "create", "pods/exec", endpoint).await?,
+        ShellMode::Exec => bounded_stream(api.exec(pod, command.iter().copied(), &plan.params), "create", "pods/exec", endpoint).await?,
         ShellMode::Attach => bounded_stream(api.attach(pod, &plan.params), "create", "pods/attach", endpoint).await?,
     };
     Ok(Connected { process, input: plan.input })
@@ -366,20 +365,6 @@ async fn session(mut process: AttachedProcess, rx: mpsc::UnboundedReceiver<Input
     // `process`는 여기서 버려지며 웹소켓을 닫는다
 }
 
-/// 기록 한 줄: 누가 아니라 어디에, 언제 열고 닫았는지만. 입력·출력은 없다.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ShellRecord {
-    pub key: String,
-    pub mode: ShellMode,
-    pub target: K8sTarget,
-    pub namespace: String,
-    pub pod: String,
-    pub container: String,
-    pub opened_at: String,
-    pub closed_at: Option<String>,
-}
-
 /// 열 세션의 대상
 #[derive(Debug, Clone)]
 pub struct ShellTarget {
@@ -390,12 +375,38 @@ pub struct ShellTarget {
     pub mode: ShellMode,
 }
 
+/// 세션이 끝난 뒤 한 번 돌리는 정리(노드 셸: 디버그 Pod 지우기)
+pub type Cleanup = Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>;
+
+/// 변경 기록에 남기는 세션 한 줄: 어디에, 언제 열고 닫았는지만. 입력·출력은 없다. 되돌릴 수 없다(`inverse` 없음).
+fn record_of(info: &ShellTarget, id: String, now: i64) -> log::Entry {
+    let object = change::pod_object(&info.namespace, &info.pod);
+    let summary = match info.mode {
+        ShellMode::Exec => SUMMARY_EXEC,
+        ShellMode::Attach => SUMMARY_ATTACH,
+    };
+    log::Entry {
+        id,
+        at: iso(now),
+        target: info.target.clone(),
+        change: Change { target: object, operation: Operation::Shell { container: info.container.clone(), mode: info.mode } },
+        summary: format!("{summary}: {}/{} ({})", info.namespace, info.pod, info.container),
+        ok: true,
+        error: None,
+        inverse: None,
+        undo_of: None,
+        undone: false,
+        closed_at: None,
+    }
+}
+
 struct ShellEntry {
     target: K8sTarget,
     input: mpsc::UnboundedSender<Input>,
     handle: tokio::task::AbortHandle,
     log: PathBuf,
     key: String,
+    cleanup: Option<Cleanup>,
 }
 
 /// 열려 있는 셸·attach 세션. 잠금은 이 안에서만 잡는다(`K8sState`의 잠금 순서에서 맨 뒤).
@@ -403,6 +414,8 @@ struct ShellEntry {
 pub struct Shells {
     entries: Mutex<HashMap<u64, ShellEntry>>,
     next: AtomicU64,
+    /// 돌고 있는 정리 작업. 앱을 끌 때 `settle`이 끝나기를 기다린다.
+    cleanups: Mutex<Vec<tauri::async_runtime::JoinHandle<()>>>,
 }
 
 fn locked<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -416,32 +429,30 @@ impl Shells {
         log: &Path,
         info: ShellTarget,
         connected: Connected,
+        cleanup: Option<Cleanup>,
         send: impl FnMut(ShellMessage) -> bool + Send + 'static,
     ) -> Result<ShellOpened, AppError> {
         let Connected { process, input } = connected;
-        self.register(log, info, input, move |rx| session(process, rx, send))
+        self.register(log, info, input, cleanup, move |rx| session(process, rx, send))
     }
 
-    /// 기록을 남기고 `run`이 만든 세션 작업을 띄워 등록한다. 기록을 못 남기면 열지 않는다.
+    /// 변경 기록에 세션 한 줄을 남기고 `run`이 만든 세션 작업을 띄워 등록한다. 기록을 못 남기면 열지 않는다.
     /// 등록이 끝날 때까지 잠금을 쥐므로, 곧바로 끝나는 세션의 `finish`도 등록 뒤에 실행된다.
-    pub fn register<F>(self: &Arc<Self>, log: &Path, info: ShellTarget, input: bool, run: impl FnOnce(mpsc::UnboundedReceiver<Input>) -> F) -> Result<ShellOpened, AppError>
+    pub fn register<F>(
+        self: &Arc<Self>,
+        log: &Path,
+        info: ShellTarget,
+        input: bool,
+        cleanup: Option<Cleanup>,
+        run: impl FnOnce(mpsc::UnboundedReceiver<Input>) -> F,
+    ) -> Result<ShellOpened, AppError>
     where
         F: Future<Output = ()> + Send + 'static,
     {
         let id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
         let now = now_secs();
-        let key = format!("sh-{now}-{id}");
-        let record = ShellRecord {
-            key: key.clone(),
-            mode: info.mode,
-            target: info.target.clone(),
-            namespace: info.namespace,
-            pod: info.pod,
-            container: info.container,
-            opened_at: iso(now),
-            closed_at: None,
-        };
-        crate::jsonl::append(log, &record).map_err(|_| AppError::other(RECORD_FAILED))?;
+        let key = new_log_id(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis()));
+        log::append(log, &record_of(&info, key.clone(), now)).map_err(|_| AppError::other(RECORD_FAILED))?;
         let (tx, rx) = mpsc::unbounded_channel();
         let mut entries = locked(&self.entries);
         let finish = Finish { shells: self.clone(), id };
@@ -451,7 +462,7 @@ impl Shells {
             let _finish = finish;
             session.await;
         });
-        entries.insert(id, ShellEntry { target: info.target, input: tx, handle: task.abort_handle(), log: log.to_path_buf(), key });
+        entries.insert(id, ShellEntry { target: info.target, input: tx, handle: task.abort_handle(), log: log.to_path_buf(), key, cleanup });
         Ok(ShellOpened { id, input })
     }
 
@@ -487,14 +498,24 @@ impl Shells {
         }
     }
 
-    /// 항목을 지우고 세션을 멈추고 닫은 시각을 적는다. 이미 지워졌으면 아무것도 하지 않는다.
+    /// 돌고 있는 정리 작업이 끝나기를 `limit`까지 기다린다(앱을 끌 때 노드 셸 Pod가 남지 않게).
+    pub async fn settle(&self, limit: Duration) {
+        let pending: Vec<_> = locked(&self.cleanups).drain(..).collect();
+        let _ = tokio::time::timeout(limit, futures::future::join_all(pending)).await;
+    }
+
+    /// 항목을 지우고 세션을 멈추고 닫은 시각을 적고 정리를 띄운다. 이미 지워졌으면 아무것도 하지 않는다.
     fn finish(&self, id: u64) {
         let Some(entry) = locked(&self.entries).remove(&id) else {
             return;
         };
         entry.handle.abort();
-        let closed = iso(now_secs());
-        let _ = crate::jsonl::update(&entry.log, |r: &ShellRecord| r.key == entry.key, |r| r.closed_at = Some(closed.clone()));
+        let _ = log::mark_closed(&entry.log, &entry.key, &iso(now_secs()));
+        if let Some(cleanup) = entry.cleanup {
+            // 앱 종료처럼 런타임 밖에서 불려도 되도록 tauri의 런타임으로 띄운다
+            let task = tauri::async_runtime::spawn(cleanup());
+            locked(&self.cleanups).push(task);
+        }
     }
 }
 

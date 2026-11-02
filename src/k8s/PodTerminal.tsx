@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { ErrorState } from "../components/ErrorState";
 import { k8sApi } from "./api";
 import { ATTACH_OUTPUT_ONLY, SHELL_OPENING, SHELL_REOPEN, SHELL_LABEL, shellExited } from "./text";
-import type { K8sShellMode, K8sTarget } from "./types";
+import type { K8sShellMessage, K8sShellMode, K8sTarget } from "./types";
 
 /** 앱의 어두운 테마에 맞춘 터미널 색 */
 const TERM_THEME = {
@@ -23,7 +23,7 @@ interface Props {
   pod: string;
   container: string;
   mode: K8sShellMode;
-  /** 위험한 네임스페이스에서 입력한 Pod 이름 */
+  /** 위험한 대상에서 입력한 이름(필요 없으면 null). 노드 셸은 쓰지 않는다 */
   confirmText: string | null;
   /** 보이는 동안만 크기를 맞추고 입력을 받는다(숨겨도 세션은 유지된다) */
   visible: boolean;
@@ -56,12 +56,17 @@ export function PodTerminal({ target, ssoProfile, namespace, pod, container, mod
     let gone = false;
     let id: number | null = null;
     let input = false;
-    const open = mode === "attach" ? k8sApi.attachOpen : k8sApi.shellOpen;
-    open(target, namespace, pod, container, confirmText, ssoProfile, (m) => {
+    const onMessage = (m: K8sShellMessage) => {
       if (gone) return;
       if (m.type === "output") term.write(m.data);
       else setState({ phase: "ended", code: m.code, reason: m.reason });
-    })
+    };
+    // 노드 셸은 변경 틀로 만든 디버그 Pod(pod)에 들어간다. 컨테이너·확인 문구는 필요 없다
+    const opening =
+      mode === "node"
+        ? k8sApi.nodeShellOpen(target, namespace, pod, ssoProfile, onMessage)
+        : (mode === "attach" ? k8sApi.attachOpen : k8sApi.shellOpen)(target, namespace, pod, container, confirmText, ssoProfile, onMessage);
+    opening
       .then((opened) => {
         if (gone) {
           void k8sApi.shellClose(opened.id);
@@ -120,9 +125,12 @@ export function PodTerminal({ target, ssoProfile, namespace, pod, container, mod
         {state.phase === "ended" && (
           <div className="k8s-term-over">
             <p>{shellExited(state.code, state.reason)}</p>
-            <button className="btn" onClick={restart}>
-              {SHELL_REOPEN}
-            </button>
+            {/* 노드 셸 Pod는 세션이 끝나면 지워지니 같은 Pod로 다시 열 수 없다 */}
+            {mode !== "node" && (
+              <button className="btn" onClick={restart}>
+                {SHELL_REOPEN}
+              </button>
+            )}
           </div>
         )}
       </div>

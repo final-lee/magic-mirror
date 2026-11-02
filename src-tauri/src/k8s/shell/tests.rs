@@ -38,21 +38,15 @@ fn out(data: &str) -> ShellMessage {
 }
 
 #[test]
-fn only_kube_system_and_prod_namespaces_need_the_pod_name_typed() {
-    assert!(needs_typed_name("kube-system"));
-    assert!(needs_typed_name("shop-prod"));
-    assert!(needs_typed_name("Prod-api"));
-    assert!(!needs_typed_name("dev"));
-    assert!(!needs_typed_name("kube-public"));
-}
-
-#[test]
 fn a_dangerous_namespace_opens_only_with_the_exact_pod_name() {
     assert!(check_confirm("dev", "web-1", None).is_ok());
     assert_eq!(check_confirm("kube-system", "coredns", None), Err(AppError::other(CONFIRM_MISMATCH)));
     assert_eq!(check_confirm("kube-system", "coredns", Some("")), Err(AppError::other(CONFIRM_MISMATCH)));
     assert_eq!(check_confirm("prod", "web-1", Some("web")), Err(AppError::other(CONFIRM_MISMATCH)));
     assert!(check_confirm("prod", "web-1", Some("web-1")).is_ok());
+    // 같은 규칙: 변경 공통 틀의 위험 판단(네임스페이스나 이름에 prod)을 그대로 쓴다
+    assert!(check_confirm("dev", "prod-db-0", Some("prod-db-0")).is_ok());
+    assert_eq!(check_confirm("dev", "prod-db-0", None), Err(AppError::other(CONFIRM_MISMATCH)));
 }
 
 #[test]
@@ -222,23 +216,25 @@ fn info(namespace: &str) -> ShellTarget {
 fn temp_log(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("mm-shell-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    dir.join(RECORD_FILE)
+    dir.join("k8s-changes.jsonl")
 }
 
-fn records(log: &Path) -> Vec<ShellRecord> {
-    crate::jsonl::read_all(log)
+fn records(log: &Path) -> Vec<log::Entry> {
+    log::read_all(log)
 }
 
 #[tokio::test]
 async fn closing_a_session_records_when_it_opened_and_closed_and_nothing_else() {
     let shells = Arc::new(Shells::default());
     let log = temp_log("close");
-    let opened = shells.register(&log, info("dev"), true, |mut rx| async move { while rx.recv().await.is_some() {} }).unwrap();
+    let opened = shells.register(&log, info("dev"), true, None, |mut rx| async move { while rx.recv().await.is_some() {} }).unwrap();
     assert!(opened.input);
     let rows = records(&log);
     assert_eq!(rows.len(), 1);
-    assert_eq!((rows[0].namespace.as_str(), rows[0].pod.as_str(), rows[0].container.as_str(), rows[0].mode), ("dev", "web-1", "app", ShellMode::Exec));
-    assert!(rows[0].closed_at.is_none());
+    assert_eq!(rows[0].change.target, change::pod_object("dev", "web-1"));
+    assert_eq!(rows[0].change.operation, Operation::Shell { container: "app".into(), mode: ShellMode::Exec });
+    // 되돌릴 수 없는 기록이고 입력·출력 자리는 없다
+    assert!(rows[0].ok && rows[0].inverse.is_none() && rows[0].closed_at.is_none());
     shells.close(opened.id);
     let rows = records(&log);
     assert!(rows[0].closed_at.is_some());
@@ -253,7 +249,7 @@ async fn closing_a_session_records_when_it_opened_and_closed_and_nothing_else() 
 async fn a_session_that_ends_by_itself_is_forgotten_and_recorded_as_closed() {
     let shells = Arc::new(Shells::default());
     let log = temp_log("ends");
-    shells.register(&log, info("dev"), false, |_rx| async {}).unwrap();
+    shells.register(&log, info("dev"), false, None, |_rx| async {}).unwrap();
     for _ in 0..100 {
         if locked(&shells.entries).is_empty() {
             break;
@@ -272,13 +268,13 @@ async fn input_and_resize_reach_the_session_that_owns_the_id() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = seen.clone();
     let a = shells
-        .register(&log, info("dev"), true, move |mut rx| async move {
+        .register(&log, info("dev"), true, None, move |mut rx| async move {
             while let Some(i) = rx.recv().await {
                 sink.lock().unwrap().push(i);
             }
         })
         .unwrap();
-    let b = shells.register(&log, info("dev"), true, |mut rx| async move { while rx.recv().await.is_some() {} }).unwrap();
+    let b = shells.register(&log, info("dev"), true, None, |mut rx| async move { while rx.recv().await.is_some() {} }).unwrap();
     assert_ne!(a.id, b.id);
     shells.input(a.id, "ls\n".into());
     shells.resize(a.id, 80, 24);
@@ -300,8 +296,8 @@ async fn closing_a_target_closes_only_its_sessions() {
     let mine = info("dev");
     let mut other = info("dev");
     other.target.cluster = "other".into();
-    shells.register(&log, mine.clone(), true, |mut rx| async move { while rx.recv().await.is_some() {} }).unwrap();
-    shells.register(&log, other.clone(), true, |mut rx| async move { while rx.recv().await.is_some() {} }).unwrap();
+    shells.register(&log, mine.clone(), true, None, |mut rx| async move { while rx.recv().await.is_some() {} }).unwrap();
+    shells.register(&log, other.clone(), true, None, |mut rx| async move { while rx.recv().await.is_some() {} }).unwrap();
     shells.close_target(&mine.target);
     assert_eq!(locked(&shells.entries).len(), 1);
     assert!(locked(&shells.entries).values().all(|e| e.target == other.target));
@@ -317,8 +313,53 @@ async fn a_session_is_not_opened_when_its_record_cannot_be_written() {
     // 폴더 자리에 파일이 있어 기록 파일을 만들 수 없다
     let blocker = std::env::temp_dir().join(format!("mm-shell-blocker-{}", std::process::id()));
     std::fs::write(&blocker, b"x").unwrap();
-    let res = shells.register(&blocker.join(RECORD_FILE), info("dev"), true, |_rx| async {});
+    let res = shells.register(&blocker.join("k8s-changes.jsonl"), info("dev"), true, None, |_rx| async {});
     assert_eq!(res.unwrap_err(), AppError::other(RECORD_FAILED));
     assert!(locked(&shells.entries).is_empty());
     let _ = std::fs::remove_file(blocker);
+}
+
+#[tokio::test]
+async fn closing_a_session_runs_its_cleanup_once_and_settle_waits_for_it() {
+    let shells = Arc::new(Shells::default());
+    let log = temp_log("cleanup");
+    let ran = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = ran.clone();
+    let cleanup: Cleanup = Box::new(move || {
+        Box::pin(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            count.fetch_add(1, Ordering::SeqCst);
+        })
+    });
+    let opened = shells.register(&log, info("dev"), true, Some(cleanup), |mut rx| async move { while rx.recv().await.is_some() {} }).unwrap();
+    shells.close(opened.id);
+    shells.close(opened.id);
+    shells.close_all();
+    // 정리가 아직 도는 중일 수 있다: 끝나길 기다린다
+    shells.settle(Duration::from_secs(5)).await;
+    assert_eq!(ran.load(Ordering::SeqCst), 1);
+    let _ = std::fs::remove_dir_all(log.parent().unwrap());
+}
+
+#[tokio::test]
+async fn a_session_that_ends_by_itself_also_runs_its_cleanup() {
+    let shells = Arc::new(Shells::default());
+    let log = temp_log("cleanup-ends");
+    let ran = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = ran.clone();
+    let cleanup: Cleanup = Box::new(move || {
+        Box::pin(async move {
+            count.fetch_add(1, Ordering::SeqCst);
+        })
+    });
+    shells.register(&log, info("dev"), true, Some(cleanup), |_rx| async {}).unwrap();
+    for _ in 0..100 {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        shells.settle(Duration::from_millis(100)).await;
+        if ran.load(Ordering::SeqCst) == 1 {
+            break;
+        }
+    }
+    assert_eq!(ran.load(Ordering::SeqCst), 1);
+    let _ = std::fs::remove_dir_all(log.parent().unwrap());
 }

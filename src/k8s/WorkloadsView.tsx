@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { K8sError } from "./K8sError";
 import { KindTree } from "./KindTree";
 import { DETAIL_PCT, LaneResizer, type Lane } from "./lanes";
@@ -6,8 +6,8 @@ import { CATEGORIES, PODS, customCategories, sameKind } from "./kinds";
 import { ObjectDetail } from "./ObjectDetail";
 import { ObjectList } from "./ObjectList";
 import { kindKey } from "./targets";
-import { CAT_CUSTOM } from "./text";
-import type { K8sKind, K8sKindRef, K8sTarget, ObjectRef } from "./types";
+import { CAT_CUSTOM, ROLLOUT_PROGRESS, ROLLOUT_WAITING } from "./text";
+import type { K8sChange, K8sKind, K8sKindRef, K8sTarget, ObjectRef } from "./types";
 import { useK8sWatch } from "./useK8sWatch";
 
 export interface WorkloadsFocus {
@@ -27,6 +27,9 @@ interface Props {
   kinds: K8sKind[];
   focus: WorkloadsFocus | null;
   onOpenIam?: (arn: string) => void;
+  changeMode?: boolean;
+  onChange?: (change: K8sChange) => void;
+  appliedChange?: K8sChange | null;
   /** 목록 위에 붙이는 알림(종류 발견 실패 등). 종류 트리와 기본 종류 탐색은 그대로 쓴다. */
   banner?: ReactNode;
   /** 북마크 화면: 이 종류만 보이고 종류 트리는 숨긴다 */
@@ -42,10 +45,13 @@ interface Props {
 }
 
 /** 종류 트리 + 감시 목록 + 상세 스택 */
-export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live, namespace, kinds, focus, onOpenIam, banner, fixedKind, bookmarked, onToggleBookmark, lanes }: Props) {
+export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live, namespace, kinds, focus, onOpenIam, banner,
+  fixedKind, bookmarked, onToggleBookmark, lanes, changeMode, onChange, appliedChange }: Props) {
   const [picked, setKind] = useState<K8sKindRef>(PODS);
   const kind = fixedKind ?? picked;
   const [stack, setStack] = useState<ObjectRef[]>([]);
+  const started = useRef<{ change: K8sChange; version: string | null } | null>(null);
+  const [rollout, setRollout] = useState<{ change: K8sChange; version: string | null } | null>(null);
 
   useEffect(() => {
     if (!focus) return;
@@ -60,6 +66,31 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
   const categories = useMemo(() => (custom.length === 0 ? CATEGORIES : [...CATEGORIES, { id: "custom", label: CAT_CUSTOM, kinds: [] }, ...custom]), [custom]);
   const top = stack.length > 0 ? stack[stack.length - 1] : null;
   const topRow = top && sameKind(top.kind, kind) ? watch.rows.find((r) => r.name === top.name && r.namespace === top.namespace) : undefined;
+
+  useEffect(() => {
+    if (!appliedChange || !["scale", "restart", "rolloutUndo"].includes(appliedChange.type)) return;
+    if (started.current?.change === appliedChange) setRollout(started.current);
+  }, [appliedChange]);
+
+  const rolloutRow = rollout && sameKind(rollout.change.kind, kind)
+    ? watch.rows.find((row) => row.name === rollout.change.name && row.namespace === rollout.change.namespace)
+    : undefined;
+  const readyParts = rolloutRow?.values.ready?.split("/") ?? [];
+  const ready = Number(readyParts[0]);
+  const desired = Number(readyParts[1] ?? rolloutRow?.values.desired);
+  const updated = rolloutRow?.values.upToDate === undefined ? ready : Number(rolloutRow.values.upToDate);
+  const known = !!rolloutRow?.values.ready && Number.isFinite(ready) && Number.isFinite(desired) && Number.isFinite(updated);
+  const complete = known && ready >= desired && updated >= desired;
+  useEffect(() => {
+    if (rollout && rolloutRow && rolloutRow.resourceVersion !== rollout.version && complete) setRollout(null);
+  }, [rollout, rolloutRow, complete]);
+  const progress = rollout && top && rolloutRow && rolloutRow.name === top.name && rolloutRow.namespace === top.namespace && known
+    ? rolloutRow.resourceVersion === rollout.version ? ROLLOUT_WAITING : ROLLOUT_PROGRESS(Math.min(ready, updated), desired)
+    : undefined;
+  const startChange = (change: K8sChange) => {
+    started.current = { change, version: topRow?.resourceVersion ?? null };
+    onChange?.(change);
+  };
 
   const pickKind = (k: K8sKindRef) => {
     setKind(k);
@@ -102,6 +133,11 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
             onBack={stack.length > 1 ? () => setStack((s) => s.slice(0, -1)) : null}
             onClose={() => setStack([])}
             onOpenIam={onOpenIam}
+            changeMode={changeMode}
+            onChange={onChange ? startChange : undefined}
+            rolloutProgress={progress}
+            appliedChange={appliedChange}
+            shellNamespace={namespace ?? undefined}
             widthPct={detailPct}
           />
         )}

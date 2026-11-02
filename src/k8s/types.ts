@@ -77,6 +77,79 @@ export interface K8sKindRef {
   namespaced: boolean;
 }
 
+/** 변경 대상. 네임스페이스가 없는 종류는 namespace가 null이다. */
+export interface K8sChangeObject {
+  kind: K8sKindRef;
+  namespace: string | null;
+  name: string;
+}
+
+/** 되돌리기용 recreate는 변경 기록에서만 만들어진다. */
+export type K8sChange = K8sChangeObject & (
+  | { type: "scale"; replicas: number }
+  | { type: "restart" }
+  | { type: "rolloutUndo"; revision: string }
+  | { type: "delete" }
+  | { type: "rerun"; jobName: string }
+  | { type: "suspend"; suspend: boolean }
+  | { type: "cordon"; unschedulable: boolean }
+  | { type: "recreate"; object: Record<string, unknown> }
+  /** 셸·attach를 연 기록(미리보기·적용 대상이 아니다) */
+  | { type: "shell"; container: string; mode: "exec" | "attach" }
+  /** 노드 셸 디버그 Pod 만들기. 대상(kind·namespace·name)은 만들 Pod, node는 고정할 노드 */
+  | { type: "nodeShell"; node: string; image: string }
+);
+
+export interface K8sRevision {
+  revision: string;
+  name: string;
+}
+
+export interface K8sApiCall {
+  verb: string;
+  path: string;
+  body: unknown;
+}
+
+export interface K8sFieldDiff {
+  path: string;
+  before: unknown;
+  after: unknown;
+}
+
+export interface K8sPreview {
+  calls: K8sApiCall[];
+  diff: K8sFieldDiff[];
+  impact: string[];
+  warnings: string[];
+  confirmName: string | null;
+  reversible: boolean;
+}
+
+export interface K8sApplyResult {
+  logId: string;
+}
+
+export interface K8sChangeLogEntry {
+  id: string;
+  at: string;
+  target: K8sTarget;
+  change: K8sChange;
+  summary: string;
+  ok: boolean;
+  error: string | null;
+  inverse: K8sChange | null;
+  undoOf: string | null;
+  undone: boolean;
+  /** 셸·attach·노드 셸 세션을 닫은 시각(세션 기록만) */
+  closedAt?: string | null;
+}
+
+export interface K8sUndo {
+  target: K8sTarget;
+  change: K8sChange;
+}
+
 export interface K8sRow {
   uid: string;
   name: string;
@@ -114,7 +187,7 @@ export interface K8sShellOpened {
   input: boolean;
 }
 
-export type K8sShellMode = "exec" | "attach";
+export type K8sShellMode = "exec" | "attach" | "node";
 
 export type K8sForwardKind = "pod" | "service";
 

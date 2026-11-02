@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { errorMessage } from "../api/errors";
 import { ErrorState } from "../components/ErrorState";
+import { ChangeActions } from "./ChangeActions";
 import { can } from "./can";
 import { Problems, valueKeys } from "./columns";
 import { age } from "./format";
@@ -10,6 +11,7 @@ import { DETAIL_PCT } from "./lanes";
 import { PodLogs } from "./PodLogs";
 import { useK8sObject, useK8sRules } from "./queries";
 import { SecretKeys } from "./SecretKeys";
+import { NodeShellPane } from "./NodeShellPane";
 import { ShellTab } from "./ShellTab";
 import { YamlView } from "./YamlView";
 import {
@@ -17,7 +19,7 @@ import {
   H_REASON, H_RESTARTS, H_STATE, INIT_MARK, LOADING, NO_RECENT_EVENTS, OPEN_IN_IAM, SEC_ANNOTATIONS, SEC_CHILDREN, SEC_CONDITIONS,
   SEC_CONTAINERS, SEC_EVENTS, SEC_LABELS, SEC_OWNERS, TAB_LOGS, TAB_SHELL, TAB_SUMMARY, TAB_YAML, YAML_SECRET_NOTE, H_TIME, H_COUNT, openNode,
 } from "./text";
-import type { K8sContainer, K8sKind, K8sLink, K8sObjectView, K8sTarget, ObjectRef } from "./types";
+import type { K8sChange, K8sContainer, K8sKind, K8sLink, K8sObjectView, K8sTarget, ObjectRef } from "./types";
 
 interface Props {
   target: K8sTarget;
@@ -33,6 +35,13 @@ interface Props {
   onClose: () => void;
   onOpenIam?: (arn: string) => void;
   now?: number;
+  changeMode?: boolean;
+  onChange?: (change: K8sChange) => void;
+  rolloutProgress?: string;
+  /** 방금 적용한 변경. 노드 셸이면 노드 상세가 터미널을 연다 */
+  appliedChange?: K8sChange | null;
+  /** 고른 네임스페이스(모든 네임스페이스면 없음). 노드 셸 Pod는 여기에 만든다 */
+  shellNamespace?: string;
   /** 3열 목록 너비 중 덮는 비율(%). 없으면 DETAIL_PCT */
   widthPct?: number;
 }
@@ -186,14 +195,26 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, actions, children }: { v
 }
 
 /** 객체 하나의 상세(요약·YAML). 소유자·자식·노드 링크는 onOpen으로 상세 스택에 쌓는다. */
-export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose, onOpenIam, now, widthPct = DETAIL_PCT }: Props) {
+export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose,
+  onOpenIam, now, widthPct = DETAIL_PCT, changeMode, onChange, rolloutProgress, appliedChange, shellNamespace }: Props) {
   const [tab, setTab] = useState<"summary" | "yaml" | "logs" | "shell">("summary");
+  // 노드 셸: 변경 틀로 디버그 Pod를 만들고 나면 그 Pod에 들어가는 터미널을 연다
+  const [nodeShell, setNodeShell] = useState<{ namespace: string; pod: string } | null>(null);
+  const seenChange = useRef(appliedChange);
+  useEffect(() => {
+    if (appliedChange === seenChange.current) return;
+    seenChange.current = appliedChange;
+    if (appliedChange?.type === "nodeShell" && appliedChange.node === objectRef.name && objectRef.kind.kind === "Node" && appliedChange.namespace) {
+      setNodeShell({ namespace: appliedChange.namespace, pod: appliedChange.name });
+      setTab("shell");
+    }
+  }, [appliedChange, objectRef.kind.kind, objectRef.name]);
   const pod = isPod(objectRef.kind) && objectRef.namespace !== null;
   const service = isService(objectRef.kind) && objectRef.namespace !== null;
   const q = useK8sObject(target, context, objectRef, resourceVersion, ssoProfile, live);
   const secret = isSecret(objectRef.kind);
-  // Secret 읽기와 셸·port-forward 버튼의 권한을 같은 규칙 목록으로 확인한다
-  const rules = useK8sRules(target, context, objectRef.namespace, ssoProfile, live && (secret || pod || service) && objectRef.namespace !== null);
+  // Secret 읽기와 변경 버튼(셸·port-forward 포함)의 권한을 같은 규칙 목록으로 확인한다
+  const rules = useK8sRules(target, context, objectRef.namespace ?? shellNamespace ?? "default", ssoProfile, live && (changeMode === true || (secret && objectRef.namespace !== null)));
   const canRead = rules.data ? can(rules.data, { verb: "get", group: "", resource: "secrets", name: objectRef.name }) : "unknown";
   const at = now ?? Date.now();
   // 로그 탭은 Pod가 바뀔 때마다(resourceVersion) 상세를 다시 읽는 동안에도 흐름·옵션·찾기를 잃지 않게, 마지막으로 읽은 컨테이너로 계속 띄워 둔다
@@ -202,7 +223,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
     if (pod && q.data) setPodContainers(q.data.containers.filter((c) => c.state !== "template"));
   }, [pod, q.data]);
   const logContainers = pod && q.data ? q.data.containers.filter((c) => c.state !== "template") : podContainers;
-  const shellTab = tab === "shell" && pod;
+  const shellTab = tab === "shell" && ((pod && changeMode === true) || nodeShell !== null);
   return (
     <aside className="k8s-detail" aria-label={DETAIL_LABEL} style={{ width: `${widthPct}%` }}>
       <div className="k8s-detail-head">
@@ -217,15 +238,17 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
           ✕
         </button>
       </div>
+      {rolloutProgress && <p role="status">{rolloutProgress}</p>}
+      {changeMode && onChange && q.data && <ChangeActions target={target} ssoProfile={ssoProfile} objectRef={objectRef} view={q.data} rules={rules.data} shellNamespace={shellNamespace ?? "default"} onStart={onChange} />}
       <div role="tablist" className="k8s-tabs">
         <button role="tab" aria-selected={tab === "summary"} onClick={() => setTab("summary")}>{TAB_SUMMARY}</button>
         <button role="tab" aria-selected={tab === "yaml"} onClick={() => setTab("yaml")}>{TAB_YAML}</button>
         {pod && <button role="tab" aria-selected={tab === "logs"} onClick={() => setTab("logs")}>{TAB_LOGS}</button>}
-        {pod && <button role="tab" aria-selected={tab === "shell"} onClick={() => setTab("shell")}>{TAB_SHELL}</button>}
+        {((pod && changeMode) || nodeShell) && <button role="tab" aria-selected={tab === "shell"} onClick={() => setTab("shell")}>{TAB_SHELL}</button>}
       </div>
       <div className={`k8s-detail-body${tab === "logs" || shellTab ? " flush" : ""}`}>
         {/* 셸 세션은 다른 탭을 보는 동안에도 유지한다: 숨기기만 한다 */}
-        {pod && objectRef.namespace && logContainers && (
+        {pod && changeMode && objectRef.namespace && logContainers && (
           <div className="k8s-shell-host" hidden={!shellTab}>
             <ShellTab
               key={`${objectRef.namespace}/${objectRef.name}`}
@@ -236,6 +259,23 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
               containers={logContainers.filter((c) => !c.init)}
               rules={rules.data}
               visible={shellTab}
+            />
+          </div>
+        )}
+        {nodeShell && (
+          <div className="k8s-shell-host" hidden={!shellTab}>
+            <NodeShellPane
+              key={nodeShell.pod}
+              target={target}
+              ssoProfile={ssoProfile}
+              node={objectRef.name}
+              namespace={nodeShell.namespace}
+              pod={nodeShell.pod}
+              visible={shellTab}
+              onClose={() => {
+                setNodeShell(null);
+                setTab("summary");
+              }}
             />
           </div>
         )}
@@ -253,7 +293,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
             onOpen={onOpen}
             onOpenIam={onOpenIam}
             actions={
-              (pod || service) && objectRef.namespace ? (
+              (pod || service) && objectRef.namespace && changeMode ? (
                 <ForwardPanel
                   key={`${objectRef.namespace}/${objectRef.name}`}
                   target={target}

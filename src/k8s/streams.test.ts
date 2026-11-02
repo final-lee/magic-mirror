@@ -1,17 +1,9 @@
-import { forwardUrl, needsTypedName, parsePort, streamPermission } from "./streams";
+import { forwardUrl, parsePort, streamPermission } from "./streams";
 import { SHELL_PERMISSION_CHECKING, noStreamPermission } from "./text";
 import type { K8sRules } from "./types";
 
 const rules = (resourceRules: K8sRules["resourceRules"], incomplete = false): K8sRules => ({ namespace: "dev", resourceRules, nonResourceRules: [], incomplete });
 const grant = (resources: string[], resourceNames: string[] = []) => ({ verbs: ["create"], apiGroups: [""], resources, resourceNames });
-
-test("kube-system and namespaces with prod in the name need the pod name typed", () => {
-  expect(needsTypedName("kube-system")).toBe(true);
-  expect(needsTypedName("shop-prod")).toBe(true);
-  expect(needsTypedName("Prod-api")).toBe(true);
-  expect(needsTypedName("dev")).toBe(false);
-  expect(needsTypedName("kube-public")).toBe(false);
-});
 
 test("each stream needs its own pods subresource; wildcards and incomplete rules do not block", () => {
   const r = rules([grant(["pods/exec"])]);
