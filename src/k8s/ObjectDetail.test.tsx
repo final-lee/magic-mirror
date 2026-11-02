@@ -1,16 +1,18 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
-import { DEPLOYMENTS, NODES, PODS, SECRETS, SERVICE_ACCOUNTS } from "./kinds";
+import { DEPLOYMENTS, NODES, PODS, SECRETS, SERVICES, SERVICE_ACCOUNTS } from "./kinds";
 import { ObjectDetail } from "./ObjectDetail";
 import {
   BACK, CHILDREN_TRUNCATED, CLOSE, NO_RECENT_EVENTS, NO_SECRET_PERMISSION, OPEN_IN_IAM, SEC_CHILDREN, SEC_OWNERS, SHOW_VALUE,
-  TAB_LOGS, TAB_YAML, YAML_SECRET_NOTE, openNode,
+  FORWARD_PORT, FORWARD_START, SHELL_OPEN, TAB_LOGS, TAB_SHELL, TAB_YAML, YAML_SECRET_NOTE, forwardPortLabel, noStreamPermission, openNode,
 } from "./text";
 import type { K8sKind, K8sObjectView, K8sRow } from "./types";
 
 vi.mock("./api", () => ({ k8sApi: { get: vi.fn(), rules: vi.fn(), secretValue: vi.fn(), logs: vi.fn(), unwatch: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
+// 터미널(xterm)은 PodTerminal.test에서 본다
+vi.mock("./PodTerminal", () => ({ PodTerminal: () => null }));
 const m = vi.mocked(k8sApi);
 const T = { profile: "app", region: "r", cluster: "c" };
 
@@ -33,7 +35,11 @@ function setup(props: Partial<Parameters<typeof ObjectDetail>[0]> = {}) {
   return handlers;
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  // Pod·Service 상세가 셸·port-forward 버튼의 권한을 읽는다. 시험이 따로 정하지 않으면 아무 권한도 없다
+  m.rules.mockResolvedValue({ namespace: "prod", resourceRules: [], nonResourceRules: [], incomplete: false });
+});
 
 test("summary: values, owners, children, containers, conditions, events", async () => {
   m.get.mockResolvedValue(
@@ -161,4 +167,49 @@ test("the logs tab keeps its stream while the pod's detail is read again for a n
   expect(screen.getByLabelText("web-1")).toBeInTheDocument();
   expect(m.logs).toHaveBeenCalledTimes(1);
   expect(m.unwatch).not.toHaveBeenCalled();
+});
+
+const grant = (...resources: string[]) => ({
+  namespace: "prod", resourceRules: [{ verbs: ["create"], apiGroups: [""], resources, resourceNames: [] }], nonResourceRules: [], incomplete: false,
+});
+const running = { name: "app", image: "x", init: false, state: "running" as const, ready: true, restarts: 0, reason: null, message: null, lastTermination: null };
+
+test("a pod gets a shell tab with the container picker, gated by pods/exec", async () => {
+  m.get.mockResolvedValue(view({ containers: [running] }));
+  m.rules.mockResolvedValue(grant("pods/exec"));
+  setup();
+  await screen.findByRole("tab", { name: TAB_SHELL });
+  fireEvent.click(screen.getByRole("tab", { name: TAB_SHELL }));
+  expect(await screen.findByRole("button", { name: SHELL_OPEN })).toBeEnabled();
+  expect(within(screen.getByRole("combobox")).getByRole("option", { name: "app" })).toBeInTheDocument();
+});
+
+test("without pods/exec the shell button is off with the reason", async () => {
+  m.get.mockResolvedValue(view({ containers: [running] }));
+  m.rules.mockResolvedValue(grant("pods/log"));
+  setup();
+  fireEvent.click(await screen.findByRole("tab", { name: TAB_SHELL }));
+  expect(await screen.findByText(noStreamPermission("pods/exec"))).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: SHELL_OPEN })).toBeDisabled();
+});
+
+test("a service has no shell tab but a port-forward picker over its service ports", async () => {
+  const ports = [{ name: "web", port: 80, container: null, target: "8080" }];
+  m.get.mockResolvedValue(view({ kind: SERVICES, row: row({ name: "web" }), ports }));
+  m.rules.mockResolvedValue(grant("pods/portforward"));
+  setup({ objectRef: { kind: SERVICES, namespace: "prod", name: "web" } });
+  const start = await screen.findByRole("button", { name: FORWARD_START });
+  expect(screen.queryByRole("tab", { name: TAB_SHELL })).not.toBeInTheDocument();
+  await waitFor(() => expect(start).toBeEnabled());
+  fireEvent.click(start);
+  expect(within(screen.getByLabelText(FORWARD_PORT)).getByRole("option", { name: forwardPortLabel(ports[0]) })).toBeInTheDocument();
+});
+
+test("port-forward is off on a pod when pods/portforward is missing", async () => {
+  m.get.mockResolvedValue(view());
+  m.rules.mockResolvedValue(grant("pods/exec"));
+  setup();
+  const start = await screen.findByRole("button", { name: FORWARD_START });
+  await waitFor(() => expect(start).toHaveAttribute("title", noStreamPermission("pods/portforward")));
+  expect(start).toBeDisabled();
 });

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { K8sNav, type NavBookmark } from "./K8sNav";
-import { BOOKMARK_MISSING, NAV_ALL, NAV_BOOKMARKS_LABEL, NAV_EVENTS, NAV_LABEL, NAV_MY_PERMISSIONS, NAV_OVERVIEW, bookmarkRemove } from "./text";
+import { BOOKMARK_MISSING, NAV_ALL, NAV_BOOKMARKS_LABEL, NAV_EVENTS, NAV_FORWARDS, NAV_LABEL, NAV_MY_PERMISSIONS, NAV_OVERVIEW, bookmarkRemove } from "./text";
 
 const bm = (label: string, plural: string, missing = false): NavBookmark => ({ key: `apps/${plural}`, label, title: missing ? BOOKMARK_MISSING : plural, missing });
 const BMS = [bm("Deployment", "deployments"), bm("StatefulSet", "statefulsets"), bm("DaemonSet", "daemonsets")];
@@ -12,9 +12,9 @@ function setup(props: Partial<Parameters<typeof K8sNav>[0]> = {}) {
 }
 const labels = () => Array.from(screen.getByRole("navigation", { name: NAV_LABEL }).querySelectorAll("button .iam-nav-label")).map((l) => l.textContent);
 
-test("four items in order, marks the current one, selects on click", () => {
+test("five items in order, marks the current one, selects on click", () => {
   const p = setup();
-  expect(labels()).toEqual([NAV_OVERVIEW, NAV_ALL, NAV_EVENTS, NAV_MY_PERMISSIONS]);
+  expect(labels()).toEqual([NAV_OVERVIEW, NAV_ALL, NAV_EVENTS, NAV_FORWARDS, NAV_MY_PERMISSIONS]);
   expect(screen.getByRole("button", { name: NAV_ALL })).toHaveAttribute("aria-current", "page");
   fireEvent.click(screen.getByRole("button", { name: NAV_EVENTS }));
   expect(p.onSelect).toHaveBeenCalledWith("events");
@@ -23,7 +23,7 @@ test("four items in order, marks the current one, selects on click", () => {
 test("bookmarks sit above the overview in their saved order; clicking one opens it, the cross removes it", () => {
   const p = setup({ bookmarks: BMS, view: "bookmark:apps/statefulsets" });
   expect(screen.getByRole("group", { name: NAV_BOOKMARKS_LABEL })).toBeInTheDocument();
-  expect(labels()).toEqual(["Deployment", "StatefulSet", "DaemonSet", NAV_OVERVIEW, NAV_ALL, NAV_EVENTS, NAV_MY_PERMISSIONS]);
+  expect(labels()).toEqual(["Deployment", "StatefulSet", "DaemonSet", NAV_OVERVIEW, NAV_ALL, NAV_EVENTS, NAV_FORWARDS, NAV_MY_PERMISSIONS]);
   expect(screen.getByRole("button", { name: "StatefulSet" })).toHaveAttribute("aria-current", "page");
   fireEvent.click(screen.getByRole("button", { name: "Deployment" }));
   expect(p.onSelect).toHaveBeenCalledWith("bookmark:apps/deployments");

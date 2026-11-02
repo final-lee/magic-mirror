@@ -1,8 +1,8 @@
-import { NAV_ALL, NAV_BOOKMARKS_LABEL, NAV_EVENTS, NAV_LABEL, NAV_MY_PERMISSIONS, NAV_OVERVIEW, bookmarkRemove } from "./text";
+import { NAV_ALL, NAV_BOOKMARKS_LABEL, NAV_EVENTS, NAV_FORWARDS, NAV_LABEL, NAV_MY_PERMISSIONS, NAV_OVERVIEW, bookmarkRemove } from "./text";
 import { useReorder } from "./useReorder";
 
 /** 북마크 화면은 `bookmark:<그룹>/<복수형>` */
-export type K8sView = "overview" | "workloads" | "events" | "myRules" | `bookmark:${string}`;
+export type K8sView = "overview" | "workloads" | "events" | "forwards" | "myRules" | `bookmark:${string}`;
 
 export interface NavBookmark {
   /** bookmarkKey */
@@ -19,6 +19,7 @@ const ITEMS: { view: K8sView; icon: string; label: string; gap?: boolean }[] = [
   { view: "overview", icon: "📊", label: NAV_OVERVIEW },
   { view: "workloads", icon: "📦", label: NAV_ALL },
   { view: "events", icon: "🔔", label: NAV_EVENTS },
+  { view: "forwards", icon: "🔌", label: NAV_FORWARDS },
   { view: "myRules", icon: "🔑", label: NAV_MY_PERMISSIONS, gap: true },
 ];
 

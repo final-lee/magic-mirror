@@ -4,16 +4,18 @@ import { ErrorState } from "../components/ErrorState";
 import { can } from "./can";
 import { Problems, valueKeys } from "./columns";
 import { age } from "./format";
-import { NODES, isPod, isSecret, isServiceAccount, resolveLink } from "./kinds";
+import { NODES, isPod, isSecret, isService, isServiceAccount, resolveLink } from "./kinds";
+import { ForwardPanel } from "./ForwardPanel";
 import { DETAIL_PCT } from "./lanes";
 import { PodLogs } from "./PodLogs";
 import { useK8sObject, useK8sRules } from "./queries";
 import { SecretKeys } from "./SecretKeys";
+import { ShellTab } from "./ShellTab";
 import { YamlView } from "./YamlView";
 import {
   BACK, CHILDREN_TRUNCATED, CLOSE, COL_NAME, COLUMN_LABELS, CREATED_AT, DETAIL_LABEL, H_IMAGE, H_KIND, H_LAST_TERMINATION, H_MESSAGE,
   H_REASON, H_RESTARTS, H_STATE, INIT_MARK, LOADING, NO_RECENT_EVENTS, OPEN_IN_IAM, SEC_ANNOTATIONS, SEC_CHILDREN, SEC_CONDITIONS,
-  SEC_CONTAINERS, SEC_EVENTS, SEC_LABELS, SEC_OWNERS, TAB_LOGS, TAB_SUMMARY, TAB_YAML, YAML_SECRET_NOTE, H_TIME, H_COUNT, openNode,
+  SEC_CONTAINERS, SEC_EVENTS, SEC_LABELS, SEC_OWNERS, TAB_LOGS, TAB_SHELL, TAB_SUMMARY, TAB_YAML, YAML_SECRET_NOTE, H_TIME, H_COUNT, openNode,
 } from "./text";
 import type { K8sContainer, K8sKind, K8sLink, K8sObjectView, K8sTarget, ObjectRef } from "./types";
 
@@ -63,7 +65,7 @@ function Links({ title, links, kinds, onOpen }: { title: string; links: K8sLink[
 
 const stateText = (c: K8sContainer) => (c.state === "template" ? "" : c.reason ? `${c.state}: ${c.reason}` : c.state);
 
-function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sObjectView; now: number; kinds: K8sKind[]; onOpen: (ref: ObjectRef) => void; onOpenIam?: (arn: string) => void; children?: ReactNode }) {
+function Summary({ view, now, kinds, onOpen, onOpenIam, actions, children }: { view: K8sObjectView; now: number; kinds: K8sKind[]; onOpen: (ref: ObjectRef) => void; onOpenIam?: (arn: string) => void; actions?: ReactNode; children?: ReactNode }) {
   const { row } = view;
   const node = isPod(view.kind) ? row.values.node : undefined;
   const role = isServiceAccount(view.kind) ? row.values.roleArn : undefined;
@@ -95,6 +97,7 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sO
             {OPEN_IN_IAM}
           </button>
         )}
+        {actions}
       </div>
       {view.owners.length > 0 && <Links title={SEC_OWNERS} links={view.owners} kinds={kinds} onOpen={onOpen} />}
       {(view.children.length > 0 || view.childrenError) && (
@@ -184,11 +187,13 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sO
 
 /** 객체 하나의 상세(요약·YAML). 소유자·자식·노드 링크는 onOpen으로 상세 스택에 쌓는다. */
 export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose, onOpenIam, now, widthPct = DETAIL_PCT }: Props) {
-  const [tab, setTab] = useState<"summary" | "yaml" | "logs">("summary");
+  const [tab, setTab] = useState<"summary" | "yaml" | "logs" | "shell">("summary");
   const pod = isPod(objectRef.kind) && objectRef.namespace !== null;
+  const service = isService(objectRef.kind) && objectRef.namespace !== null;
   const q = useK8sObject(target, context, objectRef, resourceVersion, ssoProfile, live);
   const secret = isSecret(objectRef.kind);
-  const rules = useK8sRules(target, context, objectRef.namespace, ssoProfile, live && secret && objectRef.namespace !== null);
+  // Secret 읽기와 셸·port-forward 버튼의 권한을 같은 규칙 목록으로 확인한다
+  const rules = useK8sRules(target, context, objectRef.namespace, ssoProfile, live && (secret || pod || service) && objectRef.namespace !== null);
   const canRead = rules.data ? can(rules.data, { verb: "get", group: "", resource: "secrets", name: objectRef.name }) : "unknown";
   const at = now ?? Date.now();
   // 로그 탭은 Pod가 바뀔 때마다(resourceVersion) 상세를 다시 읽는 동안에도 흐름·옵션·찾기를 잃지 않게, 마지막으로 읽은 컨테이너로 계속 띄워 둔다
@@ -197,6 +202,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
     if (pod && q.data) setPodContainers(q.data.containers.filter((c) => c.state !== "template"));
   }, [pod, q.data]);
   const logContainers = pod && q.data ? q.data.containers.filter((c) => c.state !== "template") : podContainers;
+  const shellTab = tab === "shell" && pod;
   return (
     <aside className="k8s-detail" aria-label={DETAIL_LABEL} style={{ width: `${widthPct}%` }}>
       <div className="k8s-detail-head">
@@ -215,16 +221,52 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
         <button role="tab" aria-selected={tab === "summary"} onClick={() => setTab("summary")}>{TAB_SUMMARY}</button>
         <button role="tab" aria-selected={tab === "yaml"} onClick={() => setTab("yaml")}>{TAB_YAML}</button>
         {pod && <button role="tab" aria-selected={tab === "logs"} onClick={() => setTab("logs")}>{TAB_LOGS}</button>}
+        {pod && <button role="tab" aria-selected={tab === "shell"} onClick={() => setTab("shell")}>{TAB_SHELL}</button>}
       </div>
-      <div className={`k8s-detail-body${tab === "logs" ? " flush" : ""}`}>
-        {tab === "logs" && pod && objectRef.namespace && logContainers ? (
+      <div className={`k8s-detail-body${tab === "logs" || shellTab ? " flush" : ""}`}>
+        {/* 셸 세션은 다른 탭을 보는 동안에도 유지한다: 숨기기만 한다 */}
+        {pod && objectRef.namespace && logContainers && (
+          <div className="k8s-shell-host" hidden={!shellTab}>
+            <ShellTab
+              key={`${objectRef.namespace}/${objectRef.name}`}
+              target={target}
+              ssoProfile={ssoProfile}
+              namespace={objectRef.namespace}
+              pod={objectRef.name}
+              containers={logContainers.filter((c) => !c.init)}
+              rules={rules.data}
+              visible={shellTab}
+            />
+          </div>
+        )}
+        {shellTab ? null : tab === "logs" && pod && objectRef.namespace && logContainers ? (
           <PodLogs target={target} ssoProfile={ssoProfile} live={live} namespace={objectRef.namespace} pod={objectRef.name} containers={logContainers} />
         ) : q.isError ? (
           <ErrorState error={q.error} profile={ssoProfile} compact onRetry={() => void q.refetch()} onLoggedIn={() => void q.refetch()} />
         ) : !q.data ? (
           <div className="empty">{LOADING}</div>
         ) : tab === "summary" ? (
-          <Summary view={q.data} now={at} kinds={kinds} onOpen={onOpen} onOpenIam={onOpenIam}>
+          <Summary
+            view={q.data}
+            now={at}
+            kinds={kinds}
+            onOpen={onOpen}
+            onOpenIam={onOpenIam}
+            actions={
+              (pod || service) && objectRef.namespace ? (
+                <ForwardPanel
+                  key={`${objectRef.namespace}/${objectRef.name}`}
+                  target={target}
+                  ssoProfile={ssoProfile}
+                  namespace={objectRef.namespace}
+                  kind={pod ? "pod" : "service"}
+                  name={objectRef.name}
+                  ports={q.data.ports ?? []}
+                  rules={rules.data}
+                />
+              ) : undefined
+            }
+          >
             {q.data.secretKeys && objectRef.namespace && (
               <SecretKeys target={target} ssoProfile={ssoProfile} namespace={objectRef.namespace} name={objectRef.name} keys={q.data.secretKeys} canRead={canRead} />
             )}
