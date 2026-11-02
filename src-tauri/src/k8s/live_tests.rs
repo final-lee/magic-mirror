@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 use super::connect::{client_for, REQUEST_TIMEOUT};
 use super::failure::{exec_missing, Endpoint, TLS_UNVERIFIED, UNAUTHORIZED, UNREACHABLE_PRIVATE};
 use super::kubeconfig::{load, with_path};
+use super::lnav;
 use super::logs::{self, LogMessage, LogOptions};
 use super::review::{identity, rules, IdentitySource};
 use super::rows::KindRef;
@@ -435,4 +436,57 @@ async fn logs_of_a_container_that_never_started_are_an_error() {
     let Some(LogMessage::Error { error }) = recv_log(&mut rx, Duration::from_secs(5)).await else { panic!("no error") };
     // 서버가 400과 함께 "is waiting to start"류의 설명을 준다. 연결 문제로 잘못 가르지 않는다.
     assert!(!matches!(error, AppError::Network { .. }), "{error:?}");
+}
+
+/// 설치된 lnav가 있으면 coredns 로그를 임시 파일에 받아 PTY의 lnav로 띄우고, lnav가 그 줄을 그리는지 본다
+#[tokio::test]
+#[ignore]
+async fn lnav_draws_pod_logs_written_to_its_file() {
+    let Some(program) = lnav::find_lnav().await else {
+        eprintln!("lnav가 없어 건너뛴다");
+        return;
+    };
+    let client = admin().await;
+    let pod = coredns_pod(&client).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (path, mut file) = lnav::log_file(dir.path()).unwrap();
+    let mut first = String::new();
+    logs::run(client, "kube-system".into(), pod, LogOptions { tail_lines: Some(20), ..Default::default() }, PRIVATE, |m| {
+        if let LogMessage::Lines { lines } = &m {
+            if first.is_empty() {
+                first = lines[0].clone();
+            }
+        }
+        lnav::write_log(&mut file, m).is_ok()
+    })
+    .await;
+    assert!(!first.is_empty(), "no log lines");
+    let s = lnav::spawn(&program, &[path.as_path()], 200, 50, super::path::login_path().await).unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let reader = s.reader;
+    let mut writer = s.writer;
+    std::thread::spawn(move || lnav::pump(reader, move |m| tx.send(m).is_ok()));
+    let mut screen = String::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    // 로그 첫 줄의 낱말 하나(글자·숫자만, 4자 이상)가 화면에 나올 때까지. lnav는 줄 안에 색 코드를 넣을 수 있어 낱말 단위로 본다.
+    let piece = first.split(|c: char| !c.is_ascii_alphanumeric()).find(|w| w.len() >= 4).unwrap_or("").to_string();
+    assert!(!piece.is_empty(), "no word in {first:?}");
+    while !screen.contains(&piece) {
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let Some(lnav::LnavMessage::Output { data }) = tokio::time::timeout(left, rx.recv()).await.ok().flatten() else { break };
+        use base64::Engine;
+        let chunk = String::from_utf8_lossy(&base64::engine::general_purpose::STANDARD.decode(data).unwrap()).into_owned();
+        // lnav는 터미널에 커서 위치(DSR)와 장치 속성(DA1)을 묻고 답을 기다린다. 앱에서는 xterm.js가 답한다.
+        use std::io::Write;
+        if chunk.contains("\x1b[6n") {
+            writer.write_all(b"\x1b[1;1R").unwrap();
+        }
+        if chunk.contains("\x1b[c") {
+            writer.write_all(b"\x1b[?62;22c").unwrap();
+        }
+        screen.push_str(&chunk);
+    }
+    drop(lnav::Cleanup { child: s.child, path: path.clone() });
+    assert!(screen.contains(&piece), "lnav did not draw {piece:?}");
+    assert!(!path.exists());
 }

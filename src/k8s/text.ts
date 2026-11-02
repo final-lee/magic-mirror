@@ -121,6 +121,13 @@ export const LOG_EMPTY = "로그가 없어요";
 export const LOG_ENDED = "로그가 끝났어요";
 export const logTrimmed = (n: number) => `오래된 줄은 지우고 최근 ${n.toLocaleString("ko-KR")}줄만 보관해요`;
 export const LOG_RESTART = "다시 열기";
+export const LOG_VIEW_LABEL = "보기 방식";
+export const LOG_VIEW_LNAV = "lnav";
+export const LOG_VIEW_TEXT = "텍스트";
+/** 백엔드 lnav::LNAV_MISSING과 같다 */
+export const LNAV_MISSING = "lnav를 찾지 못했어요. brew install lnav로 설치하면 로그를 lnav로 볼 수 있어요";
+export const LNAV_OPENING = "lnav를 여는 중…";
+export const LNAV_EXITED = "lnav를 닫았어요";
 export const SEC_OWNERS = "소유자";
 export const SEC_CHILDREN = "소유한 리소스";
 export const SEC_CONTAINERS = "컨테이너";
