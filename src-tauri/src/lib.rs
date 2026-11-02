@@ -134,6 +134,15 @@ pub fn run() {
             k8s_commands::k8s_lnav_input,
             k8s_commands::k8s_lnav_resize,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // 종료는 비동기 작업을 버리지 않고 프로세스를 끝내므로, 떠 있는 lnav와 로그 임시 파일은 여기서 직접 정리한다
+            if let tauri::RunEvent::Exit = event {
+                use tauri::Manager;
+                if let Some(k8s) = app.try_state::<k8s_commands::K8sState>() {
+                    k8s.shutdown();
+                }
+            }
+        });
 }

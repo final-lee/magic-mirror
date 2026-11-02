@@ -162,3 +162,41 @@ async fn unwatch_of_an_unknown_id_is_a_no_op_and_forget_does_not_abort() {
     assert!(!h.is_finished());
     h.abort();
 }
+
+fn running_terminal(dir: &std::path::Path) -> (Terminal, std::path::PathBuf) {
+    let (path, _) = lnav::log_file(dir).unwrap();
+    let s = lnav::spawn(std::path::Path::new("/bin/sleep"), &[std::path::Path::new("600")], 80, 24, "/usr/bin:/bin").unwrap();
+    // 출력은 읽지 않아도 된다(sleep은 아무것도 쓰지 않는다)
+    drop(s.reader);
+    (Terminal { input: lnav::input_worker(s.writer), master: s.master, cleanup: Cleanup::new(s.child, path.clone()) }, path)
+}
+
+#[test]
+fn shutdown_ends_every_lnav_and_removes_its_log_file_before_returning() {
+    let dir = tempfile::tempdir().unwrap();
+    let k8s = K8sState::default();
+    let (a, pa) = running_terminal(dir.path());
+    let (b, pb) = running_terminal(dir.path());
+    k8s.put_terminal(1, a);
+    k8s.put_terminal(2, b);
+    k8s.shutdown();
+    assert!(!pa.exists() && !pb.exists());
+    assert!(locked(&k8s.terminals).is_empty());
+    // 끝난 흐름의 입력·크기 조절은 조용히 버린다
+    k8s.terminal_input(1, b"q");
+    k8s.terminal_resize(2, 100, 30);
+}
+
+#[test]
+fn forgetting_a_terminal_ends_its_lnav_and_removes_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let k8s = K8sState::default();
+    let (t, path) = running_terminal(dir.path());
+    k8s.put_terminal(7, t);
+    k8s.forget_terminal(7);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while path.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(!path.exists());
+}
