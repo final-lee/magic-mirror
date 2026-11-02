@@ -561,7 +561,7 @@ pub async fn k8s_preview(k8s: State<'_, K8sState>, target: K8sTarget, change: Ch
     if k8s.epoch(&target) != epoch || !Arc::ptr_eq(&session, &k8s.session(&target)?) {
         return Err(AppError::other(NOT_OPENED));
     }
-    let preview = plan.preview.clone();
+    let preview = plan.preview.displayed();
     locked(&k8s.plans).remember(&target.profile, &(&target, &change), StoredPlan { plan, at, epoch, session }, now);
     Ok(preview)
 }
@@ -604,7 +604,8 @@ pub async fn k8s_apply(k8s: State<'_, K8sState>, target: K8sTarget, change: Chan
         id: id.clone(),
         at: iso(now),
         target,
-        change,
+        // Secret 값은 기록하지 않는다
+        change: crate::k8s::change::apply::redact(&change),
         summary: plan.preview.impact.join(", "),
         ok: outcome.is_ok(),
         error: outcome.as_ref().err().map(ToString::to_string),

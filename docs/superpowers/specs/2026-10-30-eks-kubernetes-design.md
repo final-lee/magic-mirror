@@ -229,6 +229,13 @@
 - 미리보기: server-side apply dry-run 결과와 현재 객체의 diff. field manager `magic-mirror`. 충돌이면 필드와 소유 manager를 보여주고, 강제 적용(`force`)은 이름 입력을 받는다.
 - 되돌리기: 적용 전 객체(정리한 형태)를 기록하고 다시 적용. 새로 만든 리소스는 삭제.
 - Secret: 값은 가린 채 시작, 키별 "값 보기" 후 편집 또는 새 값 입력. 기록에 Secret 값을 남기지 않으므로 Secret 변경은 "되돌릴 수 없음".
+- 지금 된 것(2026-11-02):
+  - 변경 종류 `apply { object, force }`(`Operation::Apply`). 본문은 `change/apply.rs`가 만든다: 서버가 채우는 필드를 빼고, 이름·종류를 대상과 맞추고(다르면 거절), 네임스페이스가 없으면 대상의 것을 넣고, 있는 객체면 미리보기 직전에 읽은 `resourceVersion`을 조건으로 건다(없는 객체는 조건 없이 만든다). 호출은 `PATCH …?fieldManager=magic-mirror[&force=true]`(apply-patch). 필드 이름 충돌이 아닌 409는 기존 "미리보기 이후 바뀌었어요"다.
+  - 미리보기: 서버 dry-run 결과(서버가 만든 객체)와 현재 객체를 정리해 필드마다 비교한다(`spec.template.spec.containers[0].image` 꼴 경로, 길이가 다른 배열은 통째로). 새로 만들면 객체 전체가 한 항목. 바뀌는 것이 없으면 경고. 충돌은 서버 오류의 `FieldManagerConflict` 원인에서 필드와 소유 manager를 꺼내 `Preview.conflicts`로 보여 주고, 충돌이 있는 미리보기는 적용되지 않는다(화면의 [적용]은 막힘 경고로 꺼지고 백엔드 `check`도 거절). [강제 적용으로 다시 미리보기]가 `force: true` 변경으로 다시 미리보기 하며, 강제 적용은 이름 입력을 받는다(위험한 변경과 같은 게이트). 서버가 객체를 받지 않으면(400·422) Secret이 아닌 객체는 서버의 이유를 그대로 보여 준다.
+  - 되돌리기: 있던 객체는 정리한 이전 객체를 `apply`로 다시 적용(`force: false`), 새로 만든 객체는 삭제. 둘 다 기록의 역변경이며 되돌리기 미리보기를 거친다. `aws-auth` ConfigMap은 "access entry로 옮기세요" 경고.
+  - 상세 YAML 탭: 변경 모드에서 [편집]이 읽기 전용 YAML을 CodeMirror 6 편집기로 바꾼다(`@codemirror/*`, 구문 오류는 `yaml` 패키지로 찾아 줄 밑줄과 목록으로 보이고 미리보기를 막는다). 편집기에 들어가는 글은 백엔드가 만든 `editYaml`(서버 필드를 뺀 것). 종류·이름·네임스페이스를 바꾸거나 문서가 둘이면 미리보기 전에 거절한다. patch 권한이 없으면 이유와 함께 끈다.
+  - Secret: 편집 글에는 `data`·`stringData`·last-applied가 없다. 키별 [값 보기](읽은 값은 컴포넌트 상태에만)로 읽어 고치거나 [새 값 입력]·키 추가로 `stringData`에 넣고, 건드리지 않은 키는 가린 값(••••)으로 보내 백엔드가 현재 값으로 되돌려 놓는다. 바이너리 값은 새 값 입력으로만 바꾼다. 미리보기의 본문·diff에는 값이 없고(바뀐 키만 `•••• (바뀜)`), 기록에는 `data`·`stringData`를 모두 가린 변경만 남으며, 되돌릴 수 없다는 경고를 보인다.
+  - 상단 [YAML로 만들기](변경 모드): 붙여 넣은 글을 문서마다 `apply` 변경으로 바꾼다(종류는 클러스터가 내주는 종류에서 apiVersion·kind로 찾고, 네임스페이스가 없는 문서는 고른 네임스페이스로, 모든 네임스페이스면 그 문서의 오류). 최대 50개. 문서별 미리보기(호출·diff·경고·이름 입력)를 한 창에 보이고, 순서대로 적용하다 첫 실패에서 멈추고 나머지는 건너뛴 뒤 [적용한 것 되돌리기]로 거꾸로 되돌리기 미리보기를 연다. 미리보기가 되지 않는 문서(앞 문서가 만드는 네임스페이스 안의 객체 등) 앞까지만 먼저 적용하고 나머지를 다시 미리보기 한다. 별도 배치 명령(`k8s_preview_batch`/`k8s_apply_batch`) 없이 문서마다 `k8s_preview`/`k8s_apply`를 쓰므로 기록도 문서마다 하나이고 변경 기록 화면에서 하나씩 되돌릴 수도 있다.
 
 ## 계약 (Tauri 명령)
 ```ts
@@ -253,7 +260,7 @@ k8s_findings(target, force: boolean): K8sFindings
 k8s_network(target): K8sNetworkView
 k8s_preview(target, K8sChange): K8sPreview
 k8s_apply(target, K8sChange, confirmText | null, undoOf | null): K8sApplyResult
-k8s_preview_batch(target, K8sChange[]): K8sBatchPreview
+k8s_preview_batch(target, K8sChange[]): K8sBatchPreview        // E(YAML 만들기)는 쓰지 않는다: 문서마다 k8s_preview/k8s_apply. D(RBAC 장바구니)용
 k8s_apply_batch(target, K8sChange[], confirmText | null, undoOf: string[] | null): K8sBatchResult
 k8s_drain(target, node, confirmText, channel): StreamId        // 진행 상황을 채널로. 중단은 k8s_unwatch(streamId)
 k8s_shell_open(target, namespace, pod, container, confirmText | null, channel): ShellId   // ShellId = { id, input }

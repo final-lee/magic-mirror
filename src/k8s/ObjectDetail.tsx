@@ -13,11 +13,13 @@ import { useK8sObject, useK8sRules } from "./queries";
 import { SecretKeys } from "./SecretKeys";
 import { NodeShellPane } from "./NodeShellPane";
 import { ShellTab } from "./ShellTab";
+import { YamlEdit } from "./YamlEdit";
 import { YamlView } from "./YamlView";
 import {
   BACK, CHILDREN_TRUNCATED, CLOSE, COL_NAME, COLUMN_LABELS, CREATED_AT, DETAIL_LABEL, H_IMAGE, H_KIND, H_LAST_TERMINATION, H_MESSAGE,
   H_REASON, H_RESTARTS, H_STATE, INIT_MARK, LOADING, NO_RECENT_EVENTS, OPEN_IN_IAM, SEC_ANNOTATIONS, SEC_CHILDREN, SEC_CONDITIONS,
   SEC_CONTAINERS, SEC_EVENTS, SEC_LABELS, SEC_OWNERS, TAB_LOGS, TAB_SHELL, TAB_SUMMARY, TAB_YAML, YAML_SECRET_NOTE, H_TIME, H_COUNT, openNode,
+  CHANGE_DENIED, YAML_EDIT,
 } from "./text";
 import type { K8sChange, K8sContainer, K8sKind, K8sLink, K8sObjectView, K8sTarget, ObjectRef } from "./types";
 
@@ -224,6 +226,15 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
   }, [pod, q.data]);
   const logContainers = pod && q.data ? q.data.containers.filter((c) => c.state !== "template") : podContainers;
   const shellTab = tab === "shell" && ((pod && changeMode === true) || nodeShell !== null);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => setEditing(false), [objectRef.kind, objectRef.namespace, objectRef.name, tab]);
+  // 적용이 끝나면 편집을 닫는다(편집하던 글은 더 이상 현재 객체가 아니다)
+  useEffect(() => {
+    if (appliedChange?.type === "apply") setEditing(false);
+  }, [appliedChange]);
+  // 불완전한 규칙은 서버 판단에 맡기고 확실히 거부된 것만 끈다. 새 객체를 만드는 apply가 아니라 있는 객체를 고치므로 patch 권한을 본다.
+  const patchRule = rules.data && can(rules.data, { verb: "patch", group: objectRef.kind.group, resource: objectRef.kind.plural, name: objectRef.name });
+  const editDenied = patchRule === "no" ? CHANGE_DENIED("patch", objectRef.kind.plural) : undefined;
   return (
     <aside className="k8s-detail" aria-label={DETAIL_LABEL} style={{ width: `${widthPct}%` }}>
       <div className="k8s-detail-head">
@@ -311,8 +322,17 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
               <SecretKeys target={target} ssoProfile={ssoProfile} namespace={objectRef.namespace} name={objectRef.name} keys={q.data.secretKeys} canRead={canRead} />
             )}
           </Summary>
+        ) : tab === "yaml" && editing && changeMode && onChange ? (
+          <YamlEdit target={target} ssoProfile={ssoProfile} objectRef={objectRef} view={q.data} canRead={canRead} onPreview={onChange} onCancel={() => setEditing(false)} />
         ) : (
           <>
+            {changeMode && onChange && (
+              <div className="k8s-actions">
+                <button className="btn small" disabled={!!editDenied} title={editDenied} aria-description={editDenied} onClick={() => setEditing(true)}>
+                  {YAML_EDIT}
+                </button>
+              </div>
+            )}
             {secret && <p className="dim">{YAML_SECRET_NOTE}</p>}
             <YamlView text={q.data.yaml} />
           </>

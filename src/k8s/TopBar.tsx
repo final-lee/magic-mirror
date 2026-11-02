@@ -1,6 +1,7 @@
 import type { K8sIdentity } from "./types";
 import {
   CHANGE_MODE,
+  YAML_CREATE,
   ALL_NAMESPACES,
   BAR_LABEL,
   IDENTITY_FALLBACK,
@@ -40,9 +41,11 @@ interface Props {
   onReconnect: () => void;
   changeMode?: boolean;
   onChangeMode?: (enabled: boolean) => void;
+  /** 변경 모드에서 'YAML로 만들기'를 연다. 주지 않으면 버튼을 그리지 않는다 */
+  onCreateYaml?: () => void;
 }
 
-export function TopBar({ context, identity, connection, execProfile, profile, namespaces, namespace, onNamespace, onReconnect, changeMode = false, onChangeMode }: Props) {
+export function TopBar({ context, identity, connection, execProfile, profile, namespaces, namespace, onNamespace, onReconnect, changeMode = false, onChangeMode, onCreateYaml }: Props) {
   const shown = identity?.groups.slice(0, MAX_GROUPS) ?? [];
   const more = (identity?.groups.length ?? 0) - shown.length;
   const options = namespace !== ALL && !namespaces.includes(namespace) ? [namespace, ...namespaces] : namespaces;
@@ -88,6 +91,11 @@ export function TopBar({ context, identity, connection, execProfile, profile, na
             </select>
           </label>
           <label><input type="checkbox" checked={changeMode} onChange={(e) => onChangeMode?.(e.target.checked)} /> {CHANGE_MODE}</label>
+          {changeMode && onCreateYaml && (
+            <button className="btn small" disabled={connection !== "connected"} onClick={onCreateYaml}>
+              {YAML_CREATE}
+            </button>
+          )}
           <button className="btn small" onClick={onReconnect}>
             {RECONNECT}
           </button>
