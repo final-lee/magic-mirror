@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useResources } from "../api/queries";
 import type { Favorite, ResourceType, ServiceInfo } from "../api/types";
+import { COST_TITLE } from "../cost/text";
 import { ServiceBadge } from "./ServiceBadge";
 
 interface Props {
@@ -13,9 +14,11 @@ interface Props {
   onToggleFavorite: (sel: Favorite) => void;
   /** IAM 작업 공간 탭을 연다. 주면 IAM 서비스 아래 첫 항목으로 "IAM 관리"가 보인다. */
   onOpenIam?: () => void;
+  /** 💰 비용 탭을 연다. 주면 서비스 묶음 위에 "💰 비용" 줄이 보인다. */
+  onOpenCost?: () => void;
 }
 
-export function Sidebar({ services, profile, region, selection, favorites, onSelect, onToggleFavorite, onOpenIam }: Props) {
+export function Sidebar({ services, profile, region, selection, favorites, onSelect, onToggleFavorite, onOpenIam, onOpenCost }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(selection ? [selection.service] : []));
 
   const toggle = (id: string) =>
@@ -60,6 +63,11 @@ export function Sidebar({ services, profile, region, selection, favorites, onSel
             />
           ))}
         </>
+      )}
+      {onOpenCost && (
+        <div className="typ cost-open" role="button" onClick={() => onOpenCost()}>
+          <span>{COST_TITLE}</span>
+        </div>
       )}
       <div className="grp">서비스</div>
       {services.map((svc) => (

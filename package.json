@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "tauri": "tauri",
+    "tauri:dev": "node scripts/tauri-dev.mjs",
     "release": "bash scripts/release.sh"
   },
   "dependencies": {

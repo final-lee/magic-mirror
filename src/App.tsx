@@ -21,6 +21,9 @@ import { tabTitle } from "./k8s/text";
 import type { K8sTarget } from "./k8s/types";
 import { IamTab } from "./iam/IamTab";
 import { refreshIam, useIamOverview } from "./iam/queries";
+import { CostTab } from "./cost/CostTab";
+import { refreshCost } from "./cost/queries";
+import { COST_TITLE } from "./cost/text";
 import type { S3Location } from "./lib/s3";
 import { PgTab } from "./pg/PgTab";
 import { closePg, refreshPg } from "./pg/queries";
@@ -58,6 +61,8 @@ export default function App() {
   // IAM 탭은 하나뿐이다(id "iam"). focus는 리소스 목록에서 넘어온 대상 ARN, nonce는 열 때마다 올라가 같은 대상도 다시 이동시킨다.
   const [iamTab, setIamTab] = useState<{ focus: string | null; nonce: number } | null>(null);
   const iamOverview = useIamOverview(iamTab ? profile : null);
+  // 비용 탭도 프로필마다 하나다(id "cost"). 리전과 상관없다.
+  const [costTab, setCostTab] = useState(false);
   const onTransferSettled = useCallback(
     (_req: TransferRequest) => {
       void qc.invalidateQueries({ queryKey: ["s3"] });
@@ -92,6 +97,8 @@ export default function App() {
     void qc.invalidateQueries({ queryKey: ["diff", profile] });
     void qc.invalidateQueries({ queryKey: ["vpc-topology", profile] });
     void refreshIam(qc, profile);
+    // 비용은 Cost Explorer 요청마다 돈이 들어서 비용 탭을 보고 있을 때만 캐시를 건너뛰고 다시 읽는다
+    if (activeTab === "cost") void refreshCost(qc, profile);
     // 보고 있는 PostgreSQL 탭은 연결부터 다시 읽는다. 보이지 않는 PostgreSQL 탭은 DB 연결을 열어 둔 채로 그대로 둔다.
     const pg = pgTabs.find((t) => t.id === activeTab);
     if (pg) void refreshPg(qc, pg.target);
@@ -172,8 +179,14 @@ export default function App() {
     setActiveTab("iam");
     setFilter("");
   };
+  const openCost = () => {
+    setCostTab(true);
+    setActiveTab("cost");
+    setFilter("");
+  };
   const closeTab = (id: string) => {
     if (id === "iam") setIamTab(null);
+    if (id === "cost") setCostTab(false);
     const pg = pgTabs.find((t) => t.id === id);
     if (pg) void closePg(qc, pg.target);
     setPgTabs((tabs) => tabs.filter((t) => t.id !== id));
@@ -196,6 +209,7 @@ export default function App() {
   const tabs: TabInfo[] = [
     { id: "resources", title: "리소스", closable: false },
     ...(iamTab ? [{ id: "iam", title: iamOverview.data ? `🔐 IAM · ${iamOverview.data.accountId}` : "🔐 IAM", closable: true }] : []),
+    ...(costTab ? [{ id: "cost", title: COST_TITLE, closable: true }] : []),
     ...explorerTabs.map((t) => ({ id: t.id, title: `S3: ${t.location.bucket}`, closable: true })),
     ...vpcTabs.map((t) => ({ id: t.id, title: `🗺 ${t.name}`, closable: true })),
     ...pgTabs.map((t) => ({ id: t.id, title: t.title, closable: true })),
@@ -211,7 +225,7 @@ export default function App() {
     sso.rearm(name);
     setProfile(name);
     setRegion(nextRegion);
-    // 버킷과 IAM은 계정에 속하므로 버킷 탭, 비교 탭, IAM 탭을 모두 닫는다. DB 연결은 그 프로필의 자격 증명으로 열었으니 PostgreSQL 탭도 닫는다.
+    // 버킷, IAM, 비용은 계정에 속하므로 버킷 탭, 비교 탭, IAM 탭, 비용 탭을 모두 닫는다. DB 연결은 그 프로필의 자격 증명으로 열었으니 PostgreSQL 탭도 닫는다.
     pgTabs.forEach((t) => void closePg(qc, t.target));
     setExplorerTabs([]);
     setDiffTabs([]);
@@ -220,7 +234,8 @@ export default function App() {
     k8sTabs.forEach((t) => void closeK8s(qc, t.target, t.target.profile));
     setK8sTabs([]);
     setIamTab(null);
-    if (activeTab.startsWith("s3:") || activeTab.startsWith("vpc:") || activeTab.startsWith("diff:") || activeTab.startsWith("pg:") || activeTab.startsWith("k8s:") || activeTab === "iam") setActiveTab("resources");
+    setCostTab(false);
+    if (activeTab.startsWith("s3:") || activeTab.startsWith("vpc:") || activeTab.startsWith("diff:") || activeTab.startsWith("pg:") || activeTab.startsWith("k8s:") || activeTab === "iam" || activeTab === "cost") setActiveTab("resources");
     update({ lastProfile: name, lastRegion: nextRegion });
   };
 
@@ -269,6 +284,7 @@ export default function App() {
             onSelect={select}
             onToggleFavorite={toggleFavorite}
             onOpenIam={() => openIam()}
+            onOpenCost={openCost}
           />
           <MainArea
             key={mainKey}
@@ -290,6 +306,11 @@ export default function App() {
         {profile && iamTab && (
           <div className="tabpane" hidden={activeTab !== "iam"}>
             <IamTab profile={profile} active={activeTab === "iam"} filter={activeTab === "iam" ? filter : ""} focus={iamTab.focus} nonce={iamTab.nonce} />
+          </div>
+        )}
+        {profile && costTab && (
+          <div className="tabpane" hidden={activeTab !== "cost"}>
+            <CostTab key={profile} profile={profile} />
           </div>
         )}
         {explorerTabs.map((t) => (
