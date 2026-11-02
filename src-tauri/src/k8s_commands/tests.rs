@@ -186,7 +186,27 @@ fn shutdown_ends_every_lnav_and_removes_its_log_file_before_returning() {
     k8s.terminal_input(1, b"q");
     k8s.terminal_resize(2, 100, 30);
     // 끝나는 중에는 새 lnav를 띄우지 않는다
-    assert!(k8s.closing());
+    assert!(k8s.admit().is_err());
+}
+
+#[test]
+fn shutdown_waits_for_a_start_in_progress_and_cleans_what_it_registers() {
+    let dir = tempfile::tempdir().unwrap();
+    let k8s = Arc::new(K8sState::default());
+    let ticket = k8s.admit().unwrap();
+    let closer = {
+        let k8s = k8s.clone();
+        std::thread::spawn(move || k8s.shutdown())
+    };
+    // 띄우는 중인 쪽이 등록을 마치고 나갈 때까지 shutdown은 정리를 시작하지 않는다
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(!closer.is_finished());
+    let (t, path) = running_terminal(dir.path());
+    k8s.put_terminal(3, t);
+    drop(ticket);
+    closer.join().unwrap();
+    assert!(!path.exists());
+    assert!(locked(&k8s.terminals).is_empty());
 }
 
 #[test]
