@@ -1,5 +1,5 @@
 //! 클러스터에 쓰는 호출이 허용된 파일 밖에 없는지 글자로 확인한다(PG의 `pg::hygiene`과 같은 방식).
-//! K1에서 허용되는 것은 `review.rs`의 `create`(SelfSubjectReview, SelfSubjectRulesReview) 하나다. 이후 단계가 `exec.rs`, `shell.rs`, `forward.rs`를 더한다.
+//! K1에서 허용되는 것은 `review.rs`의 `create`(SelfSubjectReview, SelfSubjectRulesReview) 하나다. `shell.rs`는 exec·attach, `forward.rs`는 port-forward만 연다. 이후 단계가 `exec.rs`를 더한다.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ const WRITE_CALLS: &[&str] = &[
     "Method::DELETE", "Request::post", "Request::put", "Request::patch", "Request::delete",
 ];
 /// (파일, 허용하는 호출)
-const ALLOWED: &[(&str, &[&str])] = &[("k8s/review.rs", &[".create(", "::create("])];
+const ALLOWED: &[(&str, &[&str])] = &[("k8s/review.rs", &[".create(", "::create("]), ("k8s/shell.rs", &[".exec(", ".attach("]), ("k8s/forward.rs", &[".portforward("])];
 
 /// 시험일 때만 컴파일되는 파일은 스캔하지 않는다: `hygiene.rs`, `live_tests.rs`, 이름이 `tests.rs`인 파일
 fn is_test_only(path: &Path) -> bool {
@@ -95,6 +95,21 @@ fn only_allowed_files_call_write_apis() {
 #[test]
 fn the_scan_sees_k8s_files() {
     assert!(sources().iter().any(|p| p.ends_with("kubeconfig.rs")));
+}
+
+#[test]
+fn the_terminal_and_forward_calls_live_in_their_own_files_and_the_scan_reads_them() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    for (file, call) in [("k8s/shell.rs", ".exec("), ("k8s/shell.rs", ".attach("), ("k8s/forward.rs", ".portforward(")] {
+        let path = root.join(file);
+        assert!(sources().contains(&path), "{file}를 스캔하지 않아요");
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(production_part(&text).unwrap().contains(call), "{file}에 {call}가 없으면 허용 목록이 헛돌아요");
+    }
+    // 다른 쪽 호출은 이 파일들에서도 허용하지 않는다
+    let allowed = |file: &str| ALLOWED.iter().find(|(f, _)| *f == file).map_or(&[][..], |(_, calls)| *calls);
+    assert!(!allowed("k8s/shell.rs").contains(&".portforward("));
+    assert!(!allowed("k8s/forward.rs").contains(&".exec(") && !allowed("k8s/forward.rs").contains(&".attach("));
 }
 
 #[test]

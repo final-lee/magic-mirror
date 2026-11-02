@@ -172,3 +172,26 @@ fn a_secret_view_never_carries_a_value_anywhere() {
     let all = serde_json::to_string(&v).unwrap();
     assert!(!all.contains("sentinel-plain") && !all.contains("c2VudGluZWwtcGxhaW4="), "{all}");
 }
+
+#[test]
+fn ports_come_from_pod_containers_and_service_ports_and_only_tcp() {
+    let pod = json!({ "spec": { "containers": [
+        { "name": "app", "ports": [{ "name": "http", "containerPort": 8080 }, { "containerPort": 53, "protocol": "UDP" }] },
+        { "name": "side", "ports": [{ "containerPort": 9090, "protocol": "TCP" }] },
+    ] } });
+    let got = ports_of(&kind("", "Pod", "pods"), &pod);
+    assert_eq!(
+        got,
+        [
+            PortView { name: Some("http".into()), port: 8080, container: Some("app".into()), target: None },
+            PortView { name: None, port: 9090, container: Some("side".into()), target: None },
+        ]
+    );
+    let svc = json!({ "spec": { "ports": [
+        { "name": "web", "port": 80, "targetPort": 8080 }, { "port": 81, "targetPort": "metrics" }, { "port": 82 }, { "port": 53, "protocol": "UDP" },
+    ] } });
+    let got = ports_of(&kind("", "Service", "services"), &svc);
+    let shown: Vec<(u16, Option<&str>)> = got.iter().map(|p| (p.port, p.target.as_deref())).collect();
+    assert_eq!(shown, [(80, Some("8080")), (81, Some("metrics")), (82, None)]);
+    assert!(ports_of(&kind("apps", "Deployment", "deployments"), &pod).is_empty());
+}
