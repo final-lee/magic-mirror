@@ -11,6 +11,10 @@ use tauri::{Manager, State};
 
 use crate::commands::AppState;
 use crate::error::AppError;
+use crate::iam::clock::{iso, now_secs};
+use crate::iam::commit::{new_log_id, plan::PlanStore};
+use crate::k8s::change::{Change, ChangeObject, Operation, Plan, Preview};
+use crate::k8s::{commit, exec, log};
 use crate::k8s::connect;
 use crate::k8s::failure::{describe, failure_of, Endpoint, Failure, NOT_OPENED};
 use crate::k8s::kubeconfig::{self, Candidate, NO_CONTEXT};
@@ -24,6 +28,9 @@ use crate::k8s::rows::KindRef;
 use crate::k8s::target::{describe_cluster, K8sTarget};
 use crate::k8s::watch::{self, WatchMessage};
 
+pub const RECORD_FAILED: &str = "변경 결과를 기록하지 못했어요";
+pub const UNDO_RECORD_FAILED: &str = "되돌리기 기록을 갱신하지 못했어요";
+
 pub struct Session {
     pub client: kube::Client,
     pub endpoint: Endpoint,
@@ -36,6 +43,8 @@ pub struct K8sState {
     epochs: Mutex<HashMap<K8sTarget, u64>>,
     watches: Mutex<HashMap<u64, WatchEntry>>,
     next_watch: AtomicU64,
+    plans: Mutex<PlanStore<StoredPlan>>,
+    log_path: PathBuf,
 }
 
 /// 돌고 있는 watch 하나. 대상이 닫히면 같은 대상의 것을 모두 멈춘다.
@@ -44,11 +53,23 @@ struct WatchEntry {
     handle: tokio::task::AbortHandle,
 }
 
+#[derive(Clone)]
+struct StoredPlan {
+    plan: Plan,
+    at: String,
+    epoch: u64,
+    session: Arc<Session>,
+}
+
 fn locked<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 impl K8sState {
+    pub fn new(log_path: PathBuf) -> Self {
+        Self { log_path, ..Self::default() }
+    }
+
     pub fn epoch(&self, t: &K8sTarget) -> u64 {
         *locked(&self.epochs).get(t).unwrap_or(&0)
     }
@@ -316,6 +337,104 @@ pub async fn k8s_overview(app: State<'_, AppState>, k8s: State<'_, K8sState>, ta
 pub async fn k8s_secret_value(k8s: State<'_, K8sState>, target: K8sTarget, namespace: String, name: String, key: String) -> Result<SecretValue, AppError> {
     let s = k8s.session(&target)?;
     secret::secret_value(&s.client, &namespace, &name, &key, s.endpoint).await
+}
+
+/// 롤아웃 대상의 소유 리비전만 고른다.
+#[tauri::command]
+pub async fn k8s_revisions(k8s: State<'_, K8sState>, target: K8sTarget, object: ChangeObject) -> Result<Vec<commit::Revision>, AppError> {
+    let session = k8s.session(&target)?;
+    commit::revisions(session.client.clone(), session.endpoint, &object).await
+}
+
+/// 되살릴 객체는 이 클러스터의 변경 기록에서 나온 역변경이어야 한다.
+fn check_recreate(k8s: &K8sState, target: &K8sTarget, change: &Change) -> Result<(), AppError> {
+    if matches!(change.operation, Operation::Recreate { .. })
+        && !log::read_all(&k8s.log_path).iter().any(|entry| entry.target == *target && entry.ok && !entry.undone && entry.inverse.as_ref() == Some(change))
+    {
+        return Err(AppError::other(log::UNDO_UNAVAILABLE));
+    }
+    Ok(())
+}
+
+
+#[tauri::command]
+pub async fn k8s_preview(k8s: State<'_, K8sState>, target: K8sTarget, change: Change) -> Result<Preview, AppError> {
+    check_recreate(&k8s, &target, &change)?;
+    let session = k8s.session(&target)?;
+    let epoch = k8s.epoch(&target);
+    let now = now_secs();
+    let at = iso(now);
+    let plan = commit::dry_plan(session.client.clone(), session.endpoint, &change, &at).await?;
+    if k8s.epoch(&target) != epoch || !Arc::ptr_eq(&session, &k8s.session(&target)?) {
+        return Err(AppError::other(NOT_OPENED));
+    }
+    let preview = plan.preview.clone();
+    locked(&k8s.plans).remember(&target.profile, &(&target, &change), StoredPlan { plan, at, epoch, session }, now);
+    Ok(preview)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct K8sApplyResult {
+    log_id: String,
+}
+
+#[tauri::command]
+pub async fn k8s_apply(k8s: State<'_, K8sState>, target: K8sTarget, change: Change, confirm_text: Option<String>, undo_of: Option<String>) -> Result<K8sApplyResult, AppError> {
+    let session = k8s.session(&target)?;
+    let seen = locked(&k8s.plans).take(&target.profile, &(&target, &change), now_secs()).ok_or_else(|| AppError::other(exec::STALE))?;
+    if k8s.epoch(&target) != seen.epoch || !Arc::ptr_eq(&session, &seen.session) {
+        return Err(AppError::other(exec::STALE));
+    }
+    check_recreate(&k8s, &target, &change)?;
+    if let Some(id) = &undo_of {
+        let undo = log::undo(&log::read_all(&k8s.log_path), id)?;
+        if undo.target != target || undo.change != change {
+            return Err(AppError::other(log::UNDO_UNAVAILABLE));
+        }
+    } else if matches!(change.operation, Operation::Recreate { .. }) {
+        return Err(AppError::other(log::UNDO_UNAVAILABLE));
+    }
+    let (plan, outcome) = commit::apply_plan(session.client.clone(), session.endpoint, &change, &seen.plan, &seen.at, confirm_text.as_deref()).await?;
+    let now = now_secs();
+    let id = new_log_id(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+    let inverse = if outcome.is_ok() {
+        plan.inverse
+    } else {
+        None
+    };
+    let entry = log::Entry {
+        id: id.clone(),
+        at: iso(now),
+        target,
+        change,
+        summary: plan.preview.impact.join(", "),
+        ok: outcome.is_ok(),
+        error: outcome.as_ref().err().map(ToString::to_string),
+        inverse,
+        undo_of: undo_of.clone(),
+        undone: false,
+    };
+    log::append(&k8s.log_path, &entry).map_err(|_| AppError::other(RECORD_FAILED))?;
+    if outcome.is_ok() {
+        if let Some(original) = undo_of {
+            log::mark_undone(&k8s.log_path, &original).map_err(|_| AppError::other(UNDO_RECORD_FAILED))?;
+        }
+    }
+    outcome?;
+    Ok(K8sApplyResult { log_id: id })
+}
+
+#[tauri::command]
+pub fn k8s_change_log(k8s: State<'_, K8sState>) -> Vec<log::Entry> {
+    let mut entries = log::read_all(&k8s.log_path);
+    entries.reverse();
+    entries
+}
+
+#[tauri::command]
+pub fn k8s_undo(k8s: State<'_, K8sState>, log_id: String) -> Result<log::Undo, AppError> {
+    log::undo(&log::read_all(&k8s.log_path), &log_id)
 }
 
 #[cfg(test)]
