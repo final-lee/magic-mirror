@@ -48,6 +48,11 @@ export const isServiceAccount = (k: K8sKindRef) => k.group === "" && k.kind === 
 
 const strip = ({ group, version, kind, plural, namespaced }: K8sKindRef): K8sKindRef => ({ group, version, kind, plural, namespaced });
 
+/** 북마크는 그룹과 복수형 이름으로 알아본다. 버전은 클러스터마다 권장 버전이 달라도 같은 북마크다. */
+export const bookmarkKey = (k: K8sKindRef) => `${k.group}/${k.plural}`;
+/** 설정에 저장하는 모양(동사·사용자 정의 표시는 빼고) */
+export const bookmarkOf = strip;
+
 /** 사용자 정의 리소스를 API 그룹마다 묶는다(그룹, 종류 이름 순서) */
 export function customCategories(kinds: K8sKind[]): KindCategory[] {
   const groups = new Map<string, K8sKindRef[]>();

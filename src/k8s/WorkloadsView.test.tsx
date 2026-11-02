@@ -29,9 +29,15 @@ beforeEach(() => {
   });
 });
 
+const LANES = { width: () => undefined, resize: vi.fn(), commit: vi.fn() };
+
 function setup(props: Partial<Parameters<typeof WorkloadsView>[0]> = {}) {
   const ui = (p: Partial<Parameters<typeof WorkloadsView>[0]>) =>
-    withClientAndSso(<WorkloadsView target={T} context="ctx" sessionEpoch={1} ssoProfile="p" live namespace="prod" kinds={[]} focus={null} {...props} {...p} />, qc, ssoLoginStub());
+    withClientAndSso(
+      <WorkloadsView target={T} context="ctx" sessionEpoch={1} ssoProfile="p" live namespace="prod" kinds={[]} focus={null} bookmarked={new Set()} onToggleBookmark={vi.fn()} lanes={LANES} {...props} {...p} />,
+      qc,
+      ssoLoginStub(),
+    );
   const qc = newQueryClient();
   const r = render(ui({}));
   return { rerender: (p: Partial<Parameters<typeof WorkloadsView>[0]>) => r.rerender(ui(p)) };
@@ -63,6 +69,13 @@ test("changing kind watches that kind and closes the detail", async () => {
   fireEvent.click(within(screen.getByRole("navigation", { name: KIND_TREE_LABEL })).getByRole("button", { name: "Deployment" }));
   await vi.waitFor(() => expect(m.watch).toHaveBeenCalledWith(T, DEPLOYMENTS, null, "p", expect.any(Function)));
   expect(screen.queryByRole("tab")).toBeNull();
+});
+
+test("a bookmark view shows only its kind, without the kind tree", async () => {
+  setup({ fixedKind: DEPLOYMENTS });
+  await vi.waitFor(() => expect(m.watch).toHaveBeenCalledWith(T, DEPLOYMENTS, "prod", "p", expect.any(Function)));
+  expect(screen.queryByRole("navigation", { name: KIND_TREE_LABEL })).toBeNull();
+  expect(m.watch).not.toHaveBeenCalledWith(T, PODS, expect.anything(), expect.anything(), expect.anything());
 });
 
 test("cluster-scoped kinds watch all namespaces", async () => {

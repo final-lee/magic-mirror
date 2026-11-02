@@ -1,3 +1,5 @@
+import type { K8sKindRef } from "../k8s/types";
+
 export type ColumnKind = "text" | "mono" | "state" | "datetime" | "bytes";
 
 export interface Column {
@@ -69,6 +71,16 @@ export interface Settings {
   k8sContexts?: Record<string, string>;
   /** kubeconfig 파일 경로. 비우면 KUBECONFIG 또는 ~/.kube/config */
   kubeconfigPath?: string | null;
+  /** EKS 탭 왼쪽 메뉴에 북마크한 리소스 종류. 북마크한 순서(드래그로 바꾼 순서)대로 둔다. */
+  k8sBookmarks?: K8sKindRef[];
+  /** EKS 탭 레인 너비(px). 비어 있으면 기본값 */
+  k8sLaneWidths?: K8sLaneWidths;
+}
+
+export interface K8sLaneWidths {
+  nav?: number | null;
+  tree?: number | null;
+  detail?: number | null;
 }
 
 export interface S3Entry {
