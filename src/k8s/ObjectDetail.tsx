@@ -34,6 +34,7 @@ interface Props {
   now?: number;
   changeMode?: boolean;
   onChange?: (change: K8sChange) => void;
+  rolloutProgress?: string;
   /** 3열 목록 너비 중 덮는 비율(%). 없으면 DETAIL_PCT */
   widthPct?: number;
 }
@@ -186,7 +187,8 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sO
 }
 
 /** 객체 하나의 상세(요약·YAML). 소유자·자식·노드 링크는 onOpen으로 상세 스택에 쌓는다. */
-export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose, onOpenIam, now, widthPct = DETAIL_PCT, changeMode, onChange }: Props) {
+export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose,
+  onOpenIam, now, widthPct = DETAIL_PCT, changeMode, onChange, rolloutProgress }: Props) {
   const [tab, setTab] = useState<"summary" | "yaml" | "logs">("summary");
   const pod = isPod(objectRef.kind) && objectRef.namespace !== null;
   const q = useK8sObject(target, context, objectRef, resourceVersion, ssoProfile, live);
@@ -214,6 +216,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
           ✕
         </button>
       </div>
+      {rolloutProgress && <p role="status">{rolloutProgress}</p>}
       {changeMode && onChange && q.data && <ChangeActions target={target} ssoProfile={ssoProfile} objectRef={objectRef} view={q.data} rules={rules.data} onStart={onChange} />}
       <div role="tablist" className="k8s-tabs">
         <button role="tab" aria-selected={tab === "summary"} onClick={() => setTab("summary")}>{TAB_SUMMARY}</button>

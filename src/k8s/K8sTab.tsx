@@ -22,7 +22,7 @@ import { ALL, TopBar, type K8sConnection } from "./TopBar";
 import { WorkloadsView, type WorkloadsFocus } from "./WorkloadsView";
 import { BOOKMARK_MISSING, savedMissing, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNECTING, updateCommand } from "./text";
 import { refreshK8s, useK8sContext, useK8sKinds, useK8sRules, useK8sSession } from "./queries";
-import type { K8sKindRef, K8sTarget } from "./types";
+import type { K8sChange, K8sKindRef, K8sTarget } from "./types";
 import { useK8sWatch } from "./useK8sWatch";
 
 interface Props {
@@ -53,13 +53,15 @@ export function K8sTab({ target, onOpenIam }: Props) {
   const [userNs, setUserNs] = useState<string | null>(null);
   const [view, setView] = useState<K8sView>("overview");
   const [changeMode, setChangeMode] = useState(false);
+  const [appliedChange, setAppliedChange] = useState<K8sChange | null>(null);
   const [focus, setFocus] = useState<WorkloadsFocus | null>(null);
   const session = useK8sSession(target, kubeconfig, settingsReady ? chosen : null, ssoProfileOf(target, candidate, null));
   const ssoProfile = ssoProfileOf(target, candidate, session.data);
   const live = session.isSuccess && !session.isFetching;
   const notices = useApplyNotices();
-  const change = useK8sChange(target, ssoProfile, () => {
+  const change = useK8sChange(target, ssoProfile, (applied) => {
     notices.announce(CHANGE_DONE, []);
+    setAppliedChange(applied);
     void qc.invalidateQueries({ queryKey: ["k8s-change-log"] });
   });
   const namespaces = useK8sWatch(target, chosen ?? "", session.dataUpdatedAt, ssoProfile, NAMESPACES, null, live);
@@ -175,6 +177,7 @@ export function K8sTab({ target, onOpenIam }: Props) {
               onOpenIam={onOpenIam}
               changeMode={changeMode}
               onChange={change.start}
+              appliedChange={appliedChange}
               banner={kinds.isError && <ErrorState error={kinds.error} profile={ssoProfile} compact onRetry={refetchKinds} onLoggedIn={refetchKinds} />}
               fixedKind={fixedKind}
               bookmarked={marks}

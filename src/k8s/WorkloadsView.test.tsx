@@ -44,6 +44,31 @@ function setup(props: Partial<Parameters<typeof WorkloadsView>[0]> = {}) {
 }
 const send = (plural: string, msg: K8sWatchMessage) => act(() => emits.get(plural)!(msg));
 
+test("rollout progress follows the watched deployment and disappears once ready", async () => {
+  const initial = { ...row("web"), values: { ready: "3/3", upToDate: "3" } };
+  m.get.mockResolvedValue(view("web", { kind: DEPLOYMENTS, row: initial }));
+  m.rules.mockResolvedValue({ namespace: "prod", resourceRules: [], nonResourceRules: [], incomplete: true });
+  const onChange = vi.fn();
+  const { rerender } = setup({ fixedKind: DEPLOYMENTS, changeMode: true, onChange });
+  await vi.waitFor(() => expect(m.watch).toHaveBeenCalled());
+  send("deployments", { type: "reset", rows: [initial] });
+  fireEvent.click(screen.getByText("web"));
+  fireEvent.click(await screen.findByRole("button", { name: "롤아웃 재시작" }));
+  const change = onChange.mock.calls[0][0];
+  rerender({ appliedChange: change });
+  expect(await screen.findByText("롤아웃 상태를 기다리는 중이에요")).toBeInTheDocument();
+  send("deployments", {
+    type: "reset",
+    rows: [{ ...initial, resourceVersion: "8", values: { ready: "2/3", upToDate: "2" } }],
+  });
+  expect(await screen.findByText("새 Pod 2/3 준비")).toBeInTheDocument();
+  send("deployments", {
+    type: "reset",
+    rows: [{ ...initial, resourceVersion: "9", values: { ready: "3/3", upToDate: "3" } }],
+  });
+  await vi.waitFor(() => expect(screen.queryByText("새 Pod 3/3 준비")).not.toBeInTheDocument());
+});
+
 test("starts on pods, opens a row, follows an owner, and goes back", async () => {
   m.get.mockImplementation(async (_t, kind, _ns, name) =>
     kind.plural === "pods" ? view(name, { owners: [{ group: "apps", version: "v1", kind: "ReplicaSet", name: "rs1", namespace: "prod", uid: "r", controller: true, problems: [] }] }) : view(name, { kind }),
