@@ -66,6 +66,10 @@ export const ARGO_AUTO_OFF = "꺼짐";
 export const ARGO_IN_CLUSTER = "이 클러스터";
 export const argoErrors = (n: number) => `오류 ${n}`;
 export const argoWarnings = (n: number) => `경고 ${n}`;
+// 묶음 머리의 요약 칩(앱 하나는 한 칸으로만 센다)
+export const argoOutOfSync = (n: number) => `OutOfSync ${n}`;
+export const argoCaution = (n: number) => `주의 ${n}`;
+export const argoOk = (n: number) => `정상 ${n}`;
 
 // 상세
 export const ARGO_DETAIL_LABEL = "Application 상세";

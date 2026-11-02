@@ -3,8 +3,8 @@ import { renderWithClient } from "../test/utils";
 import { argocdApi } from "./api";
 import { ArgoView } from "./ArgoView";
 import {
-  ARGO_ALL_PROJECTS, ARGO_GROUP_BY_SET, ARGO_HEALTH_GROUP, ARGO_IN_CLUSTER, ARGO_NO_APPS, ARGO_NO_MATCH, ARGO_PROJECT, ARGO_SEARCH, ARGO_SYNC_GROUP,
-  ARGO_UNGROUPED, LOADING, TOKEN_INVALID, TOKEN_MISSING, argoAppCount,
+  ARGO_ALL_PROJECTS, ARGO_APPS_LABEL, ARGO_GROUP_BY_SET, ARGO_HEALTH_GROUP, ARGO_IN_CLUSTER, ARGO_NO_APPS, ARGO_NO_MATCH, ARGO_PROJECT, ARGO_SEARCH, ARGO_SYNC_GROUP,
+  ARGO_UNGROUPED, LOADING, TOKEN_INVALID, TOKEN_MISSING, argoAppCount, argoCaution, argoErrors, argoOk, argoOutOfSync,
 } from "./text";
 import type { ArgoApp, ArgoAppRow, ArgoAppSetRow } from "./types";
 
@@ -30,7 +30,7 @@ function setup(apps: ArgoAppRow[], sets: ArgoAppSetRow[] = [], props: Partial<Pa
 }
 async function ready(apps: ArgoAppRow[], sets: ArgoAppSetRow[] = []) {
   const h = setup(apps, sets);
-  await screen.findByRole("table");
+  await screen.findByRole("table", { name: ARGO_APPS_LABEL });
   return h;
 }
 
@@ -41,13 +41,14 @@ beforeEach(() => {
 });
 
 const names = () => Array.from(document.querySelectorAll("tr.argo-row")).map((r) => r.querySelector("td")?.firstChild?.textContent);
-const headers = () => Array.from(document.querySelectorAll("tr.argo-group")).map((r) => r.querySelector("b")?.textContent);
+const cards = () => Array.from(document.querySelectorAll<HTMLElement>("section.argo-card"));
+const headers = () => cards().map((c) => c.querySelector(".argo-band b")?.textContent);
 const chip = (group: string, status: string) => within(screen.getByRole("group", { name: group })).getByRole("button", { name: new RegExp(`^${status}\\b`) });
 
 test("reads this server's applications and ApplicationSets, and says it is loading first", async () => {
   setup([appRow("a")]);
   expect(screen.getByText(LOADING)).toBeInTheDocument();
-  await screen.findByRole("table");
+  await screen.findByRole("table", { name: ARGO_APPS_LABEL });
   expect(m.apps).toHaveBeenCalledWith(URL);
   expect(m.appsets).toHaveBeenCalledWith(URL);
 });
@@ -175,9 +176,9 @@ describe("grouping by ApplicationSet", () => {
         setRow("empty", { generators: ["list"], status: "Error", message: "boom" }),
       ],
     );
-    // 오류 난 ApplicationSet이 맨 앞(앱 없는 empty도), 그 다음 문제 앱이 없는 묶음은 이름 순, 마지막이 ApplicationSet 없음
+    // 빨강(오류: ApplicationSet Error 포함)이 맨 앞(앱 없는 empty도), 그 다음 노랑, 정상은 이름 순, 마지막이 ApplicationSet 없음
     expect(headers()).toEqual(["empty", "web", "db", "gone", ARGO_UNGROUPED]);
-    const groups = Array.from(document.querySelectorAll("tr.argo-group")) as HTMLElement[];
+    const groups = cards();
     expect(within(groups[1]).getByText("generator: list, git")).toBeInTheDocument();
     expect(within(groups[1]).getByText("Error")).toHaveClass("argo-bad");
     expect(within(groups[1]).getByText("generator failed: no repo")).toBeInTheDocument();
@@ -192,6 +193,42 @@ describe("grouping by ApplicationSet", () => {
     expect(within(groups[4]).getByText(argoAppCount(1))).toBeInTheDocument();
     // 묶음 순서대로 앱이 따라오고, 묶음 안에서는 문제 앱이 먼저
     expect(names()).toEqual(["web-b", "web-a", "db-a", "orphan", "solo"]);
+  });
+
+  test("cards are colored by their worst app: red for errors (or an ApplicationSet Error), yellow for other problems, blue otherwise", async () => {
+    await ready(
+      [
+        appRow("r1", { appSet: "red", health: "Degraded" }),
+        appRow("r2", { appSet: "red", sync: "OutOfSync" }),
+        appRow("r3", { appSet: "red" }),
+        appRow("y1", { appSet: "yellow", sync: "OutOfSync" }),
+        appRow("y2", { appSet: "yellow", health: "Progressing" }),
+        appRow("b1", { appSet: "blue" }),
+      ],
+      [setRow("red"), setRow("yellow"), setRow("blue"), setRow("broken", { status: "Error", message: "x" })],
+    );
+    expect(headers()).toEqual(["broken", "red", "yellow", "blue"]);
+    expect(cards().map((c) => c.className.match(/argo-card-(\w+)/)?.[1])).toEqual(["err", "err", "warn", "ok"]);
+    // 요약 칩은 앱 하나를 한 칸으로만 센다: 오류 > OutOfSync > 그 밖의 주의 > 정상
+    const [, red, yellow, blue] = cards();
+    expect(within(red).getByText(argoErrors(1))).toHaveClass("argo-bad");
+    expect(within(red).getByText(argoOutOfSync(1))).toHaveClass("argo-warn");
+    expect(within(red).getByText(argoOk(1))).toHaveClass("argo-ok");
+    expect(within(yellow).getByText(argoOutOfSync(1))).toBeInTheDocument();
+    expect(within(yellow).getByText(argoCaution(1))).toBeInTheDocument();
+    expect(within(yellow).queryByText(/^정상/)).toBeNull();
+    expect(within(blue).getByText(argoOk(1))).toBeInTheDocument();
+  });
+
+  test("cards start open; clicking a header folds just that card and clicking again opens it", async () => {
+    await ready([appRow("a1", { appSet: "aaa" }), appRow("b1", { appSet: "bbb" })], [setRow("aaa"), setRow("bbb")]);
+    expect(names()).toEqual(["a1", "b1"]);
+    const band = within(cards()[0]).getByRole("button", { expanded: true });
+    fireEvent.click(band);
+    expect(band).toHaveAttribute("aria-expanded", "false");
+    expect(names()).toEqual(["b1"]);
+    fireEvent.click(band);
+    expect(names()).toEqual(["a1", "b1"]);
   });
 
   test("a group with a problem app comes before a clean one", async () => {
@@ -226,7 +263,7 @@ describe("grouping by ApplicationSet", () => {
   });
 });
 
-test("problem apps come first: out of sync, not healthy, with errors, or a failed operation", async () => {
+test("worst first: errors (error conditions, Degraded or Missing, a failed operation), then other problems, then healthy", async () => {
   await ready([
     appRow("aa-fine"),
     appRow("bb-sync", { sync: "OutOfSync" }),
@@ -235,11 +272,12 @@ test("problem apps come first: out of sync, not healthy, with errors, or a faile
     appRow("ee-failed", { operation: "Failed" }),
     appRow("ee2-error", { operation: "Error" }),
     appRow("ff-nohealth", { health: "" }),
+    appRow("gg-missing", { health: "Missing" }),
     appRow("zz-fine"),
     appRow("yy-warn-only", { warnings: "3" }),
   ]);
   fireEvent.click(screen.getByRole("checkbox", { name: ARGO_GROUP_BY_SET }));
-  expect(names()).toEqual(["bb-sync", "cc-health", "dd-errors", "ee-failed", "ee2-error", "ff-nohealth", "aa-fine", "yy-warn-only", "zz-fine"]);
+  expect(names()).toEqual(["cc-health", "dd-errors", "ee-failed", "ee2-error", "gg-missing", "bb-sync", "ff-nohealth", "aa-fine", "yy-warn-only", "zz-fine"]);
 });
 
 describe("detail", () => {
