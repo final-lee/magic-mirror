@@ -92,6 +92,7 @@ export type K8sChange = K8sChangeObject & (
   | { type: "delete" }
   | { type: "rerun"; jobName: string }
   | { type: "suspend"; suspend: boolean }
+  | { type: "cordon"; unschedulable: boolean }
   | { type: "recreate"; object: Record<string, unknown> }
 );
 

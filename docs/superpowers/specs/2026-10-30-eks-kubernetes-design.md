@@ -187,6 +187,7 @@
 
 ### B. 노드 조작
 - cordon·uncordon: 서로 되돌리기.
+- 지금 된 것: Node 상세에서 스케줄 중지·재개를 공통 미리보기와 기록·되돌리기로 수행한다.
 - drain: 미리보기에 옮길 Pod, 건너뛸 DaemonSet Pod, emptyDir 손실 경고, 컨트롤러 없는 Pod 경고, PDB로 막힐 Pod. 적용은 cordon → Eviction을 하나씩. 429가 이어지면 5분 뒤 멈추고 이미 옮긴 것은 그대로 둔다. 되돌리기는 uncordon만.
 
 ### C. 셸과 port-forward
