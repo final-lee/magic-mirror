@@ -31,6 +31,27 @@ test("permissions explain disabled actions and scale validates the input", () =>
   expect(start).toHaveBeenCalledWith({ ...objectRef, type: "scale", replicas: 4 });
 });
 
+test("rollout undo requires get and revision list as well as patch", () => {
+  const start = vi.fn();
+  const patchOnly = {
+    ...rules,
+    resourceRules: [{ verbs: ["patch"], apiGroups: ["apps"], resources: ["deployments"], resourceNames: [] }],
+  };
+  const renderActions = (current: K8sRules) => (
+    <ChangeActions target={target} ssoProfile="p" objectRef={objectRef} view={view} rules={current} onStart={start} />
+  );
+  const { rerender } = render(renderActions(patchOnly));
+  const undo = screen.getByRole("button", { name: t.CHANGE_ROLLOUT_UNDO });
+  expect(undo).toBeDisabled();
+  expect(undo).toHaveAttribute("title", t.CHANGE_DENIED("get", "deployments"));
+  rerender(renderActions({
+    ...patchOnly,
+    resourceRules: [{ verbs: ["patch", "get"], apiGroups: ["apps"], resources: ["deployments"], resourceNames: [] }],
+  }));
+  expect(undo).toHaveAttribute("title", t.CHANGE_DENIED("list", "replicasets"));
+  expect(api.revisions).not.toHaveBeenCalled();
+});
+
 test("rollout undo loads revisions and previews the selected revision", async () => {
   api.revisions.mockResolvedValue([{ revision: "2", name: "rev2" }, { revision: "1", name: "rev1" }]);
   const start = vi.fn();

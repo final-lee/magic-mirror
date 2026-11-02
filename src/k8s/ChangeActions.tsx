@@ -53,6 +53,8 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, onSt
     return result === "no" ? t.CHANGE_DENIED(verb, resource) : undefined;
   };
   const patch = denied("patch");
+  const revisionResource = kind.kind === "Deployment" ? "replicasets" : "controllerrevisions";
+  const revisionDenied = patch ?? denied("get") ?? denied("list", "apps", revisionResource, false);
   const validReplicas = /^\d+$/.test(replicas) && Number.isSafeInteger(Number(replicas)) && Number(replicas) <= 2147483647;
   const suspended = view.row.values.suspend === "true";
 
@@ -70,7 +72,7 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, onSt
       {workload && (
         <>
           <ActionButton label={t.CHANGE_RESTART} reason={patch} onClick={() => onStart({ ...objectRef, type: "restart" })} />
-          <ActionButton label={t.CHANGE_ROLLOUT_UNDO} reason={patch} onClick={() => setPicking(true)} />
+          <ActionButton label={t.CHANGE_ROLLOUT_UNDO} reason={revisionDenied} onClick={() => setPicking(true)} />
           {picking && (
             <>
               <label>
@@ -80,7 +82,7 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, onSt
                   {revisions?.map((r) => <option key={r.revision} value={r.revision}>{r.revision} — {r.name}</option>)}
                 </select>
               </label>
-              <ActionButton label={t.CHANGE_PREVIEW} reason={patch} invalid={!revision}
+              <ActionButton label={t.CHANGE_PREVIEW} reason={revisionDenied} invalid={!revision}
                 onClick={() => onStart({ ...objectRef, type: "rolloutUndo", revision })} />
               {revisionError && <span className="err">{revisionError}</span>}
             </>
