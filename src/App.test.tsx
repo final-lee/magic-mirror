@@ -12,6 +12,9 @@ import { sampleTopology } from "./vpcmap/fixtures";
 import { dbRow, eksService, makeResource, rdsService, renderWithClient, sampleServices } from "./test/utils";
 import { k8sApi } from "./k8s/api";
 import { tabTitle } from "./k8s/text";
+import { costApi } from "./cost/api";
+import { sampleBreakdown, sampleOverview as sampleCostOverview } from "./cost/fixtures";
+import { BREAKDOWN_LABEL, COST_TITLE } from "./cost/text";
 
 vi.mock("./api/client", () => ({
   api: {
@@ -57,6 +60,7 @@ vi.mock("./k8s/api", () => ({
 vi.mock("./iam/api", () => ({
   iamApi: { overview: vi.fn(), principal: vi.fn(), principalActions: vi.fn(), policy: vi.fn(), accessKeys: vi.fn(), findings: vi.fn() },
 }));
+vi.mock("./cost/api", () => ({ costApi: { overview: vi.fn(), breakdown: vi.fn(), tagKeys: vi.fn(), usage: vi.fn() } }));
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: vi.fn(async () => () => {}) }),
 }));
@@ -481,6 +485,50 @@ describe("IAM 작업 공간 탭", () => {
     fireEvent.click(within(screen.getByRole("navigation", { name: "IAM 메뉴" })).getByRole("button", { name: /사용자/ }));
     fireEvent.doubleClick(within(await screen.findByTestId("iam-list")).getByText(bob.name));
     expect(await screen.findByRole("heading", { name: "bob" })).toBeVisible();
+  });
+});
+
+describe("💰 비용 탭", () => {
+  const cost = vi.mocked(costApi);
+  beforeEach(() => {
+    cost.overview.mockResolvedValue(sampleCostOverview());
+    cost.breakdown.mockResolvedValue(sampleBreakdown());
+    cost.usage.mockResolvedValue({ yearMonth: "2026-10", requests: 3 });
+  });
+  const openCost = async () => {
+    renderWithClient(<App />);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "프로필" })).toHaveValue("prod"));
+    fireEvent.click(await screen.findByText(COST_TITLE));
+    await screen.findByRole("table", { name: BREAKDOWN_LABEL });
+  };
+
+  test("the sidebar row above the services opens one active cost tab for the profile", async () => {
+    await openCost();
+    expect(screen.getByRole("tab", { name: COST_TITLE })).toHaveAttribute("aria-selected", "true");
+    expect(cost.overview).toHaveBeenCalledWith("prod", expect.objectContaining({ period: "thisMonth" }), false);
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    fireEvent.click(screen.getByText(COST_TITLE, { selector: ".side span" }));
+    expect(screen.getAllByRole("tab", { name: COST_TITLE })).toHaveLength(1);
+  });
+
+  test("⌘R on the cost tab skips the cost cache; ⌘R elsewhere leaves the cost queries alone", async () => {
+    await openCost();
+    fireEvent.keyDown(window, { key: "r", metaKey: true });
+    await waitFor(() => expect(cost.overview).toHaveBeenLastCalledWith("prod", expect.anything(), true));
+    const calls = cost.overview.mock.calls.length;
+    const accountReads = m.getAccount.mock.calls.length;
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    fireEvent.keyDown(window, { key: "r", metaKey: true });
+    // 같은 ⌘R이 다른 것(계정 ID)은 다시 읽는다
+    await waitFor(() => expect(m.getAccount.mock.calls.length).toBeGreaterThan(accountReads));
+    expect(cost.overview).toHaveBeenCalledTimes(calls);
+  });
+
+  test("changing the profile closes the cost tab", async () => {
+    await openCost();
+    fireEvent.change(screen.getByRole("combobox", { name: "프로필" }), { target: { value: "dev" } });
+    expect(screen.queryByRole("tab", { name: COST_TITLE })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
   });
 });
 

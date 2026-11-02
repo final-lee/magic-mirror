@@ -879,3 +879,42 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .k8s-overview h5 { margin: 10px 0 4px; font-size: 12px; font-weight: 600; }
 .k8s-gap { margin: 4px 0; }
 .k8s-gap p { margin: 0 0 2px; font-size: 12px; }
+
+/* 💰 비용 탭 */
+.typ.cost-open { padding-left: 14px; margin-top: 8px; color: var(--text); font-weight: 600; }
+.typ.cost-open:hover { color: #fff; }
+.cost { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.cost-controls { display: flex; align-items: center; gap: 12px; padding: 6px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.cost-check { display: inline-flex; align-items: center; gap: 5px; color: #cfcfd2; cursor: pointer; }
+.cost-main { flex: 1; overflow: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.cost-hint { margin-top: 6px; font-size: 12px; color: var(--dim); text-align: center; line-height: 1.6; }
+.cost-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.cost-card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.cost-card h3 { margin: 0 0 6px; font-size: 11px; font-weight: 600; color: #cfcfd2; }
+.cost-big { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cost-pct { font-size: 13px; font-weight: 500; }
+.cost-sub { margin-top: 4px; font-size: 11px; color: var(--dim); }
+.cost-up { color: #ff6b62; }
+.cost-down { color: var(--green); }
+.cost-section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; min-width: 0; }
+.cost-section-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; min-height: 26px; }
+.cost-crumb { display: inline-flex; align-items: center; gap: 6px; }
+.cost-chart { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.cost-chart-max { font-size: 10px; font-variant-numeric: tabular-nums; }
+.cost-chart-plot { position: relative; border-bottom: 1px solid var(--line); }
+.cost-chart-plot svg { display: block; }
+.cost-hit { cursor: crosshair; }
+.cost-tip { position: absolute; top: 0; z-index: 2; pointer-events: none; background: #1c1c1e; border: 1px solid #4a4a4e; border-radius: 6px; padding: 6px 8px; font-size: 11px; box-shadow: 0 6px 20px #000a; min-width: 200px; }
+.cost-tip table { margin-top: 4px; }
+.cost-tip td { padding: 1px 0; max-width: 320px; background: none !important; }
+.cost-tip td.num { padding-left: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+.cost-tip-total td { border-top: 1px solid var(--line); padding-top: 3px; font-weight: 600; }
+.cost-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.cost-ticks { display: grid; font-size: 10px; text-align: center; font-variant-numeric: tabular-nums; }
+.cost-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; color: #cfcfd2; margin-top: 4px; }
+.cost-table th.num, .cost-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.cost-table th { background: var(--panel); }
+.cost-table td.cost-label { max-width: 420px; }
+.cost-table tr.drill { cursor: pointer; }
+.cost-table tr.drill:hover td { background: #ffffff12; }
+.cost-table tr.cost-small td { color: var(--dim); font-style: italic; }
