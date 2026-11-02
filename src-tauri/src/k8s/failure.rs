@@ -11,6 +11,8 @@ pub const UNREACHABLE_BOTH: &str = "클러스터 엔드포인트에 연결하지
 pub const TLS_UNVERIFIED: &str = "클러스터 인증서를 확인하지 못했어요";
 pub const UNAUTHORIZED: &str = "클러스터가 이 신원을 알아보지 못했어요. EKS access entry나 aws-auth ConfigMap에 등록돼 있는지 확인해 주세요";
 pub const NOT_OPENED: &str = "먼저 연결해 주세요";
+/// exec·attach·port-forward 요청이 404로 거절됐을 때(Pod가 없다)
+pub const STREAM_NOT_FOUND: &str = "Pod를 찾을 수 없어요. 이미 지워졌는지 확인해 주세요";
 const EXEC_LINE_MAX: usize = 300;
 /// kubeconfig에서 명령 이름을 알 수 없을 때(spawn 실패 오류가 이름을 싣지 않는다) 쓰는 기본 exec 명령.
 const DEFAULT_EXEC_COMMAND: &str = "aws";
@@ -220,6 +222,19 @@ pub fn failure_of(e: &kube::Error, verb: &str, resource: &str) -> Failure {
         }
     }
     Failure::Other(e.to_string())
+}
+
+/// 웹소켓으로 여는 요청(exec, attach, port-forward)의 실패. 업그레이드가 거절되면 상태 코드만 남아서(본문의 메시지는 버려진다) 코드로 가르고, 나머지는 `failure_of`와 같다.
+pub fn stream_failure_of(e: &kube::Error, verb: &str, resource: &str) -> Failure {
+    if let kube::Error::UpgradeConnection(kube::client::UpgradeConnectionError::ProtocolSwitch(code)) = e {
+        return match code.as_u16() {
+            401 => Failure::Unauthorized,
+            403 => Failure::Forbidden { verb: verb.into(), resource: resource.into() },
+            404 => Failure::Other(STREAM_NOT_FOUND.into()),
+            other => Failure::Other(api_error(other)),
+        };
+    }
+    failure_of(e, verb, resource)
 }
 
 #[cfg(test)]
