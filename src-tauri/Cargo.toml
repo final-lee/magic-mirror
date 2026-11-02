@@ -75,3 +75,11 @@ tokio-rustls = { version = "0.26", default-features = false }
 objc2 = "0.6"
 block2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSEvent"] }
+
+# macOS 기본값(unpacked)은 디버그 정보용 .o를 target/debug/deps에 남기고 다시 빌드할 때마다 새로 쌓아 지우지 않는다(한 달에 100GB 넘게 자랐다).
+# packed는 링크할 때 .dSYM으로 모으고 .o를 지운다. 의존성에는 디버그 정보를 넣지 않아 dsymutil이 빨라지고 다시 빌드 시간도 줄어든다.
+[profile.dev]
+split-debuginfo = "packed"
+
+[profile.dev.package."*"]
+debug = false
