@@ -94,6 +94,17 @@ export type K8sWatchMessage =
   | { type: "changes"; upserts: K8sRow[]; deletes: string[] } // deletes는 uid
   | { type: "error"; error: AppError; fatal: boolean };
 
+/** k8s_logs 옵션(백엔드 LogOptions) */
+export interface K8sLogOptions {
+  container: string | null;
+  follow: boolean;
+  tailLines: number;
+  previous: boolean;
+}
+
+/** k8s_logs 채널. error와 end에서 흐름이 끝난다. */
+export type K8sLogMessage = { type: "lines"; lines: string[] } | { type: "error"; error: AppError } | { type: "end" };
+
 export type K8sProblem = "crashLoopBackOff" | "imagePullBackOff" | "pending" | "oomKilled" | "notReady";
 
 export interface K8sKind extends K8sKindRef {

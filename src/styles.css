@@ -833,15 +833,33 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .k8s-detail { position: absolute; top: 0; right: 0; bottom: 0; z-index: 2; min-width: 320px; max-width: 100%; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--panel); box-shadow: -10px 0 28px #00000073; animation: k8s-pop 0.12s ease-out; }
 @keyframes k8s-pop { from { transform: translateX(18px); opacity: 0; } }
 .k8s-detail-resizer { position: absolute; top: 0; bottom: 0; margin: 0; transform: translateX(50%); z-index: 3; }
-.k8s-detail-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.k8s-detail-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 10px; border-bottom: 1px solid var(--line); }
+.k8s-detail-head .icon { flex: none; font-size: 16px; line-height: 1; }
 .k8s-push { margin-left: auto; }
 .k8s-tabs { display: flex; gap: 2px; padding: 4px 12px 0; border-bottom: 1px solid var(--line); }
 .k8s-tabs [role="tab"] { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--dim); padding: 4px 10px; cursor: pointer; }
 .k8s-tabs [aria-selected="true"] { color: inherit; border-bottom-color: var(--accent, #0a84ff); }
-.k8s-detail-body { flex: 1; overflow: auto; padding: 10px 12px; }
+.k8s-detail-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; }
+.k8s-detail-body.flush { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
 .k8s-kv { display: contents; }
 .k8s-links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
 .k8s-yaml { margin: 0; white-space: pre; font-size: 12px; user-select: text; }
+/* YAML 색: 어두운 테마의 시스템 색(macOS)에 맞춘다 */
+.k8s-yaml .y-key { color: #64d2ff; }
+.k8s-yaml .y-str { color: #ffb36b; }
+.k8s-yaml .y-num { color: #bf8cff; }
+.k8s-yaml .y-bool { color: #ff6b8b; }
+.k8s-yaml .y-comment { color: var(--dim); font-style: italic; }
+.k8s-yaml .y-punct { color: var(--dim); }
+.k8s-yaml .y-mask { color: var(--yellow); }
+.k8s-logs { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.k8s-log-bar { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.k8s-log-bar .btn { width: auto; margin: 0; padding: 3px 10px; }
+.k8s-log-count { font-size: 12px; white-space: nowrap; }
+.k8s-log-wrap { flex: 1; min-height: 0; position: relative; display: flex; }
+.k8s-log { flex: 1; margin: 0; padding: 8px 10px; overflow: auto; white-space: pre-wrap; word-break: break-all; font-size: 12px; line-height: 1.45; user-select: text; background: #1a1a1c; }
+.k8s-log mark { background: #ffd60a59; color: inherit; border-radius: 2px; }
+.k8s-log-bottom { position: absolute; right: 16px; bottom: 12px; width: auto; margin: 0; padding: 4px 12px; box-shadow: 0 2px 10px #0008; }
 .k8s-wrap { word-break: break-all; }
 .k8s-warn td { color: var(--orange, #ff9f0a); }
 

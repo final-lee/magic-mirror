@@ -6,12 +6,14 @@ import { Problems, valueKeys } from "./columns";
 import { age } from "./format";
 import { NODES, isPod, isSecret, isServiceAccount, resolveLink } from "./kinds";
 import { DETAIL_PCT } from "./lanes";
+import { PodLogs } from "./PodLogs";
 import { useK8sObject, useK8sRules } from "./queries";
 import { SecretKeys } from "./SecretKeys";
+import { YamlView } from "./YamlView";
 import {
   BACK, CHILDREN_TRUNCATED, CLOSE, COL_NAME, COLUMN_LABELS, CREATED_AT, DETAIL_LABEL, H_IMAGE, H_KIND, H_LAST_TERMINATION, H_MESSAGE,
   H_REASON, H_RESTARTS, H_STATE, INIT_MARK, LOADING, NO_RECENT_EVENTS, OPEN_IN_IAM, SEC_ANNOTATIONS, SEC_CHILDREN, SEC_CONDITIONS,
-  SEC_CONTAINERS, SEC_EVENTS, SEC_LABELS, SEC_OWNERS, TAB_SUMMARY, TAB_YAML, YAML_SECRET_NOTE, H_TIME, H_COUNT, openNode,
+  SEC_CONTAINERS, SEC_EVENTS, SEC_LABELS, SEC_OWNERS, TAB_LOGS, TAB_SUMMARY, TAB_YAML, YAML_SECRET_NOTE, H_TIME, H_COUNT, openNode,
 } from "./text";
 import type { K8sContainer, K8sKind, K8sLink, K8sObjectView, K8sTarget, ObjectRef } from "./types";
 
@@ -182,7 +184,8 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sO
 
 /** 객체 하나의 상세(요약·YAML). 소유자·자식·노드 링크는 onOpen으로 상세 스택에 쌓는다. */
 export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose, onOpenIam, now, widthPct = DETAIL_PCT }: Props) {
-  const [tab, setTab] = useState<"summary" | "yaml">("summary");
+  const [tab, setTab] = useState<"summary" | "yaml" | "logs">("summary");
+  const pod = isPod(objectRef.kind) && objectRef.namespace !== null;
   const q = useK8sObject(target, context, objectRef, resourceVersion, ssoProfile, live);
   const secret = isSecret(objectRef.kind);
   const rules = useK8sRules(target, context, objectRef.namespace, ssoProfile, live && secret && objectRef.namespace !== null);
@@ -191,16 +194,23 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
   return (
     <aside className="k8s-detail" aria-label={DETAIL_LABEL} style={{ width: `${widthPct}%` }}>
       <div className="k8s-detail-head">
-        {onBack && <button className="btn" onClick={onBack}>{BACK}</button>}
+        {onBack && (
+          <button className="icon" aria-label={BACK} title={BACK} onClick={onBack}>
+            ‹
+          </button>
+        )}
         <b>{objectRef.kind.kind}</b>
         <span className="mono k8s-wrap">{objectRef.namespace ? `${objectRef.namespace}/` : ""}{objectRef.name}</span>
-        <button className="btn k8s-push" onClick={onClose}>{CLOSE}</button>
+        <button className="icon k8s-push" aria-label={CLOSE} title={CLOSE} onClick={onClose}>
+          ✕
+        </button>
       </div>
       <div role="tablist" className="k8s-tabs">
         <button role="tab" aria-selected={tab === "summary"} onClick={() => setTab("summary")}>{TAB_SUMMARY}</button>
         <button role="tab" aria-selected={tab === "yaml"} onClick={() => setTab("yaml")}>{TAB_YAML}</button>
+        {pod && <button role="tab" aria-selected={tab === "logs"} onClick={() => setTab("logs")}>{TAB_LOGS}</button>}
       </div>
-      <div className="k8s-detail-body">
+      <div className={`k8s-detail-body${tab === "logs" ? " flush" : ""}`}>
         {q.isError ? (
           <ErrorState error={q.error} profile={ssoProfile} compact onRetry={() => void q.refetch()} onLoggedIn={() => void q.refetch()} />
         ) : !q.data ? (
@@ -211,10 +221,19 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
               <SecretKeys target={target} ssoProfile={ssoProfile} namespace={objectRef.namespace} name={objectRef.name} keys={q.data.secretKeys} canRead={canRead} />
             )}
           </Summary>
+        ) : tab === "logs" && pod && objectRef.namespace ? (
+          <PodLogs
+            target={target}
+            ssoProfile={ssoProfile}
+            live={live}
+            namespace={objectRef.namespace}
+            pod={objectRef.name}
+            containers={q.data.containers.filter((c) => c.state !== "template")}
+          />
         ) : (
           <>
             {secret && <p className="dim">{YAML_SECRET_NOTE}</p>}
-            <pre className="k8s-yaml mono">{q.data.yaml}</pre>
+            <YamlView text={q.data.yaml} />
           </>
         )}
       </div>

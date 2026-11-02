@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 use super::connect::{client_for, REQUEST_TIMEOUT};
 use super::failure::{exec_missing, Endpoint, TLS_UNVERIFIED, UNAUTHORIZED, UNREACHABLE_PRIVATE};
 use super::kubeconfig::{load, with_path};
+use super::logs::{self, LogMessage, LogOptions};
 use super::review::{identity, rules, IdentitySource};
 use super::rows::KindRef;
 use super::read::detail::{get, ContainerState};
@@ -383,4 +384,55 @@ async fn overview_kubernetes_part_reads_nodes_and_requests() {
     assert_eq!(parts.usage.unwrap(), None);
     assert_eq!(parts.node_pools.unwrap(), None);
     assert_eq!(parts.removed.unwrap(), Some(vec![]));
+}
+
+/// coredns Pod 하나의 이름(kind에는 늘 있고 로그를 남긴다)
+async fn coredns_pod(client: &kube::Client) -> String {
+    use k8s_openapi::api::core::v1::Pod;
+    let pods: kube::Api<Pod> = kube::Api::namespaced(client.clone(), "kube-system");
+    let list = pods.list(&kube::api::ListParams::default().labels("k8s-app=kube-dns")).await.unwrap();
+    list.items.first().and_then(|p| p.metadata.name.clone()).expect("a coredns pod")
+}
+
+async fn recv_log(rx: &mut mpsc::UnboundedReceiver<LogMessage>, limit: Duration) -> Option<LogMessage> {
+    tokio::time::timeout(limit, rx.recv()).await.ok().flatten()
+}
+
+#[tokio::test]
+#[ignore]
+async fn logs_read_the_last_lines_then_end() {
+    let client = admin().await;
+    let pod = coredns_pod(&client).await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let opts = LogOptions { tail_lines: Some(3), ..Default::default() };
+    logs::run(client, "kube-system".into(), pod, opts, PRIVATE, move |m| tx.send(m).is_ok()).await;
+    let Some(LogMessage::Lines { lines }) = recv_log(&mut rx, Duration::from_secs(5)).await else { panic!("no lines") };
+    assert!(!lines.is_empty() && lines.len() <= 3, "{lines:?}");
+    assert_eq!(recv_log(&mut rx, Duration::from_secs(5)).await, Some(LogMessage::End));
+}
+
+#[tokio::test]
+#[ignore]
+async fn following_logs_stays_open() {
+    let client = admin().await;
+    let pod = coredns_pod(&client).await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let opts = LogOptions { tail_lines: Some(2), follow: true, ..Default::default() };
+    let task = tokio::spawn(logs::run(client, "kube-system".into(), pod, opts, PRIVATE, move |m| tx.send(m).is_ok()));
+    assert!(matches!(recv_log(&mut rx, Duration::from_secs(5)).await, Some(LogMessage::Lines { .. })));
+    // 따라가는 동안은 끝나지 않는다
+    assert_eq!(recv_log(&mut rx, Duration::from_secs(3)).await, None);
+    assert!(!task.is_finished());
+    task.abort();
+}
+
+#[tokio::test]
+#[ignore]
+async fn logs_of_a_container_that_never_started_are_an_error() {
+    let client = admin().await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    logs::run(client, "mm-k2".into(), "broken".into(), LogOptions::default(), PRIVATE, move |m| tx.send(m).is_ok()).await;
+    let Some(LogMessage::Error { error }) = recv_log(&mut rx, Duration::from_secs(5)).await else { panic!("no error") };
+    // 서버가 400과 함께 "is waiting to start"류의 설명을 준다. 연결 문제로 잘못 가르지 않는다.
+    assert!(!matches!(error, AppError::Network { .. }), "{error:?}");
 }
