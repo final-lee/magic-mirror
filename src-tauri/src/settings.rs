@@ -4,12 +4,22 @@ use std::fs;
 use std::path::Path;
 
 use crate::error::AppError;
+use crate::k8s::rows::KindRef;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Favorite {
     pub service: String,
     #[serde(rename = "type")]
     pub type_id: String,
+}
+
+/// EKS 탭 레인 너비(px). 비어 있으면 화면의 기본값을 쓴다.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct K8sLaneWidths {
+    pub nav: Option<u32>,
+    pub tree: Option<u32>,
+    pub detail: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -28,6 +38,9 @@ pub struct Settings {
     pub k8s_contexts: BTreeMap<String, String>,
     /// kubeconfig 경로. 비우면 KUBECONFIG 또는 ~/.kube/config
     pub kubeconfig_path: Option<String>,
+    /// EKS 탭 왼쪽 메뉴에 북마크한 리소스 종류. 북마크한 순서(드래그로 바꾼 순서)대로 둔다.
+    pub k8s_bookmarks: Vec<KindRef>,
+    pub k8s_lane_widths: K8sLaneWidths,
 }
 
 #[derive(Deserialize, Default)]
@@ -43,6 +56,8 @@ struct RawSettings {
     pg_logins: BTreeMap<String, String>,
     k8s_contexts: BTreeMap<String, String>,
     kubeconfig_path: Option<String>,
+    k8s_bookmarks: Vec<KindRef>,
+    k8s_lane_widths: K8sLaneWidths,
 }
 
 fn defaults(all_services: &[&str]) -> Settings {
@@ -70,6 +85,8 @@ pub fn load(path: &Path, all_services: &[&str]) -> Settings {
                 pg_logins: raw.pg_logins,
                 k8s_contexts: raw.k8s_contexts,
                 kubeconfig_path: raw.kubeconfig_path,
+                k8s_bookmarks: raw.k8s_bookmarks,
+                k8s_lane_widths: raw.k8s_lane_widths,
             },
             Err(_) => defaults(all_services),
         },
@@ -115,6 +132,27 @@ mod tests {
         let d = load_text("{}");
         assert!(d.k8s_contexts.is_empty());
         assert_eq!(d.kubeconfig_path, None);
+        assert!(d.k8s_bookmarks.is_empty());
+        assert_eq!(d.k8s_lane_widths, K8sLaneWidths::default());
+    }
+
+    #[test]
+    fn k8s_bookmarks_keep_their_order_and_lane_widths_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let kind = |group: &str, kind: &str, plural: &str| KindRef { group: group.into(), version: "v1".into(), kind: kind.into(), plural: plural.into(), namespaced: true };
+        let s = Settings {
+            k8s_bookmarks: vec![kind("apps", "Deployment", "deployments"), kind("", "Pod", "pods")],
+            k8s_lane_widths: K8sLaneWidths { nav: Some(220), tree: None, detail: Some(640) },
+            ..Default::default()
+        };
+        save(&path, &s).unwrap();
+        let back = load(&path, &[]);
+        assert_eq!(back.k8s_bookmarks, s.k8s_bookmarks);
+        assert_eq!(back.k8s_lane_widths, s.k8s_lane_widths);
+        let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(json["k8sBookmarks"][0]["plural"], "deployments");
+        assert_eq!(json["k8sLaneWidths"]["detail"], 640);
     }
 
     #[test]

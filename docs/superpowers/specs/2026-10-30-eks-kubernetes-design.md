@@ -68,8 +68,10 @@
 - 애드온: 현재 버전, 클러스터 버전에 맞는 최신 버전, 상태와 문제.
 - 업그레이드 점검: EKS Upgrade Insights 결과, 다음 마이너 버전에서 제거되는 API를 쓰는 리소스(고정 표), 노드와 컨트롤 플레인의 버전 차이.
 
-### 워크로드
+### 워크로드 (메뉴 이름 "All")
 - 트리: 워크로드(Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob, Pod), 네트워크(Service, Ingress, NetworkPolicy, Endpoints), 설정(ConfigMap, Secret, ServiceAccount), 저장소(PVC, PV, StorageClass), 네임스페이스, CRD(API discovery로 나열).
+- 북마크: 트리의 종류마다 별(☆/★)로 북마크한다. 북마크는 왼쪽 메뉴의 개요 위에 북마크한 순서대로 붙고, 끌어서 순서를 바꾸며 ✕로 뺀다. 누르면 그 종류의 목록만(트리 없이) 연다. 설정(`k8sBookmarks`)에 저장하고 모든 클러스터에 같이 쓴다. 이 클러스터에 없는 사용자 정의 종류는 흐리게 두고 열지 않는다.
+- 레인(메뉴, 종류 트리, 목록, 상세) 사이의 손잡이를 끌어 너비를 바꾼다. 놓을 때 설정(`k8sLaneWidths`)에 저장한다.
 - 목록: 종류별 핵심 열, 이상 표시(CrashLoopBackOff, ImagePullBackOff, Pending, OOMKilled, 준비 안 됨), 이름·레이블 셀렉터 필터, "문제 있는 것만".
 - 상세: 요약, 소유 관계(ownerReferences 위아래 이동), 컨테이너별 상태와 마지막 종료 이유, 관련 이벤트, YAML 탭.
 - 앱 안 연결: 노드 → 노드 상세, ServiceAccount → 접근 화면, IAM 역할 → IAM 워크스페이스.

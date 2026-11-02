@@ -11,7 +11,11 @@ import {
   ALL_NAMESPACES,
   NAV_EVENTS,
   NAV_MY_PERMISSIONS,
-  NAV_WORKLOADS,
+  NAV_ALL,
+  NAV_OVERVIEW,
+  BOOKMARK_MISSING,
+  RESIZE_LANE,
+  bookmarkAdd,
   SEC_NODES,
   ALL_NAMESPACES_NOTE,
   COPIED,
@@ -32,7 +36,7 @@ import {
   profileMismatch,
   savedMissing,
 } from "./text";
-import { EVENTS, NODES, PODS } from "./kinds";
+import { DEPLOYMENTS, EVENTS, NODES, PODS } from "./kinds";
 import type { K8sContextCandidate, K8sContextInfo, K8sRow, K8sRules, K8sSession, K8sTarget, K8sWatchMessage } from "./types";
 
 vi.mock("./api", () => ({
@@ -346,11 +350,11 @@ test("opens on the overview once connected", async () => {
   await waitFor(() => expect(m.kinds).toHaveBeenCalledWith(target, target.profile));
 });
 
-test("the nav switches to workloads (pods) and events", async () => {
+test("the nav switches to All (pods) and events", async () => {
   m.context.mockResolvedValue(info([cand("ctx")]));
   setup();
   await screen.findByText(STATE_CONNECTED);
-  fireEvent.click(screen.getByRole("button", { name: NAV_WORKLOADS }));
+  fireEvent.click(screen.getByRole("button", { name: NAV_ALL }));
   await waitFor(() => expect(watchCalls().some((c) => c[1].plural === PODS.plural)).toBe(true));
   fireEvent.click(screen.getByRole("button", { name: NAV_EVENTS }));
   await waitFor(() => expect(watchCalls().some((c) => c[1].plural === EVENTS.plural)).toBe(true));
@@ -366,7 +370,7 @@ test("a node name in the overview opens its detail in workloads", async () => {
   setup();
   fireEvent.click(await screen.findByRole("button", { name: "ip-1" }));
   await waitFor(() => expect(m.get).toHaveBeenCalledWith(target, NODES, null, "ip-1", target.profile));
-  expect(screen.getByRole("button", { name: NAV_WORKLOADS })).toHaveAttribute("aria-current", "page");
+  expect(screen.getByRole("button", { name: NAV_ALL })).toHaveAttribute("aria-current", "page");
 });
 
 test("a failed kinds discovery shows next to the workloads tree, and retry refetches only the kinds", async () => {
@@ -375,7 +379,7 @@ test("a failed kinds discovery shows next to the workloads tree, and retry refet
   m.kinds.mockRejectedValueOnce({ kind: "other", message: "discovery broke" }).mockResolvedValue([]);
   setup();
   await screen.findByText(STATE_CONNECTED);
-  fireEvent.click(screen.getByRole("button", { name: NAV_WORKLOADS }));
+  fireEvent.click(screen.getByRole("button", { name: NAV_ALL }));
   expect(await screen.findByText("discovery broke")).toBeInTheDocument();
   expect(screen.getByRole("navigation", { name: KIND_TREE_LABEL })).toBeInTheDocument();
   await waitFor(() => expect(watchCalls().some((c) => c[1].plural === PODS.plural)).toBe(true));
@@ -400,11 +404,53 @@ test("after the exec profile logs in again, the failed kinds discovery is refetc
   const ui = (successProfile: string | null) => withClientAndSso(<K8sTab target={target} active />, qc, { ...manager, lastSuccessAt: (p) => (p === successProfile ? at : null) });
   const rendered = render(ui(null));
   await screen.findByText(STATE_CONNECTED);
-  fireEvent.click(screen.getByRole("button", { name: NAV_WORKLOADS }));
+  fireEvent.click(screen.getByRole("button", { name: NAV_ALL }));
   expect(await screen.findByText("SSO 세션이 만료됐어요 (pa)")).toBeInTheDocument();
   rendered.rerender(ui("app"));
   expect(m.kinds).toHaveBeenCalledTimes(1);
   rendered.rerender(ui("pa"));
   await waitFor(() => expect(m.kinds).toHaveBeenCalledTimes(2));
   expect(m.kinds).toHaveBeenLastCalledWith(target, "pa");
+});
+
+const navLabels = () => Array.from(screen.getByRole("navigation", { name: "클러스터 메뉴" }).querySelectorAll("button .iam-nav-label")).map((l) => l.textContent);
+
+test("a star in All saves a bookmark after the earlier ones; the bookmark opens its kind without the tree", async () => {
+  m.context.mockResolvedValue(info([cand("ctx")]));
+  setup({ k8sBookmarks: [PODS] });
+  await screen.findByText(STATE_CONNECTED);
+  expect(navLabels().slice(0, 2)).toEqual(["Pod", NAV_OVERVIEW]);
+  fireEvent.click(screen.getByRole("button", { name: NAV_ALL }));
+  fireEvent.click(await screen.findByRole("button", { name: bookmarkAdd("Deployment") }));
+  expect(api.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ k8sBookmarks: [PODS, DEPLOYMENTS] }));
+  await waitFor(() => expect(navLabels().slice(0, 3)).toEqual(["Pod", "Deployment", NAV_OVERVIEW]));
+  fireEvent.click(within(screen.getByRole("navigation", { name: "클러스터 메뉴" })).getByRole("button", { name: "Deployment" }));
+  await waitFor(() => expect(watchCalls().some((c) => c[1].plural === DEPLOYMENTS.plural)).toBe(true));
+  expect(screen.queryByRole("navigation", { name: KIND_TREE_LABEL })).toBeNull();
+  expect(within(screen.getByRole("navigation", { name: "클러스터 메뉴" })).getByRole("button", { name: "Deployment" })).toHaveAttribute("aria-current", "page");
+});
+
+test("a bookmarked kind this cluster does not serve is disabled once the kinds are known", async () => {
+  const widget = { group: "mm.example.com", version: "v1", kind: "Widget", plural: "widgets", namespaced: true };
+  m.context.mockResolvedValue(info([cand("ctx")]));
+  setup({ k8sBookmarks: [widget, PODS] });
+  await screen.findByText(STATE_CONNECTED);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Widget" })).toBeDisabled());
+  expect(screen.getByRole("button", { name: "Widget" })).toHaveAttribute("title", BOOKMARK_MISSING);
+});
+
+test("dragging the handle beside the menu resizes it and saves the width when released", async () => {
+  m.context.mockResolvedValue(info([cand("ctx")]));
+  setup();
+  await screen.findByText(STATE_CONNECTED);
+  const nav = screen.getByRole("navigation", { name: "클러스터 메뉴" });
+  vi.spyOn(nav, "getBoundingClientRect").mockReturnValue({ width: 196 } as DOMRect);
+  const [handle] = screen.getAllByRole("separator", { name: RESIZE_LANE });
+  fireEvent.mouseDown(handle, { button: 0, clientX: 196 });
+  fireEvent.mouseMove(window, { clientX: 250 });
+  expect(nav.style.width).toBe("250px");
+  expect(api.saveSettings).not.toHaveBeenCalled();
+  fireEvent.mouseUp(window, { clientX: 250 });
+  expect(api.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ k8sLaneWidths: { nav: 250 } }));
+  expect(nav.style.width).toBe("250px");
 });

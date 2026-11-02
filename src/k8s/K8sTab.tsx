@@ -5,17 +5,19 @@ import { ErrorState } from "../components/ErrorState";
 import { ContextPicker } from "./ContextPicker";
 import { EventsView } from "./EventsView";
 import { K8sError } from "./K8sError";
-import { K8sNav, type K8sView } from "./K8sNav";
-import { NODES } from "./kinds";
+import { K8sNav, type K8sView, type NavBookmark } from "./K8sNav";
+import { BUILTIN, NODES, bookmarkKey, bookmarkOf } from "./kinds";
+import { LaneResizer, useLaneWidths } from "./lanes";
+import { moved } from "./useReorder";
 import { MyRules } from "./MyRules";
 import { NoContext } from "./NoContext";
 import { OverviewView } from "./OverviewView";
 import { NAMESPACES, chooseContext, ssoProfileOf } from "./targets";
 import { ALL, TopBar, type K8sConnection } from "./TopBar";
 import { WorkloadsView, type WorkloadsFocus } from "./WorkloadsView";
-import { savedMissing, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNECTING, updateCommand } from "./text";
+import { BOOKMARK_MISSING, savedMissing, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNECTING, updateCommand } from "./text";
 import { refreshK8s, useK8sContext, useK8sKinds, useK8sRules, useK8sSession } from "./queries";
-import type { K8sTarget } from "./types";
+import type { K8sKindRef, K8sTarget } from "./types";
 import { useK8sWatch } from "./useK8sWatch";
 
 interface Props {
@@ -70,6 +72,34 @@ export function K8sTab({ target, onOpenIam }: Props) {
   // 종류 발견은 로그인 관리자가 무효화하지 않는 쿼리라서, 다시 시도와 로그인 뒤 이 쿼리만 다시 읽는다(exec 프로필로)
   const refetchKinds = () => void kinds.refetch();
 
+  // 북마크는 모든 클러스터에 같이 쓴다. 이 클러스터의 종류 목록을 받았으면 그 버전으로 열고, 목록에 없으면 열지 못한다.
+  const lanes = useLaneWidths();
+  const bookmarks = settings?.k8sBookmarks ?? [];
+  const marks = new Set(bookmarks.map(bookmarkKey));
+  // 내장 종류는 All 트리처럼 늘 연다. 사용자 정의 종류는 이 클러스터의 목록에 있어야 연다(목록을 아직 모르면 일단 연다).
+  const served = (b: K8sKindRef): K8sKindRef | null => {
+    const key = bookmarkKey(b);
+    const found = kinds.data?.find((k) => bookmarkKey(k) === key);
+    if (found) return found;
+    return !kinds.data || BUILTIN.some((k) => bookmarkKey(k) === key) ? b : null;
+  };
+  const navBookmarks: NavBookmark[] = bookmarks.map((b) => {
+    const missing = served(b) === null;
+    return { key: bookmarkKey(b), label: b.kind, title: missing ? BOOKMARK_MISSING : `${b.group || "core"}/${b.version} ${b.plural}`, missing };
+  });
+  const toggleBookmark = (k: K8sKindRef) => {
+    const key = bookmarkKey(k);
+    update({ k8sBookmarks: marks.has(key) ? bookmarks.filter((b) => bookmarkKey(b) !== key) : [...bookmarks, bookmarkOf(k)] });
+  };
+  const removeBookmark = (key: string) => {
+    update({ k8sBookmarks: bookmarks.filter((b) => bookmarkKey(b) !== key) });
+    if (view === `bookmark:${key}`) setView("workloads");
+  };
+  const bookmarkView = view.startsWith("bookmark:");
+  const shownBookmark = bookmarkView ? bookmarks.find((b) => `bookmark:${bookmarkKey(b)}` === view) : undefined;
+  const fixedKind = shownBookmark ? served(shownBookmark) ?? undefined : undefined;
+  const listView = view === "workloads" || fixedKind !== undefined;
+
   if (!settingsReady || ctx.isPending) return <div className="empty">{STATE_CONNECTING}</div>;
   if (ctx.isError) {
     return <K8sError error={ctx.error} target={target} ssoProfile={target.profile} />;
@@ -102,14 +132,23 @@ export function K8sTab({ target, onOpenIam }: Props) {
       {missing && <p className="err k8s-notes">{savedMissing(missing)}</p>}
       {namespaces.error && <K8sError error={namespaces.error} target={target} ssoProfile={ssoProfile} compact />}
       <div className="pg-main">
-        <K8sNav view={view} onSelect={setView} />
-        <div className={`k8s-body${view === "workloads" ? " flush" : ""}`}>
+        <K8sNav
+          view={view}
+          onSelect={setView}
+          bookmarks={navBookmarks}
+          onMoveBookmark={(from, to) => update({ k8sBookmarks: moved(bookmarks, from, to) })}
+          onRemoveBookmark={removeBookmark}
+          width={lanes.width("nav")}
+        />
+        <LaneResizer lane="nav" side="before" onResize={lanes.resize} onCommit={lanes.commit} />
+        <div className={`k8s-body${listView ? " flush" : ""}`}>
           {session.isError ? (
             <K8sError error={session.error} target={target} ssoProfile={ssoProfile} />
           ) : view === "overview" ? (
             <OverviewView target={target} context={chosen} ssoProfile={ssoProfile} live={live} onOpenNode={openNode} />
-          ) : view === "workloads" ? (
+          ) : listView ? (
             <WorkloadsView
+              key={view}
               target={target}
               context={chosen}
               sessionEpoch={session.dataUpdatedAt}
@@ -120,7 +159,13 @@ export function K8sTab({ target, onOpenIam }: Props) {
               focus={focus}
               onOpenIam={onOpenIam}
               banner={kinds.isError && <ErrorState error={kinds.error} profile={ssoProfile} compact onRetry={refetchKinds} onLoggedIn={refetchKinds} />}
+              fixedKind={fixedKind}
+              bookmarked={marks}
+              onToggleBookmark={toggleBookmark}
+              lanes={lanes}
             />
+          ) : bookmarkView ? (
+            <div className="empty">{BOOKMARK_MISSING}</div>
           ) : view === "events" ? (
             <EventsView target={target} context={chosen} sessionEpoch={session.dataUpdatedAt} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} />
           ) : rules.isError ? (

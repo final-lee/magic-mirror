@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { K8sError } from "./K8sError";
 import { KindTree } from "./KindTree";
+import { LaneResizer, type Lane } from "./lanes";
 import { CATEGORIES, PODS, customCategories, sameKind } from "./kinds";
 import { ObjectDetail } from "./ObjectDetail";
 import { ObjectList } from "./ObjectList";
@@ -28,11 +29,22 @@ interface Props {
   onOpenIam?: (arn: string) => void;
   /** 목록 위에 붙이는 알림(종류 발견 실패 등). 종류 트리와 기본 종류 탐색은 그대로 쓴다. */
   banner?: ReactNode;
+  /** 북마크 화면: 이 종류만 보이고 종류 트리는 숨긴다 */
+  fixedKind?: K8sKindRef;
+  bookmarked: Set<string>;
+  onToggleBookmark: (k: K8sKindRef) => void;
+  /** 레인 너비(useLaneWidths) */
+  lanes: {
+    width: (lane: Lane) => number | undefined;
+    resize: (lane: Lane, width: number) => void;
+    commit: (lane: Lane, width: number) => void;
+  };
 }
 
 /** 종류 트리 + 감시 목록 + 상세 스택 */
-export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live, namespace, kinds, focus, onOpenIam, banner }: Props) {
-  const [kind, setKind] = useState<K8sKindRef>(PODS);
+export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live, namespace, kinds, focus, onOpenIam, banner, fixedKind, bookmarked, onToggleBookmark, lanes }: Props) {
+  const [picked, setKind] = useState<K8sKindRef>(PODS);
+  const kind = fixedKind ?? picked;
   const [stack, setStack] = useState<ObjectRef[]>([]);
 
   useEffect(() => {
@@ -55,7 +67,12 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
   };
   return (
     <div className="k8s-workloads">
-      <KindTree categories={categories} selected={kind} onSelect={pickKind} />
+      {!fixedKind && (
+        <>
+          <KindTree categories={categories} selected={kind} onSelect={pickKind} bookmarked={bookmarked} onToggleBookmark={onToggleBookmark} width={lanes.width("tree")} />
+          <LaneResizer lane="tree" side="before" onResize={lanes.resize} onCommit={lanes.commit} />
+        </>
+      )}
       <div className="k8s-list-pane">
         {banner}
         {watch.error && <K8sError error={watch.error} target={target} ssoProfile={ssoProfile} compact />}
@@ -68,6 +85,7 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
           onSelect={(r) => setStack([{ kind, namespace: r.namespace, name: r.name }])}
         />
       </div>
+      {top && <LaneResizer lane="detail" side="after" onResize={lanes.resize} onCommit={lanes.commit} />}
       {top && (
         <ObjectDetail
           key={JSON.stringify([kindKey(top.kind), top.namespace, top.name])}
@@ -82,6 +100,7 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
           onBack={stack.length > 1 ? () => setStack((s) => s.slice(0, -1)) : null}
           onClose={() => setStack([])}
           onOpenIam={onOpenIam}
+          width={lanes.width("detail")}
         />
       )}
     </div>

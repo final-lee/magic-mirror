@@ -57,8 +57,13 @@ export const NAV_LABEL = "클러스터 메뉴";
 
 // K2
 export const NAV_OVERVIEW = "개요";
-export const NAV_WORKLOADS = "워크로드";
+export const NAV_ALL = "All";
 export const NAV_EVENTS = "이벤트";
+export const NAV_BOOKMARKS_LABEL = "북마크";
+export const bookmarkAdd = (kind: string) => `${kind} 북마크`;
+export const bookmarkRemove = (kind: string) => `${kind} 북마크 해제`;
+export const BOOKMARK_MISSING = "이 클러스터에는 이 리소스 종류가 없어요";
+export const RESIZE_LANE = "너비 조절";
 
 export const CAT_WORKLOADS = "워크로드";
 export const CAT_NETWORK = "네트워크";
