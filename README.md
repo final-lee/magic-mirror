@@ -44,6 +44,18 @@ Open **IAM → 🔐 IAM 관리** in the sidebar, or double-click a user, role, o
 - **Change log**: every applied change is recorded locally, and most can be undone. An undo goes through the same preview. Changes AWS can't reverse, such as deleting an access key, are marked as such. A batch from the assignment matrix shows as one group and can be undone as a whole.
 - **What it doesn't evaluate**: only identity-based policies and permissions boundaries. Organization SCPs and resource-based policies (such as bucket policies) aren't included, and the app says so on screen.
 
+### Cost dashboard
+![Cost dashboard](docs/screenshots/cost.png)
+
+Click **💰 비용** at the top of the sidebar to open one tab with the costs of the profile's account, from AWS Cost Explorer.
+
+- **Periods**: this month (the default), last month, the last 30 days, and the last 6 months by month. Each period is compared with the one before it automatically (this month so far against the same days of last month). Pick billed cost (`UnblendedCost`) or amortized cost, and leave credits and refunds out (on by default).
+- **Summary**: the period's total, marked when it includes AWS estimates; this month's forecast with its 80% range; and the change against the compare period.
+- **Daily trend**: stacked bars for the top 5 services and everything else. Hover a bar to see that day's amounts.
+- **Breakdown**: by service, region, usage type, or an active cost allocation tag, with this period, the compare period, the change, and the share. Click a row to drill down (service → usage type, region or tag value → service); the filter applies to the whole screen, and the path above the table goes back up. Items under half a cent fold into one row.
+- **Requests cost money**: Cost Explorer charges $0.01 per request. Answers are cached on disk for 6 hours, so reopening the same view is free. ⌘R (or **새로고침**) on the cost tab skips the cache for what's on screen; ⌘R on other tabs doesn't touch cost data. The bottom line shows how many requests the app sent this month and what they cost.
+- Read-only, single account. Opened with an Organizations management account, the numbers are the whole organization's, and the tab says so.
+
 ### PostgreSQL users (RDS)
 
 Double-click an Aurora PostgreSQL or RDS for PostgreSQL row in **RDS → DB Clusters** or **DB Instances** to open a `🐘` tab (an Aurora instance opens its cluster). The app connects straight to the database over TLS and signs in with an IAM authentication token. Reading is always read-only: every query that looks at the database runs in a read-only transaction. Changes are made only when you press **Apply** on a preview (see below). Closing the tab closes its connections.
@@ -122,6 +134,7 @@ The app checks for a new version at launch and every 6 hours, and shows an **Upd
   - `iam:AddUserToGroup`, `iam:RemoveUserFromGroup`
   - `iam:CreatePolicyVersion`, `iam:DeletePolicyVersion`
   - `iam:UpdateAccessKey`, `iam:DeleteAccessKey`
+- The cost tab needs `ce:GetCostAndUsage`, `ce:GetCostForecast`, and `ce:ListCostAllocationTags`. Cost Explorer has to be turned on once in the Billing console (it can take up to 24 hours), and in an organization the management account can block member accounts from it.
 - The PostgreSQL tab needs:
   - `rds:DescribeDBClusters`, `rds:DescribeDBInstances`, and `rds-db:connect` for the DB user you sign in as
   - A network path to the database endpoint, such as a VPN. The app connects directly and checks the server certificate against the bundled RDS CA.
@@ -157,6 +170,7 @@ src/                     React frontend
 src-tauri/src/
   adapters/              per-service read-only adapters
   explorer/              local files, S3 writes and transfers, diff engine
+  cost/                  cost dashboard tab
   topology/              VPC topology queries (read-only)
   iam/                   IAM snapshot, permission evaluation, checks, change previews
   iam/write.rs           the only place that calls IAM write APIs
@@ -164,6 +178,7 @@ src-tauri/src/
   mouse_nav.rs           macOS mouse back/forward buttons
 scripts/release.sh       universal build and GitHub release
 ```
+  cost/                  Cost Explorer client, on-disk answer cache and request counter, overview and breakdown shaping (read-only)
 
 ### Releasing
 1. Bump `version` in `src-tauri/tauri.conf.json` and push to `main`.
