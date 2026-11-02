@@ -32,6 +32,18 @@
 | K9 | C 셸과 port-forward |
 | KR | 전체 리뷰, 수정, 릴리스 |
 
+### 진행 예정: Lens·k9s 대비 빈 기능 (2026-11-02 정리)
+지금 된 것은 K1·K2와 K3 일부(Pod 로그)다. Lens·k9s의 주요 기능 중 없는 것:
+1. 클러스터를 바꾸는 조작: Pod 셸(exec)·port-forward(K9), scale·rollout restart·rollout undo·삭제(K7 A), cordon·uncordon·drain(K7 B), YAML 편집·적용·새로 만들기(K8 E). 설계에 없는 것: 컨테이너 attach, 노드 셸(디버그 Pod), CronJob 바로 실행(K7 A의 Job 재실행에 포함)·일시정지.
+2. 로그: 워크로드 합친 로그(Pod별 색, 새 Pod 따라 붙기)·since(최근 N분)·파일 저장(K3 남은 것), 모든 컨테이너 한꺼번에, 서버 타임스탬프·줄바꿈 토글.
+3. 리소스 사용량: Pod·컨테이너 CPU/메모리 열(metrics-server, 지금은 개요의 노드 사용량만), request·limit 대비 %, Prometheus 그래프, 워크로드·네임스페이스 집계.
+4. 트리에 없는 내장 종류: HPA, PDB, ResourceQuota, LimitRange, PriorityClass, RuntimeClass, Lease, Mutating·ValidatingWebhookConfiguration, EndpointSlice, IngressClass, Role·ClusterRole·RoleBinding·ClusterRoleBinding, CustomResourceDefinition 자체.
+5. 탐색: 키보드 중심 조작(명령 팔레트, `:종류` 이동), `kubectl describe` 형식 출력, xray식 관계 트리, 앱 안 터미널(kubectl), 플러그인.
+6. Helm: 릴리스 목록·values·이력, 업그레이드·롤백·삭제, 차트 설치(설계에 없음).
+7. 점검·권한: popeye식 위생 점검(K5), RBAC 역조회(K4).
+
+우선순위(매일 쓰는 빈도): ① 셸·port-forward·restart·scale·삭제 ② Pod CPU/메모리 열 ③ 트리에 내장 종류 추가 ④ 로그 K3 나머지 ⑤ Helm 읽기 전용.
+
 ## 대상과 탭
 - **EKS → Clusters** 행을 더블클릭하면 `☸️ <클러스터 이름>` 탭이 열린다. 이것이 유일한 진입점이고, 사이드바에 별도 메뉴(클러스터 선택 화면)는 두지 않는다.
 - 대상은 `{ profile, region, cluster }`. 같은 대상의 탭은 하나만 열린다.
