@@ -179,6 +179,7 @@
 | 삭제 | 목록·watch가 되는 모든 종류(Pod 제외 위 행) | 컨트롤러·소유자가 없으면 기록한 정리된 객체로 다시 만들기(Secret은 값을 기록하지 않아 불가). Namespace·Node·CRD·PV 삭제와 소유자가 있는 객체(컨트롤러가 다시 만든다는 경고)는 이름 입력 |
 | Job 재실행 | Job, CronJob → 새 Job | 만든 Job 삭제 |
 | 일시정지·재개 | CronJob(`suspend`) | 반대 |
+- 소유자 없는 Job을 지울 때 기록하는 되살리기용 객체에서는 서버가 만든 selector(`manualSelector: true`가 아닐 때)와 `controller-uid`·`job-name`(`batch.kubernetes.io/` 포함) 라벨을 뺀다(남기면 새 UID와 맞지 않아 dry-run이 거부한다).
 - 적용 후 rollout 진행(준비된 새 Pod 수)을 보여준다.
 - K7 백엔드는 소유자 UID로 리비전을 고르고 scale·restart·rollout undo·삭제·Job 재실행·CronJob 일시정지와 재개를 수행한다. 삭제 재생성에는 서버가 채운 메타데이터와 상태를 빼며, 새 Job 이름은 미리보기에서 정한다.
 - 워크로드 변경 화면: 상단 변경 토글을 켜면 상세에서 작업을 고르고 미리보기에서 호출·필드 변경·영향·경고를 확인한다. 변경 기록의 되돌리기도 같은 미리보기를 거친다.
@@ -192,9 +193,11 @@
 - drain 지금 된 것 (K7 drain):
   - 계획은 순수 함수(`drain::plan_drain`): 노드의 모든 Pod(`spec.nodeName` 필드 선택자)를 옮길 것·건너뛸 것으로 나눈다. DaemonSet이 컨트롤러인 Pod, 미러(static) Pod(`kubernetes.io/config.mirror`), 이미 종료 중인 Pod는 건너뛴다. 끝난(Succeeded·Failed) Pod는 경고 없이 옮긴다. emptyDir 볼륨이 있으면 데이터 손실 경고, 컨트롤러(`controller: true`) 소유자가 없으면 "다시 만들어지지 않음" 경고. 같은 네임스페이스에서 Pod를 고르는(`matchLabels`, `matchExpressions`, 빈 선택자는 전부) PodDisruptionBudget 중 `status.disruptionsAllowed`가 0인 것이 있으면 그 Pod를 "막힐 Pod"로 표시한다. PDB 목록을 읽을 권한이 없으면 알 수 없다는 경고를 낸다.
   - 미리보기는 공통 틀(`k8s_preview`)을 거친다. 이름 입력(노드 이름)은 늘 요구한다. 호출 목록은 cordon PATCH 하나와 Pod마다 Eviction POST이고, 서버 dry-run은 cordon에만 돌린다(Eviction은 Pod마다 호출이 늘고, 막힘은 PDB 상태로 미리 계산해서 보여 준다). 미리보기에는 `drain`(옮길 Pod 표시, 건너뛸 Pod) 필드가 더해진다.
-  - 적용은 `k8s_drain(target, node, confirmText, channel)`로만 한다(`k8s_apply`는 drain을 거절). 미리보기한 계획을 꺼내 노드(status 제외)와 옮길 Pod 집합(UID)이 그대로인지, 이름 입력이 맞는지 다시 확인하고 곧바로 번호를 돌려준다. 이후 작업이 cordon → Eviction을 하나씩 보내며 `started`, `cordoned`, `pod`(상태 pending·evicting·evicted·blocked·failed와 합계), `finished`(completed·stopped·timedOut·failed) 메시지를 채널로 흘린다.
+  - 적용은 `k8s_drain(target, node, confirmText, channel)`로만 한다(`k8s_apply`는 drain을 거절). 미리보기한 계획을 꺼내 노드(status 제외)와 옮길 Pod 집합(UID)이 그대로인지, 이름 입력이 맞는지 다시 확인하고 곧바로 번호를 돌려준다. 이후 작업이 cordon → Eviction을 하나씩 보내며 `started`, `cordoned`, `pod`(상태 pending·evicting·terminating·evicted·blocked·lingering·failed와 합계), `finished`(completed·stopped·timedOut·failed·lingering) 메시지를 채널로 흘린다.
   - Eviction은 `exec.rs`의 `evict`만 보낸다. kube의 `evict`는 `deleteOptions`를 잘못된 이름으로 보내 UID 조건이 사라져서 `eviction` 하위 리소스를 직접 만들고, 본문의 UID 조건으로 계획 뒤에 같은 이름으로 다시 만들어진 Pod는 건드리지 않는다. 404·409는 이미 없는 것으로 본다.
   - kube 클라이언트의 기본 재시도(429·503·504를 `Retry-After`만큼 기다리며 최대 15번)는 Eviction 요청에만 끈다. 켜 두면 PDB가 막은 Eviction이 429 대신 몇 분씩 멈춰 있는다(kind에서 확인). 세션은 로그인 PATH를 넣은 kubeconfig를 들고 있다가 drain을 시작할 때 재시도 없는 두 번째 클라이언트(`connect::eviction_client`)를 만들어 `exec::evict`에만 쓴다(exec 플러그인은 그때 한 번 더 돈다). cordon을 포함한 나머지 호출은 기본 재시도를 그대로 쓰므로 큰 클러스터의 API Priority & Fairness 429는 이전처럼 조용히 다시 시도된다.
+  - Eviction이 받아들여져도 Pod는 종료 유예 동안 남아 있으므로 바로 옮긴 것으로 세지 않는다. 받아들여진 Pod는 `terminating`으로 두고 그 UID의 Pod가 사라지면(같은 이름으로 다시 생긴 Pod는 사라진 것으로 본다) `evicted`로 센다. 기다림은 다음 Pod의 Eviction을 막지 않고, 한 바퀴가 끝날 때와 쉬는 동안 1초마다 살핀다. 기다림 한도는 Pod의 `terminationGracePeriodSeconds`(없으면 30초)에 여유 30초를 더한 시간이고, 넘으면 `lingering`("종료 지연")으로 표시하고 다음으로 넘어간다. 모두 받아들여졌지만 종료 지연이 남으면 끝 결과는 `lingering`(기록은 실패 + 이유)이다. Pod 읽기에 실패하면 아직 있는 것으로 보고 한도가 끝을 정한다. 사라진 Pod도 429로 막힌 Pod가 있을 때의 "진전"으로 센다. 중단하면 기다리던 Pod는 `terminating`인 채로 끝난다.
+  - drain이 받은 노드 이름 입력은 cordon의 확인 문구로도 넘긴다(이름에 `prod`가 든 노드의 cordon이 이름 확인에서 거절되지 않게).
   - 429(PDB)는 막힌 Pod로 두고 다음 Pod를 먼저 하며, 한 바퀴가 끝나면 1초부터 두 배씩(최대 30초) 늘려 가며 다시 시도한다. 어떤 Pod도 옮기지 못한 채 429만 5분 이어지면 멈춘다(`timedOut`). 이미 옮긴 Pod는 그대로 둔다. 다른 Pod를 하나라도 옮기면 5분을 다시 센다. 그 밖의 API 오류는 그 Pod만 `failed`로 두고 계속하며, 권한(401·403)·연결 오류는 계속할 수 없어 바로 멈춘다(`failed`).
   - 중단은 `k8s_unwatch(번호)`: 지금 하는 Eviction을 마치고(기다리는 중이면 바로) 멈춘다. 대상을 닫거나(`k8s_close`) 다시 연결하면 같은 신호로 멈추고 항목을 잊는다(끊지 않으므로 기록은 남는다). 채널을 닫아도 멈춘다. 프론트는 화면을 떠날 때도 중단한다.
   - 기록: cordon을 했으면 cordon 기록(되돌리기 = uncordon)과 drain 기록(`drain: Pod N개 옮김, M개 막힘…`, 끝까지 마친 경우만 성공, 중단·시간 초과·실패는 이유와 함께 실패 기록, 되돌리기 없음)을 남긴다. 미리보기 때 이미 스케줄이 중지된 노드는 cordon을 건너뛰고 기록하지 않으며 되돌릴 것이 없다.
@@ -232,6 +235,7 @@
 - 지금 된 것(2026-11-02):
   - 변경 종류 `apply { object, force }`(`Operation::Apply`). 본문은 `change/apply.rs`가 만든다: 서버가 채우는 필드를 빼고, 이름·종류를 대상과 맞추고(다르면 거절), 네임스페이스가 없으면 대상의 것을 넣고, 있는 객체면 미리보기 직전에 읽은 `resourceVersion`을 조건으로 건다(없는 객체는 조건 없이 만든다). 호출은 `PATCH …?fieldManager=magic-mirror[&force=true]`(apply-patch). 필드 이름 충돌이 아닌 409는 기존 "미리보기 이후 바뀌었어요"다.
   - 미리보기: 서버 dry-run 결과(서버가 만든 객체)와 현재 객체를 정리해 필드마다 비교한다(`spec.template.spec.containers[0].image` 꼴 경로, 길이가 다른 배열은 통째로). 새로 만들면 객체 전체가 한 항목. 바뀌는 것이 없으면 경고. 충돌은 서버 오류의 `FieldManagerConflict` 원인에서 필드와 소유 manager를 꺼내 `Preview.conflicts`로 보여 주고, 충돌이 있는 미리보기는 적용되지 않는다(화면의 [적용]은 막힘 경고로 꺼지고 백엔드 `check`도 거절). [강제 적용으로 다시 미리보기]가 `force: true` 변경으로 다시 미리보기 하며, 강제 적용은 이름 입력을 받는다(위험한 변경과 같은 게이트). 서버가 객체를 받지 않으면(400·422) Secret이 아닌 객체는 서버의 이유를 그대로 보여 준다.
+  - 이름 입력: `roleRef`가 `cluster-admin` ClusterRole인 RoleBinding·ClusterRoleBinding을 만들거나(되살리기 포함) 그런 바인딩의 subjects를 고치면 대상 이름을 입력받는다. 그 밖의 권한 상승 경로(bind·escalate·impersonate 등) 판단은 K4 몫이다.
   - 되돌리기: 있던 객체는 정리한 이전 객체를 `apply`로 다시 적용(`force: false`), 새로 만든 객체는 삭제. 둘 다 기록의 역변경이며 되돌리기 미리보기를 거친다. `aws-auth` ConfigMap은 "access entry로 옮기세요" 경고.
   - 상세 YAML 탭: 변경 모드에서 [편집]이 읽기 전용 YAML을 CodeMirror 6 편집기로 바꾼다(`@codemirror/*`, 구문 오류는 `yaml` 패키지로 찾아 줄 밑줄과 목록으로 보이고 미리보기를 막는다). 편집기에 들어가는 글은 백엔드가 만든 `editYaml`(서버 필드를 뺀 것). 종류·이름·네임스페이스를 바꾸거나 문서가 둘이면 미리보기 전에 거절한다. patch 권한이 없으면 이유와 함께 끈다.
   - Secret: 편집 글에는 `data`·`stringData`·last-applied가 없다. 키별 [값 보기](읽은 값은 컴포넌트 상태에만)로 읽어 고치거나 [새 값 입력]·키 추가로 `stringData`에 넣고, 건드리지 않은 키는 가린 값(••••)으로 보내 백엔드가 현재 값으로 되돌려 놓는다. 바이너리 값은 새 값 입력으로만 바꾼다. 미리보기의 본문·diff에는 값이 없고(바뀐 키만 `•••• (바뀜)`), 기록에는 `data`·`stringData`를 모두 가린 변경만 남으며, 되돌릴 수 없다는 경고를 보인다.

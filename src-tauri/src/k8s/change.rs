@@ -200,6 +200,55 @@ fn path(target: &ChangeObject, collection: bool) -> String {
     format!("{prefix}{namespace}/{}{name}", kind.plural)
 }
 
+/// 서버가 Job에 만들어 넣는 라벨. 새 Job은 자기 UID로 다시 만들므로 옮겨 가면 안 된다.
+const GENERATED_JOB_LABELS: [&str; 4] = ["controller-uid", "job-name", "batch.kubernetes.io/controller-uid", "batch.kubernetes.io/job-name"];
+
+fn remove_generated_labels(labels: Option<&mut Value>) {
+    if let Some(labels) = labels.and_then(Value::as_object_mut) {
+        for key in GENERATED_JOB_LABELS {
+            labels.remove(key);
+        }
+    }
+}
+
+/// Job 사양에서 서버가 만든 selector와 라벨을 지운다. `manual_too`가 거짓이면 사용자가 `manualSelector: true`로 직접 정한 selector와 라벨은 남긴다.
+fn strip_generated_job_spec(spec: &mut Value, manual_too: bool) {
+    let manual = spec.get("manualSelector").and_then(Value::as_bool) == Some(true) && !manual_too;
+    if manual {
+        return;
+    }
+    if let Some(map) = spec.as_object_mut() {
+        map.remove("selector");
+        map.remove("manualSelector");
+    }
+    remove_generated_labels(spec.pointer_mut("/template/metadata/labels"));
+}
+
+/// 삭제한 객체를 다시 만들 때 쓰는 정리: 서버 필드를 빼고, Job이면 서버가 만든 selector·라벨도 뺀다(남기면 새 UID와 맞지 않아 거부된다).
+fn recreatable(group: &str, kind: &str, object: &Value) -> Value {
+    let mut object = clean_object(object.clone());
+    if group == "batch" && kind == "Job" {
+        if let Some(spec) = object.get_mut("spec") {
+            strip_generated_job_spec(spec, false);
+        }
+        let manual = object.pointer("/spec/manualSelector").and_then(Value::as_bool) == Some(true);
+        if !manual {
+            remove_generated_labels(object.pointer_mut("/metadata/labels"));
+        }
+    }
+    object
+}
+
+/// `cluster-admin` ClusterRole을 가리키는 RoleBinding·ClusterRoleBinding인가
+fn binds_cluster_admin(object: &Value) -> bool {
+    let kind = object.get("kind").and_then(Value::as_str);
+    let group = object.get("apiVersion").and_then(Value::as_str).is_some_and(|v| v.starts_with("rbac.authorization.k8s.io/"));
+    group
+        && matches!(kind, Some("RoleBinding" | "ClusterRoleBinding"))
+        && object.pointer("/roleRef/kind").and_then(Value::as_str) == Some("ClusterRole")
+        && object.pointer("/roleRef/name").and_then(Value::as_str) == Some("cluster-admin")
+}
+
 fn inverse(change: &Change, operation: Operation) -> Change {
     Change { target: change.target.clone(), operation }
 }
@@ -296,7 +345,13 @@ pub fn plan(change: &Change, current: Option<&Value>, revision: Option<&Value>, 
         }
     }
     let owned = obj.pointer("/metadata/ownerReferences").and_then(Value::as_array).is_some_and(|a| !a.is_empty());
+    // 만들거나 고치는 YAML이 cluster-admin을 주는 바인딩이면(이미 그런 바인딩의 subjects를 바꾸는 것도) 이름을 입력받는다
+    let admin_grant = match &change.operation {
+        Operation::Apply { object, .. } | Operation::Recreate { object } => binds_cluster_admin(object) || binds_cluster_admin(obj),
+        _ => false,
+    };
     let dangerous = dangerous(target.namespace.as_deref(), &target.name)
+        || admin_grant
         || (matches!(change.operation, Operation::Delete) && (owned || matches!(kind, "Namespace" | "Node" | "CustomResourceDefinition" | "PersistentVolume")));
     let mut warnings = Vec::new();
     let mut diff = Vec::new();
@@ -341,7 +396,7 @@ pub fn plan(change: &Change, current: Option<&Value>, revision: Option<&Value>, 
                 warnings.push(UNOWNED_POD_WARNING.into());
             }
             if !owned && kind != "Pod" && !(group.is_empty() && kind == "Secret") {
-                undo = Some(inverse(change, Operation::Recreate { object: clean_object(obj.clone()) }));
+                undo = Some(inverse(change, Operation::Recreate { object: recreatable(group, kind, obj) }));
             }
             impact.push(DELETE_IMPACT.into());
             ("DELETE", json!({"preconditions":{"resourceVersion":version}}), false)
@@ -392,15 +447,7 @@ pub fn plan(change: &Change, current: Option<&Value>, revision: Option<&Value>, 
                 obj.pointer("/spec/jobTemplate/spec")
             }.cloned().ok_or_else(|| AppError::other(INVALID_CHANGE))?;
             let mut spec = spec;
-            if let Some(map) = spec.as_object_mut() {
-                map.remove("selector");
-                map.remove("manualSelector");
-            }
-            if let Some(labels) = spec.pointer_mut("/template/metadata/labels").and_then(Value::as_object_mut) {
-                for key in ["controller-uid", "job-name", "batch.kubernetes.io/controller-uid", "batch.kubernetes.io/job-name"] {
-                    labels.remove(key);
-                }
-            }
+            strip_generated_job_spec(&mut spec, true);
             let source_meta = if kind == "Job" {
                 obj.pointer("/metadata")
             } else {

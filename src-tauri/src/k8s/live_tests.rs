@@ -1099,7 +1099,7 @@ async fn drain_moves_pods_off_a_worker_around_a_budget_then_uncordons() {
         plan,
         at: "2026-01-01T00:00:00Z".into(),
         // 막힌 Pod는 8초만 기다린다
-        limits: Limits { stall: Duration::from_secs(8), first_delay: Duration::from_secs(1), max_delay: Duration::from_secs(2) },
+        limits: Limits { stall: Duration::from_secs(8), first_delay: Duration::from_secs(1), max_delay: Duration::from_secs(2), ..Limits::default() },
     };
     let run = |plan| {
         let job = job(plan);
@@ -1134,6 +1134,11 @@ async fn drain_moves_pods_off_a_worker_around_a_budget_then_uncordons() {
     let node = nodes.get(&worker).await.unwrap();
     assert_eq!(node.spec.and_then(|s| s.unschedulable), Some(true));
     let listed = pods.list(&ListParams::default()).await.unwrap().items;
+    // Evicted로 센 Pod는 종료까지 기다린 뒤라 원래 Pod(UID)가 목록에 아예 없다
+    for original in [&free.uid, &bare.uid] {
+        assert!(!listed.iter().any(|pod| pod.metadata.uid.as_deref() == Some(original.as_str())), "{original}가 아직 남아 있어요");
+    }
+    assert!(messages.iter().any(|m| matches!(m, DrainMessage::Pod { name, state: PodState::Terminating, .. } if name == "bare")));
     assert_eq!(alive(listed.clone(), "free"), 0, "free는 옮겨졌어요");
     assert_eq!(alive(listed.clone(), "bare"), 0, "컨트롤러 없는 Pod는 지워졌어요");
     assert_eq!(alive(listed, "held"), 1, "막힌 Pod는 그대로예요");
@@ -1317,4 +1322,73 @@ async fn yaml_apply_diff_conflict_force_create_and_undo() {
     assert_eq!((decode("keep"), decode("change"), decode("added")), ("keep-value".into(), "after-value".into(), "added-value".into()));
 
     kubectl(&["-n", "mm-k2", "delete", "configmap/mm-e-config", "secret/mm-e-secret", "--ignore-not-found"]);
+}
+
+/// 이 시험은 스크립트가 만든 kind 클러스터에서만 쓰기 요청을 보낸다.
+#[tokio::test]
+#[ignore]
+async fn unowned_job_delete_recreates_and_cluster_admin_binding_needs_the_name() {
+    use super::change::{Change, ChangeObject, Operation};
+    use super::{commit, read};
+    use kube::api::{DynamicObject, PostParams};
+
+    let client = admin().await;
+    let get = |target: ChangeObject| {
+        let client = client.clone();
+        async move { commit::current(client, PRIVATE, &target).await.unwrap() }
+    };
+
+    // 소유자 없는 Job: 서버가 만든 selector와 controller-uid 라벨이 있어도 지운 뒤 되돌리면 다시 만들어진다
+    let job = ChangeObject {
+        kind: KindRef { group: "batch".into(), version: "v1".into(), kind: "Job".into(), plural: "jobs".into(), namespaced: true },
+        namespace: Some("mm-k2".into()),
+        name: "mm-e-job".into(),
+    };
+    let api = read::api_for(client.clone(), &job.kind, job.namespace.as_deref());
+    let fixture: DynamicObject = serde_json::from_value(json!({"apiVersion":"batch/v1","kind":"Job","metadata":{"name":"mm-e-job","namespace":"mm-k2"},
+        "spec":{"template":{"spec":{"restartPolicy":"Never","containers":[{"name":"app","image":"registry.k8s.io/pause:3.10"}]}}}})).unwrap();
+    api.create(&PostParams::default(), &fixture).await.unwrap();
+    let created = get(job.clone()).await.unwrap();
+    assert!(created["spec"].get("selector").is_some() && created["spec"]["template"]["metadata"]["labels"].as_object().is_some_and(|l| l.contains_key("batch.kubernetes.io/controller-uid") || l.contains_key("controller-uid")));
+    let delete = Change { target: job.clone(), operation: Operation::Delete };
+    let plan = commit::dry_plan(client.clone(), PRIVATE, &delete, "").await.unwrap();
+    let recreate = plan.inverse.clone().expect("소유자 없는 Job은 되돌릴 수 있어요");
+    let (_, result) = commit::apply_plan(client.clone(), PRIVATE, &delete, &plan, "", None).await.unwrap();
+    result.unwrap();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        while get(job.clone()).await.is_some() {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }).await.expect("Job이 지워지지 않았어요");
+    let plan = commit::dry_plan(client.clone(), PRIVATE, &recreate, "").await.expect("정리한 Job은 dry-run에서 받아들여져야 해요");
+    let (_, result) = commit::apply_plan(client.clone(), PRIVATE, &recreate, &plan, "", None).await.unwrap();
+    result.unwrap();
+    let again = get(job.clone()).await.expect("다시 만들어진 Job");
+    assert_ne!(again["metadata"]["uid"], created["metadata"]["uid"]);
+    kubectl(&["-n", "mm-k2", "delete", "job/mm-e-job", "--ignore-not-found", "--wait=false"]);
+
+    // cluster-admin을 주는 바인딩을 YAML로 만들면 이름을 입력해야 한다
+    let binding = ChangeObject {
+        kind: KindRef { group: "rbac.authorization.k8s.io".into(), version: "v1".into(), kind: "ClusterRoleBinding".into(), plural: "clusterrolebindings".into(), namespaced: false },
+        namespace: None,
+        name: "mm-e-admin".into(),
+    };
+    let object = |role: &str| json!({"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRoleBinding","metadata":{"name":"mm-e-admin"},
+        "roleRef":{"apiGroup":"rbac.authorization.k8s.io","kind":"ClusterRole","name":role},"subjects":[{"kind":"User","name":"mm-e-nobody","apiGroup":"rbac.authorization.k8s.io"}]});
+    let grant = Change { target: binding.clone(), operation: Operation::Apply { object: object("cluster-admin"), force: false } };
+    let plan = commit::dry_plan(client.clone(), PRIVATE, &grant, "").await.unwrap();
+    assert_eq!(plan.preview.confirm_name.as_deref(), Some("mm-e-admin"));
+    assert_eq!(commit::apply_plan(client.clone(), PRIVATE, &grant, &plan, "", None).await.unwrap_err(), AppError::other(commit::CONFIRM_REQUIRED));
+    assert!(get(binding.clone()).await.is_none());
+    let (_, result) = commit::apply_plan(client.clone(), PRIVATE, &grant, &plan, "", Some("mm-e-admin")).await.unwrap();
+    result.unwrap();
+    // 이미 있는 cluster-admin 바인딩의 subjects를 바꿀 때도 같다
+    let mut edited = object("cluster-admin");
+    edited["subjects"] = json!([{"kind":"User","name":"mm-e-other","apiGroup":"rbac.authorization.k8s.io"}]);
+    let edit = Change { target: binding.clone(), operation: Operation::Apply { object: edited, force: false } };
+    assert_eq!(commit::dry_plan(client.clone(), PRIVATE, &edit, "").await.unwrap().preview.confirm_name.as_deref(), Some("mm-e-admin"));
+    let ordinary = Change { target: ChangeObject { name: "mm-e-view".into(), ..binding.clone() }, operation: Operation::Apply { object: json!({"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRoleBinding","metadata":{"name":"mm-e-view"},
+        "roleRef":{"apiGroup":"rbac.authorization.k8s.io","kind":"ClusterRole","name":"view"},"subjects":[{"kind":"User","name":"mm-e-nobody","apiGroup":"rbac.authorization.k8s.io"}]}), force: false } };
+    assert!(commit::dry_plan(client.clone(), PRIVATE, &ordinary, "").await.unwrap().preview.confirm_name.is_none());
+    kubectl(&["delete", "clusterrolebinding/mm-e-admin", "--ignore-not-found"]);
 }
