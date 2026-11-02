@@ -13,7 +13,7 @@ import { dbRow, eksService, makeResource, rdsService, renderWithClient, sampleSe
 import { k8sApi } from "./k8s/api";
 import { tabTitle } from "./k8s/text";
 import { argocdApi } from "./argocd/api";
-import { ARGOCD_TITLE, TOKEN_LABEL } from "./argocd/text";
+import { ARGOCD_TITLE, SERVER_HELP } from "./argocd/text";
 import { costApi } from "./cost/api";
 import { sampleBreakdown, sampleOverview as sampleCostOverview } from "./cost/fixtures";
 import { BREAKDOWN_LABEL, COST_TITLE } from "./cost/text";
@@ -934,13 +934,13 @@ describe("🐙 ArgoCD 탭", () => {
   };
   const argocdTabs = () => screen.queryAllByRole("tab", { name: new RegExp(ARGOCD_TITLE) });
 
-  test("the entry under EKS opens an active closable tab that shows the token form", async () => {
+  test("the entry under EKS opens an active closable tab that starts by asking for the server", async () => {
     await open();
     const tab = await screen.findByRole("tab", { name: ARGOCD_TITLE });
     expect(tab).toHaveAttribute("aria-selected", "true");
-    expect(await screen.findByLabelText(TOKEN_LABEL)).toBeVisible();
+    expect(await screen.findByText(SERVER_HELP)).toBeVisible();
     expect(within(tab.parentElement as HTMLElement).getByRole("button", { name: /닫기/ })).toBeInTheDocument();
-    expect(argocd.session).toHaveBeenCalledWith("https://argocd.taileada8.ts.net");
+    expect(argocd.session).not.toHaveBeenCalled();
   });
 
   test("opening it again reuses the single tab", async () => {

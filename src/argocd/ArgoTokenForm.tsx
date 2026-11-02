@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from "react";
-import { TOKEN_CANCEL, TOKEN_HELP, TOKEN_HTTP_WARNING, TOKEN_LABEL, TOKEN_SUBMIT } from "./text";
+import { ArgoSteps } from "./ArgoSteps";
+import { TOKEN_CANCEL, TOKEN_HELP, TOKEN_HTTP_WARNING, TOKEN_LABEL, TOKEN_SUBMIT, tokenFor } from "./text";
+import type { ArgocdServer } from "./types";
 
 interface Props {
-  /** 토큰을 넣을 서버 주소(http://면 평문 경고를 보인다) */
-  url: string;
+  /** 토큰을 넣을 서버(http://면 평문 경고를 보인다) */
+  server: ArgocdServer;
   /** 왜 토큰을 다시 받는지, 또는 지난 시도의 실패 */
   message: string | null;
   busy: boolean;
@@ -12,8 +14,8 @@ interface Props {
   onCancel?: () => void;
 }
 
-/** API 토큰 입력 폼. 토큰은 이 폼의 상태에만 있고, 보내는 순간 비운다. */
-export function ArgoTokenForm({ url, message, busy, onSubmit, onCancel }: Props) {
+/** 2단계: API 토큰 입력 폼. 토큰은 이 폼의 상태에만 있고, 보내는 순간 비운다. */
+export function ArgoTokenForm({ server, message, busy, onSubmit, onCancel }: Props) {
   const [token, setToken] = useState("");
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -24,8 +26,10 @@ export function ArgoTokenForm({ url, message, busy, onSubmit, onCancel }: Props)
   };
   return (
     <form className="argo-token" onSubmit={submit}>
+      <ArgoSteps step="token" />
+      <p className="mono">{tokenFor(server.name, server.url)}</p>
       <p>{TOKEN_HELP}</p>
-      {url.toLowerCase().startsWith("http://") && (
+      {server.url.toLowerCase().startsWith("http://") && (
         <p className="err" role="alert">
           {TOKEN_HTTP_WARNING}
         </p>

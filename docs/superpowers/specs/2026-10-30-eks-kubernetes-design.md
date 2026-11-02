@@ -98,7 +98,7 @@
 
 ### ArgoCD (사용자 결정, 2026-11-02)
 - 위치: 클러스터 탭 안이 아니라 **사이드바 EKS 밑 "🐙 ArgoCD"** 항목. 누르면 단일 탭이 열리고 AWS 프로필과 무관하다(프로필을 바꿔도 닫히지 않는다).
-- 연결: 운영 중인 **ArgoCD API 서버**에 **API 토큰**으로 붙는다(비밀번호 로그인 없음). 서버는 여러 개(설정 `argocdServers: [{name, url}]`, 비어 있으면 `stg` `https://argocd.taileada8.ts.net`·`ops` `http://ops.example`). 탭에서 서버를 고르고 목록을 고친다.
+- 연결: 운영 중인 **ArgoCD API 서버**에 **API 토큰**으로 붙는다(비밀번호 로그인 없음). 미리 넣어 둔 서버는 없다. 처음에는 **1단계 서버 주소**(http(s)://, 이름은 비우면 호스트) → **2단계 API 토큰** 순으로 연결하고, 새로 넣은 서버는 곧바로 골라 토큰을 묻는다(사용자 결정, 2026-11-02). 서버는 여러 개(설정 `argocdServers: [{name, url}]`), 탭에서 고르고 목록을 고친다. 목록에서 빼면 그 서버의 토큰도 키체인에서 지우고, 마지막 서버를 빼면 1단계로 돌아간다.
 - 토큰: ArgoCD UI Settings → Accounts → 계정 → Tokens나 `argocd account generate-token`으로 만들어 붙여 넣는다. `/api/v1/session/userinfo`로 확인된 토큰만 **macOS 키체인**(service `magic-mirror.argocd`, account = 서버 URL)에 저장하고, 앱은 메모리 캐시를 둔다. 키체인 호출은 블로킹 스레드에서 한다. 설정 파일·로그·오류에 토큰을 넣지 않는다. `http://` 서버는 평문 전송 경고를 보인다. 401이면 토큰 입력으로 돌아간다(토큰은 지우지 않는다).
 - 목록(10초마다 다시 읽음, 탭이 안 보이면 멈춤): Sync·Health 칩 다중 선택(묶음 안 OR·묶음 사이 AND), 프로젝트·이름 거르기, ApplicationSet으로 묶기(generator·Error 메시지·앱 수), 문제 앱(OutOfSync·Healthy 아님·오류 조건·작업 실패) 먼저. 대상 열의 `https://kubernetes.default.svc`·`in-cluster`는 "이 클러스터".
 - 상세: 개요(상태, 마지막 작업과 실패 리소스, 조건 전문, 소스·values 파일, 대상, 동기화 정책, 이미지, ApplicationSet), 리소스 트리(`resource-tree` API의 부모 관계로 Deployment → ReplicaSet → Pod 들여쓰기, 노드별 Health·info, Application의 Sync 상태·hook·삭제 예정 표시), 동기화 이력, YAML/JSON(Application 전체).

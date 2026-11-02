@@ -961,6 +961,12 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .argo-token label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
 .argo-token-acts { display: flex; gap: 8px; align-items: center; }
 .argo-token-acts .btn { margin-top: 0; }
+.argo-token .argo-server-add input:first-child { flex: 2; }
+.argo-token .argo-server-add .btn { margin-top: 0; }
+/* 처음 연결 단계: 지금 단계만 강조 */
+.argo-steps { display: flex; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12px; }
+.argo-steps li { padding: 2px 10px; border-radius: 11px; border: 1px solid var(--line); color: var(--dim); }
+.argo-steps li[aria-current="step"] { color: var(--text); border-color: var(--accent); background: #0a84ff1f; }
 .argo-servers { padding: 8px 10px; border-bottom: 1px solid var(--line); background: #232325; font-size: 12px; }
 .argo-server-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .argo-server-list li { display: flex; align-items: center; gap: 8px; }
