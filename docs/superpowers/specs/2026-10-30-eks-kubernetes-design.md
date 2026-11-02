@@ -96,6 +96,15 @@
   - 레벨 거르기: 오류·경고·정보·디버그·기타(레벨을 알 수 없는 줄) 칩을 여러 개 함께 고른다. 아무것도 고르지 않으면 모든 줄. 칩마다 줄 수. JSON이 아닌 줄은 맨 앞의 레벨 낱말(`[WARNING] …`, `ERROR: …`)이나 logfmt `level=`로 레벨을 정한다. 찾기의 일치 줄 수와 복사는 보이는 줄만.
   - 공통: 찾기(대소문자 무시, 일치 줄 수), 일시정지(대기 줄 수), 맨 아래 따라가기, 복사(보이는 줄의 원문), 최근 5만 줄 보관.
 
+### ArgoCD (사용자 결정, 2026-11-02)
+- 위치: 클러스터 탭 안이 아니라 **사이드바 EKS 밑 "🐙 ArgoCD"** 항목. 누르면 단일 탭이 열리고 AWS 프로필과 무관하다(프로필을 바꿔도 닫히지 않는다).
+- 연결: 운영 중인 **ArgoCD API 서버**에 **API 토큰**으로 붙는다(비밀번호 로그인 없음). 서버는 여러 개(설정 `argocdServers: [{name, url}]`, 비어 있으면 `stg` `https://argocd.taileada8.ts.net`·`ops` `http://ops.example`). 탭에서 서버를 고르고 목록을 고친다.
+- 토큰: ArgoCD UI Settings → Accounts → 계정 → Tokens나 `argocd account generate-token`으로 만들어 붙여 넣는다. `/api/v1/session/userinfo`로 확인된 토큰만 **macOS 키체인**(service `magic-mirror.argocd`, account = 서버 URL)에 저장하고, 앱은 메모리 캐시를 둔다. 키체인 호출은 블로킹 스레드에서 한다. 설정 파일·로그·오류에 토큰을 넣지 않는다. `http://` 서버는 평문 전송 경고를 보인다. 401이면 토큰 입력으로 돌아간다(토큰은 지우지 않는다).
+- 목록(10초마다 다시 읽음, 탭이 안 보이면 멈춤): Sync·Health 칩 다중 선택(묶음 안 OR·묶음 사이 AND), 프로젝트·이름 거르기, ApplicationSet으로 묶기(generator·Error 메시지·앱 수), 문제 앱(OutOfSync·Healthy 아님·오류 조건·작업 실패) 먼저. 대상 열의 `https://kubernetes.default.svc`·`in-cluster`는 "이 클러스터".
+- 상세: 개요(상태, 마지막 작업과 실패 리소스, 조건 전문, 소스·values 파일, 대상, 동기화 정책, 이미지, ApplicationSet), 리소스 트리(`resource-tree` API의 부모 관계로 Deployment → ReplicaSet → Pod 들여쓰기, 노드별 Health·info, Application의 Sync 상태·hook·삭제 예정 표시), 동기화 이력, YAML/JSON(Application 전체).
+- 실행: Refresh·Hard refresh(`GET …?refresh=`), Sync(확인 창, Prune·Dry run 기본 끔, `POST …/sync`). 권한 판단과 요청자 기록은 ArgoCD 서버가 한다. 진행 중이면 Sync를 끈다. 클러스터에 직접 쓰지 않으므로 `k8s::hygiene` 예외는 없다.
+- 명령: `argocd_set_token`, `argocd_forget_token`, `argocd_session`, `argocd_apps`, `argocd_appsets`, `argocd_app`, `argocd_tree`, `argocd_refresh`, `argocd_sync` (`src-tauri/src/argocd/`, `src-tauri/src/argocd_commands.rs`, 프론트 `src/argocd/`).
+
 ### 네트워크
 - Service·Ingress → ALB·NLB: AWS Load Balancer Controller 태그(`elbv2.k8s.aws/cluster`, `service.k8s.aws/stack`, `ingress.k8s.aws/stack`)와 status 호스트명으로 짝을 찾는다. 리스너, 대상 그룹 상태.
 - 노드 → 서브넷·AZ. VPC CNI면 Pod IP가 속한 서브넷.

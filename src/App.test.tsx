@@ -12,6 +12,8 @@ import { sampleTopology } from "./vpcmap/fixtures";
 import { dbRow, eksService, makeResource, rdsService, renderWithClient, sampleServices } from "./test/utils";
 import { k8sApi } from "./k8s/api";
 import { tabTitle } from "./k8s/text";
+import { argocdApi } from "./argocd/api";
+import { ARGOCD_TITLE, TOKEN_LABEL } from "./argocd/text";
 import { costApi } from "./cost/api";
 import { sampleBreakdown, sampleOverview as sampleCostOverview } from "./cost/fixtures";
 import { BREAKDOWN_LABEL, COST_TITLE } from "./cost/text";
@@ -59,6 +61,9 @@ vi.mock("./k8s/api", () => ({
 }));
 vi.mock("./iam/api", () => ({
   iamApi: { overview: vi.fn(), principal: vi.fn(), principalActions: vi.fn(), policy: vi.fn(), accessKeys: vi.fn(), findings: vi.fn() },
+}));
+vi.mock("./argocd/api", () => ({
+  argocdApi: { session: vi.fn(), setToken: vi.fn(), forgetToken: vi.fn(), apps: vi.fn(), appsets: vi.fn(), app: vi.fn(), tree: vi.fn(), refresh: vi.fn(), sync: vi.fn() },
 }));
 vi.mock("./cost/api", () => ({ costApi: { overview: vi.fn(), breakdown: vi.fn(), tagKeys: vi.fn(), usage: vi.fn() } }));
 vi.mock("@tauri-apps/api/webview", () => ({
@@ -910,5 +915,57 @@ describe("EKS 탭", () => {
     await waitFor(() => expect(k8sApi.close).toHaveBeenCalledTimes(2));
     expect(k8sApi.close).toHaveBeenCalledWith(target("prod"), "prod");
     expect(k8sApi.close).toHaveBeenCalledWith(target("staging"), "prod");
+  });
+});
+
+describe("🐙 ArgoCD 탭", () => {
+  const argocd = vi.mocked(argocdApi);
+  beforeEach(() => {
+    m.listServices.mockResolvedValue([...sampleServices, eksService]);
+    m.getSettings.mockResolvedValue({ enabledServices: ["ec2", "eks"], favorites: [], lastProfile: "prod", lastRegion: null });
+    argocd.session.mockResolvedValue(null);
+    argocd.apps.mockResolvedValue([]);
+    argocd.appsets.mockResolvedValue([]);
+  });
+  const open = async () => {
+    renderWithClient(<App />);
+    fireEvent.click(await screen.findByText("EKS"));
+    fireEvent.click(await screen.findByText(ARGOCD_TITLE));
+  };
+  const argocdTabs = () => screen.queryAllByRole("tab", { name: new RegExp(ARGOCD_TITLE) });
+
+  test("the entry under EKS opens an active closable tab that shows the token form", async () => {
+    await open();
+    const tab = await screen.findByRole("tab", { name: ARGOCD_TITLE });
+    expect(tab).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByLabelText(TOKEN_LABEL)).toBeVisible();
+    expect(within(tab.parentElement as HTMLElement).getByRole("button", { name: /닫기/ })).toBeInTheDocument();
+    expect(argocd.session).toHaveBeenCalledWith("https://argocd.taileada8.ts.net");
+  });
+
+  test("opening it again reuses the single tab", async () => {
+    await open();
+    await screen.findByRole("tab", { name: ARGOCD_TITLE });
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    expect(screen.getByRole("tab", { name: ARGOCD_TITLE })).toHaveAttribute("aria-selected", "false");
+    fireEvent.click(screen.getByText(ARGOCD_TITLE, { selector: ".typ span" }));
+    expect(argocdTabs()).toHaveLength(1);
+    expect(screen.getByRole("tab", { name: ARGOCD_TITLE })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("closing it returns to the resources tab", async () => {
+    await open();
+    const tab = await screen.findByRole("tab", { name: ARGOCD_TITLE });
+    fireEvent.click(within(tab.parentElement as HTMLElement).getByRole("button", { name: /닫기/ }));
+    expect(argocdTabs()).toHaveLength(0);
+    expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("changing the AWS profile does not close it", async () => {
+    await open();
+    await screen.findByRole("tab", { name: ARGOCD_TITLE });
+    fireEvent.change(screen.getByRole("combobox", { name: "프로필" }), { target: { value: "dev" } });
+    expect(argocdTabs()).toHaveLength(1);
+    expect(screen.getByRole("tab", { name: ARGOCD_TITLE })).toHaveAttribute("aria-selected", "true");
   });
 });

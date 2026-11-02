@@ -943,3 +943,59 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .cost-table tr.drill { cursor: pointer; }
 .cost-table tr.drill:hover td { background: #ffffff12; }
 .cost-table tr.cost-small td { color: var(--dim); font-style: italic; }
+
+/* ArgoCD: 사이드바 항목 */
+.typ.argocd-open { color: var(--text); font-weight: 600; }
+.typ.argocd-open:hover { color: #fff; }
+
+/* ArgoCD: 서버 막대·토큰 폼·요약 칩(.k8s-lvl 모양)·표·트리·상세 */
+.argo { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; }
+.argo-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.argo-bar select, .argo-bar .k8s-filter, .argo-token input, .argo-server-add input { background: #1c1c1e; border: 1px solid #444; border-radius: 6px; padding: 3px 8px; color: var(--text); font: inherit; font-size: 12px; }
+.argo-bar .k8s-filter { flex: 0 1 200px; }
+.argo-top { background: var(--panel); }
+.argo-session { color: var(--dim); }
+.argo-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+.argo-token { width: 520px; max-width: calc(100% - 32px); margin: 24px auto; display: flex; flex-direction: column; gap: 10px; background: var(--panel); border: 1px solid #444; border-radius: 12px; padding: 20px; }
+.argo-token p { margin: 0; font-size: 12px; }
+.argo-token label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.argo-token-acts { display: flex; gap: 8px; align-items: center; }
+.argo-token-acts .btn { margin-top: 0; }
+.argo-servers { padding: 8px 10px; border-bottom: 1px solid var(--line); background: #232325; font-size: 12px; }
+.argo-server-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.argo-server-list li { display: flex; align-items: center; gap: 8px; }
+.argo-server-list .btn { margin-left: auto; }
+.argo-server-add { display: flex; gap: 8px; align-items: center; }
+.argo-server-add input { flex: 1; min-width: 0; }
+.argo-servers .err { margin: 6px 0 0; }
+.argo-lvl-Synced::before, .argo-lvl-Healthy::before { background: var(--green); }
+.argo-lvl-OutOfSync::before, .argo-lvl-Progressing::before { background: var(--yellow); }
+.argo-lvl-Degraded::before, .argo-lvl-Missing::before { background: var(--red); }
+.argo-badge { display: inline-block; padding: 0 7px; line-height: 17px; border-radius: 9px; font-size: 11px; white-space: nowrap; background: #ffffff12; color: var(--dim); }
+.argo-badge.argo-ok { background: #30d15822; color: var(--green); }
+.argo-badge.argo-warn { background: #ffd60a22; color: var(--yellow); }
+.argo-badge.argo-bad { background: #ff453a26; color: #ff6b62; }
+.argo-table td { vertical-align: middle; }
+.argo-row { cursor: pointer; }
+.argo-row:hover { background: #ffffff08; }
+.argo-row.on { background: #0a84ff22; }
+.argo-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.argo-group td { background: #ffffff08; padding-top: 6px; padding-bottom: 6px; }
+.argo-group .argo-badge, .argo-group .argo-gen, .argo-group .argo-msg { margin-left: 10px; }
+.argo-group .argo-count { margin-left: 10px; font-size: 11px; }
+.argo-chip { margin-left: 6px; }
+.argo-chip-warn { background: #ffd60a22; color: var(--yellow); }
+.argo-acts { display: inline-flex; gap: 6px; }
+.argo-note { margin: 0; padding: 4px 12px; font-size: 12px; background: #30d15814; border-bottom: 1px solid var(--line); }
+.argo-pre { white-space: pre-wrap; word-break: break-word; user-select: text; }
+.argo-sub { margin: 10px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }
+.argo-source { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.argo-cond { margin-bottom: 6px; padding: 6px 10px; border-radius: 6px; background: #ffd60a14; border: 1px solid #ffd60a40; font-size: 12px; }
+.argo-cond-err { background: #ff453a1f; border-color: #ff453a60; color: #ff8a82; }
+.argo-opt { display: flex; margin: 6px 0; }
+.argo-opt .dim { margin-left: 6px; }
+.argo-tree { display: flex; flex-direction: column; }
+.argo-node { padding-top: 3px; padding-bottom: 3px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.argo-node-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.argo-node .argo-pre { margin-top: 2px; }
+.argo-raw { margin: 0; }

@@ -21,6 +21,13 @@ pub struct K8sLaneWidths {
     pub tree: Option<u32>,
     pub detail_pct: Option<u32>,
 }
+/// ArgoCD API 서버의 표시 이름과 주소.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArgocdServer {
+    pub name: String,
+    pub url: String,
+}
+
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -41,6 +48,8 @@ pub struct Settings {
     /// EKS 탭 왼쪽 메뉴에 북마크한 리소스 종류. 북마크한 순서(드래그로 바꾼 순서)대로 둔다.
     pub k8s_bookmarks: Vec<KindRef>,
     pub k8s_lane_widths: K8sLaneWidths,
+    /// ArgoCD 서버 목록. 토큰은 설정이 아니라 키체인에 저장한다.
+    pub argocd_servers: Vec<ArgocdServer>,
 }
 
 #[derive(Deserialize, Default)]
@@ -58,6 +67,7 @@ struct RawSettings {
     kubeconfig_path: Option<String>,
     k8s_bookmarks: Vec<KindRef>,
     k8s_lane_widths: K8sLaneWidths,
+    argocd_servers: Vec<ArgocdServer>,
 }
 
 fn defaults(all_services: &[&str]) -> Settings {
@@ -87,6 +97,7 @@ pub fn load(path: &Path, all_services: &[&str]) -> Settings {
                 kubeconfig_path: raw.kubeconfig_path,
                 k8s_bookmarks: raw.k8s_bookmarks,
                 k8s_lane_widths: raw.k8s_lane_widths,
+                argocd_servers: raw.argocd_servers,
             },
             Err(_) => defaults(all_services),
         },
@@ -123,6 +134,24 @@ mod tests {
         fs::write(&path, text).unwrap();
         load(&path, &["ec2", "s3"])
     }
+    #[test]
+    fn argocd_servers_roundtrip_and_default() {
+        assert!(load_text("{}").argocd_servers.is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let settings = Settings {
+            argocd_servers: vec![ArgocdServer {
+                name: "stg".into(),
+                url: "https://example.test".into(),
+            }],
+            ..Default::default()
+        };
+        save(&path, &settings).unwrap();
+        assert_eq!(load(&path, &[]).argocd_servers, settings.argocd_servers);
+        let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(json["argocdServers"][0]["name"], "stg");
+    }
+
 
     #[test]
     fn k8s_fields_roundtrip_and_default() {
