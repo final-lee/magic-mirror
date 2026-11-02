@@ -1,6 +1,6 @@
 //! EKS 탭의 명령. 대상(프로필·리전·클러스터)마다 열린 연결 하나(`Session`)를 둔다.
 //! 열기는 시작할 때 대상의 닫힌 횟수(`epoch`)를 읽어 두고, 끝날 때 그사이 닫혔으면 연결을 버린다(PG 탭과 같은 규칙).
-//! 잠금 순서: `epochs`, `sessions`, `watches`. 두 잠금을 함께 잡는 곳은 모두 이 순서를 지킨다. `terminals`는 `watches` 다음에만 잡는다.
+//! 잠금 순서: `epochs`, `sessions`, `watches`. 두 잠금을 함께 잡는 곳은 모두 이 순서를 지킨다.
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -19,9 +19,7 @@ use crate::k8s::read::kinds::{self, Kind};
 use crate::k8s::read::overview::{self, Overview};
 use crate::k8s::read::secret::{self, SecretValue};
 use crate::k8s::review::{self, Identity, Rules};
-use crate::k8s::lnav::{self, Cleanup, LnavMessage, Spawned, LNAV_MISSING, LOG_FILE_FAILED, LOG_WRITE_FAILED};
 use crate::k8s::logs::{self, LogMessage, LogOptions};
-use crate::k8s::path::login_path;
 use crate::k8s::rows::KindRef;
 use crate::k8s::target::{describe_cluster, K8sTarget};
 use crate::k8s::watch::{self, WatchMessage};
@@ -38,34 +36,6 @@ pub struct K8sState {
     epochs: Mutex<HashMap<K8sTarget, u64>>,
     watches: Mutex<HashMap<u64, WatchEntry>>,
     next_watch: AtomicU64,
-    /// lnav를 띄운 로그 흐름(키 입력, 크기 조절, 뒷정리). 번호는 watch 번호와 같다. 항목을 지우면 lnav도 끝나고 로그 파일도 지워진다.
-    terminals: Mutex<HashMap<u64, Terminal>>,
-    /// lnav 띄우기의 입장 관리. 앱이 끝날 때 새로 들어오지 못하게 하고, 이미 들어온 것이 등록이나 뒷정리를 마칠 때까지 기다린다.
-    starts: Mutex<Starts>,
-    starts_done: std::sync::Condvar,
-}
-
-#[derive(Default)]
-struct Starts {
-    closing: bool,
-    in_flight: usize,
-}
-
-/// 입장권. 버리면(성공, 실패 어느 쪽이든) 나간 것으로 센다.
-struct StartTicket<'a>(&'a K8sState);
-
-impl Drop for StartTicket<'_> {
-    fn drop(&mut self) {
-        locked(&self.0.starts).in_flight -= 1;
-        self.0.starts_done.notify_all();
-    }
-}
-
-struct Terminal {
-    /// `lnav::input_worker`로 가는 키 입력
-    input: std::sync::mpsc::Sender<Vec<u8>>,
-    master: Box<dyn portable_pty::MasterPty + Send>,
-    cleanup: Cleanup,
 }
 
 /// 돌고 있는 watch 하나. 대상이 닫히면 같은 대상의 것을 모두 멈춘다.
@@ -141,69 +111,6 @@ impl K8sState {
 
     pub fn session(&self, t: &K8sTarget) -> Result<Arc<Session>, AppError> {
         locked(&self.sessions).get(t).cloned().ok_or_else(|| AppError::other(NOT_OPENED))
-    }
-
-    fn put_terminal(&self, id: u64, t: Terminal) {
-        locked(&self.terminals).insert(id, t);
-    }
-
-    fn forget_terminal(&self, id: u64) {
-        // 뒷정리(Cleanup)는 잠금을 놓은 뒤에 버린다
-        let gone = locked(&self.terminals).remove(&id);
-        drop(gone);
-    }
-
-    /// 화면의 키 입력을 lnav에 넘긴다(쓰기는 입력 스레드가 한다). 이미 끝난 흐름이면 버린다.
-    pub fn terminal_input(&self, id: u64, data: &[u8]) {
-        if let Some(t) = locked(&self.terminals).get(&id) {
-            let _ = t.input.send(data.to_vec());
-        }
-    }
-
-    pub fn terminal_resize(&self, id: u64, cols: u16, rows: u16) {
-        if let Some(t) = locked(&self.terminals).get(&id) {
-            let _ = t.master.resize(lnav::size(cols, rows));
-        }
-    }
-
-    /// lnav 띄우기에 들어간다. 앱이 끝나는 중이면 거절한다.
-    fn admit(&self) -> Result<StartTicket<'_>, AppError> {
-        let mut s = locked(&self.starts);
-        if s.closing {
-            return Err(AppError::other(NOT_OPENED));
-        }
-        s.in_flight += 1;
-        Ok(StartTicket(self))
-    }
-
-    /// 앱이 끝날 때: 새 lnav를 막고, 이미 띄우는 중인 것이 등록을 마치기를 기다리고(입장 뒤는 동기 코드라 짧다, 최대 3초),
-    /// 떠 있는 lnav를 모두 그 자리에서 끝내고, 이 앱의 로그 폴더를 통째로 지운다.
-    /// 종료는 비동기 작업을 버리지 않고 프로세스를 끝내므로 여기서 직접 한다. 비정상 종료로 남은 폴더는 다음 실행의 `sweep_stale`이 지운다.
-    pub fn shutdown(&self) {
-        {
-            let mut s = locked(&self.starts);
-            s.closing = true;
-            let _ = self.starts_done.wait_timeout_while(s, std::time::Duration::from_secs(3), |s| s.in_flight > 0);
-        }
-        let all: Vec<Terminal> = locked(&self.terminals).drain().map(|(_, t)| t).collect();
-        for mut t in all {
-            t.cleanup.finish_now();
-        }
-        let _ = std::fs::remove_dir_all(lnav::process_dir(&lnav::logs_root()));
-    }
-}
-
-/// 작업이 어떻게 끝나든 PTY 항목을 지운다
-struct ForgetTerminal {
-    app: tauri::AppHandle,
-    id: u64,
-}
-
-impl Drop for ForgetTerminal {
-    fn drop(&mut self) {
-        if let Some(k8s) = self.app.try_state::<K8sState>() {
-            k8s.forget_terminal(self.id);
-        }
     }
 }
 
@@ -379,83 +286,6 @@ pub fn k8s_logs(
         task.inner().abort_handle()
     })
     .ok_or_else(|| AppError::other(NOT_OPENED))
-}
-
-/// 설치된 lnav가 있는지(로그인 셸의 PATH에서 찾는다)
-#[tauri::command]
-pub async fn k8s_lnav_available() -> bool {
-    lnav::find_lnav().await.is_some()
-}
-
-/// Pod 로그를 lnav로 본다. 로그 줄은 본인만 읽는 임시 파일에 이어 쓰고, lnav는 PTY에서 그 파일을 따라간다.
-/// PTY 출력과 로그 흐름의 오류·끝, lnav 종료는 채널로 보낸다. 반환값은 `k8s_unwatch`(멈춤), `k8s_lnav_input`, `k8s_lnav_resize`에 쓰는 번호.
-#[allow(clippy::too_many_arguments)]
-#[tauri::command]
-pub async fn k8s_lnav(
-    app: tauri::AppHandle,
-    k8s: State<'_, K8sState>,
-    target: K8sTarget,
-    namespace: String,
-    pod: String,
-    options: LogOptions,
-    cols: u16,
-    rows: u16,
-    on_event: tauri::ipc::Channel<LnavMessage>,
-) -> Result<u64, AppError> {
-    let program = lnav::find_lnav().await.ok_or_else(|| AppError::other(LNAV_MISSING))?;
-    let path_env = login_path().await;
-    // 여기서부터 등록까지는 기다림 없는 동기 코드다. 앱이 끝날 때 `shutdown`이 이 구간이 끝나기를 기다린다.
-    let _ticket = k8s.admit()?;
-    let started = k8s.epoch(&target);
-    let session = k8s.session(&target)?;
-    let (client, endpoint) = (session.client.clone(), session.endpoint);
-    let (path, mut file) = lnav::log_file(&lnav::logs_root()).map_err(|_| AppError::other(LOG_FILE_FAILED))?;
-    let spawned = lnav::spawn(&program, &[path.as_path()], cols, rows, path_env);
-    let Spawned { child, reader, writer, master } = match spawned {
-        Ok(s) => s,
-        Err(e) => {
-            let _ = std::fs::remove_file(&path);
-            return Err(e);
-        }
-    };
-    // 항목을 지우거나(작업 끝) 등록하지 못해 버려지면(그사이 대상이 닫힘) lnav를 끝내고 파일을 지운다
-    let terminal = Terminal { input: lnav::input_worker(writer), master, cleanup: Cleanup::new(child, path) };
-    k8s.register_watch(&target, started, |id| {
-        k8s.put_terminal(id, terminal);
-        // 첫 실행 전에 중단돼도 항목이 남지 않도록 지킴이를 먼저 만들어 작업에 넘긴다
-        let forget = (ForgetWatch { app: app.clone(), id }, ForgetTerminal { app, id });
-        let task = tauri::async_runtime::spawn(async move {
-            let _forget = forget;
-            let out = on_event.clone();
-            let mut pump = tokio::task::spawn_blocking(move || lnav::pump(reader, move |m| out.send(m).is_ok()));
-            let logs = logs::run(client, namespace, pod, options, endpoint, move |m| match lnav::write_log(&mut file, m) {
-                Ok(None) => true,
-                Ok(Some(msg)) => on_event.send(msg).is_ok(),
-                // 디스크가 가득 차는 등: 알리고 받기를 멈춘다(lnav는 받은 데까지 계속 보여준다)
-                Err(_) => {
-                    let _ = on_event.send(LnavMessage::LogError { error: AppError::other(LOG_WRITE_FAILED) });
-                    false
-                }
-            });
-            // 로그가 먼저 끝나면(따라가지 않을 때) lnav는 사용자가 닫을 때까지 둔다. lnav가 먼저 끝나면 로그도 멈춘다.
-            tokio::select! {
-                _ = logs => { let _ = (&mut pump).await; }
-                _ = &mut pump => {}
-            }
-        });
-        task.inner().abort_handle()
-    })
-    .ok_or_else(|| AppError::other(NOT_OPENED))
-}
-
-#[tauri::command]
-pub fn k8s_lnav_input(k8s: State<'_, K8sState>, id: u64, data: String) {
-    k8s.terminal_input(id, data.as_bytes());
-}
-
-#[tauri::command]
-pub fn k8s_lnav_resize(k8s: State<'_, K8sState>, id: u64, cols: u16, rows: u16) {
-    k8s.terminal_resize(id, cols, rows);
 }
 
 /// 클러스터가 내주는 종류(목록·watch가 되는 것). 사용자 정의 리소스 목록을 만든다.

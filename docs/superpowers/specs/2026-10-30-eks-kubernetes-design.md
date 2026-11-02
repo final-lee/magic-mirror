@@ -91,9 +91,10 @@
 - 검색과 하이라이트, 일시정지와 자동 스크롤, 파일로 저장(보관 중인 줄).
 - 화면 보관은 최근 5만 줄. 백엔드는 줄을 묶어(100ms 또는 500줄) Tauri 채널로 보낸다.
 - 지금 된 것(2026-11-02, K3 일부 먼저): 4열 상세의 Pod "로그" 탭. 컨테이너(init 포함) 고르기, 이전 컨테이너, 따라가기, 처음 받을 줄 수(100~50,000). 명령 `k8s_logs`(채널, `k8s_unwatch`로 멈춤, 탭을 닫으면 같이 멈춤). 남은 것: 워크로드 단위 합친 로그(Pod별 색, 새 Pod 따라 붙기), 최근 N분, 파일로 저장.
-- 보기 방식(사용자 결정, 2026-11-02): 기본은 **lnav**, 원하면 **텍스트**로 바꾼다. lnav는 앱에 넣지 않고 설치된 것을 쓴다(로그인 셸의 PATH에서 찾음). 없으면 텍스트로 열고 `brew install lnav`를 안내한다.
-  - lnav: 로그 줄을 본인만 읽는 임시 파일(`$TMPDIR/magic-mirror-logs/`, 폴더 0700·파일 0600)에 이어 쓰고, lnav를 PTY(`portable-pty`)에서 그 파일로 띄운다. 화면은 xterm.js(앱 테마 색)이고 키 입력·크기 조절을 lnav로 보낸다. lnav의 터미널 질의(커서 위치, 장치 속성)는 xterm.js가 답한다. 탭·Pod·옵션이 바뀌거나 lnav를 닫으면 lnav를 끝내고 파일을 지운다. 명령 `k8s_lnav_available`, `k8s_lnav`(채널: PTY 출력 base64, 로그 오류·끝, lnav 종료), `k8s_lnav_input`, `k8s_lnav_resize`, 멈춤은 `k8s_unwatch`.
-  - 텍스트: 찾기(대소문자 무시, 일치 줄 수), 일시정지(대기 줄 수), 맨 아래 따라가기, 복사(클립보드), 최근 5만 줄 보관.
+- 보기 방식(사용자 결정, 2026-11-02): lnav로 보던 방식은 버리고(설치된 lnav를 PTY로 띄웠으나 서비스 JSON 로그를 제대로 읽지 못했다) 앱 안에서 그린다. 기본은 **JSON 정리**, 원하면 **원문**.
+  - JSON 정리: `{`로 시작하는 줄을 JSON 객체로 읽어 ▸ 시각(로컬 `MM-DD HH:mm:ss.SSS`, 원래 값은 툴팁) · 레벨(색) · 메시지를 한 줄로 보인다. 흔한 로거의 이름을 읽는다: 시각 `timestamp`·`@timestamp`·`time`·`ts`(ISO 또는 epoch 초·밀리초·마이크로초·나노초), 레벨 `log.level`·`level`·`severity`(pino 숫자 레벨 포함), 메시지 `message`·`msg`. 나머지 필드는 접어 두고, 오류 필드(`error*`, `err*`, `exception`, `stack*`)와 찾는 말이 든 필드는 메시지 옆에 `key=value`로 붙인다. ▸를 누르면 필드 전체(값의 종류별 색)와 JSON 복사. JSON이 아닌 줄은 원문 그대로.
+  - 레벨 거르기: 오류·경고·정보·디버그·기타(레벨을 알 수 없는 줄) 칩을 여러 개 함께 고른다. 아무것도 고르지 않으면 모든 줄. 칩마다 줄 수. JSON이 아닌 줄은 맨 앞의 레벨 낱말(`[WARNING] …`, `ERROR: …`)이나 logfmt `level=`로 레벨을 정한다. 찾기의 일치 줄 수와 복사는 보이는 줄만.
+  - 공통: 찾기(대소문자 무시, 일치 줄 수), 일시정지(대기 줄 수), 맨 아래 따라가기, 복사(보이는 줄의 원문), 최근 5만 줄 보관.
 
 ### 네트워크
 - Service·Ingress → ALB·NLB: AWS Load Balancer Controller 태그(`elbv2.k8s.aws/cluster`, `service.k8s.aws/stack`, `ingress.k8s.aws/stack`)와 status 호스트명으로 짝을 찾는다. 리스너, 대상 그룹 상태.

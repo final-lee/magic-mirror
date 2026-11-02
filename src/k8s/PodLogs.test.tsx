@@ -1,66 +1,31 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import * as invokeModule from "../api/invoke";
 import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
-import { PodLogs, matchRanges, searchPattern } from "./PodLogs";
-import { LNAV_EXITED, LNAV_MISSING, LOG_CONTAINER, LOG_EMPTY, LOG_ENDED, LOG_PAUSE, LOG_PREVIOUS, LOG_RESTART, LOG_RESUME, LOG_SEARCH, LOG_VIEW_LNAV, LOG_VIEW_TEXT, logMatches, logPending } from "./text";
-import type { K8sContainer, K8sLnavMessage, K8sLogMessage, K8sLogOptions } from "./types";
+import { matchRanges, searchPattern } from "./logSearch";
+import { PodLogs } from "./PodLogs";
+import {
+  LOG_CONTAINER, LOG_EMPTY, LOG_ENDED, LOG_FIELDS_HIDE, LOG_FIELDS_SHOW, LOG_LEVEL_NONE, LOG_PAUSE, LOG_PREVIOUS, LOG_RESUME, LOG_SEARCH, LOG_VIEW_PRETTY,
+  LOG_VIEW_RAW, logMatches, logPending,
+} from "./text";
+import type { K8sContainer, K8sLogMessage, K8sLogOptions } from "./types";
 
-// jsdom에서는 xterm이 그려지지 않으니 받은 것만 기록하는 가짜 터미널로 바꾼다(vi.mock보다 먼저 만들어야 해서 hoisted)
-const { terms, FakeTerm } = vi.hoisted(() => {
-  const terms: { written: string[]; disposed: boolean; onDataCb: (d: string) => void }[] = [];
-  class FakeTerm {
-    cols = 120;
-    rows = 40;
-    written: string[] = [];
-    disposed = false;
-    onDataCb: (d: string) => void = () => {};
-    constructor() {
-      terms.push(this);
-    }
-    loadAddon() {}
-    open() {}
-    focus() {}
-    write(d: Uint8Array) {
-      this.written.push(new TextDecoder().decode(d));
-    }
-    onData(cb: (d: string) => void) {
-      this.onDataCb = cb;
-      return { dispose: () => {} };
-    }
-    dispose() {
-      this.disposed = true;
-    }
-  }
-  return { terms, FakeTerm };
-});
-vi.mock("@xterm/xterm", () => ({ Terminal: FakeTerm }));
-vi.mock("@xterm/addon-fit", () => ({ FitAddon: class { fit() {} } }));
-vi.mock("./api", () => ({ k8sApi: { logs: vi.fn(), unwatch: vi.fn(), lnavAvailable: vi.fn(), lnav: vi.fn(), lnavInput: vi.fn(), lnavResize: vi.fn() } }));
+vi.mock("./api", () => ({ k8sApi: { logs: vi.fn(), unwatch: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 const m = vi.mocked(k8sApi);
 const T = { profile: "app", region: "r", cluster: "c" };
 
 const c = (name: string, init = false): K8sContainer => ({ name, image: "x", init, state: "running", ready: true, restarts: 0, reason: null, message: null, lastTermination: null });
 let emit: ((msg: K8sLogMessage) => void)[] = [];
-let lnavEmit: ((msg: K8sLnavMessage) => void)[] = [];
 let nextId = 0;
 
 beforeEach(() => {
   vi.clearAllMocks();
   emit = [];
-  lnavEmit = [];
-  terms.length = 0;
   nextId = 0;
   m.unwatch.mockResolvedValue(null);
-  // 아래 텍스트 보기 시험은 lnav가 없는 환경에서 돈다(lnav 시험이 따로 켠다)
-  m.lnavAvailable.mockResolvedValue(false);
   m.logs.mockImplementation(async (_t, _ns, _pod, _opts, _p, onMessage) => {
     emit.push(onMessage);
-    return ++nextId;
-  });
-  m.lnav.mockImplementation(async (_t, _ns, _pod, _opts, _cols, _rows, _p, onMessage) => {
-    lnavEmit.push(onMessage);
     return ++nextId;
   });
 });
@@ -180,60 +145,74 @@ test("a broken stream shows the error and retry reopens it", async () => {
   expect(screen.queryByText("끊겼어요")).toBeNull();
 });
 
-describe("lnav view", () => {
-  const b64 = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
-  const lnavSend = (i: number, msg: K8sLnavMessage) => act(() => lnavEmit[i](msg));
+describe("JSON view", () => {
+  const ok = JSON.stringify({ "log.level": "info", timestamp: "2026-11-02T06:40:58.776Z", service: "azit", "request.id": "r-1", "http.status_code": 200, message: "GET /health/readiness 200" });
+  const failed = JSON.stringify({ "log.level": "warn", timestamp: "2026-11-02T06:41:00.000Z", "request.id": "r-9", "error.message": "no such azit", message: "PUT /v1/communities/x 404" });
+  const rows = () => Array.from(document.querySelectorAll<HTMLElement>(".lj-row"));
 
-  test("is the default when lnav is installed: opens at the terminal's size, draws its output and passes keys", async () => {
-    m.lnavAvailable.mockResolvedValue(true);
+  test("is the default: time, level and message on one line, error fields beside, ▸ opens every field, raw shows lines as received", async () => {
     setup();
-    await vi.waitFor(() => expect(m.lnav).toHaveBeenCalledTimes(1));
-    expect(m.lnav).toHaveBeenCalledWith(T, "prod", "web-1", { container: "app", follow: true, tailLines: 500, previous: false }, 120, 40, "p", expect.any(Function));
-    expect(m.logs).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: LOG_VIEW_LNAV })).toHaveAttribute("aria-pressed", "true");
-    lnavSend(0, { type: "output", data: b64("로그 화면") });
-    expect(terms[0].written).toEqual(["로그 화면"]);
-    await act(async () => {});
-    terms[0].onDataCb("q");
-    expect(m.lnavInput).toHaveBeenCalledWith(1, "q");
+    await vi.waitFor(() => expect(emit).toHaveLength(1));
+    expect(screen.getByRole("button", { name: LOG_VIEW_PRETTY })).toHaveAttribute("aria-pressed", "true");
+    send(0, { type: "lines", lines: [ok, "plain text", failed] });
+    const [first, second] = rows();
+    expect(first).toHaveClass("lj-info");
+    expect(within(first).getByText("GET /health/readiness 200")).toBeInTheDocument();
+    expect(first.querySelector(".lj-time")).toHaveAttribute("title", "2026-11-02T06:40:58.776Z");
+    expect(first.querySelector(".lj-time")!.textContent).toMatch(/^\d\d-\d\d \d\d:\d\d:\d\d\.776$/);
+    // 나머지 필드는 접어 둔다
+    expect(first.textContent).not.toContain("r-1");
+    expect(logText()).toContain("plain text\n");
+    expect(second).toHaveClass("lj-warn");
+    expect(second.textContent).toContain('error.message="no such azit"');
+    fireEvent.click(within(first).getByRole("button", { name: LOG_FIELDS_SHOW }));
+    expect(within(first).getByRole("button", { name: LOG_FIELDS_HIDE })).toHaveAttribute("aria-expanded", "true");
+    expect(within(first).getByText("request.id")).toBeInTheDocument();
+    expect(within(first).getByText("r-1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: LOG_VIEW_RAW }));
+    expect(logText()).toBe(`${ok}\nplain text\n${failed}\n`);
   });
 
-  test("closing lnav offers to reopen it; changing an option or leaving stops it", async () => {
-    m.lnavAvailable.mockResolvedValue(true);
-    const r = setup();
-    await vi.waitFor(() => expect(m.lnav).toHaveBeenCalledTimes(1));
-    lnavSend(0, { type: "exit" });
-    expect(screen.getByText(LNAV_EXITED)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: LOG_RESTART }));
-    await vi.waitFor(() => expect(m.lnav).toHaveBeenCalledTimes(2));
-    expect(m.unwatch).toHaveBeenCalledWith(1);
-    expect(terms[0].disposed).toBe(true);
-    fireEvent.click(screen.getByLabelText(LOG_PREVIOUS));
-    await vi.waitFor(() => expect(m.lnav).toHaveBeenCalledTimes(3));
-    expect(m.unwatch).toHaveBeenCalledWith(2);
-    expect(m.lnav.mock.lastCall![3]).toMatchObject({ previous: true });
-    r.unmount();
-    expect(m.unwatch).toHaveBeenCalledWith(3);
+  test("search finds a folded field: the line counts and the field shows beside the message, marked", async () => {
+    setup();
+    await vi.waitFor(() => expect(emit).toHaveLength(1));
+    send(0, { type: "lines", lines: [ok, failed] });
+    fireEvent.change(screen.getByLabelText(LOG_SEARCH), { target: { value: "r-9" } });
+    expect(screen.getByText(logMatches(1))).toBeInTheDocument();
+    expect(rows()[1].textContent).toContain("request.id=r-9");
+    expect(Array.from(document.querySelectorAll(".k8s-log mark")).map((e) => e.textContent)).toEqual(["r-9"]);
+    expect(rows()[0].textContent).not.toContain("request.id");
   });
 
-  test("switching to text stops lnav and streams plain lines", async () => {
-    m.lnavAvailable.mockResolvedValue(true);
+  test("level filter: several levels at once, counts per level, plain lines by their leading level word, search counts only what is shown", async () => {
     setup();
-    await vi.waitFor(() => expect(m.lnav).toHaveBeenCalledTimes(1));
-    await act(async () => {});
-    fireEvent.click(screen.getByRole("button", { name: LOG_VIEW_TEXT }));
-    await vi.waitFor(() => expect(m.logs).toHaveBeenCalledTimes(1));
-    expect(m.unwatch).toHaveBeenCalledWith(1);
-    send(0, { type: "lines", lines: ["plain"] });
-    expect(logText()).toBe("plain\n");
+    await vi.waitFor(() => expect(emit).toHaveLength(1));
+    const debug = JSON.stringify({ level: "debug", msg: "cache hit" });
+    send(0, { type: "lines", lines: [ok, failed, debug, "[WARNING] plugin/health: slow", "GET /plain 200"] });
+    const chip = (name: RegExp) => screen.getByRole("button", { name });
+    expect(chip(/^경고 2$/)).toHaveAttribute("aria-pressed", "false");
+    expect(chip(/^기타 1$/)).toBeInTheDocument();
+    fireEvent.click(chip(/^경고/));
+    fireEvent.click(chip(/^디버그/));
+    expect(chip(/^경고/)).toHaveAttribute("aria-pressed", "true");
+    expect(logText()).toContain("[WARNING] plugin/health: slow\n");
+    expect(logText()).toContain("cache hit");
+    expect(logText()).not.toContain("GET /health/readiness 200");
+    expect(logText()).not.toContain("GET /plain 200");
+    fireEvent.change(screen.getByLabelText(LOG_SEARCH), { target: { value: "GET" } });
+    expect(screen.getByText(logMatches(0))).toBeInTheDocument();
+    // 다 끄면 모든 줄
+    fireEvent.click(chip(/^경고/));
+    fireEvent.click(chip(/^디버그/));
+    expect(screen.getByText(logMatches(2))).toBeInTheDocument();
   });
 
-  test("without lnav the text view opens, says how to install lnav, and the lnav button is off", async () => {
+  test("a filter that hides every line says so", async () => {
     setup();
-    await vi.waitFor(() => expect(m.logs).toHaveBeenCalledTimes(1));
-    expect(screen.getByText(LNAV_MISSING)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: LOG_VIEW_LNAV })).toBeDisabled();
-    expect(screen.getByRole("button", { name: LOG_VIEW_TEXT })).toHaveAttribute("aria-pressed", "true");
-    expect(m.lnav).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(emit).toHaveLength(1));
+    send(0, { type: "lines", lines: [ok] });
+    fireEvent.click(screen.getByRole("button", { name: /^오류/ }));
+    expect(screen.getByText(LOG_LEVEL_NONE)).toBeInTheDocument();
+    expect(logText()).toBe("");
   });
 });

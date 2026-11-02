@@ -105,9 +105,6 @@ export interface K8sLogOptions {
 /** k8s_logs 채널. error와 end에서 흐름이 끝난다. */
 export type K8sLogMessage = { type: "lines"; lines: string[] } | { type: "error"; error: AppError } | { type: "end" };
 
-/** k8s_lnav 채널. output은 PTY 출력(base64). exit는 lnav가 끝났을 때. */
-export type K8sLnavMessage = { type: "output"; data: string } | { type: "logError"; error: AppError } | { type: "logEnd" } | { type: "exit" };
-
 export type K8sProblem = "crashLoopBackOff" | "imagePullBackOff" | "pending" | "oomKilled" | "notReady";
 
 export interface K8sKind extends K8sKindRef {
