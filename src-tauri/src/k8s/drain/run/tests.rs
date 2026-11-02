@@ -8,6 +8,9 @@ struct Script {
     answers: Mutex<HashMap<String, VecDeque<Eviction>>>,
     calls: Mutex<Vec<(String, Duration)>>,
     started: Instant,
+    /// Eviction이 받아들여진 뒤 Pod가 남아 있는 시간(없으면 바로 사라진다)
+    stay: Mutex<HashMap<String, Duration>>,
+    accepted: Mutex<HashMap<String, Instant>>,
     /// 이 Pod를 옮기는 도중에 취소를 켠다
     cancel_during: Option<(String, watch::Sender<bool>)>,
 }
@@ -18,8 +21,15 @@ impl Script {
             answers: Mutex::new(answers.iter().map(|(name, list)| (name.to_string(), list.iter().cloned().collect())).collect()),
             calls: Mutex::new(Vec::new()),
             started: Instant::now(),
+            stay: Mutex::new(HashMap::new()),
+            accepted: Mutex::new(HashMap::new()),
             cancel_during: None,
         }
+    }
+
+    fn staying(self, name: &str, seconds: u64) -> Self {
+        self.stay.lock().unwrap().insert(name.into(), Duration::from_secs(seconds));
+        self
     }
 
     fn calls(&self) -> Vec<(String, u64)> {
@@ -42,16 +52,26 @@ impl Evictor for Script {
         }
         let mut answers = self.answers.lock().unwrap();
         let list = answers.get_mut(&pod.name).expect("script for pod");
-        if list.len() > 1 {
+        let answer = if list.len() > 1 {
             list.pop_front().unwrap()
         } else {
             list.front().cloned().expect("an answer")
+        };
+        if answer == Eviction::Evicted {
+            self.accepted.lock().unwrap().insert(pod.name.clone(), Instant::now());
         }
+        answer
+    }
+
+    async fn still_there(&self, pod: &DrainPod) -> bool {
+        let stay = self.stay.lock().unwrap().get(&pod.name).copied().unwrap_or_default();
+        let accepted = self.accepted.lock().unwrap().get(&pod.name).copied().expect("받아들여진 Pod만 살핀다");
+        accepted.elapsed() < stay
     }
 }
 
 fn pod(name: &str) -> DrainPod {
-    DrainPod { namespace: "app".into(), name: name.into(), uid: format!("uid-{name}"), empty_dir: false, unmanaged: false, blocked_by: None }
+    DrainPod { namespace: "app".into(), name: name.into(), uid: format!("uid-{name}"), empty_dir: false, unmanaged: false, blocked_by: None, grace_seconds: 10 }
 }
 
 fn pods(names: &[&str]) -> Vec<DrainPod> {
@@ -99,8 +119,10 @@ async fn pods_are_evicted_one_at_a_time_in_order_with_a_state_per_step() {
         states(&result.messages),
         [
             ("a".to_string(), PodState::Evicting),
-            ("a".to_string(), PodState::Evicted),
+            ("a".to_string(), PodState::Terminating),
             ("b".to_string(), PodState::Evicting),
+            ("b".to_string(), PodState::Terminating),
+            ("a".to_string(), PodState::Evicted),
             ("b".to_string(), PodState::Evicted),
         ]
     );
@@ -114,7 +136,7 @@ async fn each_message_carries_the_running_counts() {
     let (_keep, mut cancel) = idle();
     let result = drive(&["a", "b"], &script, &mut cancel).await;
     let DrainMessage::Pod { counts, .. } = &result.messages[1] else { panic!("{:?}", result.messages) };
-    assert_eq!(*counts, Counts { total: 2, pending: 1, evicted: 1, ..Counts::default() });
+    assert_eq!(*counts, Counts { total: 2, pending: 1, terminating: 1, ..Counts::default() });
 }
 
 #[tokio::test(start_paused = true)]
@@ -193,8 +215,8 @@ async fn cancel_stops_after_the_current_eviction() {
     script.cancel_during = Some(("a".into(), tx));
     let result = drive(&["a", "b"], &script, &mut cancel).await;
     assert_eq!(result.report.outcome, Outcome::Stopped);
-    // 하던 Eviction은 마치고(a는 옮겨졌다) 다음 것은 시작하지 않는다
-    assert_eq!(result.report.counts, Counts { total: 2, evicted: 1, pending: 1, ..Counts::default() });
+    // 하던 Eviction은 마치고(a는 받아들여졌다) 다음 것은 시작하지 않는다
+    assert_eq!(result.report.counts, Counts { total: 2, terminating: 1, pending: 1, ..Counts::default() });
     assert_eq!(script.attempts("b"), 0);
 }
 
@@ -274,9 +296,67 @@ fn messages_serialize_with_the_keys_the_screen_reads() {
         serde_json::to_value(message).unwrap(),
         serde_json::json!({
             "type": "pod", "namespace": "app", "name": "web", "state": "blocked", "error": null,
-            "counts": {"total": 2, "pending": 0, "evicting": 0, "evicted": 0, "blocked": 1, "failed": 0},
+            "counts": {"total": 2, "pending": 0, "evicting": 0, "evicted": 0, "blocked": 1, "terminating": 0, "lingering": 0, "failed": 0},
         })
     );
     let finished = DrainMessage::Finished { outcome: Outcome::TimedOut, counts: Counts::default(), error: None };
     assert_eq!(serde_json::to_value(finished).unwrap()["outcome"], "timedOut");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_accepted_pod_counts_as_moved_only_once_it_is_gone_and_does_not_hold_up_the_next_eviction() {
+    let script = Script::new(&[("slow", vec![Eviction::Evicted]), ("quick", vec![Eviction::Evicted])]).staying("slow", 5);
+    let (_keep, mut cancel) = idle();
+    let started = Instant::now();
+    let result = drive(&["slow", "quick"], &script, &mut cancel).await;
+    assert_eq!(result.report.outcome, Outcome::Completed);
+    assert_eq!(started.elapsed(), Duration::from_secs(5));
+    assert_eq!(result.report.counts, Counts { total: 2, evicted: 2, ..Counts::default() });
+    // 다음 Pod의 Eviction은 기다리지 않고 바로 보낸다
+    assert_eq!(script.calls(), [("slow".to_string(), 0), ("quick".to_string(), 0)]);
+    let seen = states(&result.messages);
+    let at = |entry: (&str, PodState)| seen.iter().position(|s| (s.0.as_str(), s.1) == entry).unwrap();
+    assert!(at(("slow", PodState::Terminating)) < at(("slow", PodState::Evicted)));
+    assert!(at(("quick", PodState::Evicted)) < at(("slow", PodState::Evicted)));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pod_that_outlives_its_grace_period_is_marked_lingering_and_the_drain_moves_on() {
+    // 유예 10초 + 여유 30초 = 40초 뒤에 포기한다
+    let script = Script::new(&[("stuck", vec![Eviction::Evicted]), ("other", vec![Eviction::Evicted])]).staying("stuck", 100_000);
+    let (_keep, mut cancel) = idle();
+    let started = Instant::now();
+    let result = drive(&["stuck", "other"], &script, &mut cancel).await;
+    assert_eq!(result.report.outcome, Outcome::Lingering);
+    assert_eq!(started.elapsed(), Duration::from_secs(40));
+    assert_eq!(result.report.counts, Counts { total: 2, evicted: 1, lingering: 1, ..Counts::default() });
+    let DrainMessage::Pod { error, .. } = result.messages.iter().find(|m| matches!(m, DrainMessage::Pod { state: PodState::Lingering, .. })).unwrap() else { unreachable!() };
+    assert!(error.as_deref().is_some_and(|e| e.contains("종료 지연") && e.contains("40")), "{error:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn cancel_while_waiting_for_a_pod_to_go_stops_at_once() {
+    let script = Script::new(&[("slow", vec![Eviction::Evicted])]).staying("slow", 100_000);
+    let (tx, mut cancel) = idle();
+    let started = Instant::now();
+    let stopper = async {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        tx.send_replace(true);
+    };
+    let (result, ()) = tokio::join!(drive(&["slow"], &script, &mut cancel), stopper);
+    assert_eq!(result.report.outcome, Outcome::Stopped);
+    assert_eq!(started.elapsed(), Duration::from_secs(3));
+    assert_eq!(result.report.counts, Counts { total: 1, terminating: 1, ..Counts::default() });
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pod_going_away_while_another_is_blocked_still_counts_as_progress() {
+    // pdb는 늘 막히고, free는 35초 동안 종료 중이다(유예 10초 + 여유 30초 안). free가 사라진 때부터 5분을 다시 센다
+    let script = Script::new(&[("pdb", vec![Eviction::Blocked]), ("free", vec![Eviction::Evicted])]).staying("free", 35);
+    let (_keep, mut cancel) = idle();
+    let started = Instant::now();
+    let result = drive(&["pdb", "free"], &script, &mut cancel).await;
+    assert_eq!(result.report.outcome, Outcome::TimedOut);
+    assert!(started.elapsed() >= Duration::from_secs(35) + STALL_LIMIT, "{:?}", started.elapsed());
+    assert_eq!(result.report.counts.evicted, 1);
 }

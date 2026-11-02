@@ -17,6 +17,8 @@ pub const BUDGETS_UNKNOWN_WARNING: &str = "PodDisruptionBudget을 읽지 못해 
 const MIRROR_ANNOTATION: &str = "kubernetes.io/config.mirror";
 /// 경고 한 줄에 이름을 이만큼까지만 싣는다. 전체 목록은 `DrainPlan`에 있다.
 const NAMES_SHOWN: usize = 5;
+/// `terminationGracePeriodSeconds`가 없을 때 쿠버네티스의 기본값
+const DEFAULT_GRACE_SECONDS: u64 = 30;
 
 /// 옮길 Pod 하나
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,6 +33,8 @@ pub struct DrainPod {
     pub unmanaged: bool,
     /// 이 Pod를 고른 PodDisruptionBudget 가운데 허용량이 0인 것의 이름
     pub blocked_by: Option<String>,
+    /// `terminationGracePeriodSeconds`. Eviction 뒤 Pod가 사라지기를 기다리는 한도의 바탕이다.
+    pub grace_seconds: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,6 +164,7 @@ pub fn plan_drain(node: &Value, pods: &[Value], budgets: Option<&[Value]>) -> Dr
             empty_dir: !finished && has_empty_dir(pod),
             unmanaged: !finished && controller_kind(pod).is_none(),
             blocked_by: budgets.and_then(|budgets| blocking_budget(pod, budgets)),
+            grace_seconds: pod.pointer("/spec/terminationGracePeriodSeconds").and_then(Value::as_u64).unwrap_or(DEFAULT_GRACE_SECONDS),
         });
     }
     evict.sort_by(|a, b| (&a.namespace, &a.name).cmp(&(&b.namespace, &b.name)));

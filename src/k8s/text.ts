@@ -336,6 +336,8 @@ export const DRAIN_POD_STATE = {
   evicting: "옮기는 중",
   evicted: "옮김",
   blocked: "막힘, 다시 시도 중",
+  terminating: "종료 중",
+  lingering: "종료 지연",
   failed: "실패",
 } as const;
 export const DRAIN_PHASE_CORDON = "노드를 스케줄 중지하는 중…";
@@ -346,9 +348,19 @@ export const DRAIN_OUTCOME = {
   stopped: "중단했어요. 이미 옮긴 Pod는 그대로예요",
   timedOut: "PodDisruptionBudget이 5분 넘게 막아 멈췄어요. 이미 옮긴 Pod는 그대로예요",
   failed: "옮기지 못한 Pod가 있어요",
+  lingering: "Eviction은 받아들여졌지만 종료가 늦은 Pod가 있어요",
 } as const;
-export const DRAIN_COUNTS = (c: { total: number; evicted: number; blocked: number; failed: number; pending: number; evicting: number }) =>
-  `전체 ${c.total} · 옮김 ${c.evicted} · 옮기는 중 ${c.evicting} · 대기 ${c.pending} · 막힘 ${c.blocked} · 실패 ${c.failed}`;
+export const DRAIN_COUNTS = (c: {
+  total: number;
+  evicted: number;
+  blocked: number;
+  failed: number;
+  pending: number;
+  evicting: number;
+  terminating: number;
+  lingering: number;
+}) =>
+  `전체 ${c.total} · 옮김 ${c.evicted} · 옮기는 중 ${c.evicting} · 종료 중 ${c.terminating} · 종료 지연 ${c.lingering} · 대기 ${c.pending} · 막힘 ${c.blocked} · 실패 ${c.failed}`;
 export const DRAIN_STOP = "중단";
 export const DRAIN_CLOSE = "닫기";
 export const DRAIN_UNDO_HINT = "스케줄 중지는 변경 기록에서 되돌릴 수 있어요";

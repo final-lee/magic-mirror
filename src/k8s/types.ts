@@ -129,6 +129,8 @@ export interface K8sDrainPod {
   unmanaged: boolean;
   /** 허용량이 0인 PodDisruptionBudget의 이름 */
   blockedBy: string | null;
+  /** terminationGracePeriodSeconds */
+  graceSeconds: number;
 }
 
 export interface K8sSkippedPod {
@@ -163,7 +165,8 @@ export interface K8sPreview {
   conflicts: K8sFieldConflict[];
 }
 
-export type K8sDrainPodState = "pending" | "evicting" | "evicted" | "blocked" | "failed";
+/** terminating: Eviction은 받아들여졌고 Pod가 사라지기를 기다림. lingering: 유예와 여유가 지나도 남아 있음 */
+export type K8sDrainPodState = "pending" | "evicting" | "evicted" | "blocked" | "terminating" | "lingering" | "failed";
 
 export interface K8sDrainCounts {
   total: number;
@@ -171,10 +174,12 @@ export interface K8sDrainCounts {
   evicting: number;
   evicted: number;
   blocked: number;
+  terminating: number;
+  lingering: number;
   failed: number;
 }
 
-export type K8sDrainOutcome = "completed" | "stopped" | "timedOut" | "failed";
+export type K8sDrainOutcome = "completed" | "stopped" | "timedOut" | "failed" | "lingering";
 
 /** `k8s_drain` 채널 메시지. `finished`가 마지막이다. */
 export type K8sDrainMessage =
