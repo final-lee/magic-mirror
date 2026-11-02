@@ -1,4 +1,6 @@
 // ArgoCD 화면의 글. 오류 문구 두 개(TOKEN_INVALID, TOKEN_MISSING)는 백엔드의 ARGOCD_TOKEN_INVALID·ARGOCD_TOKEN_MISSING과 글자까지 같아야 한다.
+import type { ArgoEnv, ArgoEnvSource } from "./argoEnv";
+
 export const ARGOCD_TITLE = "🐙 ArgoCD";
 export const LOADING = "불러오는 중…";
 export const CLOSE = "닫기";
@@ -47,9 +49,40 @@ export const ARGO_HEALTH_GROUP = "Health 상태";
 export const ARGO_SYNC_STATUSES = ["Synced", "OutOfSync", "Unknown"] as const;
 export const ARGO_HEALTH_STATUSES = ["Healthy", "Progressing", "Degraded", "Suspended", "Missing", "Unknown"] as const;
 export const ARGO_PROJECT = "프로젝트";
-export const ARGO_ALL_PROJECTS = "모든 프로젝트";
-export const ARGO_SEARCH = "이름 검색";
-export const ARGO_GROUP_BY_SET = "ApplicationSet으로 묶기";
+export const ARGO_SEARCH = "이름·레이블·네임스페이스 검색";
+// 거르기: 환경 칩, 여러 개 고르는 목록(대상 클러스터·프로젝트), 레이블
+export const ARGO_ENV_GROUP = "환경";
+export const ARGO_CLUSTER_FILTER = "클러스터";
+export const argoPickButton = (label: string, picked: number) => `${label}: ${picked === 0 ? "전체" : `${picked}개`}`;
+export const ARGO_PICK_CLEAR = "선택 해제";
+export const ARGO_LABEL_FILTER = "레이블 필터";
+export const ARGO_LABEL_PLACEHOLDER = "레이블 (key=value)";
+export const ARGO_LABEL_SUGGESTIONS = "레이블 후보";
+export const argoLabelRemove = (text: string) => `${text} 빼기`;
+// 환경 이름과 어디서 읽었는지(칸에 마우스를 올리면 보인다)
+export const ARGO_ENV_TEXT: Record<ArgoEnv, string> = { dev: "dev", stg: "stg", prd: "prd", ops: "ops", demo: "demo", preview: "preview", unknown: "미분류" };
+export const ARGO_ENV_SOURCE: Record<ArgoEnvSource | "none", string> = {
+  label: "레이블에서 읽었어요",
+  name: "이름에서 추정했어요",
+  namespace: "네임스페이스에서 추정했어요",
+  cluster: "대상 클러스터에서 추정했어요",
+  none: "환경을 알 수 없어요",
+};
+export const H_ARGO_ENV = "환경";
+// 묶기: 1단계("묶기")와 그 안의 2단계("그 안에서")
+export const ARGO_GROUP_BY = "묶기";
+export const ARGO_GROUP_THEN = "그 안에서";
+export const ARGO_GROUP_NONE = "없음";
+export const ARGO_GROUP_SET = "ApplicationSet";
+export const ARGO_GROUP_ENV = "환경";
+export const ARGO_GROUP_CLUSTER = "대상 클러스터";
+export const ARGO_GROUP_PROJECT = "프로젝트";
+export const ARGO_GROUP_NAMESPACE = "네임스페이스";
+export const argoGroupLabel = (key: string) => `레이블: ${key}`;
+export const ARGO_NO_CLUSTER = "(대상 없음)";
+export const ARGO_NO_PROJECT = "(프로젝트 없음)";
+export const ARGO_NO_NAMESPACE = "(네임스페이스 없음)";
+export const ARGO_NO_LABEL = "(레이블 없음)";
 export const ARGO_NO_APPS = "Application이 없어요";
 export const ARGO_NO_MATCH = "조건에 맞는 Application이 없어요";
 export const ARGO_UNGROUPED = "ApplicationSet 없음";

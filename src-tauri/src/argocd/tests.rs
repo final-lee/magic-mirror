@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn argocd_application_row_values() {
     let row = app_row(&json!({
-        "metadata": {"name":"app", "namespace":"argo", "resourceVersion":"7", "ownerReferences":[{"kind":"ApplicationSet","name":"fleet"}]},
+        "metadata": {"name":"app", "namespace":"argo", "resourceVersion":"7", "ownerReferences":[{"kind":"ApplicationSet","name":"fleet"}], "labels":{"environment":"prd","type":"api"}},
         "spec": {"sources":[{"targetRevision":"main"},{"targetRevision":"v2"}],"syncPolicy":{"automated":{}}},
         "status": {"sync":{"revisions":["0123456789012345678901234567890123456789","v2"]},"conditions":[{"type":"ComparisonError"},{"type":"RepeatedResourceWarning"}]}
     }));
@@ -17,6 +17,9 @@ fn argocd_application_row_values() {
     assert_eq!(row.values["autoSync"], "true");
     assert_eq!(row.values["errors"], "1");
     assert_eq!(row.values["warnings"], "1");
+    assert_eq!(row.labels.len(), 2);
+    assert_eq!(row.labels["environment"], "prd");
+    assert!(app_row(&json!({"metadata":{"name":"bare"}})).labels.is_empty());
 }
 
 #[test]

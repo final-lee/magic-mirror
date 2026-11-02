@@ -49,7 +49,7 @@ test("apps and appsets poll every 10 seconds while live, and stop when not", asy
 });
 
 test("each server has its own cache entries", async () => {
-  m.apps.mockImplementation(async (url) => [{ name: url, namespace: "argocd", resourceVersion: "1", values: {} }]);
+  m.apps.mockImplementation(async (url) => [{ name: url, namespace: "argocd", resourceVersion: "1", values: {}, labels: {} }]);
   const a = renderHook(() => useApps("https://a", true), { wrapper });
   const b = renderHook(() => useApps("https://b", true), { wrapper });
   await waitFor(() => expect(a.result.current.isSuccess && b.result.current.isSuccess).toBe(true));

@@ -51,9 +51,10 @@ export function ArgocdTab({ active }: { active: boolean }) {
     selectServer(added.url);
   };
 
-  // 목록에서 빼면 그 서버의 토큰도 키체인에서 지운다
+  // 목록에서 빼면 그 서버의 토큰도 키체인에서 지우고, 그 서버의 필터·묶기 기억도 버린다
   const removeServer = (removed: string) => {
-    update({ argocdServers: servers.filter((s) => s.url !== removed) });
+    const { [removed]: _dropped, ...views } = settings?.argocdViews ?? {};
+    update({ argocdServers: servers.filter((s) => s.url !== removed), argocdViews: views });
     qc.removeQueries({ queryKey: argoKeys.server(removed) });
     argocdApi.forgetToken(removed).catch((e: unknown) => setFailure(errorMessage(e)));
   };
@@ -115,7 +116,16 @@ export function ArgocdTab({ active }: { active: boolean }) {
       </div>
     );
   } else if (session.data) {
-    body = <ArgoView key={url} url={url} live={active} onTokenError={onTokenError} />;
+    body = (
+      <ArgoView
+        key={url}
+        url={url}
+        live={active}
+        onTokenError={onTokenError}
+        saved={settings.argocdViews?.[url] ?? null}
+        onSave={(view) => update({ argocdViews: { ...settings.argocdViews, [url]: view } })}
+      />
+    );
   } else {
     body = <div className="empty">{LOADING}</div>;
   }

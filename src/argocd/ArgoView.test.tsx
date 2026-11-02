@@ -3,21 +3,23 @@ import { renderWithClient } from "../test/utils";
 import { argocdApi } from "./api";
 import { ArgoView } from "./ArgoView";
 import {
-  ARGO_ALL_PROJECTS, ARGO_APPS_LABEL, ARGO_GROUP_BY_SET, ARGO_HEALTH_GROUP, ARGO_IN_CLUSTER, ARGO_NO_APPS, ARGO_NO_MATCH, ARGO_PROJECT, ARGO_SEARCH, ARGO_SYNC_GROUP,
-  ARGO_UNGROUPED, LOADING, TOKEN_INVALID, TOKEN_MISSING, argoAppCount, argoCaution, argoErrors, argoOk, argoOutOfSync,
+  ARGO_APPS_LABEL, ARGO_CLUSTER_FILTER, ARGO_ENV_GROUP, ARGO_ENV_SOURCE, ARGO_GROUP_BY, ARGO_GROUP_THEN, ARGO_HEALTH_GROUP, ARGO_IN_CLUSTER, ARGO_LABEL_FILTER, ARGO_NO_APPS,
+  ARGO_NO_CLUSTER, ARGO_NO_LABEL, ARGO_NO_MATCH, ARGO_PICK_CLEAR, ARGO_PROJECT, ARGO_SEARCH, ARGO_SYNC_GROUP, ARGO_UNGROUPED, LOADING, TOKEN_INVALID, TOKEN_MISSING,
+  argoAppCount, argoCaution, argoErrors, argoGenerators, argoLabelRemove, argoOk, argoOutOfSync,
 } from "./text";
-import type { ArgoApp, ArgoAppRow, ArgoAppSetRow } from "./types";
+import type { ArgoApp, ArgoAppRow, ArgoAppSetRow, ArgoViewState } from "./types";
 
 vi.mock("./api", () => ({ argocdApi: { apps: vi.fn(), appsets: vi.fn(), app: vi.fn(), tree: vi.fn(), refresh: vi.fn(), sync: vi.fn() } }));
 const m = vi.mocked(argocdApi);
 const URL = "https://argocd.example";
 const NOW = Date.parse("2026-10-30T12:00:00Z");
 
-const appRow = (name: string, values: Record<string, string> = {}): ArgoAppRow => ({
+const appRow = (name: string, values: Record<string, string> = {}, labels: Record<string, string> = {}): ArgoAppRow => ({
   name,
   namespace: "argocd",
   resourceVersion: "1",
   values: { sync: "Synced", health: "Healthy", project: "default", destination: "in-cluster", destNamespace: "web", revision: "0123456", ...values },
+  labels,
 });
 const setRow = (name: string, over: Partial<ArgoAppSetRow> = {}): ArgoAppSetRow => ({ name, namespace: "argocd", status: null, message: null, generators: [], ...over });
 
@@ -44,6 +46,36 @@ const names = () => Array.from(document.querySelectorAll("tr.argo-row")).map((r)
 const cards = () => Array.from(document.querySelectorAll<HTMLElement>("section.argo-card"));
 const headers = () => cards().map((c) => c.querySelector(".argo-band b")?.textContent);
 const chip = (group: string, status: string) => within(screen.getByRole("group", { name: group })).getByRole("button", { name: new RegExp(`^${status}\\b`) });
+/** 환경 칩처럼 이름이 한글일 수도 있는 칩("미분류 2"): \b가 한글에서는 듣지 않아 뒤의 개수로 끊는다 */
+const chipN = (group: string, text: string) => within(screen.getByRole("group", { name: group })).getByRole("button", { name: new RegExp(`^${text} \\d`) });
+const chipTexts = (group: string) => within(screen.getByRole("group", { name: group })).getAllByRole("button").map((b) => b.textContent);
+/** 여러 개 고르는 목록: 단추를 눌러 열고, 목록 안의 체크 칸을 고른다 */
+const msButton = (label: string) => screen.getByRole("button", { name: new RegExp(`^${label}:`) });
+const openMs = (label: string) => fireEvent.click(msButton(label));
+const msBox = (label: string, text: string) => within(screen.getByRole("group", { name: label })).getByRole("checkbox", { name: new RegExp(`^${text} \\d`) });
+const msTexts = (label: string) => within(screen.getByRole("group", { name: label })).getAllByRole("checkbox").map((c) => c.closest("label")?.textContent);
+const pickMs = (label: string, text: string) => {
+  openMs(label);
+  fireEvent.click(msBox(label, text));
+  openMs(label);
+};
+/** 레이블 필터 입력 */
+const labelInput = () => screen.getByRole("combobox", { name: ARGO_LABEL_FILTER });
+const addLabel = (text: string) => {
+  fireEvent.change(labelInput(), { target: { value: text } });
+  fireEvent.keyDown(labelInput(), { key: "Enter" });
+};
+const labelChips = () => Array.from(document.querySelectorAll(".argo-lchip")).map((c) => c.firstChild?.textContent);
+/** 묶기 기준 */
+const primarySel = () => screen.getByRole("combobox", { name: ARGO_GROUP_BY });
+const secondarySel = () => screen.getByRole("combobox", { name: ARGO_GROUP_THEN });
+const groupBy = (dim: string, then = "none") => {
+  fireEvent.change(primarySel(), { target: { value: dim } });
+  fireEvent.change(secondarySel(), { target: { value: then } });
+};
+const optionTexts = (sel: HTMLElement) => within(sel).getAllByRole("option").map((o) => o.textContent);
+const subHeaders = (scope: HTMLElement = document.body) => Array.from(scope.querySelectorAll("tr.argo-subgroup b")).map((b) => b.textContent);
+const colHeaders = () => screen.getAllByRole("columnheader").map((h) => h.textContent);
 
 test("reads this server's applications and ApplicationSets, and says it is loading first", async () => {
   setup([appRow("a")]);
@@ -57,14 +89,14 @@ describe("rows", () => {
   test("the table shows the app's columns with errors and warnings counted", async () => {
     await ready([appRow("web", { sync: "OutOfSync", health: "Progressing", operation: "Failed", lastSync: "2026-10-30T11:00:00Z", autoSync: "true", targetRevision: "main", errors: "2", warnings: "1" })]);
     const cells = within(document.querySelector("tr.argo-row") as HTMLElement).getAllByRole("cell");
-    expect(cells.map((c) => c.textContent)).toEqual(["web오류 2경고 1", "default", `${ARGO_IN_CLUSTER}/web`, "OutOfSync", "Progressing", "Failed", "0123456", "1h", "켜짐"]);
-    expect(cells[6]).toHaveAttribute("title", "main");
-    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["이름", "프로젝트", "대상", "Sync", "Health", "작업", "Revision", "마지막 동기화", "자동"]);
+    expect(cells.map((c) => c.textContent)).toEqual(["web오류 2경고 1", "미분류", "default", `${ARGO_IN_CLUSTER}/web`, "OutOfSync", "Progressing", "Failed", "0123456", "1h", "켜짐"]);
+    expect(cells[7]).toHaveAttribute("title", "main");
+    expect(colHeaders()).toEqual(["이름", "환경", "프로젝트", "대상", "Sync", "Health", "작업", "Revision", "마지막 동기화", "자동"]);
   });
 
   test("auto sync off is shown, and a missing value leaves the cell empty", async () => {
     await ready([appRow("off", { autoSync: "false" }), appRow("none")]);
-    const auto = (n: string) => within(screen.getByText(n).closest("tr") as HTMLElement).getAllByRole("cell")[8].textContent;
+    const auto = (n: string) => within(screen.getByText(n).closest("tr") as HTMLElement).getAllByRole("cell")[9].textContent;
     expect(auto("off")).toBe("꺼짐");
     expect(auto("none")).toBe("");
   });
@@ -76,7 +108,7 @@ describe("rows", () => {
       appRow("remote", { destination: "x-dev2-cluster", destNamespace: "x" }),
       appRow("no-ns", { destination: "other", destNamespace: "" }),
     ]);
-    const dest = (n: string) => within(screen.getByText(n).closest("tr") as HTMLElement).getAllByRole("cell")[2].textContent;
+    const dest = (n: string) => within(screen.getByText(n).closest("tr") as HTMLElement).getAllByRole("cell")[3].textContent;
     expect(dest("by-name")).toBe(`${ARGO_IN_CLUSTER}/web`);
     expect(dest("by-server")).toBe(`${ARGO_IN_CLUSTER}/db`);
     expect(dest("remote")).toBe("x-dev2-cluster/x");
@@ -138,7 +170,7 @@ describe("filtering", () => {
 
   test("picking chips never changes the chip counts", async () => {
     await ready(APPS);
-    const counts = () => screen.getAllByRole("button", { name: /\d$/ }).map((b) => b.textContent);
+    const counts = () => [ARGO_SYNC_GROUP, ARGO_HEALTH_GROUP].flatMap(chipTexts);
     const before = counts();
     fireEvent.click(chip(ARGO_SYNC_GROUP, "OutOfSync"));
     fireEvent.click(chip(ARGO_HEALTH_GROUP, "Degraded"));
@@ -152,15 +184,16 @@ describe("filtering", () => {
     expect(screen.getByText(ARGO_NO_MATCH)).toBeInTheDocument();
   });
 
-  test("project select and name search narrow the list and the chip counts", async () => {
+  test("project list and name search narrow the list and the chip counts", async () => {
     await ready([appRow("web-a", { project: "prod" }), appRow("web-b", { project: "dev", sync: "OutOfSync" }), appRow("db", { project: "prod" })]);
-    const select = screen.getByRole("combobox", { name: ARGO_PROJECT });
-    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual([ARGO_ALL_PROJECTS, "dev", "prod"]);
+    expect(msButton(ARGO_PROJECT)).toHaveTextContent("프로젝트: 전체");
+    openMs(ARGO_PROJECT);
+    expect(msTexts(ARGO_PROJECT)).toEqual(["dev1", "prod2"]);
     expect(chip(ARGO_SYNC_GROUP, "OutOfSync")).toHaveTextContent("OutOfSync 1");
-    fireEvent.change(select, { target: { value: "prod" } });
+    fireEvent.click(msBox(ARGO_PROJECT, "prod"));
     expect([...names()].sort()).toEqual(["db", "web-a"]);
     expect(chip(ARGO_SYNC_GROUP, "OutOfSync")).toHaveTextContent("OutOfSync 0");
-    fireEvent.change(screen.getByRole("textbox", { name: ARGO_SEARCH }), { target: { value: "WEB" } });
+    fireEvent.change(screen.getByRole("textbox", { name: ARGO_SEARCH }), { target: { value: "WEB-" } });
     expect(names()).toEqual(["web-a"]);
     expect(chip(ARGO_SYNC_GROUP, "Synced")).toHaveTextContent("Synced 1");
   });
@@ -249,16 +282,17 @@ describe("grouping by ApplicationSet", () => {
 
   test("the toggle flattens the list into one problem-first run", async () => {
     await ready([appRow("web-a", { appSet: "web" }), appRow("db-a", { appSet: "db", sync: "OutOfSync" }), appRow("solo")], [setRow("web"), setRow("db")]);
-    fireEvent.click(screen.getByRole("checkbox", { name: ARGO_GROUP_BY_SET }));
+    groupBy("none");
     expect(headers()).toEqual([]);
     expect(names()).toEqual(["db-a", "solo", "web-a"]);
-    fireEvent.click(screen.getByRole("checkbox", { name: ARGO_GROUP_BY_SET }));
+    groupBy("set");
     expect(headers()).toHaveLength(3);
   });
 
   test("grouping is on by default", async () => {
     await ready([appRow("a")]);
-    expect(screen.getByRole("checkbox", { name: ARGO_GROUP_BY_SET })).toBeChecked();
+    expect(primarySel()).toHaveValue("set");
+    expect(secondarySel()).toHaveValue("none");
     expect(headers()).toEqual([ARGO_UNGROUPED]);
   });
 });
@@ -276,7 +310,7 @@ test("worst first: errors (error conditions, Degraded or Missing, a failed opera
     appRow("zz-fine"),
     appRow("yy-warn-only", { warnings: "3" }),
   ]);
-  fireEvent.click(screen.getByRole("checkbox", { name: ARGO_GROUP_BY_SET }));
+  groupBy("none");
   expect(names()).toEqual(["cc-health", "dd-errors", "ee-failed", "ee2-error", "gg-missing", "bb-sync", "ff-nohealth", "aa-fine", "yy-warn-only", "zz-fine"]);
 });
 
@@ -349,5 +383,440 @@ describe("empty and error states", () => {
     const onTokenError = vi.fn();
     renderWithClient(<ArgoView url={URL} live onTokenError={onTokenError} now={NOW} />);
     await waitFor(() => expect(onTokenError).toHaveBeenCalledWith(TOKEN_INVALID));
+  });
+});
+
+describe("environment column", () => {
+  test("each row shows its environment; the tooltip says where it was read", async () => {
+    await ready([
+      appRow("a-label", {}, { environment: "production" }),
+      appRow("b-stg"),
+      appRow("c", { destNamespace: "backend-prd" }),
+      appRow("d", { destination: "x-dev2-cluster", destNamespace: "x" }),
+      appRow("e"),
+      appRow("pr-1-dev", {}, { preview: "true", slug: "pr-1" }),
+    ]);
+    const env = (n: string) => {
+      const badge = within(screen.getByText(n).closest("tr") as HTMLElement).getAllByRole("cell")[1].firstElementChild as HTMLElement;
+      return [badge.textContent, badge.getAttribute("title"), badge.className.match(/argo-env-(\w+)/)?.[1]];
+    };
+    expect(env("a-label")).toEqual(["prd", ARGO_ENV_SOURCE.label, "prd"]);
+    expect(env("b-stg")).toEqual(["stg", ARGO_ENV_SOURCE.name, "stg"]);
+    expect(env("c")).toEqual(["prd", ARGO_ENV_SOURCE.namespace, "prd"]);
+    expect(env("d")).toEqual(["dev", ARGO_ENV_SOURCE.cluster, "dev"]);
+    expect(env("e")).toEqual(["미분류", ARGO_ENV_SOURCE.none, "unknown"]);
+    expect(env("pr-1-dev")).toEqual(["preview", ARGO_ENV_SOURCE.label, "preview"]);
+  });
+
+  test("the column is there when flat or grouped by something else, and gone when either level groups by environment", async () => {
+    await ready([appRow("a-dev", { appSet: "web" }, { team: "ai" })], [setRow("web")]);
+    const dataCells = () => (document.querySelector("tr.argo-row") as HTMLElement).children.length;
+    expect(colHeaders()).toContain("환경");
+    expect(dataCells()).toBe(10);
+    groupBy("none");
+    expect(colHeaders()).toContain("환경");
+    groupBy("label:team", "cluster");
+    expect(colHeaders()).toContain("환경");
+    groupBy("env");
+    expect(colHeaders()).not.toContain("환경");
+    expect(dataCells()).toBe(9);
+    groupBy("set", "env");
+    expect(colHeaders()).not.toContain("환경");
+    expect(dataCells()).toBe(9);
+    groupBy("set", "project");
+    expect(colHeaders()).toContain("환경");
+    expect(dataCells()).toBe(10);
+  });
+});
+
+describe("environment, cluster, project and label filters", () => {
+  test("environment chips: only environments in the data, in the fixed order; OR within, AND with the others", async () => {
+    await ready([appRow("a-dev"), appRow("b-dev", { sync: "OutOfSync" }), appRow("c-stg"), appRow("d-prd"), appRow("e")]);
+    expect(chipTexts(ARGO_ENV_GROUP)).toEqual(["dev 2", "stg 1", "prd 1", "미분류 1"]);
+    fireEvent.click(chipN(ARGO_ENV_GROUP, "dev"));
+    fireEvent.click(chipN(ARGO_ENV_GROUP, "stg"));
+    expect(chipN(ARGO_ENV_GROUP, "dev")).toHaveAttribute("aria-pressed", "true");
+    expect([...names()].sort()).toEqual(["a-dev", "b-dev", "c-stg"]);
+    // 자기 칩의 숫자는 그대로, 다른 칩(Sync)의 숫자는 환경 조건을 따른다
+    expect(chipTexts(ARGO_ENV_GROUP)).toEqual(["dev 2", "stg 1", "prd 1", "미분류 1"]);
+    expect(chip(ARGO_SYNC_GROUP, "Synced")).toHaveTextContent("Synced 2");
+    expect(chip(ARGO_SYNC_GROUP, "OutOfSync")).toHaveTextContent("OutOfSync 1");
+    // 다른 조건과는 교집합이고, 그 조건이 환경 칩의 숫자를 줄인다
+    fireEvent.click(chip(ARGO_SYNC_GROUP, "OutOfSync"));
+    expect(names()).toEqual(["b-dev"]);
+    expect(chipTexts(ARGO_ENV_GROUP)).toEqual(["dev 1", "stg 0", "prd 0", "미분류 0"]);
+  });
+
+  test("cluster list: in-cluster shown as this cluster, counts, OR within and AND with project, own picks keep the counts", async () => {
+    await ready([
+      appRow("a", { destination: "x-dev2-cluster", project: "p1" }),
+      appRow("b", { destination: "x-dev2-cluster", project: "p2" }),
+      appRow("c", { destination: "https://kubernetes.default.svc", project: "p1" }),
+      appRow("d", { destination: "in-cluster", project: "p2" }),
+      appRow("e", { destination: "ml-cluster", project: "p1" }),
+    ]);
+    expect(msButton(ARGO_CLUSTER_FILTER)).toHaveTextContent("클러스터: 전체");
+    openMs(ARGO_CLUSTER_FILTER);
+    expect(msTexts(ARGO_CLUSTER_FILTER)).toEqual(["ml-cluster1", "x-dev2-cluster2", `${ARGO_IN_CLUSTER}2`]);
+    fireEvent.click(msBox(ARGO_CLUSTER_FILTER, "x-dev2-cluster"));
+    fireEvent.click(msBox(ARGO_CLUSTER_FILTER, ARGO_IN_CLUSTER));
+    expect(msBox(ARGO_CLUSTER_FILTER, ARGO_IN_CLUSTER)).toBeChecked();
+    expect(msButton(ARGO_CLUSTER_FILTER)).toHaveTextContent("클러스터: 2개");
+    expect([...names()].sort()).toEqual(["a", "b", "c", "d"]);
+    expect(msTexts(ARGO_CLUSTER_FILTER)).toEqual(["ml-cluster1", "x-dev2-cluster2", `${ARGO_IN_CLUSTER}2`]);
+    // 프로젝트와는 교집합. 클러스터 숫자는 프로젝트 조건만 따른다
+    pickMs(ARGO_PROJECT, "p1");
+    expect([...names()].sort()).toEqual(["a", "c"]);
+    expect(msTexts(ARGO_CLUSTER_FILTER)).toEqual(["ml-cluster1", "x-dev2-cluster1", `${ARGO_IN_CLUSTER}1`]);
+    // 선택 해제
+    fireEvent.click(within(screen.getByRole("group", { name: ARGO_CLUSTER_FILTER })).getByRole("button", { name: ARGO_PICK_CLEAR }));
+    expect(msButton(ARGO_CLUSTER_FILTER)).toHaveTextContent("클러스터: 전체");
+    expect([...names()].sort()).toEqual(["a", "c", "e"]);
+  });
+
+  test("project list: several projects are OR; the counts follow the other filters", async () => {
+    await ready([appRow("a", { project: "p1" }), appRow("b", { project: "p2", sync: "OutOfSync" }), appRow("c", { project: "p3" })]);
+    pickMs(ARGO_PROJECT, "p1");
+    pickMs(ARGO_PROJECT, "p2");
+    expect(msButton(ARGO_PROJECT)).toHaveTextContent("프로젝트: 2개");
+    expect([...names()].sort()).toEqual(["a", "b"]);
+    fireEvent.click(chip(ARGO_SYNC_GROUP, "OutOfSync"));
+    openMs(ARGO_PROJECT);
+    expect(msTexts(ARGO_PROJECT)).toEqual(["p10", "p21", "p30"]);
+    expect(names()).toEqual(["b"]);
+  });
+
+  test("the list closes on an outside click and on Escape (which returns focus to its button)", async () => {
+    await ready([appRow("a")]);
+    openMs(ARGO_PROJECT);
+    expect(screen.getByRole("group", { name: ARGO_PROJECT })).toBeInTheDocument();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("group", { name: ARGO_PROJECT })).toBeNull();
+    openMs(ARGO_PROJECT);
+    fireEvent.mouseDown(screen.getByRole("checkbox"));
+    expect(screen.getByRole("group", { name: ARGO_PROJECT })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("checkbox"), { key: "Escape" });
+    expect(screen.queryByRole("group", { name: ARGO_PROJECT })).toBeNull();
+    expect(msButton(ARGO_PROJECT)).toHaveFocus();
+  });
+
+  describe("label filter", () => {
+    const LABELED = () =>
+      ready([
+        appRow("a", {}, { team: "ai", type: "api" }),
+        appRow("b", {}, { team: "ai", type: "web" }),
+        appRow("c", {}, { team: "data", type: "api" }),
+        appRow("d", { sync: "OutOfSync" }, { team: "data", type: "consumer" }),
+        appRow("e"),
+      ]);
+    const suggestions = () => (screen.queryByRole("listbox") ? within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent) : []);
+
+    test("suggests keys when empty and key=value pairs as you type, with counts", async () => {
+      await LABELED();
+      fireEvent.focus(labelInput());
+      expect(suggestions()).toEqual(["team4", "type4"]);
+      fireEvent.change(labelInput(), { target: { value: "team=" } });
+      expect(suggestions()).toEqual(["team=ai2", "team=data2"]);
+      fireEvent.change(labelInput(), { target: { value: "API" } });
+      expect(suggestions()).toEqual(["type=api2"]);
+      fireEvent.change(labelInput(), { target: { value: "zzz" } });
+      expect(suggestions()).toEqual([]);
+    });
+
+    test("Enter adds a chip: the same key is OR, different keys are AND, a bare key means the label exists", async () => {
+      await LABELED();
+      addLabel("team=ai");
+      expect(labelChips()).toEqual(["team=ai"]);
+      expect(labelInput()).toHaveValue("");
+      expect([...names()].sort()).toEqual(["a", "b"]);
+      addLabel("team=data");
+      expect([...names()].sort()).toEqual(["a", "b", "c", "d"]);
+      addLabel("type=api");
+      expect(labelChips()).toEqual(["team=ai", "team=data", "type=api"]);
+      expect([...names()].sort()).toEqual(["a", "c"]);
+      // 같은 칩을 또 더해도 하나
+      addLabel("type=api");
+      expect(labelChips()).toHaveLength(3);
+      fireEvent.click(screen.getByRole("button", { name: argoLabelRemove("type=api") }));
+      expect(labelChips()).toEqual(["team=ai", "team=data"]);
+      expect([...names()].sort()).toEqual(["a", "b", "c", "d"]);
+      fireEvent.click(screen.getByRole("button", { name: argoLabelRemove("team=ai") }));
+      fireEvent.click(screen.getByRole("button", { name: argoLabelRemove("team=data") }));
+      expect(names()).toHaveLength(5);
+      addLabel("type");
+      expect(labelChips()).toEqual(["type"]);
+      expect([...names()].sort()).toEqual(["a", "b", "c", "d"]);
+    });
+
+    test("clicking a suggestion adds it; arrow keys and Enter pick one; the picked one is no longer offered", async () => {
+      await LABELED();
+      fireEvent.change(labelInput(), { target: { value: "team=" } });
+      fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: /^team=data/ }));
+      expect(labelChips()).toEqual(["team=data"]);
+      expect([...names()].sort()).toEqual(["c", "d"]);
+      fireEvent.change(labelInput(), { target: { value: "team=" } });
+      expect(suggestions()).toEqual(["team=ai2"]);
+      fireEvent.change(labelInput(), { target: { value: "type=" } });
+      fireEvent.keyDown(labelInput(), { key: "ArrowDown" });
+      fireEvent.keyDown(labelInput(), { key: "ArrowDown" });
+      fireEvent.keyDown(labelInput(), { key: "Enter" });
+      expect(labelChips()).toEqual(["team=data", "type=consumer"]);
+    });
+
+    test("Enter on a partial text takes the first suggestion, not the half-typed text; with no suggestion it takes the text", async () => {
+      await LABELED();
+      addLabel("type=con");
+      expect(labelChips()).toEqual(["type=consumer"]);
+      expect(names()).toEqual(["d"]);
+      addLabel("owner=me");
+      expect(labelChips()).toEqual(["type=consumer", "owner=me"]);
+      // 빈 입력의 Enter는 아무것도 더하지 않는다
+      fireEvent.keyDown(labelInput(), { key: "Enter" });
+      expect(labelChips()).toHaveLength(2);
+    });
+
+    test("Escape closes the suggestions; the counts follow the other filters", async () => {
+      await LABELED();
+      fireEvent.click(chip(ARGO_SYNC_GROUP, "OutOfSync"));
+      fireEvent.change(labelInput(), { target: { value: "team=" } });
+      expect(suggestions()).toEqual(["team=ai0", "team=data1"]);
+      fireEvent.keyDown(labelInput(), { key: "Escape" });
+      expect(screen.queryByRole("listbox")).toBeNull();
+    });
+  });
+
+  test("the search also matches label values and the destination namespace", async () => {
+    await ready([appRow("alpha", { destNamespace: "payments-dev" }, { team: "Platform" }), appRow("beta"), appRow("gamma", {}, { team: "data" })]);
+    const search = (q: string) => fireEvent.change(screen.getByRole("textbox", { name: ARGO_SEARCH }), { target: { value: q } });
+    search("payments");
+    expect(names()).toEqual(["alpha"]);
+    search("PLATFORM");
+    expect(names()).toEqual(["alpha"]);
+    search("data");
+    expect(names()).toEqual(["gamma"]);
+    search("beta");
+    expect(names()).toEqual(["beta"]);
+    // 레이블 키는 찾지 않는다
+    search("team");
+    expect(names()).toEqual([]);
+  });
+});
+
+describe("grouping levels", () => {
+  test("options: ApplicationSet, environment, cluster, project, namespace, one per label key, none; the second level leaves out the first", async () => {
+    await ready([appRow("a", {}, { team: "ai", type: "api" }), appRow("b", {}, { team: "data" })]);
+    const all = ["ApplicationSet", "환경", "대상 클러스터", "프로젝트", "네임스페이스", "레이블: team", "레이블: type", "없음"];
+    expect(optionTexts(primarySel())).toEqual(all);
+    expect(optionTexts(secondarySel())).toEqual(all.filter((t) => t !== "ApplicationSet"));
+    fireEvent.change(primarySel(), { target: { value: "label:team" } });
+    expect(optionTexts(secondarySel())).toEqual(all.filter((t) => t !== "레이블: team"));
+  });
+
+  test("the second level is off with no first level, and cannot equal the first level", async () => {
+    await ready([appRow("a-dev", { appSet: "web" })], [setRow("web")]);
+    expect(secondarySel()).toBeEnabled();
+    fireEvent.change(secondarySel(), { target: { value: "env" } });
+    expect(secondarySel()).toHaveValue("env");
+    // 1단계를 2단계와 같게 바꾸면 2단계는 없음이 된다
+    fireEvent.change(primarySel(), { target: { value: "env" } });
+    expect(secondarySel()).toHaveValue("none");
+    expect(subHeaders()).toEqual([]);
+    fireEvent.change(primarySel(), { target: { value: "none" } });
+    expect(secondarySel()).toBeDisabled();
+    expect(secondarySel()).toHaveValue("none");
+    expect(headers()).toEqual([]);
+  });
+
+  test("by environment: the fixed order whatever the health, unknown last, no ApplicationSet extras", async () => {
+    await ready(
+      [
+        appRow("a-prd"),
+        appRow("b-dev"),
+        appRow("c-ops"),
+        appRow("d-stg", { sync: "OutOfSync" }),
+        appRow("e"),
+        appRow("pr-1", {}, { preview: "true" }),
+        appRow("f-demo"),
+        appRow("g-dev", { health: "Degraded", appSet: "web" }),
+      ],
+      [setRow("web", { generators: ["list"], status: "Error", message: "boom" }), setRow("empty")],
+    );
+    expect(screen.getByText(argoGenerators("list"))).toBeInTheDocument();
+    groupBy("env");
+    expect(headers()).toEqual(["dev", "stg", "prd", "ops", "demo", "preview", "미분류"]);
+    expect(names()).toEqual(["g-dev", "b-dev", "d-stg", "a-prd", "c-ops", "f-demo", "pr-1", "e"]);
+    // ApplicationSet의 generator·상태·메시지·앱 없는 카드는 ApplicationSet으로 묶을 때만
+    expect(screen.queryByText(argoGenerators("list"))).toBeNull();
+    expect(screen.queryByText("boom")).toBeNull();
+    expect(screen.queryByText("Error")).toBeNull();
+    expect(headers()).not.toContain("empty");
+  });
+
+  test("by cluster: errors, then problems, then healthy by name; apps without a destination go last whatever their health", async () => {
+    await ready([
+      appRow("a", { destination: "k8s-b-cluster" }),
+      appRow("b", { destination: "k8s-a-cluster" }),
+      appRow("c", { destination: "k8s-z-cluster", health: "Degraded" }),
+      appRow("d", { destination: "", health: "Degraded" }),
+      appRow("e", { destination: "in-cluster", sync: "OutOfSync" }),
+    ]);
+    groupBy("cluster");
+    expect(headers()).toEqual(["k8s-z-cluster", ARGO_IN_CLUSTER, "k8s-a-cluster", "k8s-b-cluster", ARGO_NO_CLUSTER]);
+    expect(cards().map((c) => c.className.match(/argo-card-(\w+)/)?.[1])).toEqual(["err", "warn", "ok", "ok", "err"]);
+  });
+
+  test("by label: groups per value, apps without the label go last as 'no label'", async () => {
+    await ready([
+      appRow("a", {}, { team: "data" }),
+      appRow("b", {}, { team: "ai" }),
+      appRow("c", { sync: "OutOfSync" }, { team: "zed" }),
+      appRow("d", { health: "Degraded" }),
+      appRow("e", {}, { team: "ai" }),
+    ]);
+    groupBy("label:team");
+    expect(headers()).toEqual(["zed", "ai", "data", ARGO_NO_LABEL]);
+    expect(within(cards()[1]).getByText(argoAppCount(2))).toBeInTheDocument();
+  });
+
+  test("by project and by namespace", async () => {
+    await ready([appRow("a", { project: "p2", destNamespace: "n1" }), appRow("b", { project: "p1", destNamespace: "n2" }), appRow("c", { project: "p2", destNamespace: "n2" })]);
+    groupBy("project");
+    expect(headers()).toEqual(["p1", "p2"]);
+    groupBy("namespace");
+    expect(headers()).toEqual(["n1", "n2"]);
+    expect(names()).toEqual(["a", "b", "c"]);
+  });
+
+  test("a second level puts foldable sub-headers with tally chips and a count inside each card, with the rows under them", async () => {
+    await ready(
+      [appRow("web-dev", { appSet: "web" }), appRow("web-prd", { appSet: "web", sync: "OutOfSync" }), appRow("web-stg", { appSet: "web" }), appRow("web-x", { appSet: "web" }), appRow("solo-dev")],
+      [setRow("web", { generators: ["list"] })],
+    );
+    groupBy("set", "env");
+    expect(headers()).toEqual(["web", ARGO_UNGROUPED]);
+    const [web, loose] = cards();
+    expect(subHeaders(web)).toEqual(["dev", "stg", "prd", "미분류"]);
+    expect(subHeaders(loose)).toEqual(["dev"]);
+    expect(names()).toEqual(["web-dev", "web-stg", "web-prd", "web-x", "solo-dev"]);
+    // 소제목 줄은 표의 모든 열에 걸치고(환경으로 묶으니 9열), 요약 칩과 개수가 있다
+    const prd = Array.from(web.querySelectorAll<HTMLElement>("tr.argo-subgroup")).find((tr) => tr.textContent?.startsWith("▾prd")) as HTMLElement;
+    expect(prd.querySelector("td")).toHaveAttribute("colspan", "9");
+    expect(within(prd).getByText(argoOutOfSync(1))).toHaveClass("argo-warn");
+    expect(within(prd).getByText(argoAppCount(1))).toBeInTheDocument();
+    // ApplicationSet 머리는 1단계일 때만: 2단계 소제목에는 generator가 없다
+    expect(screen.getByText(argoGenerators("list"))).toBeInTheDocument();
+    fireEvent.change(primarySel(), { target: { value: "env" } });
+    fireEvent.change(secondarySel(), { target: { value: "set" } });
+    expect(headers()).toEqual(["dev", "stg", "prd", "미분류"]);
+    expect(subHeaders(cards()[0])).toEqual(["web", ARGO_UNGROUPED]);
+    expect(screen.queryByText(argoGenerators("list"))).toBeNull();
+  });
+
+  test("the second level is ordered like the first: environment by the fixed order, others worst first with 'none' last", async () => {
+    await ready([
+      appRow("x1-dev", { destination: "k8s-b-cluster" }),
+      appRow("x2-dev", { destination: "k8s-a-cluster", health: "Degraded" }),
+      appRow("x3-dev", { destination: "k8s-c-cluster", sync: "OutOfSync" }),
+      appRow("x4-dev", { destination: "", health: "Degraded" }),
+      appRow("x5-dev", { destination: "k8s-d-cluster" }),
+    ]);
+    groupBy("env", "cluster");
+    expect(subHeaders()).toEqual(["k8s-a-cluster", "k8s-c-cluster", "k8s-b-cluster", "k8s-d-cluster", ARGO_NO_CLUSTER]);
+    // 1단계가 환경이라 환경 열은 없다
+    expect(colHeaders()).not.toContain("환경");
+    expect(names()).toEqual(["x2-dev", "x3-dev", "x1-dev", "x5-dev", "x4-dev"]);
+  });
+
+  test("a sub-header folds just its own rows and opens again; folding the card hides the sub-headers too", async () => {
+    await ready([appRow("a-dev"), appRow("b-dev", { destination: "k8s-z-cluster" }), appRow("c-stg")]);
+    groupBy("env", "cluster");
+    expect(names()).toEqual(["b-dev", "a-dev", "c-stg"]);
+    const band = Array.from(document.querySelectorAll<HTMLElement>("tr.argo-subgroup button")).find((b) => b.textContent?.includes(ARGO_IN_CLUSTER)) as HTMLElement;
+    expect(band).toHaveAttribute("aria-expanded", "true");
+    expect(band.closest("tr")).toHaveClass("argo-subgroup");
+    fireEvent.click(band);
+    expect(band).toHaveAttribute("aria-expanded", "false");
+    expect(names()).toEqual(["b-dev", "c-stg"]);
+    expect(subHeaders(cards()[0])).toEqual(["k8s-z-cluster", ARGO_IN_CLUSTER]);
+    fireEvent.click(band);
+    expect(names()).toEqual(["b-dev", "a-dev", "c-stg"]);
+    fireEvent.click(cards()[0].querySelector(".argo-band") as HTMLElement);
+    expect(subHeaders()).toEqual([ARGO_IN_CLUSTER]);
+    expect(names()).toEqual(["c-stg"]);
+  });
+
+  test("filters apply before grouping: empty groups and sub-groups disappear", async () => {
+    await ready([appRow("a-dev", { destination: "k8s-a-cluster" }), appRow("b-stg", { destination: "k8s-b-cluster" })]);
+    groupBy("env", "cluster");
+    expect(headers()).toEqual(["dev", "stg"]);
+    fireEvent.click(chipN(ARGO_ENV_GROUP, "stg"));
+    expect(headers()).toEqual(["stg"]);
+    expect(subHeaders()).toEqual(["k8s-b-cluster"]);
+  });
+});
+
+describe("remembered filters and grouping", () => {
+  const SAVED: ArgoViewState = {
+    sync: ["OutOfSync"],
+    health: [],
+    envs: ["dev", "stg", "bogus"],
+    clusters: [],
+    projects: ["p1"],
+    labels: ["type=api", "=broken"],
+    groupBy: "env",
+    thenBy: "label:type",
+  };
+  const rows = [
+    appRow("a-dev", { sync: "OutOfSync", project: "p1" }, { type: "api" }),
+    appRow("b-stg", { sync: "OutOfSync", project: "p1" }, { type: "api" }),
+    appRow("c-dev", { project: "p1" }, { type: "api" }),
+    appRow("d-prd", { sync: "OutOfSync", project: "p1" }, { type: "api" }),
+    appRow("e-dev", { sync: "OutOfSync", project: "p2" }, { type: "api" }),
+    appRow("f-dev", { sync: "OutOfSync", project: "p1" }, { type: "web" }),
+  ];
+
+  test("the saved view comes back: filters, grouping, and nothing unreadable", async () => {
+    const onSave = vi.fn();
+    setup(rows, [], { saved: SAVED, onSave });
+    await screen.findByRole("table", { name: ARGO_APPS_LABEL });
+    expect(names()).toEqual(["a-dev", "b-stg"]);
+    expect(chip(ARGO_SYNC_GROUP, "OutOfSync")).toHaveAttribute("aria-pressed", "true");
+    expect(chipN(ARGO_ENV_GROUP, "dev")).toHaveAttribute("aria-pressed", "true");
+    expect(msButton(ARGO_PROJECT)).toHaveTextContent("프로젝트: 1개");
+    expect(labelChips()).toEqual(["type=api"]);
+    expect(primarySel()).toHaveValue("env");
+    expect(secondarySel()).toHaveValue("label:type");
+    expect(headers()).toEqual(["dev", "stg"]);
+    expect(subHeaders()).toEqual(["api", "api"]);
+    // 그리기만 해서는 저장하지 않는다
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  test("an unknown grouping falls back to the default", async () => {
+    setup([appRow("a")], [], { saved: { ...SAVED, envs: [], sync: [], projects: [], labels: [], groupBy: "colour", thenBy: "label:" } });
+    await screen.findByRole("table", { name: ARGO_APPS_LABEL });
+    expect(primarySel()).toHaveValue("set");
+    expect(secondarySel()).toHaveValue("none");
+  });
+
+  test("each change of filters or grouping is saved, the search text is not", async () => {
+    const onSave = vi.fn();
+    setup(rows, [], { onSave });
+    await screen.findByRole("table", { name: ARGO_APPS_LABEL });
+    fireEvent.change(screen.getByRole("textbox", { name: ARGO_SEARCH }), { target: { value: "dev" } });
+    expect(onSave).not.toHaveBeenCalled();
+    fireEvent.click(chip(ARGO_HEALTH_GROUP, "Healthy"));
+    addLabel("type=web");
+    groupBy("project", "env");
+    expect(onSave).toHaveBeenLastCalledWith({
+      sync: [],
+      health: ["Healthy"],
+      envs: [],
+      clusters: [],
+      projects: [],
+      labels: ["type=web"],
+      groupBy: "project",
+      thenBy: "env",
+    });
   });
 });
