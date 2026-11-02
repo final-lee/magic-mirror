@@ -103,6 +103,10 @@ export const argoWarnings = (n: number) => `경고 ${n}`;
 export const argoOutOfSync = (n: number) => `OutOfSync ${n}`;
 export const argoCaution = (n: number) => `주의 ${n}`;
 export const argoOk = (n: number) => `정상 ${n}`;
+// 정상은 접어서 문제를 먼저 보인다
+export const argoOkApps = (n: number) => `정상 Application ${n}개`;
+export const ARGO_EXPAND_ALL = "모두 펼치기";
+export const ARGO_FOLD_OK = "정상 접기";
 
 // 상세
 export const ARGO_DETAIL_LABEL = "Application 상세";

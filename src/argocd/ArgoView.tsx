@@ -14,7 +14,7 @@ import { isTokenError, useApps, useAppsets } from "./queries";
 import {
   ARGO_APPS_LABEL, ARGO_AUTO_OFF, ARGO_AUTO_ON, ARGO_CLUSTER_FILTER, ARGO_ENV_GROUP, ARGO_ENV_SOURCE, ARGO_ENV_TEXT, ARGO_GROUP_BY, ARGO_GROUP_THEN, ARGO_HEALTH_GROUP,
   ARGO_HEALTH_STATUSES, ARGO_NO_APPS, ARGO_NO_MATCH, ARGO_PROJECT, ARGO_SEARCH, ARGO_SYNC_GROUP, ARGO_SYNC_STATUSES, COL_NAME, H_ARGO_AUTO, H_ARGO_DEST, H_ARGO_ENV,
-  H_ARGO_LAST_SYNC, H_ARGO_OPERATION, H_ARGO_REVISION, LOADING, argoAppCount, argoCaution, argoErrors, argoGenerators, argoOk, argoOutOfSync, argoWarnings,
+  H_ARGO_LAST_SYNC, H_ARGO_OPERATION, H_ARGO_REVISION, LOADING, ARGO_EXPAND_ALL, ARGO_FOLD_OK, argoAppCount, argoCaution, argoErrors, argoGenerators, argoOk, argoOkApps, argoOutOfSync, argoWarnings,
 } from "./text";
 import type { ArgoAppRow, ArgoViewState } from "./types";
 
@@ -147,8 +147,10 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
   const [search, setSearch] = useState("");
   const [primary, setPrimary] = useState<GroupDim>(() => parseDim(saved?.groupBy) ?? "set");
   const [secondaryPick, setSecondaryPick] = useState<GroupDim>(() => parseDim(saved?.thenBy) ?? "none");
-  // 처음에는 모두 펼친다. 사용자가 머리 줄을 눌러 접은 묶음만 이 탭이 열려 있는 동안 기억한다.
-  const [folded, setFolded] = useState<Set<string>>(new Set());
+  // 문제가 있는 묶음은 펴고, 정상인 묶음·정상 행은 접어 문제를 먼저 보인다. 사용자가 직접 펴거나 접은 것은 탭이 열린 동안 그대로 둔다.
+  const [manual, setManual] = useState<Map<string, boolean>>(new Map());
+  // "모두 펼치기": 기본을 모두 펼침으로 바꾼다. 다시 누르면 처음 규칙(정상 접기)으로 돌아간다. 둘 다 그동안 직접 펴고 접은 것은 잊는다.
+  const [allOpen, setAllOpen] = useState(false);
   const [selected, setSelected] = useState<{ namespace: string; name: string } | null>(null);
   const at = now ?? Date.now();
 
@@ -233,6 +235,10 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
   );
 
   const selectedRow = selected ? appRows.find((r) => r.name === selected.name && r.namespace === selected.namespace) : undefined;
+  // Sync·Health 칩이나 검색으로 직접 찾을 때는 찾은 것을 접지 않는다
+  const quietOk = syncPick.size === 0 && healthPick.size === 0 && search.trim() === "";
+  const isOpen = (id: string, byDefault: boolean) => manual.get(id) ?? (allOpen || byDefault);
+  const setOpen = (id: string, open: boolean) => setManual((m) => new Map(m).set(id, open));
   const colCount = showEnv ? 10 : 9;
 
   const row = (r: ArgoAppRow, inSub = false) => {
@@ -282,24 +288,74 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
     );
   };
 
-  /** 카드 안의 2단계 묶음: 접을 수 있는 소제목 줄 다음에 그 묶음의 행 */
+  /** 행 목록: 문제 행 다음에 정상 행. 문제와 정상이 섞여 있으면 정상 행은 한 줄로 접고, 그 줄에 정상 앱 이름을 늘어놓아 무엇이 있는지 보이게 한다 */
+  const rowsOf = (id: string, rows: ArgoAppRow[], inSub: boolean) => {
+    const bad = rows.filter(isProblem);
+    const ok = rows.filter((r) => !isProblem(r));
+    if (!quietOk || bad.length === 0 || ok.length === 0) return rows.map((r) => row(r, inSub));
+    const okId = `${id}|ok`;
+    const open = isOpen(okId, false);
+    return [
+      ...bad.map((r) => row(r, inSub)),
+      <tr key={okId} className={`argo-okfold${inSub ? " argo-in-sub" : ""}`}>
+        <td colSpan={colCount}>
+          <button className="argo-okfold-btn" aria-expanded={open} onClick={() => setOpen(okId, !open)}>
+            <span className="argo-band-tw">{open ? "▾" : "▸"}</span>
+            <span className="argo-badge argo-ok">{argoOkApps(ok.length)}</span>
+            {!open && <span className="argo-okfold-names mono">{ok.map((r) => r.name).join(" · ")}</span>}
+          </button>
+        </td>
+      </tr>,
+      ...(open ? ok.map((r) => row(r, inSub)) : []),
+    ];
+  };
+
+  /** 카드 안의 2단계 묶음: 접을 수 있는 소제목 줄 다음에 그 묶음의 행. 모두 정상이면 처음에 접어 둔다 */
   const subgroup = (cardId: string, sg: Group) => {
     const id = `${cardId}|${secondary}|${sg.id}`;
-    const open = !folded.has(id);
+    const t = tally(sg.apps);
+    const open = isOpen(id, !quietOk || t.ok < sg.apps.length);
     return (
       <Fragment key={id}>
         <tr className="argo-subgroup">
           <td colSpan={colCount}>
-            <button className="argo-subband" aria-expanded={open} onClick={() => setFolded((f) => toggled(f, id))}>
+            <button className="argo-subband" aria-expanded={open} onClick={() => setOpen(id, !open)}>
               <span className="argo-band-tw">{open ? "▾" : "▸"}</span>
               <b>{sg.name}</b>
-              <TallyChips t={tally(sg.apps)} />
+              <TallyChips t={t} />
               <span className="dim">{argoAppCount(sg.apps.length)}</span>
             </button>
           </td>
         </tr>
-        {open && sg.apps.map((r) => row(r, true))}
+        {open && rowsOf(id, sg.apps, true)}
       </Fragment>
+    );
+  };
+
+  /** 1단계 묶음의 카드. 정상 카드는 처음에 접어 얇은 머리 줄만 보인다 */
+  const card = (id: string, g: Group, subs: Group[] | null) => {
+    const t = tally(g.apps);
+    const level = groupLevel(g.set, t);
+    const open = isOpen(id, !quietOk || level !== "ok");
+    return (
+      <section key={id} className={`argo-card argo-card-${level}${level === "ok" && !open ? " argo-card-quiet" : ""}`} aria-label={g.name}>
+        <button className="argo-band" aria-expanded={open} onClick={() => setOpen(id, !open)}>
+          <span className="argo-band-tw">{open ? "▾" : "▸"}</span>
+          <b className="argo-band-name">{g.name}</b>
+          {g.apps.length > 0 && <TallyBar t={t} />}
+          <TallyChips t={t} />
+          {g.set && g.set.generators.length > 0 && <span className="dim">{argoGenerators(g.set.generators.join(", "))}</span>}
+          <ArgoBadge status={g.set?.status} />
+          {g.set?.message && <span className="err argo-band-msg">{g.set.message}</span>}
+          <span className="dim">{argoAppCount(g.apps.length)}</span>
+        </button>
+        {open && g.apps.length > 0 && (
+          <table className="k8s-table argo-table argo-card-rows" aria-label={g.name}>
+            <Columns withEnv={showEnv} />
+            <tbody>{subs ? subs.map((sg) => subgroup(id, sg)) : rowsOf(id, g.apps, false)}</tbody>
+          </table>
+        )}
+      </section>
     );
   };
 
@@ -362,6 +418,15 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
             ))}
           </select>
         </label>
+        <button
+          className="btn small"
+          onClick={() => {
+            setAllOpen(!allOpen);
+            setManual(new Map());
+          }}
+        >
+          {allOpen ? ARGO_FOLD_OK : ARGO_EXPAND_ALL}
+        </button>
       </div>
       <div className="argo-scroll">
         {apps.isPending ? (
@@ -389,37 +454,13 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
                   <th>{H_ARGO_AUTO}</th>
                 </tr>
               </thead>
-              {!grouped && <tbody>{visible.map((r) => row(r))}</tbody>}
+              {!grouped && <tbody>{rowsOf("flat", visible, false)}</tbody>}
             </table>
           </div>
         )}
         {grouped && !apps.isPending && visible.length > 0 && (
           <div className="argo-cards">
-            {groups.map(({ g, subs }) => {
-              const id = `${primary}|${g.id}`;
-              const t = tally(g.apps);
-              const open = !folded.has(id);
-              return (
-                <section key={id} className={`argo-card argo-card-${groupLevel(g.set, t)}`} aria-label={g.name}>
-                  <button className="argo-band" aria-expanded={open} onClick={() => setFolded((f) => toggled(f, id))}>
-                    <span className="argo-band-tw">{open ? "▾" : "▸"}</span>
-                    <b className="argo-band-name">{g.name}</b>
-                    {g.apps.length > 0 && <TallyBar t={t} />}
-                    <TallyChips t={t} />
-                    {g.set && g.set.generators.length > 0 && <span className="dim">{argoGenerators(g.set.generators.join(", "))}</span>}
-                    <ArgoBadge status={g.set?.status} />
-                    {g.set?.message && <span className="err argo-band-msg">{g.set.message}</span>}
-                    <span className="dim">{argoAppCount(g.apps.length)}</span>
-                  </button>
-                  {open && g.apps.length > 0 && (
-                    <table className="k8s-table argo-table argo-card-rows" aria-label={g.name}>
-                      <Columns withEnv={showEnv} />
-                      <tbody>{subs ? subs.map((sg) => subgroup(id, sg)) : g.apps.map((r) => row(r))}</tbody>
-                    </table>
-                  )}
-                </section>
-              );
-            })}
+            {groups.map(({ g, subs }) => card(`${primary}|${g.id}`, g, subs))}
           </div>
         )}
       </div>
