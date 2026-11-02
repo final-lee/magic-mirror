@@ -335,3 +335,109 @@ fn status_only_changes_keep_an_apply_preview_valid() {
     let third = plan(&c, Some(&changed), None, "").unwrap();
     assert!(commit::check(Some(&first), &third, None).is_err());
 }
+
+fn job_object() -> Value {
+    json!({"apiVersion":"batch/v1","kind":"Job","metadata":{"name":"sample","namespace":"default","resourceVersion":"3","uid":"u",
+        "labels":{"controller-uid":"u","batch.kubernetes.io/controller-uid":"u","job-name":"sample","batch.kubernetes.io/job-name":"sample","app":"x"}},
+        "spec":{"completions":1,"selector":{"matchLabels":{"batch.kubernetes.io/controller-uid":"u"}},
+            "template":{"metadata":{"labels":{"controller-uid":"u","batch.kubernetes.io/controller-uid":"u","job-name":"sample","batch.kubernetes.io/job-name":"sample","app":"x"}},"spec":{"restartPolicy":"Never","containers":[]}}},
+        "status":{"succeeded":1}})
+}
+
+#[test]
+fn deleting_an_unowned_job_records_an_object_without_generated_selector_and_labels() {
+    let c = change("batch", "Job", Operation::Delete);
+    let p = plan(&c, Some(&job_object()), None, "").unwrap();
+    let Operation::Recreate { object } = p.inverse.unwrap().operation else { panic!("역변경이 아니에요") };
+    assert!(object["spec"].get("selector").is_none());
+    assert!(object["spec"].get("manualSelector").is_none());
+    assert_eq!(object["spec"]["template"]["metadata"]["labels"], json!({"app":"x"}));
+    assert_eq!(object["metadata"]["labels"], json!({"app":"x"}));
+    assert!(object.get("status").is_none());
+    assert_eq!(object["spec"]["completions"], 1);
+}
+
+#[test]
+fn a_job_with_a_manual_selector_keeps_it_when_recreated() {
+    let mut job = job_object();
+    job["spec"]["manualSelector"] = json!(true);
+    job["spec"]["selector"] = json!({"matchLabels":{"app":"x"}});
+    let p = plan(&change("batch", "Job", Operation::Delete), Some(&job), None, "").unwrap();
+    let Operation::Recreate { object } = p.inverse.unwrap().operation else { panic!("역변경이 아니에요") };
+    assert_eq!(object["spec"]["selector"], json!({"matchLabels":{"app":"x"}}));
+    assert_eq!(object["spec"]["manualSelector"], true);
+    assert_eq!(object["spec"]["template"]["metadata"]["labels"]["controller-uid"], "u");
+}
+
+#[test]
+fn other_kinds_keep_such_labels_when_deleted_and_recreated() {
+    let mut deploy = object();
+    deploy["spec"]["selector"] = json!({"matchLabels":{"job-name":"keep"}});
+    let p = plan(&change("apps", "Deployment", Operation::Delete), Some(&deploy), None, "").unwrap();
+    let Operation::Recreate { object } = p.inverse.unwrap().operation else { panic!("역변경이 아니에요") };
+    assert_eq!(object["spec"]["selector"]["matchLabels"]["job-name"], "keep");
+}
+
+fn binding(kind: &str, role: &str, role_kind: &str) -> Value {
+    json!({"apiVersion":"rbac.authorization.k8s.io/v1","kind":kind,"metadata":{"name":"sample","namespace":"default"},
+        "roleRef":{"apiGroup":"rbac.authorization.k8s.io","kind":role_kind,"name":role},"subjects":[{"kind":"User","name":"u"}]})
+}
+
+fn binding_change(kind: &str, object: Value) -> Change {
+    let mut c = change("rbac.authorization.k8s.io", kind, Operation::Apply { object, force: false });
+    c.target.kind.namespaced = kind == "RoleBinding";
+    c.target.namespace = (kind == "RoleBinding").then(|| "default".to_string());
+    if kind == "ClusterRoleBinding" {
+        if let Operation::Apply { object, .. } = &mut c.operation {
+            object["metadata"].as_object_mut().unwrap().remove("namespace");
+        }
+    }
+    c
+}
+
+#[test]
+fn applying_a_cluster_admin_binding_needs_the_name() {
+    for kind in ["RoleBinding", "ClusterRoleBinding"] {
+        let granted = binding_change(kind, binding(kind, "cluster-admin", "ClusterRole"));
+        let p = plan(&granted, None, None, "").unwrap();
+        assert_eq!(p.preview.confirm_name.as_deref(), Some("sample"), "{kind}");
+        assert!(commit::check(Some(&p), &p, None).is_err());
+        assert!(commit::check(Some(&p), &p, Some("sample")).is_ok());
+        let ordinary = binding_change(kind, binding(kind, "view", "ClusterRole"));
+        assert!(plan(&ordinary, None, None, "").unwrap().preview.confirm_name.is_none(), "{kind}");
+        // 같은 이름의 Role(ClusterRole이 아님)은 cluster-admin이 아니다
+        let role = binding_change(kind, binding(kind, "cluster-admin", "Role"));
+        assert!(plan(&role, None, None, "").unwrap().preview.confirm_name.is_none(), "{kind}");
+    }
+}
+
+#[test]
+fn changing_subjects_of_an_existing_cluster_admin_binding_needs_the_name() {
+    let mut current = binding("ClusterRoleBinding", "cluster-admin", "ClusterRole");
+    current["metadata"]["resourceVersion"] = json!("7");
+    current["metadata"].as_object_mut().unwrap().remove("namespace");
+    // 고친 문서가 roleRef를 바꿔도(서버가 거절하겠지만) 현재 객체가 cluster-admin이면 이름을 입력받는다
+    let mut edited = binding("ClusterRoleBinding", "view", "ClusterRole");
+    edited["subjects"] = json!([{"kind":"User","name":"other"}]);
+    let c = binding_change("ClusterRoleBinding", edited);
+    assert_eq!(plan(&c, Some(&current), None, "").unwrap().preview.confirm_name.as_deref(), Some("sample"));
+}
+
+#[test]
+fn recreating_a_cluster_admin_binding_needs_the_name() {
+    let mut c = binding_change("RoleBinding", binding("RoleBinding", "cluster-admin", "ClusterRole"));
+    if let Operation::Apply { object, .. } = c.operation.clone() {
+        c.operation = Operation::Recreate { object };
+    }
+    let p = plan(&c, None, None, "").unwrap();
+    assert_eq!(p.preview.confirm_name.as_deref(), Some("sample"));
+}
+
+#[test]
+fn rerun_still_drops_the_generated_selector_and_labels() {
+    let job = change("batch", "Job", Operation::Rerun { job_name: "next".into() });
+    let p = plan(&job, Some(&job_object()), None, "").unwrap();
+    let spec = &p.preview.calls[0].body["spec"];
+    assert!(spec.get("selector").is_none());
+    assert_eq!(spec["template"]["metadata"]["labels"], json!({"app":"x"}));
+}
