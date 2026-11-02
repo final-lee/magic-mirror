@@ -437,6 +437,413 @@ async fn logs_of_a_container_that_never_started_are_an_error() {
     assert!(!matches!(error, AppError::Network { .. }), "{error:?}");
 }
 
+
+/// 셸·attach·port-forward(K9). 클러스터에 `mm-k9` 네임스페이스와 busybox Pod·Deployment·Service를 만들고 그 위에서 돈다.
+mod streams {
+    use std::io::Write;
+    use std::process::Stdio;
+    use std::sync::Arc;
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
+
+    use super::*;
+    use crate::k8s::forward::{self, ForwardKind, ForwardRequest, Forwards};
+    use crate::k8s::shell::{self, ShellMessage, ShellMode, ShellTarget, Shells};
+    use crate::k8s::target::K8sTarget;
+
+    const NS: &str = "mm-k9";
+    const FIXTURE: &str = r#"
+apiVersion: v1
+kind: Namespace
+metadata: { name: mm-k9 }
+---
+apiVersion: v1
+kind: Pod
+metadata: { name: plain, namespace: mm-k9 }
+spec:
+  containers:
+    - name: main
+      image: busybox:1.36
+      command: ["sh", "-c", "while true; do echo tick; sleep 1; done"]
+---
+apiVersion: v1
+kind: Pod
+metadata: { name: tty, namespace: mm-k9 }
+spec:
+  containers:
+    - name: main
+      image: busybox:1.36
+      command: ["sh"]
+      stdin: true
+      tty: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: echo, namespace: mm-k9 }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: echo } }
+  template:
+    metadata: { labels: { app: echo } }
+    spec:
+      containers:
+        - name: web
+          image: busybox:1.36
+          command: ["sh", "-c", "mkdir -p /www && echo mm-forward-ok > /www/index.html && exec httpd -f -p 8080 -h /www"]
+          ports: [{ name: http, containerPort: 8080 }]
+          readinessProbe: { tcpSocket: { port: 8080 }, periodSeconds: 1 }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: echo, namespace: mm-k9 }
+spec:
+  selector: { app: echo }
+  ports: [{ port: 80, targetPort: http }]
+"#;
+
+    fn kubectl_apply(yaml: &str) {
+        let mut child = Command::new("kubectl")
+            .arg("--kubeconfig")
+            .arg(kubeconfig_path())
+            .args(["apply", "-f", "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("kubectl");
+        child.stdin.take().unwrap().write_all(yaml.as_bytes()).unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "kubectl apply: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    /// 픽스처를 만들고 Pod가 준비될 때까지 기다린다(이미 있으면 그대로)
+    fn fixture() {
+        kubectl_apply(FIXTURE);
+        kubectl(&["-n", NS, "wait", "--for=condition=Ready", "pod/plain", "pod/tty", "--timeout=180s"]);
+        kubectl(&["-n", NS, "rollout", "status", "deployment/echo", "--timeout=180s"]);
+    }
+
+    fn target() -> K8sTarget {
+        K8sTarget { profile: "live".into(), region: "r".into(), cluster: "kind".into() }
+    }
+
+    fn log_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("mm-live-shell-{name}-{}", std::process::id())).join("k8s-changes.jsonl")
+    }
+
+    fn info(pod: &str, mode: ShellMode) -> ShellTarget {
+        ShellTarget { target: target(), namespace: NS.into(), pod: pod.into(), container: if pod == "echo" { "web".into() } else { "main".into() }, mode }
+    }
+
+    /// 열린 세션의 출력을 받는 쪽
+    struct Screen {
+        rx: mpsc::UnboundedReceiver<ShellMessage>,
+        seen: String,
+    }
+
+    impl Screen {
+        /// `needle`이 나올 때까지(또는 `limit`) 출력을 모은다. 나오면 true.
+        async fn until(&mut self, needle: &str, limit: Duration) -> bool {
+            let deadline = tokio::time::Instant::now() + limit;
+            while !self.seen.contains(needle) {
+                let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+                match tokio::time::timeout(left, self.rx.recv()).await {
+                    Ok(Some(ShellMessage::Output { data })) => self.seen.push_str(&data),
+                    Ok(Some(ShellMessage::Exit { .. })) | Ok(None) | Err(_) => return self.seen.contains(needle),
+                }
+            }
+            true
+        }
+
+        /// 끝날 때까지 읽어 끝 코드를 돌려준다
+        async fn exit(&mut self, limit: Duration) -> Option<Option<i32>> {
+            let deadline = tokio::time::Instant::now() + limit;
+            loop {
+                let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+                match tokio::time::timeout(left, self.rx.recv()).await {
+                    Ok(Some(ShellMessage::Output { data })) => self.seen.push_str(&data),
+                    Ok(Some(ShellMessage::Exit { code, .. })) => return Some(code),
+                    Ok(None) | Err(_) => return None,
+                }
+            }
+        }
+    }
+
+    async fn open(client: kube::Client, shells: &Arc<Shells>, log: &std::path::Path, pod: &str, mode: ShellMode) -> (shell::ShellOpened, Screen) {
+        let i = info(pod, mode);
+        let connected = shell::connect(client, mode, NS, pod, &i.container, &shell::SHELL_COMMAND, PRIVATE).await.unwrap();
+        let (tx, rx) = mpsc::unbounded_channel();
+        let opened = shells.start(log, i, connected, None, move |m| tx.send(m).is_ok()).unwrap();
+        (opened, Screen { rx, seen: String::new() })
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn exec_echoes_resizes_and_reports_the_exit_code() {
+        fixture();
+        let client = admin().await;
+        let shells = Arc::new(Shells::default());
+        let log = log_path("exec");
+        let (opened, mut screen) = open(client, &shells, &log, "plain", ShellMode::Exec).await;
+        assert!(opened.input);
+        shells.input(opened.id, "echo mm-$((20+22))\n".into());
+        assert!(screen.until("mm-42", Duration::from_secs(20)).await, "output: {}", screen.seen);
+        shells.resize(opened.id, 120, 40);
+        // 크기 변경이 서버에 닿을 시간을 주고 터미널 크기를 묻는다
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        shells.input(opened.id, "stty size\n".into());
+        assert!(screen.until("40 120", Duration::from_secs(20)).await, "output: {}", screen.seen);
+        shells.input(opened.id, "exit 3\n".into());
+        assert_eq!(screen.exit(Duration::from_secs(20)).await, Some(Some(3)), "output: {}", screen.seen);
+        // 끝난 세션은 정리되고 기록에 닫은 시각이 남는다. 입력·출력은 기록에 없다
+        for _ in 0..50 {
+            if crate::k8s::log::read_all(&log).iter().all(|r| r.closed_at.is_some()) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let records = crate::k8s::log::read_all(&log);
+        assert_eq!(records.len(), 1);
+        assert!(records[0].closed_at.is_some());
+        let text = std::fs::read_to_string(&log).unwrap();
+        assert!(!text.contains("mm-42") && !text.contains("stty"), "{text}");
+        let _ = std::fs::remove_dir_all(log.parent().unwrap());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn closing_an_exec_session_ends_the_remote_shell() {
+        fixture();
+        let client = admin().await;
+        let shells = Arc::new(Shells::default());
+        let log = log_path("close");
+        let (opened, mut screen) = open(client, &shells, &log, "plain", ShellMode::Exec).await;
+        shells.input(opened.id, "echo alive\n".into());
+        assert!(screen.until("alive", Duration::from_secs(20)).await);
+        shells.close(opened.id);
+        // 닫은 뒤의 입력은 어디에도 가지 않는다
+        shells.input(opened.id, "echo after-close\n".into());
+        assert_eq!(screen.exit(Duration::from_secs(3)).await, None);
+        assert!(!screen.seen.contains("after-close"));
+        assert!(crate::k8s::log::read_all(&log)[0].closed_at.is_some());
+        let _ = std::fs::remove_dir_all(log.parent().unwrap());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn attach_to_a_tty_container_takes_input() {
+        fixture();
+        let client = admin().await;
+        let shells = Arc::new(Shells::default());
+        let log = log_path("attach");
+        let (opened, mut screen) = open(client, &shells, &log, "tty", ShellMode::Attach).await;
+        assert!(opened.input);
+        // 주 프로세스(sh)에 바로 들어간다
+        shells.input(opened.id, "echo attached-$((1+1))\n".into());
+        assert!(screen.until("attached-2", Duration::from_secs(20)).await, "output: {}", screen.seen);
+        shells.close_all();
+        let _ = std::fs::remove_dir_all(log.parent().unwrap());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn attach_to_a_container_without_stdin_is_output_only() {
+        fixture();
+        let client = admin().await;
+        let shells = Arc::new(Shells::default());
+        let log = log_path("attach-ro");
+        let (opened, mut screen) = open(client, &shells, &log, "plain", ShellMode::Attach).await;
+        assert!(!opened.input);
+        shells.input(opened.id, "echo typed\n".into());
+        assert!(screen.until("tick", Duration::from_secs(20)).await, "output: {}", screen.seen);
+        assert!(!screen.seen.contains("typed"));
+        shells.close_all();
+        let _ = std::fs::remove_dir_all(log.parent().unwrap());
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn a_stopped_or_unknown_container_is_refused_before_connecting() {
+        fixture();
+        let client = admin().await;
+        let unknown = shell::connect(client.clone(), ShellMode::Exec, NS, "plain", "nope", &shell::SHELL_COMMAND, PRIVATE).await;
+        assert_eq!(unknown.err(), Some(AppError::other(shell::NO_SUCH_CONTAINER)));
+        let missing = shell::connect(client, ShellMode::Exec, NS, "no-such-pod", "main", &shell::SHELL_COMMAND, PRIVATE).await;
+        assert!(missing.is_err());
+    }
+
+    /// 로컬 포트로 HTTP GET을 보내 응답 전체를 돌려준다
+    async fn http_get(port: u16) -> std::io::Result<String> {
+        let mut tcp = TcpStream::connect((forward::LOCAL_ADDR, port)).await?;
+        tcp.write_all(b"GET / HTTP/1.0\r\nHost: localhost\r\n\r\n").await?;
+        let mut body = String::new();
+        tcp.read_to_string(&mut body).await?;
+        Ok(body)
+    }
+
+    async fn start_forward(client: &kube::Client, forwards: &Arc<Forwards>, kind: ForwardKind, name: &str, remote: u16) -> forward::Forward {
+        let req = ForwardRequest { namespace: NS.into(), kind, name: name.into(), remote_port: remote, local_port: None };
+        let prepared = forward::prepare(client.clone(), &req, PRIVATE).await.unwrap();
+        let listener = forward::bind_local(None, remote).await.unwrap();
+        forwards.start(target(), &req, prepared, listener, client.clone(), PRIVATE).unwrap()
+    }
+
+    async fn echo_pods(client: &kube::Client) -> Vec<String> {
+        use k8s_openapi::api::core::v1::Pod;
+        let pods: kube::Api<Pod> = kube::Api::namespaced(client.clone(), NS);
+        let list = pods.list(&kube::api::ListParams::default().labels("app=echo")).await.unwrap();
+        list.items.into_iter().filter(|p| p.metadata.deletion_timestamp.is_none()).filter_map(|p| p.metadata.name).collect()
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn port_forward_to_a_pod_serves_http_and_stops_when_closed() {
+        fixture();
+        let client = admin().await;
+        let forwards = Arc::new(Forwards::default());
+        let pod = echo_pods(&client).await.remove(0);
+        let f = start_forward(&client, &forwards, ForwardKind::Pod, &pod, 8080).await;
+        let reply = http_get(f.local_port).await.unwrap();
+        assert!(reply.contains(" 200 OK") && reply.contains("mm-forward-ok"), "{reply}");
+        assert_eq!(forwards.list()[0].pod.as_deref(), Some(pod.as_str()));
+        forwards.close(f.id);
+        assert!(forwards.list().is_empty());
+        // 닫은 뒤에는 로컬 포트가 닫힌다(작업이 멈추는 데 잠깐 걸릴 수 있다)
+        let mut closed = false;
+        for _ in 0..50 {
+            if TcpStream::connect((forward::LOCAL_ADDR, f.local_port)).await.is_err() {
+                closed = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(closed, "local port {} still open", f.local_port);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn port_forward_to_a_closed_pod_port_reports_the_failure() {
+        fixture();
+        let client = admin().await;
+        let forwards = Arc::new(Forwards::default());
+        let pod = echo_pods(&client).await.remove(0);
+        let f = start_forward(&client, &forwards, ForwardKind::Pod, &pod, 9999).await;
+        // 아무도 듣지 않는 포트: 연결은 열렸다가 바로 닫힌다
+        let reply = http_get(f.local_port).await.unwrap_or_default();
+        assert!(!reply.contains("200"), "{reply}");
+        let mut reported = None;
+        for _ in 0..50 {
+            reported = forwards.list()[0].error.clone();
+            if reported.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(reported.is_some(), "no error reported");
+        forwards.close_all();
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn port_forward_to_a_service_resolves_the_named_port_and_reattaches_after_the_pod_is_deleted() {
+        fixture();
+        let client = admin().await;
+        let forwards = Arc::new(Forwards::default());
+        // Service 포트 80은 이름 있는 targetPort(http → 8080)로 간다
+        let f = start_forward(&client, &forwards, ForwardKind::Service, "echo", 80).await;
+        let reply = http_get(f.local_port).await.unwrap();
+        assert!(reply.contains(" 200 OK") && reply.contains("mm-forward-ok"), "{reply}");
+        let first = forwards.list()[0].pod.clone().expect("a pod");
+        // 붙어 있던 Pod를 지우면 다른 준비된 Pod로 옮겨 간다
+        kubectl(&["-n", NS, "delete", "pod", &first, "--wait=false"]);
+        let mut moved = None;
+        for _ in 0..300 {
+            let now = forwards.list()[0].pod.clone();
+            if now.is_some() && now.as_deref() != Some(first.as_str()) {
+                moved = now;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let moved = moved.unwrap_or_else(|| panic!("never left {first}"));
+        assert!(echo_pods(&client).await.contains(&moved));
+        let reply = http_get(f.local_port).await.unwrap();
+        assert!(reply.contains("mm-forward-ok"), "{reply}");
+        forwards.close_all();
+        kubectl(&["-n", NS, "rollout", "status", "deployment/echo", "--timeout=180s"]);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn a_service_port_that_does_not_exist_is_refused() {
+        fixture();
+        let client = admin().await;
+        let req = ForwardRequest { namespace: NS.into(), kind: ForwardKind::Service, name: "echo".into(), remote_port: 81, local_port: None };
+        // Service에 없는 포트
+        assert_eq!(forward::prepare(client, &req, PRIVATE).await.err(), Some(AppError::other(forward::NO_SERVICE_PORT)));
+    }
+
+    /// 노드 셸: 변경 틀로 디버그 Pod를 만들고(미리보기·확인), 노드 안으로 들어가 `hostname`이 노드 이름인지 보고, 닫으면 Pod가 지워진다.
+    #[tokio::test]
+    #[ignore]
+    async fn node_shell_enters_the_node_and_the_debug_pod_goes_away_when_it_is_closed() {
+        use crate::k8s::change::{self, Change, Operation};
+        use crate::k8s::{commit, log, node_shell};
+        fixture();
+        let client = admin().await;
+        let nodes: kube::Api<k8s_openapi::api::core::v1::Node> = kube::Api::all(client.clone());
+        let node = nodes.list(&kube::api::ListParams::default()).await.unwrap().items.remove(0).metadata.name.unwrap();
+        let pod = "mm-node-shell-live";
+        let change = Change {
+            target: change::pod_object(NS, pod),
+            operation: Operation::NodeShell { node: node.clone(), image: "busybox:1.36".into() },
+        };
+        let seen = commit::dry_plan(client.clone(), PRIVATE, &change, "").await.unwrap();
+        assert_eq!(seen.preview.confirm_name.as_deref(), Some(node.as_str()));
+        // 노드 이름을 입력하지 않으면 만들지 않는다
+        assert!(commit::apply_plan(client.clone(), PRIVATE, &change, &seen, "", Some("wrong")).await.is_err());
+        let (_, created) = commit::apply_plan(client.clone(), PRIVATE, &change, &seen, "", Some(&node)).await.unwrap();
+        created.unwrap();
+
+        let log_file = log_path("node-shell");
+        let shells = Arc::new(Shells::default());
+        node_shell::wait_ready(client.clone(), NS, pod, PRIVATE).await.unwrap();
+        let mut command = change::NODE_SHELL_COMMAND.to_vec();
+        command.push("sh");
+        let connected = shell::connect(client.clone(), ShellMode::Exec, NS, pod, change::NODE_SHELL_CONTAINER, &command, PRIVATE).await.unwrap();
+        let info = ShellTarget { target: target(), namespace: NS.into(), pod: pod.into(), container: change::NODE_SHELL_CONTAINER.into(), mode: ShellMode::Exec };
+        let cleanup: shell::Cleanup = {
+            let (client, log_file) = (client.clone(), log_file.clone());
+            Box::new(move || Box::pin(node_shell::remove(client, PRIVATE, target(), NS.into(), pod.into(), log_file)))
+        };
+        let (tx, rx) = mpsc::unbounded_channel();
+        let opened = shells.start(&log_file, info, connected, Some(cleanup), move |m| tx.send(m).is_ok()).unwrap();
+        let mut screen = Screen { rx, seen: String::new() };
+        shells.input(opened.id, "echo host=$(hostname)\n".into());
+        let expected = format!("host={node}");
+        assert!(screen.until(&expected, Duration::from_secs(30)).await, "output: {}", screen.seen);
+
+        shells.close(opened.id);
+        shells.settle(Duration::from_secs(60)).await;
+        let pods: kube::Api<k8s_openapi::api::core::v1::Pod> = kube::Api::namespaced(client.clone(), NS);
+        let mut gone = false;
+        for _ in 0..300 {
+            if pods.get_opt(pod).await.unwrap().is_none() {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(gone, "debug pod still there");
+        // 세션을 열고 닫은 기록과 Pod를 지운 기록이 남는다
+        let entries = log::read_all(&log_file);
+        assert!(entries.iter().any(|e| matches!(e.change.operation, Operation::Shell { .. }) && e.closed_at.is_some()), "{entries:?}");
+        assert!(entries.iter().any(|e| e.summary == node_shell::SUMMARY_DELETE && e.ok && e.change.operation == Operation::Delete), "{entries:?}");
+        let _ = std::fs::remove_dir_all(log_file.parent().unwrap());
+    }
+}
+
 /// 이 시험은 스크립트가 만든 kind 클러스터에서만 쓰기 요청을 보낸다.
 #[tokio::test]
 #[ignore]

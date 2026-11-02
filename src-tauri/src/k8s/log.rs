@@ -22,6 +22,9 @@ pub struct Entry {
     pub inverse: Option<Change>,
     pub undo_of: Option<String>,
     pub undone: bool,
+    /// 세션(셸·attach·노드 셸)을 닫은 시각. 세션이 아닌 변경은 없다.
+    #[serde(default)]
+    pub closed_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -41,6 +44,11 @@ pub fn read_all(path: &Path) -> Vec<Entry> {
 
 pub fn mark_undone(path: &Path, id: &str) -> io::Result<()> {
     jsonl::update(path, |entry: &Entry| entry.id == id, |entry| entry.undone = true)
+}
+
+/// 셸·attach 세션 기록에 닫은 시각을 적는다.
+pub fn mark_closed(path: &Path, id: &str, at: &str) -> io::Result<()> {
+    jsonl::update(path, |entry: &Entry| entry.id == id, |entry| entry.closed_at = Some(at.to_string()))
 }
 
 pub fn undo(entries: &[Entry], id: &str) -> Result<Undo, AppError> {

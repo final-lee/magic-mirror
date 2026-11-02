@@ -6,6 +6,8 @@ import { BACK, CAT_CUSTOM, DETAIL_LABEL, KIND_TREE_LABEL, TAB_SUMMARY, TAB_YAML 
 import type { K8sKind, K8sObjectView, K8sRow, K8sWatchMessage } from "./types";
 import { WorkloadsView, type WorkloadsFocus } from "./WorkloadsView";
 
+// 터미널(xterm)은 PodTerminal.test에서 본다
+vi.mock("./PodTerminal", () => ({ PodTerminal: () => null }));
 vi.mock("./api", () => ({ k8sApi: { watch: vi.fn(), unwatch: vi.fn(), get: vi.fn(), rules: vi.fn(), secretValue: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 const m = vi.mocked(k8sApi);
@@ -23,6 +25,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   T = { ...T, cluster: `c${n++}` };
   m.unwatch.mockResolvedValue(null);
+  // Pod 상세가 셸·port-forward 버튼의 권한을 읽는다
+  m.rules.mockResolvedValue({ namespace: "prod", resourceRules: [], nonResourceRules: [], incomplete: false });
   m.watch.mockImplementation(async (_t, kind, _ns, _p, onMessage) => {
     emits.set(kind.plural, onMessage);
     return 1;

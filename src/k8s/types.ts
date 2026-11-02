@@ -95,6 +95,10 @@ export type K8sChange = K8sChangeObject & (
   | { type: "cordon"; unschedulable: boolean }
   | { type: "drain" }
   | { type: "recreate"; object: Record<string, unknown> }
+  /** 셸·attach를 연 기록(미리보기·적용 대상이 아니다) */
+  | { type: "shell"; container: string; mode: "exec" | "attach" }
+  /** 노드 셸 디버그 Pod 만들기. 대상(kind·namespace·name)은 만들 Pod, node는 고정할 노드 */
+  | { type: "nodeShell"; node: string; image: string }
 );
 
 export interface K8sRevision {
@@ -184,6 +188,8 @@ export interface K8sChangeLogEntry {
   inverse: K8sChange | null;
   undoOf: string | null;
   undone: boolean;
+  /** 셸·attach·노드 셸 세션을 닫은 시각(세션 기록만) */
+  closedAt?: string | null;
 }
 
 export interface K8sUndo {
@@ -218,6 +224,54 @@ export interface K8sLogOptions {
 
 /** k8s_logs 채널. error와 end에서 흐름이 끝난다. */
 export type K8sLogMessage = { type: "lines"; lines: string[] } | { type: "error"; error: AppError } | { type: "end" };
+
+/** k8s_shell_open·k8s_attach_open 채널. exit에서 세션이 끝난다(code가 없으면 연결이 끊겼거나 시작하지 못한 것, 시작하지 못했으면 reason). */
+export type K8sShellMessage = { type: "output"; data: string } | { type: "exit"; code: number | null; reason: string | null };
+
+/** 열린 셸·attach. input: 이 세션이 키 입력을 받는지(attach는 컨테이너에 stdin과 tty가 켜져 있어야 한다) */
+export interface K8sShellOpened {
+  id: number;
+  input: boolean;
+}
+
+export type K8sShellMode = "exec" | "attach" | "node";
+
+export type K8sForwardKind = "pod" | "service";
+
+export interface K8sForwardRequest {
+  namespace: string;
+  kind: K8sForwardKind;
+  name: string;
+  /** Pod는 컨테이너 포트, Service는 Service 포트 */
+  remotePort: number;
+  /** 없으면 자동 */
+  localPort: number | null;
+}
+
+/** 열린 port-forward. 로컬은 늘 127.0.0.1 */
+export interface K8sForward {
+  id: number;
+  localPort: number;
+  target: K8sTarget;
+  namespace: string;
+  kind: K8sForwardKind;
+  name: string;
+  remotePort: number;
+  /** 지금 붙어 있는 Pod(Service는 바뀔 수 있고, 준비된 Pod가 없으면 null) */
+  pod: string | null;
+  /** 가장 최근 연결 실패의 사유 */
+  error: string | null;
+}
+
+/** port-forward로 고를 수 있는 TCP 포트(Pod는 컨테이너 포트, Service는 Service 포트) */
+export interface K8sPort {
+  name: string | null;
+  port: number;
+  /** Pod: 이 포트를 가진 컨테이너 */
+  container: string | null;
+  /** Service: Pod로 가는 포트(번호 또는 이름) */
+  target: string | null;
+}
 
 export type K8sProblem = "crashLoopBackOff" | "imagePullBackOff" | "pending" | "oomKilled" | "notReady";
 
@@ -301,6 +355,8 @@ export interface K8sObjectView {
   yaml: string;
   /** Secret일 때만 */
   secretKeys: K8sSecretKey[] | null;
+  /** Pod와 Service만(TCP). 없는 응답은 빈 목록으로 본다 */
+  ports?: K8sPort[];
 }
 
 /** Secret 키 하나의 값. 컴포넌트 상태에만 둔다(React Query에 넣지 않는다) */

@@ -75,6 +75,7 @@ fn entry(job: &Job, change: Change, summary: String, outcome: Result<(), String>
         inverse,
         undo_of: None,
         undone: false,
+        closed_at: None,
     }
 }
 

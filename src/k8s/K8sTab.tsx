@@ -10,6 +10,7 @@ import { DrainProgress } from "./DrainProgress";
 import { CHANGE_DONE } from "./text";
 import { ContextPicker } from "./ContextPicker";
 import { EventsView } from "./EventsView";
+import { ForwardsView } from "./ForwardsView";
 import { K8sError } from "./K8sError";
 import { K8sNav, type K8sView, type NavBookmark } from "./K8sNav";
 import { BUILTIN, NODES, bookmarkKey, bookmarkOf } from "./kinds";
@@ -195,6 +196,8 @@ export function K8sTab({ target, onOpenIam }: Props) {
             <div className="empty">{BOOKMARK_MISSING}</div>
           ) : view === "events" ? (
             <EventsView target={target} context={chosen} sessionEpoch={session.dataUpdatedAt} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} />
+          ) : view === "forwards" ? (
+            <ForwardsView target={target} ssoProfile={ssoProfile} />
           ) : view === "changeLog" ? (
             <ChangeLog target={target} onStart={change.start} changeMode={changeMode} />
           ) : rules.isError ? (

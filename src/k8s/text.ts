@@ -231,6 +231,54 @@ export const SECTION_LABELS: Record<K8sOverviewSection, string> = {
   nodePools: "Karpenter NodePool", addons: "애드온", insights: "Upgrade Insights", removedApis: "제거되는 API",
 };
 
+// ── 셸·attach·port-forward(K9) ──
+export const TAB_SHELL = "셸";
+export const SHELL_LABEL = "터미널";
+export const SHELL_MODE_LABEL = "연결 방식";
+export const SHELL_MODE_EXEC = "셸 (새 프로세스)";
+export const SHELL_MODE_ATTACH = "attach (주 프로세스)";
+export const SHELL_OPEN = "열기";
+export const SHELL_CANCEL = "취소";
+export const SHELL_CONFIRM = "확인";
+export const SHELL_OPENING = "여는 중…";
+export const SHELL_CLOSE = "세션 닫기";
+export const SHELL_REOPEN = "다시 열기";
+export const SHELL_NO_CONTAINER = "열 수 있는 컨테이너가 없어요";
+export const SHELL_DISCONNECTED = "연결이 끊겼어요";
+export const ATTACH_WARNING = "입력과 Ctrl-C가 컨테이너의 주 프로세스로 가요. 잘못 누르면 서비스가 멈출 수 있어요";
+export const ATTACH_OUTPUT_ONLY = "이 컨테이너는 stdin과 tty가 켜져 있지 않아 출력만 볼 수 있어요";
+export const shellConfirmTitle = (pod: string, container: string) => `${pod}의 ${container} 컨테이너에 열까요?`;
+export const shellTypedHint = (pod: string) => `위험한 네임스페이스예요. 계속하려면 Pod 이름 ${pod}을 그대로 입력하세요`;
+export const SHELL_TYPED_LABEL = "Pod 이름 확인";
+export const shellExited = (code: number | null, reason: string | null) =>
+  code !== null ? `세션이 끝났어요 (종료 코드 ${code})` : reason ? `세션이 끝났어요: ${reason}` : `세션이 끝났어요. ${SHELL_DISCONNECTED}`;
+export const SHELL_PERMISSION_CHECKING = "권한을 확인하는 중이에요";
+export const noStreamPermission = (resource: string) => `이 네임스페이스에서 ${resource} 만들기 권한이 없어요`;
+
+export const NAV_FORWARDS = "포트포워딩";
+export const FORWARD_START = "포트포워딩";
+export const FORWARD_PORT = "대상 포트";
+export const FORWARD_CUSTOM = "직접 입력";
+export const FORWARD_LOCAL = "로컬 포트";
+export const FORWARD_LOCAL_AUTO = "자동";
+export const FORWARD_OPEN = "열기";
+export const FORWARD_BAD_PORT = "포트는 1~65535 숫자로 입력해 주세요";
+export const FORWARD_NO_PORTS = "컨테이너가 포트를 선언하지 않았어요. 직접 입력할 수 있어요";
+export const forwardPortLabel = (p: { port: number; name: string | null; container: string | null; target: string | null }) =>
+  `${p.port}${p.name ? ` (${p.name})` : ""}${p.container ? ` · ${p.container}` : ""}${p.target ? ` → ${p.target}` : ""}`;
+export const forwardOpened = (addr: string) => `${addr}로 열었어요`;
+export const FORWARDS_EMPTY = "열린 포트포워딩이 없어요";
+export const H_FORWARD_TARGET = "대상";
+export const H_FORWARD_LOCAL = "로컬 주소";
+export const H_FORWARD_POD = "연결된 Pod";
+export const H_FORWARD_STATE = "상태";
+export const FORWARD_OPEN_BROWSER = "브라우저로 열기";
+export const FORWARD_COPY_URL = "주소 복사";
+export const FORWARD_CLOSE = "닫기";
+export const FORWARD_NO_POD = "준비된 Pod가 없어요";
+export const FORWARD_HEALTHY = "연결돼요";
+export const forwardTarget = (f: { kind: "pod" | "service"; namespace: string; name: string; remotePort: number }) =>
+  `${f.kind === "pod" ? "Pod" : "Service"} ${f.namespace}/${f.name}:${f.remotePort}`;
 export const CHANGE_MODE = "변경";
 export const CHANGE_LOG = "변경 기록";
 export const CHANGE_DONE = "변경을 적용했어요";
@@ -306,3 +354,10 @@ export const DRAIN_CLOSE = "닫기";
 export const DRAIN_UNDO_HINT = "스케줄 중지는 변경 기록에서 되돌릴 수 있어요";
 export const DRAIN_NO_PODS = "옮길 Pod가 없어요";
 export const DRAIN_ERROR = "오류";
+// ── 노드 셸·세션 기록 ──
+export const CHANGE_NODE_SHELL = "노드 셸";
+export const CHANGE_NODE_SHELL_IMAGE = "이미지";
+export const SHELL_CLOSED_AT = (at: string) => `닫음 ${at}`;
+export const NODE_SHELL_BAR = (node: string) => `노드 ${node}`;
+export const NODE_SHELL_CLOSE_NOTE = "닫으면 디버그 Pod를 지워요";
+export const SHELL_CHECKING_NAME = "확인할 이름을 읽는 중이에요…";
