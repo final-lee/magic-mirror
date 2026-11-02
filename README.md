@@ -152,12 +152,15 @@ The app checks for a new version at launch and every 6 hours, and shows an **Upd
 
 ```bash
 npm install
-npm run tauri dev      # run in development mode
+npm run tauri dev      # run in development mode (Vite on port 1420, same data folder as the installed app)
+npm run tauri:dev      # same, but on a random free port and with this worktree's own data folder, so several worktrees can run at once
 npm test               # frontend tests
 (cd src-tauri && cargo test && cargo clippy --all-targets -- -D warnings)
 ```
 
 The Rust toolchain is pinned in `rust-toolchain.toml` because of the AWS SDK's minimum supported Rust version.
+
+`npm run tauri:dev` picks a free port in 1421-1499 (`DEV_PORT_RANGE=a-b` to change) and gives the app a per-worktree identifier, so settings, the cost cache and request counter, and the IAM and DB change logs live in `~/Library/Application Support/dev.finallee.magicmirror.dev-<worktree>-<hash>/`. On first run it copies `settings.json` from the installed app's folder. Changes made there can't be undone from another worktree or from the installed app, and the cost cache isn't shared, so the same view costs a Cost Explorer request in each worktree. Switching between `tauri dev` and `tauri:dev` in one worktree recompiles the app crate.
 
 ### Project layout
 ```
@@ -167,18 +170,18 @@ src/                     React frontend
   vpcmap/                VPC network diagram
   iam/                   IAM workspace
   pg/                    PostgreSQL users tab
+  cost/                  cost dashboard tab
 src-tauri/src/
   adapters/              per-service read-only adapters
   explorer/              local files, S3 writes and transfers, diff engine
-  cost/                  cost dashboard tab
   topology/              VPC topology queries (read-only)
   iam/                   IAM snapshot, permission evaluation, checks, change previews
   iam/write.rs           the only place that calls IAM write APIs
   pg/                    PostgreSQL connection, read-only catalog snapshot, privilege evaluation, security checks
+  cost/                  Cost Explorer client, on-disk answer cache and request counter, overview and breakdown shaping (read-only)
   mouse_nav.rs           macOS mouse back/forward buttons
 scripts/release.sh       universal build and GitHub release
 ```
-  cost/                  Cost Explorer client, on-disk answer cache and request counter, overview and breakdown shaping (read-only)
 
 ### Releasing
 1. Bump `version` in `src-tauri/tauri.conf.json` and push to `main`.
