@@ -808,14 +808,21 @@ spec:
 
         let log_file = log_path("node-shell");
         let shells = Arc::new(Shells::default());
-        node_shell::wait_ready(client.clone(), NS, pod, PRIVATE).await.unwrap();
+        // 만든 Pod의 UID를 기억해 두고, 터미널은 그 Pod만 연다
+        let registry = node_shell::NodeShells::default();
+        let uid = node_shell::read_uid(client.clone(), PRIVATE, NS, pod).await.expect("created pod uid");
+        let remove = node_shell::remover(client.clone(), PRIVATE, target(), NS.into(), pod.into(), Some(uid.clone()), log_file.clone());
+        registry.track(target(), NS, pod, uid.clone(), remove);
+        let claimed = registry.claim(&target(), NS, pod).unwrap();
+        assert_eq!(claimed.uid, uid);
+        node_shell::wait_ready(client.clone(), NS, pod, &claimed.uid, PRIVATE).await.unwrap();
         let mut command = change::NODE_SHELL_COMMAND.to_vec();
         command.push("sh");
         let connected = shell::connect(client.clone(), ShellMode::Exec, NS, pod, change::NODE_SHELL_CONTAINER, &command, PRIVATE).await.unwrap();
         let info = ShellTarget { target: target(), namespace: NS.into(), pod: pod.into(), container: change::NODE_SHELL_CONTAINER.into(), mode: ShellMode::Exec };
         let cleanup: shell::Cleanup = {
-            let (client, log_file) = (client.clone(), log_file.clone());
-            Box::new(move || Box::pin(node_shell::remove(client, PRIVATE, target(), NS.into(), pod.into(), log_file)))
+            let remove = claimed.remove.clone();
+            Box::new(move || Box::pin(async move { (*remove)().await }))
         };
         let (tx, rx) = mpsc::unbounded_channel();
         let opened = shells.start(&log_file, info, connected, Some(cleanup), move |m| tx.send(m).is_ok()).unwrap();
@@ -840,6 +847,52 @@ spec:
         let entries = log::read_all(&log_file);
         assert!(entries.iter().any(|e| matches!(e.change.operation, Operation::Shell { .. }) && e.closed_at.is_some()), "{entries:?}");
         assert!(entries.iter().any(|e| e.summary == node_shell::SUMMARY_DELETE && e.ok && e.change.operation == Operation::Delete), "{entries:?}");
+        let _ = std::fs::remove_dir_all(log_file.parent().unwrap());
+    }
+
+    /// 같은 표시를 단 다른 Pod(YAML 적용 따위)는 노드 셸로 열 수 없고, 열기 전에 탭이 닫히면 등록된 Pod는 지워진다.
+    #[tokio::test]
+    #[ignore]
+    async fn node_shell_refuses_a_look_alike_pod_and_removes_an_unopened_one_when_the_tab_closes() {
+        use crate::k8s::change::{self, Change, Operation};
+        use crate::k8s::{commit, node_shell};
+        fixture();
+        let client = admin().await;
+        let registry = node_shell::NodeShells::default();
+        // 표시만 같은 Pod: 변경 틀을 거치지 않았으니 등록돼 있지 않다
+        let forged = change::node_shell_pod("mm-forged-shell", NS, "any-node", "busybox:1.36");
+        let mut value = forged.clone();
+        value["spec"] = serde_json::json!({ "containers": [{ "name": "shell", "image": "busybox:1.36", "command": ["sleep", "600"] }] });
+        kubectl_apply(&value.to_string());
+        kubectl(&["-n", NS, "wait", "--for=condition=Ready", "pod/mm-forged-shell", "--timeout=120s"]);
+        assert_eq!(registry.claim(&target(), NS, "mm-forged-shell").err(), Some(AppError::other(node_shell::NOT_NODE_SHELL)));
+        let uid = node_shell::read_uid(client.clone(), PRIVATE, NS, "mm-forged-shell").await.unwrap();
+        let wrong = node_shell::wait_ready(client.clone(), NS, "mm-forged-shell", "some-other-uid", PRIVATE).await;
+        assert_eq!(wrong.err(), Some(AppError::other(node_shell::NOT_NODE_SHELL)));
+        assert!(!uid.is_empty());
+        kubectl(&["-n", NS, "delete", "pod", "mm-forged-shell", "--wait=false"]);
+
+        // 확인해 만든 Pod를 등록만 하고 터미널을 열지 않은 채 탭을 닫는다
+        let node = kube::Api::<k8s_openapi::api::core::v1::Node>::all(client.clone()).list(&kube::api::ListParams::default()).await.unwrap().items.remove(0).metadata.name.unwrap();
+        let pod = "mm-node-shell-unopened";
+        let change = Change { target: change::pod_object(NS, pod), operation: Operation::NodeShell { node: node.clone(), image: "busybox:1.36".into() } };
+        let seen = commit::dry_plan(client.clone(), PRIVATE, &change, "").await.unwrap();
+        commit::apply_plan(client.clone(), PRIVATE, &change, &seen, "", Some(&node)).await.unwrap().1.unwrap();
+        let log_file = log_path("node-shell-unopened");
+        let uid = node_shell::read_uid(client.clone(), PRIVATE, NS, pod).await.unwrap();
+        registry.track(target(), NS, pod, uid.clone(), node_shell::remover(client.clone(), PRIVATE, target(), NS.into(), pod.into(), Some(uid), log_file.clone()));
+        registry.close_target(&target());
+        registry.settle(Duration::from_secs(60)).await;
+        let pods: kube::Api<k8s_openapi::api::core::v1::Pod> = kube::Api::namespaced(client.clone(), NS);
+        let mut gone = false;
+        for _ in 0..300 {
+            if pods.get_opt(pod).await.unwrap().is_none() {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(gone, "unopened debug pod still there");
         let _ = std::fs::remove_dir_all(log_file.parent().unwrap());
     }
 }
