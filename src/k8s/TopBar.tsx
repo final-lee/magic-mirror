@@ -1,5 +1,6 @@
 import type { K8sIdentity } from "./types";
 import {
+  CHANGE_MODE,
   ALL_NAMESPACES,
   BAR_LABEL,
   IDENTITY_FALLBACK,
@@ -37,9 +38,11 @@ interface Props {
   namespace: string;
   onNamespace: (ns: string) => void;
   onReconnect: () => void;
+  changeMode?: boolean;
+  onChangeMode?: (enabled: boolean) => void;
 }
 
-export function TopBar({ context, identity, connection, execProfile, profile, namespaces, namespace, onNamespace, onReconnect }: Props) {
+export function TopBar({ context, identity, connection, execProfile, profile, namespaces, namespace, onNamespace, onReconnect, changeMode = false, onChangeMode }: Props) {
   const shown = identity?.groups.slice(0, MAX_GROUPS) ?? [];
   const more = (identity?.groups.length ?? 0) - shown.length;
   const options = namespace !== ALL && !namespaces.includes(namespace) ? [namespace, ...namespaces] : namespaces;
@@ -84,6 +87,7 @@ export function TopBar({ context, identity, connection, execProfile, profile, na
               ))}
             </select>
           </label>
+          <label><input type="checkbox" checked={changeMode} onChange={(e) => onChangeMode?.(e.target.checked)} /> {CHANGE_MODE}</label>
           <button className="btn small" onClick={onReconnect}>
             {RECONNECT}
           </button>

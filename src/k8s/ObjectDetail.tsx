@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { errorMessage } from "../api/errors";
 import { ErrorState } from "../components/ErrorState";
+import { ChangeActions } from "./ChangeActions";
 import { can } from "./can";
 import { Problems, valueKeys } from "./columns";
 import { age } from "./format";
@@ -15,7 +16,7 @@ import {
   H_REASON, H_RESTARTS, H_STATE, INIT_MARK, LOADING, NO_RECENT_EVENTS, OPEN_IN_IAM, SEC_ANNOTATIONS, SEC_CHILDREN, SEC_CONDITIONS,
   SEC_CONTAINERS, SEC_EVENTS, SEC_LABELS, SEC_OWNERS, TAB_LOGS, TAB_SUMMARY, TAB_YAML, YAML_SECRET_NOTE, H_TIME, H_COUNT, openNode,
 } from "./text";
-import type { K8sContainer, K8sKind, K8sLink, K8sObjectView, K8sTarget, ObjectRef } from "./types";
+import type { K8sChange, K8sContainer, K8sKind, K8sLink, K8sObjectView, K8sTarget, ObjectRef } from "./types";
 
 interface Props {
   target: K8sTarget;
@@ -31,6 +32,8 @@ interface Props {
   onClose: () => void;
   onOpenIam?: (arn: string) => void;
   now?: number;
+  changeMode?: boolean;
+  onChange?: (change: K8sChange) => void;
   /** 3열 목록 너비 중 덮는 비율(%). 없으면 DETAIL_PCT */
   widthPct?: number;
 }
@@ -183,12 +186,12 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sO
 }
 
 /** 객체 하나의 상세(요약·YAML). 소유자·자식·노드 링크는 onOpen으로 상세 스택에 쌓는다. */
-export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose, onOpenIam, now, widthPct = DETAIL_PCT }: Props) {
+export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose, onOpenIam, now, widthPct = DETAIL_PCT, changeMode, onChange }: Props) {
   const [tab, setTab] = useState<"summary" | "yaml" | "logs">("summary");
   const pod = isPod(objectRef.kind) && objectRef.namespace !== null;
   const q = useK8sObject(target, context, objectRef, resourceVersion, ssoProfile, live);
   const secret = isSecret(objectRef.kind);
-  const rules = useK8sRules(target, context, objectRef.namespace, ssoProfile, live && secret && objectRef.namespace !== null);
+  const rules = useK8sRules(target, context, objectRef.namespace ?? "default", ssoProfile, live && (changeMode === true || (secret && objectRef.namespace !== null)));
   const canRead = rules.data ? can(rules.data, { verb: "get", group: "", resource: "secrets", name: objectRef.name }) : "unknown";
   const at = now ?? Date.now();
   // 로그 탭은 Pod가 바뀔 때마다(resourceVersion) 상세를 다시 읽는 동안에도 흐름·옵션·찾기를 잃지 않게, 마지막으로 읽은 컨테이너로 계속 띄워 둔다
@@ -211,6 +214,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
           ✕
         </button>
       </div>
+      {changeMode && onChange && q.data && <ChangeActions target={target} ssoProfile={ssoProfile} objectRef={objectRef} view={q.data} rules={rules.data} onStart={onChange} />}
       <div role="tablist" className="k8s-tabs">
         <button role="tab" aria-selected={tab === "summary"} onClick={() => setTab("summary")}>{TAB_SUMMARY}</button>
         <button role="tab" aria-selected={tab === "yaml"} onClick={() => setTab("yaml")}>{TAB_YAML}</button>

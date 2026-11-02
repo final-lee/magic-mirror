@@ -2,6 +2,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useSettings } from "../api/queries";
 import { ErrorState } from "../components/ErrorState";
+import { DoneNotice } from "../components/DoneNotice";
+import { useApplyNotices } from "../iam/useApplyFlow";
+import { ChangeDialog, useK8sChange } from "./ChangeFlow";
+import { ChangeLog } from "./ChangeLog";
+import { CHANGE_DONE } from "./text";
 import { ContextPicker } from "./ContextPicker";
 import { EventsView } from "./EventsView";
 import { K8sError } from "./K8sError";
@@ -47,10 +52,16 @@ export function K8sTab({ target, onOpenIam }: Props) {
 
   const [userNs, setUserNs] = useState<string | null>(null);
   const [view, setView] = useState<K8sView>("overview");
+  const [changeMode, setChangeMode] = useState(false);
   const [focus, setFocus] = useState<WorkloadsFocus | null>(null);
   const session = useK8sSession(target, kubeconfig, settingsReady ? chosen : null, ssoProfileOf(target, candidate, null));
   const ssoProfile = ssoProfileOf(target, candidate, session.data);
   const live = session.isSuccess && !session.isFetching;
+  const notices = useApplyNotices();
+  const change = useK8sChange(target, ssoProfile, () => {
+    notices.announce(CHANGE_DONE, []);
+    void qc.invalidateQueries({ queryKey: ["k8s-change-log"] });
+  });
   const namespaces = useK8sWatch(target, chosen ?? "", session.dataUpdatedAt, ssoProfile, NAMESPACES, null, live);
   const names = namespaces.rows.map((r) => r.name);
 
@@ -128,9 +139,13 @@ export function K8sTab({ target, onOpenIam }: Props) {
         namespace={namespace}
         onNamespace={setUserNs}
         onReconnect={reconnect}
+        changeMode={changeMode}
+        onChangeMode={setChangeMode}
       />
       {missing && <p className="err k8s-notes">{savedMissing(missing)}</p>}
       {namespaces.error && <K8sError error={namespaces.error} target={target} ssoProfile={ssoProfile} compact />}
+      {notices.notices.map((notice) => <DoneNotice key={notice.id} notice={notice} onDismiss={() => notices.dismissNotice(notice.id)} />)}
+      {change.pending && <ChangeDialog pending={change.pending} apply={change.apply} retry={change.retry} cancel={change.cancel} />}
       <div className="pg-main">
         <K8sNav
           view={view}
@@ -158,6 +173,8 @@ export function K8sTab({ target, onOpenIam }: Props) {
               kinds={kinds.data ?? []}
               focus={focus}
               onOpenIam={onOpenIam}
+              changeMode={changeMode}
+              onChange={change.start}
               banner={kinds.isError && <ErrorState error={kinds.error} profile={ssoProfile} compact onRetry={refetchKinds} onLoggedIn={refetchKinds} />}
               fixedKind={fixedKind}
               bookmarked={marks}
@@ -168,6 +185,8 @@ export function K8sTab({ target, onOpenIam }: Props) {
             <div className="empty">{BOOKMARK_MISSING}</div>
           ) : view === "events" ? (
             <EventsView target={target} context={chosen} sessionEpoch={session.dataUpdatedAt} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} />
+          ) : view === "changeLog" ? (
+            <ChangeLog target={target} onStart={change.start} changeMode={changeMode} />
           ) : rules.isError ? (
             <K8sError error={rules.error} target={target} ssoProfile={ssoProfile} />
           ) : rules.data ? (

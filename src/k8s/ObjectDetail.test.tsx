@@ -35,6 +35,23 @@ function setup(props: Partial<Parameters<typeof ObjectDetail>[0]> = {}) {
 
 beforeEach(() => vi.clearAllMocks());
 
+test("change actions appear only while change mode is enabled", async () => {
+  m.get.mockResolvedValue(view());
+  m.rules.mockResolvedValue({ namespace: "prod", resourceRules: [], nonResourceRules: [], incomplete: true });
+  const qc = newQueryClient();
+  const renderDetail = (changeMode: boolean) => withClientAndSso(
+    <ObjectDetail target={T} context="ctx" ssoProfile="p" live objectRef={{ kind: PODS, namespace: "prod", name: "web-1" }} resourceVersion="1" kinds={[]} onOpen={vi.fn()} onBack={null} onClose={vi.fn()} changeMode={changeMode} onChange={vi.fn()} />,
+    qc, ssoLoginStub(),
+  );
+  const result = render(renderDetail(false));
+  await screen.findByRole("tab", { name: TAB_YAML });
+  expect(screen.queryByRole("button", { name: "삭제" })).not.toBeInTheDocument();
+  result.rerender(renderDetail(true));
+  expect(await screen.findByRole("button", { name: "삭제" })).toBeInTheDocument();
+  result.rerender(renderDetail(false));
+  expect(screen.queryByRole("button", { name: "삭제" })).not.toBeInTheDocument();
+});
+
 test("summary: values, owners, children, containers, conditions, events", async () => {
   m.get.mockResolvedValue(
     view({
