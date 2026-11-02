@@ -437,3 +437,95 @@ async fn logs_of_a_container_that_never_started_are_an_error() {
     assert!(!matches!(error, AppError::Network { .. }), "{error:?}");
 }
 
+/// 이 시험은 스크립트가 만든 kind 클러스터에서만 쓰기 요청을 보낸다.
+#[tokio::test]
+#[ignore]
+async fn workload_changes_dry_run_apply_undo_and_conflict() {
+    use super::change::{Change, ChangeObject, Operation};
+    use super::{commit, exec, read};
+    use kube::api::{DynamicObject, Patch, PatchParams, PostParams};
+
+    let client = admin().await;
+    let target = |group: &str, kind: &str, plural: &str, name: &str| ChangeObject {
+        kind: KindRef { group: group.into(), version: "v1".into(), kind: kind.into(), plural: plural.into(), namespaced: true },
+        namespace: Some("mm-k2".into()),
+        name: name.into(),
+    };
+    let deployment = target("apps", "Deployment", "deployments", "mm-k7-web");
+    let cron = target("batch", "CronJob", "cronjobs", "mm-k7-cron");
+    let config = target("", "ConfigMap", "configmaps", "mm-k7-config");
+    let fixtures = [
+        (&deployment, json!({"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"mm-k7-web","namespace":"mm-k2"},"spec":{"replicas":0,"selector":{"matchLabels":{"app":"mm-k7"}},"template":{"metadata":{"labels":{"app":"mm-k7"}},"spec":{"containers":[{"name":"app","image":"registry.k8s.io/pause:3.10"}]}}}})),
+        (&cron, json!({"apiVersion":"batch/v1","kind":"CronJob","metadata":{"name":"mm-k7-cron","namespace":"mm-k2"},"spec":{"schedule":"0 0 1 1 *","jobTemplate":{"spec":{"template":{"spec":{"restartPolicy":"Never","containers":[{"name":"app","image":"registry.k8s.io/pause:3.10"}]}}}}}})),
+        (&config, json!({"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"mm-k7-config","namespace":"mm-k2"},"data":{"key":"value"}})),
+    ];
+    for (target, fixture) in fixtures {
+        let api = read::api_for(client.clone(), &target.kind, target.namespace.as_deref());
+        let object: DynamicObject = serde_json::from_value(fixture).unwrap();
+        api.create(&PostParams::default(), &object).await.unwrap();
+    }
+    kubectl(&["-n", "mm-k2", "rollout", "status", "deployment/mm-k7-web", "--timeout=120s"]);
+
+    let scale = Change { target: deployment.clone(), operation: Operation::Scale { replicas: 1 } };
+    let scale_plan = commit::dry_plan(client.clone(), PRIVATE, &scale, "2026-01-01T00:00:00Z").await.unwrap();
+    let api = read::api_for(client.clone(), &deployment.kind, deployment.namespace.as_deref());
+    api.patch_status(&deployment.name, &PatchParams::default(), &Patch::Merge(json!({"status":{"observedGeneration":0}}))).await.unwrap();
+    assert_eq!(exec::run(client.clone(), PRIVATE, &scale, &scale_plan, true).await.unwrap_err(), AppError::other(exec::STALE));
+    let (_, result) = commit::apply_plan(client.clone(), PRIVATE, &scale, &scale_plan, "2026-01-01T00:00:00Z", None).await.unwrap();
+    result.unwrap();
+    assert_eq!(exec::run(client.clone(), PRIVATE, &scale, &scale_plan, false).await.unwrap_err(), AppError::other(exec::STALE));
+    kubectl(&["-n", "mm-k2", "rollout", "status", "deployment/mm-k7-web", "--timeout=120s"]);
+    let next_scale = Change { target: deployment.clone(), operation: Operation::Scale { replicas: 2 } };
+    let seen = commit::dry_plan(client.clone(), PRIVATE, &next_scale, "").await.unwrap();
+    let inverse = scale_plan.inverse.unwrap();
+    let inverse_plan = commit::dry_plan(client.clone(), PRIVATE, &inverse, "").await.unwrap();
+    let (_, result) = commit::apply_plan(client.clone(), PRIVATE, &inverse, &inverse_plan, "", None).await.unwrap();
+    result.unwrap();
+    assert!(commit::apply_plan(client.clone(), PRIVATE, &next_scale, &seen, "", None).await.is_err());
+    kubectl(&["-n", "mm-k2", "rollout", "status", "deployment/mm-k7-web", "--timeout=120s"]);
+
+    let suspend = Change { target: cron.clone(), operation: Operation::Suspend { suspend: true } };
+    let plan = commit::make_plan(client.clone(), PRIVATE, &suspend, "").await.unwrap();
+    exec::run(client.clone(), PRIVATE, &suspend, &plan, true).await.unwrap();
+    exec::run(client.clone(), PRIVATE, &suspend, &plan, false).await.unwrap();
+    let rerun = Change { target: cron, operation: Operation::Rerun { job_name: "mm-k7-job".into() } };
+    let plan = commit::make_plan(client.clone(), PRIVATE, &rerun, "").await.unwrap();
+    exec::run(client.clone(), PRIVATE, &rerun, &plan, true).await.unwrap();
+    exec::run(client.clone(), PRIVATE, &rerun, &plan, false).await.unwrap();
+
+    let delete = Change { target: config, operation: Operation::Delete };
+    let plan = commit::make_plan(client.clone(), PRIVATE, &delete, "").await.unwrap();
+    exec::run(client.clone(), PRIVATE, &delete, &plan, true).await.unwrap();
+    exec::run(client.clone(), PRIVATE, &delete, &plan, false).await.unwrap();
+    let recreate = plan.inverse.unwrap();
+    let plan = commit::make_plan(client.clone(), PRIVATE, &recreate, "").await.unwrap();
+    exec::run(client.clone(), PRIVATE, &recreate, &plan, true).await.unwrap();
+    exec::run(client.clone(), PRIVATE, &recreate, &plan, false).await.unwrap();
+
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if !commit::revisions(client.clone(), PRIVATE, &deployment).await.unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }).await.expect("첫 롤아웃 리비전이 만들어지지 않았어요");
+    let restart = Change { target: deployment.clone(), operation: Operation::Restart };
+    let plan = commit::make_plan(client.clone(), PRIVATE, &restart, "2026-01-01T00:00:00Z").await.unwrap();
+    exec::run(client.clone(), PRIVATE, &restart, &plan, true).await.unwrap();
+    exec::run(client.clone(), PRIVATE, &restart, &plan, false).await.unwrap();
+    let revisions = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let revisions = commit::revisions(client.clone(), PRIVATE, &deployment).await.unwrap();
+            if revisions.len() >= 2 {
+                break revisions;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }).await.expect("롤아웃 리비전이 만들어지지 않았어요");
+    let undo = Change { target: deployment, operation: Operation::RolloutUndo { revision: revisions.last().unwrap().revision.clone() } };
+    let plan = commit::make_plan(client.clone(), PRIVATE, &undo, "").await.unwrap();
+    assert!(plan.inverse.is_some(), "현재 리비전의 역변경이 필요해요");
+    exec::run(client.clone(), PRIVATE, &undo, &plan, true).await.unwrap();
+    exec::run(client, PRIVATE, &undo, &plan, false).await.unwrap();
+}

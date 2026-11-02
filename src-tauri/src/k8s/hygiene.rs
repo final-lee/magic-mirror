@@ -7,10 +7,17 @@ use std::path::{Path, PathBuf};
 const WRITE_CALLS: &[&str] = &[
     ".create(", "::create(", ".method(", ".patch(", ".replace(", ".delete(", ".delete_collection(", ".create_subresource(", ".patch_subresource(",
     ".replace_subresource(", ".evict(", ".exec(", ".attach(", ".portforward(", "Method::POST", "Method::PUT", "Method::PATCH",
+    ".patch_metadata(", ".patch_scale(", ".replace_scale(", ".patch_status(", ".replace_status(", ".patch_approval(",
+    ".patch_resize(", ".replace_resize(", ".patch_ephemeral_containers(", ".replace_ephemeral_containers(", ".create_token_request(",
     "Method::DELETE", "Request::post", "Request::put", "Request::patch", "Request::delete",
 ];
 /// (파일, 허용하는 호출)
-const ALLOWED: &[(&str, &[&str])] = &[("k8s/review.rs", &[".create(", "::create("])];
+const ALLOWED: &[(&str, &[&str])] = &[
+    ("k8s/review.rs", &[".create(", "::create("]),
+    ("k8s/exec.rs", &[".create(", ".patch(", ".delete("]),
+    ("k8s/shell.rs", &[".exec(", ".attach("]),
+    ("k8s/forward.rs", &[".portforward("]),
+];
 
 /// 시험일 때만 컴파일되는 파일은 스캔하지 않는다: `hygiene.rs`, `live_tests.rs`, 이름이 `tests.rs`인 파일
 fn is_test_only(path: &Path) -> bool {
