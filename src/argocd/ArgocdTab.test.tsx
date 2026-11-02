@@ -21,7 +21,8 @@ const EMPTY: Settings = { enabledServices: [], favorites: [], lastProfile: null,
 const SETTINGS: Settings = { ...EMPTY, argocdServers: [STG, OPS] };
 
 const session = (url: string): ArgocdSession => ({ url, username: "admin", version: url === OPS.url ? "v3.3.6" : "v3.4.5" });
-const row = (name: string): ArgoAppRow => ({ name, namespace: "argocd", resourceVersion: "1", values: { sync: "Synced", health: "Healthy", project: "default" }, labels: {} });
+/** 정상 앱은 접혀 보이지 않으므로, 어느 서버의 목록인지 이름으로 확인하도록 OutOfSync로 둔다 */
+const row = (name: string): ArgoAppRow => ({ name, namespace: "argocd", resourceVersion: "1", values: { sync: "OutOfSync", health: "Healthy", project: "default" }, labels: {} });
 const serverSelect = () => screen.getByRole("combobox", { name: SERVER_LABEL });
 const submitToken = (token: string) => {
   fireEvent.change(screen.getByLabelText(TOKEN_LABEL), { target: { value: token } });

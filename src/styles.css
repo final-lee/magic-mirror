@@ -1051,6 +1051,21 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .argo-card-rows .argo-in-sub td:first-child { padding-left: 46px; }
 .argo-card-rows .argo-subgroup td:first-child { padding-left: 0; box-shadow: none; }
 .argo-card-rows tr:last-child td { border-bottom: 0; }
+/* 정상은 접어서 자리를 덜 쓴다: 섞인 묶음의 정상 행은 이름을 늘어놓은 한 줄, 정상 카드는 얇은 머리 줄 */
+.argo-okfold td { padding: 0; }
+.argo-okfold-btn { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 5px 12px 5px 30px; border: 0; background: #30d1580a; color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.argo-okfold-btn:hover { background: #30d1581a; }
+.argo-okfold-btn .argo-badge { flex: none; }
+.argo-okfold-names { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c8c8cc; }
+.argo-okfold-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.argo-card-rows .argo-okfold td:first-child { padding-left: 0; box-shadow: none; }
+.argo-okfold.argo-in-sub .argo-okfold-btn { padding-left: 46px; }
+.argo-card-quiet { border-color: #3a3a3e; }
+.argo-card-quiet .argo-band { padding: 3px 12px; background: #252528; }
+.argo-card-quiet .argo-band-name { font-size: 12px; font-weight: 500; }
+.argo-card-quiet .argo-tally { height: 4px; }
+/* 접힌 정상 카드끼리는 바짝 붙인다 */
+.argo-card-quiet + .argo-card-quiet { margin-top: -8px; }
 .argo-chip { margin-left: 6px; }
 .argo-chip-warn { background: #ffd60a22; color: var(--yellow); }
 .argo-acts { display: inline-flex; gap: 6px; }
