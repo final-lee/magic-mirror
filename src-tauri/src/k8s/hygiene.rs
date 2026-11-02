@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const WRITE_CALLS: &[&str] = &[
-    ".create(", "::create(", ".method(", ".patch(", ".replace(", ".delete(", ".delete_collection(", ".create_subresource(", ".patch_subresource(",
+    ".create(", "::create(", ".method(", ".patch(", ".replace(", ".delete(", ".delete_collection(", ".create_subresource(", ".create_subresource::<", ".patch_subresource(",
     ".replace_subresource(", ".evict(", ".exec(", ".attach(", ".portforward(", "Method::POST", "Method::PUT", "Method::PATCH",
     ".patch_metadata(", ".patch_scale(", ".replace_scale(", ".patch_status(", ".replace_status(", ".patch_approval(",
     ".patch_resize(", ".replace_resize(", ".patch_ephemeral_containers(", ".replace_ephemeral_containers(", ".create_token_request(",
@@ -14,7 +14,7 @@ const WRITE_CALLS: &[&str] = &[
 /// (파일, 허용하는 호출)
 const ALLOWED: &[(&str, &[&str])] = &[
     ("k8s/review.rs", &[".create(", "::create("]),
-    ("k8s/exec.rs", &[".create(", ".patch(", ".delete("]),
+    ("k8s/exec.rs", &[".create(", ".patch(", ".delete(", ".create_subresource::<"]),
     ("k8s/shell.rs", &[".exec(", ".attach("]),
     ("k8s/forward.rs", &[".portforward("]),
 ];

@@ -1,3 +1,5 @@
+use std::sync::atomic::AtomicBool;
+
 use kube::{Client, Config};
 
 use super::*;
@@ -163,3 +165,49 @@ async fn unwatch_of_an_unknown_id_is_a_no_op_and_forget_does_not_abort() {
     h.abort();
 }
 
+
+/// 신호를 받으면 `stopped`를 켜고 끝나는 작업. 끊기면(abort) 켜지 못한다.
+fn drain_task(stopped: Arc<AtomicBool>) -> impl FnOnce(u64) -> (tokio::task::AbortHandle, tokio::sync::watch::Sender<bool>) {
+    move |_| {
+        let (cancel, mut signal) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(async move {
+            let _ = signal.changed().await;
+            tokio::task::yield_now().await;
+            stopped.store(true, Ordering::SeqCst);
+        });
+        (task.abort_handle(), cancel)
+    }
+}
+
+#[tokio::test]
+async fn closing_the_target_signals_its_drain_to_stop_instead_of_aborting_it() {
+    let state = K8sState::default();
+    let (a, b) = (target("a"), target("b"));
+    let (stopped_a, stopped_b) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+    state.register_drain(&a, 0, drain_task(stopped_a.clone())).unwrap();
+    state.register_drain(&b, 0, drain_task(stopped_b.clone())).unwrap();
+    state.close(&a);
+    // 신호를 받은 작업은 yield 뒤의 마무리까지 끝까지 돈다(끊겼다면 켜지지 못한다)
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+    assert!(stopped_a.load(Ordering::SeqCst));
+    assert!(!stopped_b.load(Ordering::SeqCst));
+    // 닫은 대상의 항목은 잊고 다른 대상의 것은 남긴다
+    assert_eq!(locked(&state.watches).values().map(|w| w.target.clone()).collect::<Vec<_>>(), [b]);
+}
+
+#[tokio::test]
+async fn unwatch_stops_a_drain_gracefully_and_a_stale_epoch_is_refused() {
+    let state = K8sState::default();
+    let t = target("a");
+    let stopped = Arc::new(AtomicBool::new(false));
+    let id = state.register_drain(&t, 0, drain_task(stopped.clone())).unwrap();
+    state.unwatch(id);
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+    assert!(stopped.load(Ordering::SeqCst));
+    state.close(&t);
+    assert!(state.register_drain(&t, 0, drain_task(Arc::new(AtomicBool::new(false)))).is_none());
+}

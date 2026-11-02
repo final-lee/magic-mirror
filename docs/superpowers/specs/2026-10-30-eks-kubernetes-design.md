@@ -189,6 +189,17 @@
 - cordon·uncordon: 서로 되돌리기.
 - 지금 된 것: Node 상세에서 스케줄 중지·재개를 공통 미리보기와 기록·되돌리기로 수행한다.
 - drain: 미리보기에 옮길 Pod, 건너뛸 DaemonSet Pod, emptyDir 손실 경고, 컨트롤러 없는 Pod 경고, PDB로 막힐 Pod. 적용은 cordon → Eviction을 하나씩. 429가 이어지면 5분 뒤 멈추고 이미 옮긴 것은 그대로 둔다. 되돌리기는 uncordon만.
+- drain 지금 된 것 (K7 drain):
+  - 계획은 순수 함수(`drain::plan_drain`): 노드의 모든 Pod(`spec.nodeName` 필드 선택자)를 옮길 것·건너뛸 것으로 나눈다. DaemonSet이 컨트롤러인 Pod, 미러(static) Pod(`kubernetes.io/config.mirror`), 이미 종료 중인 Pod는 건너뛴다. 끝난(Succeeded·Failed) Pod는 경고 없이 옮긴다. emptyDir 볼륨이 있으면 데이터 손실 경고, 컨트롤러(`controller: true`) 소유자가 없으면 "다시 만들어지지 않음" 경고. 같은 네임스페이스에서 Pod를 고르는(`matchLabels`, `matchExpressions`, 빈 선택자는 전부) PodDisruptionBudget 중 `status.disruptionsAllowed`가 0인 것이 있으면 그 Pod를 "막힐 Pod"로 표시한다. PDB 목록을 읽을 권한이 없으면 알 수 없다는 경고를 낸다.
+  - 미리보기는 공통 틀(`k8s_preview`)을 거친다. 이름 입력(노드 이름)은 늘 요구한다. 호출 목록은 cordon PATCH 하나와 Pod마다 Eviction POST이고, 서버 dry-run은 cordon에만 돌린다(Eviction은 Pod마다 호출이 늘고, 막힘은 PDB 상태로 미리 계산해서 보여 준다). 미리보기에는 `drain`(옮길 Pod 표시, 건너뛸 Pod) 필드가 더해진다.
+  - 적용은 `k8s_drain(target, node, confirmText, channel)`로만 한다(`k8s_apply`는 drain을 거절). 미리보기한 계획을 꺼내 노드(status 제외)와 옮길 Pod 집합(UID)이 그대로인지, 이름 입력이 맞는지 다시 확인하고 곧바로 번호를 돌려준다. 이후 작업이 cordon → Eviction을 하나씩 보내며 `started`, `cordoned`, `pod`(상태 pending·evicting·evicted·blocked·failed와 합계), `finished`(completed·stopped·timedOut·failed) 메시지를 채널로 흘린다.
+  - Eviction은 `exec.rs`의 `evict`만 보낸다. kube의 `evict`는 `deleteOptions`를 잘못된 이름으로 보내 UID 조건이 사라져서 `eviction` 하위 리소스를 직접 만들고, 본문의 UID 조건으로 계획 뒤에 같은 이름으로 다시 만들어진 Pod는 건드리지 않는다. 404·409는 이미 없는 것으로 본다.
+  - kube 클라이언트의 기본 재시도(429·503·504를 `Retry-After`만큼 기다리며 최대 15번)는 모든 연결에서 끈다(`connect::tune`). 켜 두면 PDB가 막은 Eviction이 429 대신 몇 분씩 멈춰 있는다(kind에서 확인). 일시적인 429·503·504는 호출한 쪽이 오류로 받는다.
+  - 429(PDB)는 막힌 Pod로 두고 다음 Pod를 먼저 하며, 한 바퀴가 끝나면 1초부터 두 배씩(최대 30초) 늘려 가며 다시 시도한다. 어떤 Pod도 옮기지 못한 채 429만 5분 이어지면 멈춘다(`timedOut`). 이미 옮긴 Pod는 그대로 둔다. 다른 Pod를 하나라도 옮기면 5분을 다시 센다. 그 밖의 API 오류는 그 Pod만 `failed`로 두고 계속하며, 권한(401·403)·연결 오류는 계속할 수 없어 바로 멈춘다(`failed`).
+  - 중단은 `k8s_unwatch(번호)`: 지금 하는 Eviction을 마치고(기다리는 중이면 바로) 멈춘다. 대상을 닫거나(`k8s_close`) 다시 연결하면 같은 신호로 멈추고 항목을 잊는다(끊지 않으므로 기록은 남는다). 채널을 닫아도 멈춘다. 프론트는 화면을 떠날 때도 중단한다.
+  - 기록: cordon을 했으면 cordon 기록(되돌리기 = uncordon)과 drain 기록(`drain: Pod N개 옮김, M개 막힘…`, 끝까지 마친 경우만 성공, 중단·시간 초과·실패는 이유와 함께 실패 기록, 되돌리기 없음)을 남긴다. 미리보기 때 이미 스케줄이 중지된 노드는 cordon을 건너뛰고 기록하지 않으며 되돌릴 것이 없다.
+  - 화면: 변경 모드의 Node 상세에 "drain" 버튼(노드 patch와 `pods/eviction` create 권한이 확실히 없으면 이유와 함께 비활성화). 미리보기에 옮길 Pod 표(경고 표시)와 건너뛸 Pod 표를 보이고, 적용하면 진행 창(Pod별 상태, 합계, 중단, 끝나면 요약과 "스케줄 중지는 변경 기록에서 되돌릴 수 있어요")으로 바뀐다.
+  - 시험: 계획과 상태 기계는 단위 시험(`drain/tests.rs`, `drain/run/tests.rs`, `drain/apply/tests.rs`, `exec/tests.rs`의 가짜 API 서버로 Eviction 응답 분류와 재시도 끔, 멈춘 시계로 5분 한도), 화면은 `DrainFlow.test.tsx`, kind 실제 시험은 `drain_moves_pods_off_a_worker_around_a_budget_then_uncordons`(워커 노드, PDB로 막힌 Pod와 보통 Pod, 컨트롤러 없는 emptyDir Pod). `scripts/k8s-live-test.sh`가 컨트롤 플레인 하나와 워커 하나로 kind 클러스터를 만든다.
 
 ### C. 셸과 port-forward
 - 셸: `kube-rs` `exec`(웹소켓). `/bin/bash`, 없으면 `/bin/sh`. 터미널은 xterm.js, 크기 변경을 전달한다. 열 때 확인, 위험 네임스페이스면 이름 입력. 기록은 열고 닫은 시각과 대상만.
@@ -233,7 +244,7 @@ k8s_preview(target, K8sChange): K8sPreview
 k8s_apply(target, K8sChange, confirmText | null, undoOf | null): K8sApplyResult
 k8s_preview_batch(target, K8sChange[]): K8sBatchPreview
 k8s_apply_batch(target, K8sChange[], confirmText | null, undoOf: string[] | null): K8sBatchResult
-k8s_drain(target, node, confirmText, channel): StreamId        // 진행 상황을 채널로
+k8s_drain(target, node, confirmText, channel): StreamId        // 진행 상황을 채널로. 중단은 k8s_unwatch(streamId)
 k8s_shell_open(target, namespace, pod, container, confirmText | null, channel): ShellId
 k8s_shell_input(shellId, data: string): void
 k8s_shell_resize(shellId, cols, rows): void

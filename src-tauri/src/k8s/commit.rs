@@ -5,6 +5,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::change::{self, Change, ChangeObject, Operation, Plan};
+use super::drain;
 use super::failure::Endpoint;
 use super::read::{api_for, bounded, list_all};
 use super::rows::KindRef;
@@ -86,8 +87,38 @@ pub async fn revisions(client: Client, endpoint: Endpoint, target: &ChangeObject
     Ok(history(client, endpoint, target, &object).await?.into_iter().map(|(revision, _)| revision).collect())
 }
 
+/// 노드에 있는 Pod. 모든 네임스페이스에서 `spec.nodeName`으로 고른다.
+async fn pods_on(client: Client, endpoint: Endpoint, node: &str) -> Result<Vec<Value>, AppError> {
+    let kind = KindRef { group: String::new(), version: "v1".into(), kind: "Pod".into(), plural: "pods".into(), namespaced: true };
+    let api = api_for(client, &kind, None);
+    let params = ListParams::default().fields(&format!("spec.nodeName={node}"));
+    let (items, _) = list_all(&api, &params, 100, &kind.plural, endpoint).await?;
+    items.into_iter().map(|item| serde_json::to_value(item).map_err(|_| AppError::other(change::INVALID_CHANGE))).collect()
+}
+
+/// 모든 PodDisruptionBudget. 읽을 권한이 없으면 None(막히는 Pod를 알 수 없다고 미리보기가 알린다).
+async fn budgets(client: Client, endpoint: Endpoint) -> Result<Option<Vec<Value>>, AppError> {
+    let kind = KindRef { group: "policy".into(), version: "v1".into(), kind: "PodDisruptionBudget".into(), plural: "poddisruptionbudgets".into(), namespaced: true };
+    let api = api_for(client, &kind, None);
+    match list_all(&api, &ListParams::default(), 100, &kind.plural, endpoint).await {
+        Ok((items, _)) => items
+            .into_iter()
+            .map(|item| serde_json::to_value(item).map_err(|_| AppError::other(change::INVALID_CHANGE)))
+            .collect::<Result<_, _>>()
+            .map(Some),
+        Err(AppError::AccessDenied { .. }) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 pub async fn make_plan(client: Client, endpoint: Endpoint, change: &Change, now: &str) -> Result<Plan, AppError> {
     let object = current(client.clone(), endpoint, &change.target).await?;
+    if matches!(change.operation, Operation::Drain) {
+        let node = object.ok_or_else(|| AppError::other(change::MISSING_VERSION))?;
+        let pods = pods_on(client.clone(), endpoint, &change.target.name).await?;
+        let budgets = budgets(client, endpoint).await?;
+        return drain::preview(change, &node, drain::plan_drain(&node, &pods, budgets.as_deref()));
+    }
     let revisions = if matches!(change.operation, Operation::RolloutUndo { .. }) {
         history(client, endpoint, &change.target, object.as_ref().ok_or_else(|| AppError::other(REVISION_MISSING))?).await?
     } else {
@@ -122,6 +153,23 @@ pub fn check(seen: Option<&Plan>, current: &Plan, confirmation: Option<&str>) ->
         return Err(AppError::other(super::exec::STALE));
     }
     if seen.preview.confirm_name.as_deref().is_some_and(|name| Some(name) != confirmation) {
+        return Err(AppError::other(CONFIRM_REQUIRED));
+    }
+    Ok(())
+}
+
+/// drain 적용 직전 확인: 미리보기를 본 노드와 옮길 Pod가 그대로이고 노드 이름을 정확히 입력했는가.
+pub fn check_drain(seen: Option<&Plan>, current: &Plan, confirmation: Option<&str>) -> Result<(), AppError> {
+    let seen = seen.ok_or_else(|| AppError::other(super::exec::STALE))?;
+    let unchanged = seen.fingerprint == current.fingerprint
+        && match (&seen.preview.drain, &current.preview.drain) {
+            (Some(seen), Some(current)) => drain::same_targets(seen, current),
+            _ => false,
+        };
+    if !unchanged {
+        return Err(AppError::other(super::exec::STALE));
+    }
+    if seen.preview.confirm_name.is_none() || seen.preview.confirm_name.as_deref() != confirmation {
         return Err(AppError::other(CONFIRM_REQUIRED));
     }
     Ok(())

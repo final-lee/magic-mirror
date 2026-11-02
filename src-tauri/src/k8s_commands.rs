@@ -13,7 +13,9 @@ use crate::commands::AppState;
 use crate::error::AppError;
 use crate::iam::clock::{iso, now_secs};
 use crate::iam::commit::{new_log_id, plan::PlanStore};
-use crate::k8s::change::{Change, ChangeObject, Operation, Plan, Preview};
+use crate::k8s::change::{Change, ChangeObject, Operation, Plan, Preview, INVALID_CHANGE};
+use crate::k8s::drain::apply::{self as drain_apply, Job};
+use crate::k8s::drain::run::{DrainMessage, Limits};
 use crate::k8s::{commit, exec, log};
 use crate::k8s::connect;
 use crate::k8s::failure::{describe, failure_of, Endpoint, Failure, NOT_OPENED};
@@ -47,10 +49,23 @@ pub struct K8sState {
     log_path: PathBuf,
 }
 
-/// 돌고 있는 watch 하나. 대상이 닫히면 같은 대상의 것을 모두 멈춘다.
+/// 돌고 있는 watch, 로그, drain 하나. 대상이 닫히면 같은 대상의 것을 모두 멈춘다.
 struct WatchEntry {
     target: K8sTarget,
     handle: tokio::task::AbortHandle,
+    /// drain만 가진다. 끊지 않고 이 신호로 멈춰야 지금 하는 Eviction을 마치고 결과를 기록한다.
+    cancel: Option<tokio::sync::watch::Sender<bool>>,
+}
+
+impl WatchEntry {
+    fn stop(&self) {
+        match &self.cancel {
+            Some(cancel) => {
+                cancel.send_replace(true);
+            }
+            None => self.handle.abort(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -86,7 +101,7 @@ impl K8sState {
             locked(&self.watches).retain(|_, w| {
                 let same = w.target == *t;
                 if same {
-                    w.handle.abort();
+                    w.stop();
                 }
                 !same
             });
@@ -101,7 +116,7 @@ impl K8sState {
         locked(&self.watches).retain(|_, w| {
             let same = w.target == *t;
             if same {
-                w.handle.abort();
+                w.stop();
             }
             !same
         });
@@ -116,7 +131,25 @@ impl K8sState {
         }
         let mut watches = locked(&self.watches);
         let id = self.next_watch.fetch_add(1, Ordering::Relaxed) + 1;
-        watches.insert(id, WatchEntry { target: t.clone(), handle: spawn(id) });
+        watches.insert(id, WatchEntry { target: t.clone(), handle: spawn(id), cancel: None });
+        Some(id)
+    }
+
+    /// `register_watch`와 같되 drain용이다. `spawn`이 돌려주는 보내는 쪽으로 멈춘다(`unwatch`, 대상 닫기).
+    pub fn register_drain(
+        &self,
+        t: &K8sTarget,
+        started: u64,
+        spawn: impl FnOnce(u64) -> (tokio::task::AbortHandle, tokio::sync::watch::Sender<bool>),
+    ) -> Option<u64> {
+        let epochs = locked(&self.epochs);
+        if *epochs.get(t).unwrap_or(&0) != started {
+            return None;
+        }
+        let mut watches = locked(&self.watches);
+        let id = self.next_watch.fetch_add(1, Ordering::Relaxed) + 1;
+        let (handle, cancel) = spawn(id);
+        watches.insert(id, WatchEntry { target: t.clone(), handle, cancel: Some(cancel) });
         Some(id)
     }
 
@@ -126,7 +159,7 @@ impl K8sState {
 
     pub fn unwatch(&self, id: u64) {
         if let Some(w) = locked(&self.watches).remove(&id) {
-            w.handle.abort();
+            w.stop();
         }
     }
 
@@ -279,7 +312,7 @@ pub fn k8s_watch(
     .ok_or_else(|| AppError::other(NOT_OPENED))
 }
 
-/// watch와 로그 흐름을 멈춘다(번호는 `k8s_watch`·`k8s_logs`가 돌려준 것)
+/// watch, 로그, drain 흐름을 멈춘다(번호는 `k8s_watch`·`k8s_logs`·`k8s_drain`이 돌려준 것). drain은 지금 하는 Eviction을 마치고 멈춘다.
 #[tauri::command]
 pub fn k8s_unwatch(k8s: State<'_, K8sState>, watch_id: u64) {
     k8s.unwatch(watch_id);
@@ -381,6 +414,10 @@ pub struct K8sApplyResult {
 
 #[tauri::command]
 pub async fn k8s_apply(k8s: State<'_, K8sState>, target: K8sTarget, change: Change, confirm_text: Option<String>, undo_of: Option<String>) -> Result<K8sApplyResult, AppError> {
+    // drain은 진행을 채널로 알리는 `k8s_drain`으로만 적용한다
+    if matches!(change.operation, Operation::Drain) {
+        return Err(AppError::other(INVALID_CHANGE));
+    }
     let session = k8s.session(&target)?;
     let seen = locked(&k8s.plans).take(&target.profile, &(&target, &change), now_secs()).ok_or_else(|| AppError::other(exec::STALE))?;
     if k8s.epoch(&target) != seen.epoch || !Arc::ptr_eq(&session, &seen.session) {
@@ -423,6 +460,55 @@ pub async fn k8s_apply(k8s: State<'_, K8sState>, target: K8sTarget, change: Chan
     }
     outcome?;
     Ok(K8sApplyResult { log_id: id })
+}
+
+/// 노드를 drain한다. 미리보기(`k8s_preview`)한 계획과 노드 이름 입력을 확인하고 곧바로 돌아오며,
+/// cordon과 Eviction 진행은 채널로 흘린다. 반환값은 멈출 때 쓰는 번호(`k8s_unwatch`).
+#[tauri::command]
+pub async fn k8s_drain(
+    app: tauri::AppHandle,
+    k8s: State<'_, K8sState>,
+    target: K8sTarget,
+    node: String,
+    confirm_text: Option<String>,
+    on_event: tauri::ipc::Channel<DrainMessage>,
+) -> Result<u64, AppError> {
+    let session = k8s.session(&target)?;
+    let change = Change {
+        target: ChangeObject { kind: node_kind(), namespace: None, name: node },
+        operation: Operation::Drain,
+    };
+    let seen = locked(&k8s.plans).take(&target.profile, &(&target, &change), now_secs()).ok_or_else(|| AppError::other(exec::STALE))?;
+    if k8s.epoch(&target) != seen.epoch || !Arc::ptr_eq(&session, &seen.session) {
+        return Err(AppError::other(exec::STALE));
+    }
+    let current = commit::make_plan(session.client.clone(), session.endpoint, &change, &seen.at).await?;
+    commit::check_drain(Some(&seen.plan), &current, confirm_text.as_deref())?;
+    let plan = current.preview.drain.ok_or_else(|| AppError::other(INVALID_CHANGE))?;
+    let job = Job {
+        client: session.client.clone(),
+        endpoint: session.endpoint,
+        log_path: k8s.log_path.clone(),
+        target: target.clone(),
+        change,
+        plan,
+        at: seen.at,
+        limits: Limits::default(),
+    };
+    k8s.register_drain(&target, seen.epoch, |id| {
+        let (cancel, signal) = tokio::sync::watch::channel(false);
+        let task = tauri::async_runtime::spawn(async move {
+            // 끝나는 길이 무엇이든(패닉 포함) 항목을 지운다
+            let _forget = ForgetWatch { app, id };
+            drain_apply::apply(job, signal, move |m| on_event.send(m).is_ok()).await;
+        });
+        (task.inner().abort_handle(), cancel)
+    })
+    .ok_or_else(|| AppError::other(NOT_OPENED))
+}
+
+fn node_kind() -> KindRef {
+    KindRef { group: String::new(), version: "v1".into(), kind: "Node".into(), plural: "nodes".into(), namespaced: false }
 }
 
 #[tauri::command]

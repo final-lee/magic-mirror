@@ -6,6 +6,7 @@ import { DoneNotice } from "../components/DoneNotice";
 import { useApplyNotices } from "../iam/useApplyFlow";
 import { ChangeDialog, useK8sChange } from "./ChangeFlow";
 import { ChangeLog } from "./ChangeLog";
+import { DrainProgress } from "./DrainProgress";
 import { CHANGE_DONE } from "./text";
 import { ContextPicker } from "./ContextPicker";
 import { EventsView } from "./EventsView";
@@ -59,11 +60,16 @@ export function K8sTab({ target, onOpenIam }: Props) {
   const ssoProfile = ssoProfileOf(target, candidate, session.data);
   const live = session.isSuccess && !session.isFetching;
   const notices = useApplyNotices();
-  const change = useK8sChange(target, ssoProfile, (applied) => {
-    notices.announce(CHANGE_DONE, []);
-    setAppliedChange(applied);
-    void qc.invalidateQueries({ queryKey: ["k8s-change-log"] });
-  });
+  const change = useK8sChange(
+    target,
+    ssoProfile,
+    (applied) => {
+      notices.announce(CHANGE_DONE, []);
+      setAppliedChange(applied);
+      void qc.invalidateQueries({ queryKey: ["k8s-change-log"] });
+    },
+    () => void qc.invalidateQueries({ queryKey: ["k8s-change-log"] }),
+  );
   const namespaces = useK8sWatch(target, chosen ?? "", session.dataUpdatedAt, ssoProfile, NAMESPACES, null, live);
   const names = namespaces.rows.map((r) => r.name);
 
@@ -148,6 +154,7 @@ export function K8sTab({ target, onOpenIam }: Props) {
       {namespaces.error && <K8sError error={namespaces.error} target={target} ssoProfile={ssoProfile} compact />}
       {notices.notices.map((notice) => <DoneNotice key={notice.id} notice={notice} onDismiss={() => notices.dismissNotice(notice.id)} />)}
       {change.pending && <ChangeDialog pending={change.pending} apply={change.apply} retry={change.retry} cancel={change.cancel} />}
+      {change.drain && <DrainProgress run={change.drain} onStop={change.stopDrain} onClose={change.closeDrain} />}
       <div className="pg-main">
         <K8sNav
           view={view}

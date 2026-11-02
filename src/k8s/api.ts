@@ -1,7 +1,7 @@
 import { Channel } from "@tauri-apps/api/core";
 import { invoke } from "../api/invoke";
 import type {
-  K8sApplyResult, K8sChange, K8sChangeLogEntry, K8sChangeObject, K8sContextInfo, K8sKind, K8sKindRef, K8sLogMessage, K8sLogOptions, K8sObjectView, K8sOverview, K8sPreview, K8sRevision, K8sSecretValue, K8sRules, K8sSession, K8sTarget, K8sUndo, K8sWatchMessage,
+  K8sApplyResult, K8sChange, K8sChangeLogEntry, K8sChangeObject, K8sContextInfo, K8sDrainMessage, K8sKind, K8sKindRef, K8sLogMessage, K8sLogOptions, K8sObjectView, K8sOverview, K8sPreview, K8sRevision, K8sSecretValue, K8sRules, K8sSession, K8sTarget, K8sUndo, K8sWatchMessage,
 } from "./types";
 
 // 명령 이름과 인자 이름은 K1 계획의 Contract와 같아야 한다. target은 객체 하나로 넘긴다.
@@ -41,6 +41,12 @@ export const k8sApi = {
     invoke<K8sPreview>("k8s_preview", { target, change, profile: ssoProfile }),
   apply: (target: K8sTarget, change: K8sChange, confirmText: string | null, undoOf: string | null, ssoProfile: string) =>
     invoke<K8sApplyResult>("k8s_apply", { target, change, confirmText, undoOf, profile: ssoProfile }),
+  /** 미리보기한 drain을 적용한다. 진행은 채널로 오고 반환값은 `unwatch`(중단)에 넘기는 번호 */
+  drain: (target: K8sTarget, node: string, confirmText: string | null, ssoProfile: string, onMessage: (m: K8sDrainMessage) => void) => {
+    const onEvent = new Channel<K8sDrainMessage>();
+    onEvent.onmessage = onMessage;
+    return invoke<number>("k8s_drain", { target, node, confirmText, onEvent, profile: ssoProfile });
+  },
   changeLog: () => invoke<K8sChangeLogEntry[]>("k8s_change_log"),
   undo: (logId: string) => invoke<K8sUndo>("k8s_undo", { logId }),
 };

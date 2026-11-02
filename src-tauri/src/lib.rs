@@ -135,6 +135,7 @@ pub fn run() {
             k8s_commands::k8s_revisions,
             k8s_commands::k8s_preview,
             k8s_commands::k8s_apply,
+            k8s_commands::k8s_drain,
             k8s_commands::k8s_change_log,
             k8s_commands::k8s_undo,
             argocd_commands::argocd_set_token,

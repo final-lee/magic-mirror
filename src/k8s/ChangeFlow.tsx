@@ -1,11 +1,13 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { errorMessage } from "../api/errors";
 import { PreviewFooter } from "../iam/PreviewFooter";
 import { ConfirmField, useSheetFocus } from "../iam/previewParts";
 import { usePendingFlow } from "../iam/useApplyFlow";
 import { k8sApi } from "./api";
+import { DrainPlanView } from "./DrainPlanView";
+import { reduceDrain, startRun, type DrainRun } from "./drain";
 import * as t from "./text";
-import type { K8sChange, K8sPreview, K8sTarget } from "./types";
+import type { K8sChange, K8sDrainMessage, K8sPreview, K8sTarget } from "./types";
 
 type Pending = {
   change: K8sChange;
@@ -17,9 +19,44 @@ type Pending = {
   rev: number;
 };
 
-/** 미리보기와 적용을 한 흐름으로 묶고 실패하면 다시 확인하도록 막는다. */
-export function useK8sChange(target: K8sTarget, ssoProfile: string, onDone: (change: K8sChange) => void) {
+/**
+ * 미리보기와 적용을 한 흐름으로 묶고 실패하면 다시 확인하도록 막는다.
+ * drain은 적용이 끝나지 않는 흐름이라 진행(`drain`)을 채널 메시지로 받아 두고, `onDrained`는 끝 메시지에서 한 번 부른다.
+ */
+export function useK8sChange(target: K8sTarget, ssoProfile: string, onDone: (change: K8sChange) => void, onDrained: () => void = () => {}) {
   const flow = usePendingFlow<Pending, () => void>(JSON.stringify(target));
+  const run = useRef<DrainRun | null>(null);
+  const [drain, show] = useState<DrainRun | null>(null);
+  const setRun = (next: DrainRun | null) => {
+    run.current = next;
+    show(next);
+  };
+  const onMessage = (message: K8sDrainMessage) => {
+    if (!run.current) return;
+    setRun(reduceDrain(run.current, message));
+    if (message.type === "finished") onDrained();
+  };
+  const drainNode = async (node: string, typed: string) => {
+    setRun(startRun(node));
+    try {
+      const id = await k8sApi.drain(target, node, typed, ssoProfile, onMessage);
+      if (run.current) setRun({ ...run.current, id });
+    } catch (error) {
+      setRun(null);
+      throw error;
+    }
+  };
+  const stopDrain = () => {
+    const current = run.current;
+    if (current?.id == null || current.finished || current.stopping) return;
+    setRun({ ...current, stopping: true });
+    void k8sApi.unwatch(current.id);
+  };
+  // 화면을 떠나면 하던 drain은 지금 Eviction까지만 하고 멈추게 한다
+  useEffect(() => () => {
+    const current = run.current;
+    if (current?.id != null && !current.finished) void k8sApi.unwatch(current.id);
+  }, []);
   const load = async (change: K8sChange, undoOf: string | null) => {
     const rev = ++flow.seq.current;
     flow.commit({ change, undoOf, preview: null, phase: "loading", error: null, stale: false, rev });
@@ -41,9 +78,14 @@ export function useK8sChange(target: K8sTarget, ssoProfile: string, onDone: (cha
     flow.inFlight.current = true;
     flow.commit({ ...p, phase: "applying", error: null });
     try {
-      await k8sApi.apply(target, p.change, p.preview.confirmName ? typed : null, p.undoOf, ssoProfile);
-      flow.commit(null);
-      if (flow.alive.current) onDone(p.change);
+      if (p.change.type === "drain") {
+        await drainNode(p.change.name, typed);
+        flow.commit(null);
+      } else {
+        await k8sApi.apply(target, p.change, p.preview.confirmName ? typed : null, p.undoOf, ssoProfile);
+        flow.commit(null);
+        if (flow.alive.current) onDone(p.change);
+      }
     } catch (error) {
       flow.commit({ ...p, phase: "ready", error: { kind: "apply", message: errorMessage(error) }, stale: true });
     } finally {
@@ -59,6 +101,10 @@ export function useK8sChange(target: K8sTarget, ssoProfile: string, onDone: (cha
     },
     apply,
     cancel: flow.cancel,
+    /** 진행 중이거나 끝난 drain. `k8s_drain`이 받아들여진 뒤에만 있다 */
+    drain: drain?.id != null ? drain : null,
+    stopDrain,
+    closeDrain: () => setRun(null),
   };
 }
 
@@ -116,6 +162,7 @@ function Sheet({ pending: p, apply, retry, cancel }: DialogProps) {
               </table>
               <h4>{t.CHANGE_IMPACT}</h4>
               {preview.impact.map((impact, i) => <p key={i}>{impact}</p>)}
+              {preview.drain && <DrainPlanView plan={preview.drain} />}
               <h4>{t.CHANGE_WARNINGS}</h4>
               {preview.warnings.map((warning, i) => <p className="err" key={i}>{warning}</p>)}
               {preview.confirmName && (
