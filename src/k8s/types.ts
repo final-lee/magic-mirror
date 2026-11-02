@@ -99,6 +99,8 @@ export type K8sChange = K8sChangeObject & (
   | { type: "shell"; container: string; mode: "exec" | "attach" }
   /** 노드 셸 디버그 Pod 만들기. 대상(kind·namespace·name)은 만들 Pod, node는 고정할 노드 */
   | { type: "nodeShell"; node: string; image: string }
+  /** YAML 객체 하나를 server-side apply(field manager magic-mirror). force는 다른 manager의 필드까지 가져온다 */
+  | { type: "apply"; object: Record<string, unknown>; force: boolean }
 );
 
 export interface K8sRevision {
@@ -142,6 +144,12 @@ export interface K8sDrainPlan {
   budgetsUnknown: boolean;
 }
 
+/** server-side apply에서 다른 manager가 가진 필드 */
+export interface K8sFieldConflict {
+  field: string;
+  manager: string;
+}
+
 export interface K8sPreview {
   calls: K8sApiCall[];
   diff: K8sFieldDiff[];
@@ -151,6 +159,8 @@ export interface K8sPreview {
   reversible: boolean;
   /** drain일 때만 온다 */
   drain?: K8sDrainPlan | null;
+  /** 비어 있지 않으면 강제 적용(force)으로 다시 미리보기 하기 전에는 적용할 수 없다 */
+  conflicts: K8sFieldConflict[];
 }
 
 export type K8sDrainPodState = "pending" | "evicting" | "evicted" | "blocked" | "failed";
@@ -353,6 +363,8 @@ export interface K8sObjectView {
   eventsError: AppError | null;
   /** managedFields 없음, Secret 값은 •••• */
   yaml: string;
+  /** 편집기에 넣는 YAML: 서버가 채우는 필드를 뺐고, Secret은 data·stringData도 뺐다 */
+  editYaml: string;
   /** Secret일 때만 */
   secretKeys: K8sSecretKey[] | null;
   /** Pod와 Service만(TCP). 없는 응답은 빈 목록으로 본다 */

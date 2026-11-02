@@ -49,7 +49,7 @@ test("undo opens the shared preview and sends undoOf when applied", async () => 
   ]);
   vi.mocked(k8sApi.undo).mockResolvedValue({ target, change });
   vi.mocked(k8sApi.preview).mockResolvedValue({
-    calls: [], diff: [], impact: [], warnings: [], confirmName: null, reversible: true,
+    calls: [], diff: [], impact: [], warnings: [], confirmName: null, reversible: true, conflicts: [],
   });
   vi.mocked(k8sApi.apply).mockResolvedValue({ logId: "new" });
   render(withClientAndSso(<HistoryFlow />, newQueryClient(), ssoLoginStub()));

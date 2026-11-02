@@ -112,12 +112,17 @@ async fn budgets(client: Client, endpoint: Endpoint) -> Result<Option<Vec<Value>
 }
 
 pub async fn make_plan(client: Client, endpoint: Endpoint, change: &Change, now: &str) -> Result<Plan, AppError> {
+    Ok(plan_with_current(client, endpoint, change, now).await?.0)
+}
+
+/// 계획과 그 계획을 만든 현재 객체. 차이 계산에 현재 객체가 필요한 변경이 있다.
+async fn plan_with_current(client: Client, endpoint: Endpoint, change: &Change, now: &str) -> Result<(Plan, Option<Value>), AppError> {
     let object = current(client.clone(), endpoint, &change.target).await?;
     if matches!(change.operation, Operation::Drain) {
         let node = object.ok_or_else(|| AppError::other(change::MISSING_VERSION))?;
         let pods = pods_on(client.clone(), endpoint, &change.target.name).await?;
         let budgets = budgets(client, endpoint).await?;
-        return drain::preview(change, &node, drain::plan_drain(&node, &pods, budgets.as_deref()));
+        return Ok((drain::preview(change, &node, drain::plan_drain(&node, &pods, budgets.as_deref()))?, Some(node)));
     }
     let revisions = if matches!(change.operation, Operation::RolloutUndo { .. }) {
         history(client, endpoint, &change.target, object.as_ref().ok_or_else(|| AppError::other(REVISION_MISSING))?).await?
@@ -144,13 +149,16 @@ pub async fn make_plan(client: Client, endpoint: Endpoint, change: &Change, now:
             return Err(AppError::other(REVISION_MISSING));
         }
     }
-    Ok(plan)
+    Ok((plan, object))
 }
 
 pub fn check(seen: Option<&Plan>, current: &Plan, confirmation: Option<&str>) -> Result<(), AppError> {
     let seen = seen.ok_or_else(|| AppError::other(super::exec::STALE))?;
     if !change::same_except_version(seen, current) {
         return Err(AppError::other(super::exec::STALE));
+    }
+    if !seen.preview.conflicts.is_empty() {
+        return Err(AppError::other(super::exec::CONFLICT));
     }
     if seen.preview.confirm_name.as_deref().is_some_and(|name| Some(name) != confirmation) {
         return Err(AppError::other(CONFIRM_REQUIRED));
@@ -175,19 +183,41 @@ pub fn check_drain(seen: Option<&Plan>, current: &Plan, confirmation: Option<&st
     Ok(())
 }
 
+/// 서버 dry-run. server-side apply는 서버가 만든 결과로 필드 차이를 채우고, 충돌이면 충돌 목록을 채운다.
+async fn dry_run(client: Client, endpoint: Endpoint, change: &Change, plan: &mut Plan, current: Option<&Value>) -> Result<(), AppError> {
+    if !matches!(change.operation, Operation::Apply { .. }) {
+        return super::exec::run(client, endpoint, change, plan, true).await;
+    }
+    match super::exec::server_apply(client, endpoint, change, plan, true).await {
+        Ok(result) => {
+            plan.preview.diff = change::apply::diff(&change.target, current, &result);
+            if current.is_some() && plan.preview.diff.is_empty() {
+                plan.preview.warnings.push(change::NOOP_WARNING.into());
+            }
+            Ok(())
+        }
+        Err(super::exec::ApplyFailure::Conflicts(conflicts)) => {
+            plan.preview.conflicts = conflicts;
+            Ok(())
+        }
+        Err(super::exec::ApplyFailure::Failed(error)) => Err(error),
+    }
+}
+
 /// 최신 객체로 계획하고 서버 dry-run한다.
 pub async fn dry_plan(client: Client, endpoint: Endpoint, change: &Change, at: &str) -> Result<Plan, AppError> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    let mut plan = make_plan(client.clone(), endpoint, change, at).await?;
+    let (mut plan, mut current) = plan_with_current(client.clone(), endpoint, change, at).await?;
     loop {
-        match super::exec::run(client.clone(), endpoint, change, &plan, true).await {
+        match dry_run(client.clone(), endpoint, change, &mut plan, current.as_ref()).await {
             Ok(()) => return Ok(plan),
             Err(error) if error == AppError::other(super::exec::STALE) && plan.version.is_some() && std::time::Instant::now() < deadline => {
-                let next = make_plan(client.clone(), endpoint, change, at).await?;
+                let (next, next_current) = plan_with_current(client.clone(), endpoint, change, at).await?;
                 if next.version == plan.version {
                     return Err(error);
                 }
                 plan = next;
+                current = next_current;
             }
             Err(error) => return Err(error),
         }

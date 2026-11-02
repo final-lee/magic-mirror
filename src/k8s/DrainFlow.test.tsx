@@ -13,7 +13,7 @@ const api = vi.mocked(k8sApi);
 const target = { profile: "p", region: "r", cluster: "c" };
 const nodeRef = { kind: NODES, namespace: null, name: "worker-1" };
 const drainChange: K8sChange = { ...nodeRef, type: "drain" };
-const view: K8sObjectView = { kind: NODES, row: { uid: "u", name: "worker-1", namespace: null, resourceVersion: "1", createdAt: null, labels: {}, values: { status: "Ready" }, problems: [] }, annotations: {}, owners: [], children: [], childrenTruncated: false, childrenError: null, containers: [], conditions: [], events: [], eventsError: null, yaml: "", secretKeys: null };
+const view: K8sObjectView = { kind: NODES, row: { uid: "u", name: "worker-1", namespace: null, resourceVersion: "1", createdAt: null, labels: {}, values: { status: "Ready" }, problems: [] }, annotations: {}, owners: [], children: [], childrenTruncated: false, childrenError: null, containers: [], conditions: [], events: [], eventsError: null, yaml: "", editYaml: "", secretKeys: null };
 const rule = (verbs: string[], resources: string[], apiGroups = [""]) => ({ verbs, apiGroups, resources, resourceNames: [] });
 const rules = (...resourceRules: K8sRules["resourceRules"]): K8sRules => ({ namespace: "default", incomplete: false, resourceRules, nonResourceRules: [] });
 
@@ -26,6 +26,7 @@ const preview: K8sPreview = {
   warnings: ["emptyDir 데이터가 사라지는 Pod 1개: app/cache"],
   confirmName: "worker-1",
   reversible: true,
+  conflicts: [],
   drain: {
     nodeCordoned: false,
     evict: [pod("cache", { emptyDir: true, unmanaged: true }), pod("web"), pod("held", { blockedBy: "held-pdb" })],
