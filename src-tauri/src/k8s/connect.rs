@@ -14,14 +14,6 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub const EXEC_TIMEOUT_REASON: &str = "30초 안에 끝나지 않았어요";
 
-/// 이 앱의 모든 클라이언트가 쓰는 설정. kube의 기본 재시도(429·503·504를 `Retry-After`만큼 기다리며 최대 15번)는 끈다:
-/// drain의 Eviction은 PodDisruptionBudget이 막으면 429를 곧바로 받아야 자기 간격과 5분 한도로 다시 시도할 수 있고,
-/// 요청마다 `REQUEST_TIMEOUT`을 따로 두는 읽기도 라이브러리가 몰래 기다리지 않는 편이 낫다.
-pub fn tune(cfg: &mut Config) {
-    cfg.connect_timeout = Some(CONNECT_TIMEOUT);
-    cfg.default_retry = false;
-}
-
 /// kubeconfig 해석 오류의 글은 원문 조각(토큰, 키)을 싣고 있을 수 있어, 고정 문구와 위치만 보여 준다(`kubeconfig::reason`).
 pub async fn client_for(config: &Kubeconfig, context: &str, endpoint: Endpoint) -> Result<Client, AppError> {
     client_for_with_timeout(config, context, endpoint, REQUEST_TIMEOUT).await
@@ -30,10 +22,22 @@ pub async fn client_for(config: &Kubeconfig, context: &str, endpoint: Endpoint) 
 /// `Client::try_from`은 exec 플러그인을 동기로 끝까지 돌린다. 워커 스레드를 막지 않게 블로킹 스레드에서 만들고 시간 제한을 둔다.
 /// 시간이 지나도 블로킹 스레드의 플러그인은 끝날 때까지 남아 있을 수 있다(결과만 버린다).
 pub async fn client_for_with_timeout(config: &Kubeconfig, context: &str, endpoint: Endpoint, limit: Duration) -> Result<Client, AppError> {
+    build_client(config, context, endpoint, limit, true).await
+}
+
+/// 429·503·504를 스스로 다시 시도하지 않는 클라이언트. kube의 기본 재시도는 `Retry-After`만큼 기다리며 최대 15번 되풀이해서,
+/// PodDisruptionBudget이 막은 Eviction이 429 대신 몇 분씩 멈춰 있게 된다. drain의 Eviction(`exec::evict`)만 이 클라이언트로 보낸다.
+/// 나머지 호출은 `client_for`의 기본 재시도를 그대로 쓴다(큰 클러스터의 API Priority & Fairness 429를 조용히 넘긴다).
+pub async fn eviction_client(config: &Kubeconfig, context: &str, endpoint: Endpoint) -> Result<Client, AppError> {
+    build_client(config, context, endpoint, REQUEST_TIMEOUT, false).await
+}
+
+async fn build_client(config: &Kubeconfig, context: &str, endpoint: Endpoint, limit: Duration, retry: bool) -> Result<Client, AppError> {
     let command = exec_command(config, context);
     let options = KubeConfigOptions { context: Some(context.to_string()), ..Default::default() };
     let mut cfg = Config::from_custom_kubeconfig(config.clone(), &options).await.map_err(|e| AppError::other(reason(&e)))?;
-    tune(&mut cfg);
+    cfg.connect_timeout = Some(CONNECT_TIMEOUT);
+    cfg.default_retry = retry;
     let build = tokio::task::spawn_blocking(move || Client::try_from(cfg));
     match tokio::time::timeout(limit, build).await {
         Err(_) => Err(AppError::other(exec_failed(EXEC_TIMEOUT_REASON))),
@@ -55,9 +59,11 @@ pub fn exec_command(config: &Kubeconfig, context: &str) -> Option<String> {
     config.auth_infos.iter().find(|u| u.name == *user)?.auth_info.as_ref()?.exec.as_ref()?.command.clone()
 }
 
-pub async fn connect(loaded: &Loaded, context: &str, endpoint: Endpoint) -> Result<Client, AppError> {
+/// 연결한 클라이언트와, 같은 로그인 PATH를 넣은 kubeconfig(나중에 `eviction_client`를 만들 때 쓴다)
+pub async fn connect(loaded: &Loaded, context: &str, endpoint: Endpoint) -> Result<(Client, Kubeconfig), AppError> {
     let config = with_path(&loaded.config, context, login_path().await);
-    client_for(&config, context, endpoint).await
+    let client = client_for(&config, context, endpoint).await?;
+    Ok((client, config))
 }
 
 #[cfg(test)]

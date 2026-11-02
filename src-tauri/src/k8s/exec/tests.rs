@@ -1,18 +1,18 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use kube::{Client, Config};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use super::*;
-use crate::k8s::connect::tune;
+use crate::k8s::connect::{client_for, eviction_client};
+use kube::config::Kubeconfig;
 use crate::k8s::tls::install_crypto_provider;
 
 const PUBLIC: Endpoint = Endpoint { public: true, private: false };
 
 /// 요청을 모두 받아 두고 정해 둔 응답 하나를 되풀이하는 가짜 API 서버. 돌려주는 값은 클라이언트와 받은 요청 글이다.
-async fn api_server(status: &'static str, headers: &'static str, body: &'static str) -> (Client, Arc<Mutex<Vec<String>>>) {
+async fn api_server(status: &'static str, headers: &'static str, body: &'static str) -> (Kubeconfig, Arc<Mutex<Vec<String>>>) {
     install_crypto_provider();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -52,13 +52,20 @@ async fn api_server(status: &'static str, headers: &'static str, body: &'static 
             });
         }
     });
-    let mut config = Config::new(format!("http://127.0.0.1:{port}").parse().unwrap());
-    tune(&mut config);
-    (Client::try_from(config).unwrap(), seen)
+    (kubeconfig(port), seen)
+}
+
+/// 가짜 서버를 가리키는 kubeconfig
+fn kubeconfig(port: u16) -> Kubeconfig {
+    Kubeconfig::from_yaml(&format!(
+        "apiVersion: v1\nkind: Config\nclusters:\n- name: c\n  cluster: {{ server: \"http://127.0.0.1:{port}\" }}\ncontexts:\n- name: ctx\n  context: {{ cluster: c, user: u }}\nusers:\n- name: u\n  user: {{ token: t }}\n"
+    ))
+    .unwrap()
 }
 
 async fn evict_once(status: &'static str, headers: &'static str, body: &'static str) -> (Eviction, Vec<String>) {
-    let (client, seen) = api_server(status, headers, body).await;
+    let (config, seen) = api_server(status, headers, body).await;
+    let client = eviction_client(&config, "ctx", PUBLIC).await.unwrap();
     // 재시도가 켜져 있으면 `Retry-After`만큼 기다리다 이 시간 제한에 걸린다
     let result = tokio::time::timeout(Duration::from_secs(5), evict(client, PUBLIC, "app", "web-1", "uid-1")).await.expect("한 번만 보내고 바로 돌아와야 해요");
     let requests = seen.lock().unwrap().clone();
@@ -116,9 +123,23 @@ async fn an_unreachable_server_stops_the_whole_drain() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         listener.local_addr().unwrap().port()
     };
-    let mut config = Config::new(format!("http://127.0.0.1:{port}").parse().unwrap());
-    tune(&mut config);
-    let client = Client::try_from(config).unwrap();
+    let client = eviction_client(&kubeconfig(port), "ctx", PUBLIC).await.unwrap();
     let result = evict(client, PUBLIC, "app", "web-1", "uid-1").await;
     assert!(matches!(result, Eviction::Fatal(AppError::Network { .. })), "{result:?}");
+}
+
+/// 429에 `Retry-After: 1`을 붙이는 서버에서, 어느 클라이언트가 스스로 다시 보내는지 본다.
+#[tokio::test]
+async fn only_the_eviction_client_skips_the_library_retry() {
+    let (config, seen) = api_server("429 Too Many Requests", "Retry-After: 1\r\n", status_body(429, "TooManyRequests")).await;
+    let ordinary = client_for(&config, "ctx", PUBLIC).await.unwrap();
+    // 일반 클라이언트는 1초 뒤에 같은 요청을 다시 보낸다(이 시간 안에 끝나지 않는다)
+    let waited = tokio::time::timeout(Duration::from_millis(1800), evict(ordinary, PUBLIC, "app", "web-1", "uid-1")).await;
+    assert!(waited.is_err(), "일반 클라이언트는 429를 기다려 다시 시도해야 해요: {waited:?}");
+    assert!(seen.lock().unwrap().len() >= 2, "다시 보낸 요청이 있어야 해요");
+
+    seen.lock().unwrap().clear();
+    let eviction = eviction_client(&config, "ctx", PUBLIC).await.unwrap();
+    assert_eq!(evict(eviction, PUBLIC, "app", "web-1", "uid-1").await, Eviction::Blocked);
+    assert_eq!(seen.lock().unwrap().len(), 1);
 }

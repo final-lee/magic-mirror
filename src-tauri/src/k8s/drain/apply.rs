@@ -25,6 +25,8 @@ pub const NOT_ALL_MOVED: &str = "옮기지 못한 Pod가 있어요";
 /// 한 번의 drain 적용에 필요한 것
 pub struct Job {
     pub client: Client,
+    /// Eviction 전용: 429를 스스로 다시 시도하지 않는 클라이언트(`connect::eviction_client`)
+    pub evict_client: Client,
     pub endpoint: Endpoint,
     pub log_path: PathBuf,
     pub target: K8sTarget,
@@ -102,7 +104,7 @@ pub async fn apply<F>(job: Job, cancel: watch::Receiver<bool>, send: F)
 where
     F: FnMut(DrainMessage) -> bool + Send,
 {
-    let cluster = Cluster { client: job.client.clone(), endpoint: job.endpoint };
+    let cluster = Cluster { client: job.evict_client.clone(), endpoint: job.endpoint };
     apply_with(job, cancel, send, &cluster).await;
 }
 

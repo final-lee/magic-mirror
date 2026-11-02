@@ -626,8 +626,12 @@ async fn drain_moves_pods_off_a_worker_around_a_budget_then_uncordons() {
     let dir = tempfile::tempdir().unwrap();
     let log_path = dir.path().join("k8s-changes.jsonl");
     let target = super::target::K8sTarget { profile: "live".into(), region: "local".into(), cluster: "kind".into() };
+    // Eviction은 재시도 없는 클라이언트로 보낸다(운영과 같다): 있는 그대로의 429를 받아야 5분 한도가 맞는다
+    let (context, value) = base();
+    let evict_client = super::connect::eviction_client(&build(&value), &context, PRIVATE).await.unwrap();
     let job = |plan| Job {
         client: client.clone(),
+        evict_client: evict_client.clone(),
         endpoint: PRIVATE,
         log_path: log_path.clone(),
         target: target.clone(),
