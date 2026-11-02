@@ -65,31 +65,60 @@ export function usePodLogs(target: K8sTarget, ssoProfile: string, live: boolean,
   return { buf, status, error };
 }
 
+/** 대소문자를 가리지 않는 찾기. 원래 글의 위치로 맞추므로(소문자로 바꾸면 길이가 달라지는 글자가 있다) 정규식으로 찾는다. */
+export function searchPattern(query: string): RegExp | null {
+  return query ? new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "giu") : null;
+}
+
+/** 줄 안의 일치를 원래 글의 [시작, 끝]으로 */
+export function matchRanges(line: string, re: RegExp): [number, number][] {
+  const out: [number, number][] = [];
+  re.lastIndex = 0;
+  for (let m = re.exec(line); m; m = re.exec(line)) {
+    out.push([m.index, m.index + m[0].length]);
+    if (m[0].length === 0) re.lastIndex++;
+  }
+  return out;
+}
+
 /** 묶음 하나. 다 찬 묶음은 배열이 바뀌지 않아 다시 그리지 않는다. */
 const Chunk = memo(function Chunk({ lines, query }: { lines: string[]; query: string }) {
-  if (!query) return <>{lines.join("\n") + "\n"}</>;
-  const q = query.toLowerCase();
+  const re = searchPattern(query);
+  if (!re) return <>{lines.join("\n") + "\n"}</>;
   const out: ReactNode[] = [];
   let plain = "";
   lines.forEach((line, i) => {
-    const lower = line.toLowerCase();
-    if (!lower.includes(q)) {
+    const ranges = matchRanges(line, re);
+    if (ranges.length === 0) {
       plain += line + "\n";
       return;
     }
     if (plain) out.push(plain);
     plain = "";
     let at = 0;
-    for (let hit = lower.indexOf(q); hit !== -1; hit = lower.indexOf(q, at)) {
-      if (hit > at) out.push(line.slice(at, hit));
-      out.push(<mark key={`${i}:${hit}`}>{line.slice(hit, hit + q.length)}</mark>);
-      at = hit + q.length;
+    for (const [from, to] of ranges) {
+      if (from > at) out.push(line.slice(at, from));
+      out.push(<mark key={`${i}:${from}`}>{line.slice(from, to)}</mark>);
+      at = to;
     }
     out.push(line.slice(at) + "\n");
   });
   if (plain) out.push(plain);
   return <>{out}</>;
 });
+
+/** 묶음마다 일치하는 줄 수를 기억한다. 다 찬 묶음은 배열이 바뀌지 않으니 따라가는 동안에도 마지막 묶음만 다시 센다. */
+const counted = new WeakMap<string[], { query: string; n: number }>();
+function matchingLines(lines: string[], query: string, re: RegExp): number {
+  const hit = counted.get(lines);
+  if (hit && hit.query === query) return hit.n;
+  const n = lines.reduce((sum, l) => {
+    re.lastIndex = 0;
+    return sum + (re.test(l) ? 1 : 0);
+  }, 0);
+  counted.set(lines, { query, n });
+  return n;
+}
 
 interface Props {
   target: K8sTarget;
@@ -119,9 +148,8 @@ export function PodLogs({ target, ssoProfile, live, namespace, pod, containers }
   const shown = paused ?? buf;
   const [copied, setCopied] = useState(false);
   const matches = useMemo(() => {
-    if (!query) return 0;
-    const q = query.toLowerCase();
-    return shown.chunks.reduce((n, c) => n + c.lines.filter((l) => l.toLowerCase().includes(q)).length, 0);
+    const re = searchPattern(query);
+    return re ? shown.chunks.reduce((n, c) => n + matchingLines(c.lines, query, re), 0) : 0;
   }, [shown, query]);
 
   // 맨 아래에 붙어 있으면 새 줄을 따라 내려간다. 위로 올려 읽는 중이면 그대로 둔다.

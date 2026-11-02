@@ -9,7 +9,7 @@ import {
 } from "./text";
 import type { K8sKind, K8sObjectView, K8sRow } from "./types";
 
-vi.mock("./api", () => ({ k8sApi: { get: vi.fn(), rules: vi.fn(), secretValue: vi.fn() } }));
+vi.mock("./api", () => ({ k8sApi: { get: vi.fn(), rules: vi.fn(), secretValue: vi.fn(), logs: vi.fn(), unwatch: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 const m = vi.mocked(k8sApi);
 const T = { profile: "app", region: "r", cluster: "c" };
@@ -139,4 +139,26 @@ test("managed SSO success retries the failed detail request", async () => {
   rendered.rerender(ui(Date.now() + 1000));
   expect(await screen.findByText(NO_RECENT_EVENTS)).toBeInTheDocument();
   expect(m.get).toHaveBeenCalledTimes(2);
+});
+
+test("the logs tab keeps its stream while the pod's detail is read again for a new resourceVersion", async () => {
+  const app = { name: "app", image: "x", init: false, state: "running" as const, ready: true, restarts: 0, reason: null, message: null, lastTermination: null };
+  m.get.mockImplementation((_t, _k, _ns, _n) => (m.get.mock.calls.length === 1 ? Promise.resolve(view({ containers: [app] })) : new Promise(() => {})));
+  m.logs.mockResolvedValue(1);
+  m.unwatch.mockResolvedValue(null);
+  const qc = newQueryClient();
+  const ui = (rv: string) =>
+    withClientAndSso(
+      <ObjectDetail target={T} context="ctx" ssoProfile="p" live objectRef={{ kind: PODS, namespace: "prod", name: "web-1" }} resourceVersion={rv} kinds={[]} onOpen={vi.fn()} onBack={null} onClose={vi.fn()} />,
+      qc,
+      ssoLoginStub(),
+    );
+  const rendered = render(ui("1"));
+  fireEvent.click(await screen.findByRole("tab", { name: TAB_LOGS }));
+  await vi.waitFor(() => expect(m.logs).toHaveBeenCalledTimes(1));
+  rendered.rerender(ui("2"));
+  await vi.waitFor(() => expect(m.get).toHaveBeenCalledTimes(2));
+  expect(screen.getByLabelText("web-1")).toBeInTheDocument();
+  expect(m.logs).toHaveBeenCalledTimes(1);
+  expect(m.unwatch).not.toHaveBeenCalled();
 });

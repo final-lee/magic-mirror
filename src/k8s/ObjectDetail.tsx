@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { errorMessage } from "../api/errors";
 import { ErrorState } from "../components/ErrorState";
 import { can } from "./can";
@@ -191,6 +191,12 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
   const rules = useK8sRules(target, context, objectRef.namespace, ssoProfile, live && secret && objectRef.namespace !== null);
   const canRead = rules.data ? can(rules.data, { verb: "get", group: "", resource: "secrets", name: objectRef.name }) : "unknown";
   const at = now ?? Date.now();
+  // 로그 탭은 Pod가 바뀔 때마다(resourceVersion) 상세를 다시 읽는 동안에도 흐름·옵션·찾기를 잃지 않게, 마지막으로 읽은 컨테이너로 계속 띄워 둔다
+  const [podContainers, setPodContainers] = useState<K8sContainer[] | null>(null);
+  useEffect(() => {
+    if (pod && q.data) setPodContainers(q.data.containers.filter((c) => c.state !== "template"));
+  }, [pod, q.data]);
+  const logContainers = pod && q.data ? q.data.containers.filter((c) => c.state !== "template") : podContainers;
   return (
     <aside className="k8s-detail" aria-label={DETAIL_LABEL} style={{ width: `${widthPct}%` }}>
       <div className="k8s-detail-head">
@@ -211,7 +217,9 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
         {pod && <button role="tab" aria-selected={tab === "logs"} onClick={() => setTab("logs")}>{TAB_LOGS}</button>}
       </div>
       <div className={`k8s-detail-body${tab === "logs" ? " flush" : ""}`}>
-        {q.isError ? (
+        {tab === "logs" && pod && objectRef.namespace && logContainers ? (
+          <PodLogs target={target} ssoProfile={ssoProfile} live={live} namespace={objectRef.namespace} pod={objectRef.name} containers={logContainers} />
+        ) : q.isError ? (
           <ErrorState error={q.error} profile={ssoProfile} compact onRetry={() => void q.refetch()} onLoggedIn={() => void q.refetch()} />
         ) : !q.data ? (
           <div className="empty">{LOADING}</div>
@@ -221,15 +229,6 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
               <SecretKeys target={target} ssoProfile={ssoProfile} namespace={objectRef.namespace} name={objectRef.name} keys={q.data.secretKeys} canRead={canRead} />
             )}
           </Summary>
-        ) : tab === "logs" && pod && objectRef.namespace ? (
-          <PodLogs
-            target={target}
-            ssoProfile={ssoProfile}
-            live={live}
-            namespace={objectRef.namespace}
-            pod={objectRef.name}
-            containers={q.data.containers.filter((c) => c.state !== "template")}
-          />
         ) : (
           <>
             {secret && <p className="dim">{YAML_SECRET_NOTE}</p>}

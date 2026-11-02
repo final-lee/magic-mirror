@@ -54,16 +54,11 @@ pub fn params(opts: &LogOptions) -> LogParams {
     }
 }
 
-/// 줄 끝(`\n`, `\r\n`)을 떼고, 너무 긴 줄은 자르고, UTF-8이 아닌 바이트는 �로 바꾼다
-pub fn line_of(mut bytes: Vec<u8>) -> String {
-    if bytes.last() == Some(&b'\n') {
+/// 한 줄의 바이트(`\n` 없이, 앞 `MAX_LINE`바이트까지)를 글로. 끝의 `\r`을 떼고, UTF-8이 아닌 바이트는 �로 바꾸고, 잘렸으면 `…`를 붙인다.
+pub fn line_of(mut bytes: Vec<u8>, clipped: bool) -> String {
+    if !clipped && bytes.last() == Some(&b'\r') {
         bytes.pop();
-        if bytes.last() == Some(&b'\r') {
-            bytes.pop();
-        }
     }
-    let clipped = bytes.len() > MAX_LINE;
-    bytes.truncate(MAX_LINE);
     let mut s = String::from_utf8_lossy(&bytes).into_owned();
     if clipped {
         s.push('…');
@@ -71,14 +66,32 @@ pub fn line_of(mut bytes: Vec<u8>) -> String {
     s
 }
 
-/// 읽기 흐름을 줄 흐름으로. 잘못된 UTF-8이 있어도 끊지 않는다.
+/// 읽기 흐름을 줄 흐름으로. 줄마다 앞 `MAX_LINE`바이트만 모으고 나머지는 줄 끝까지 버린다(줄바꿈 없이 쏟아지는 출력도 메모리를 키우지 않는다).
+/// 잘못된 UTF-8이 있어도 끊지 않는다.
 pub fn lines_of<R: AsyncBufRead + Unpin + Send + 'static>(reader: R) -> BoxStream<'static, io::Result<String>> {
     stream::unfold(reader, |mut r| async move {
-        let mut buf = Vec::new();
-        match r.read_until(b'\n', &mut buf).await {
-            Ok(0) => None,
-            Ok(_) => Some((Ok(line_of(buf)), r)),
-            Err(e) => Some((Err(e), r)),
+        let mut line: Vec<u8> = Vec::new();
+        let mut clipped = false;
+        loop {
+            let (used, done) = match r.fill_buf().await {
+                Err(e) => return Some((Err(e), r)),
+                // 끝: 남은 줄이 있으면 마지막 줄로
+                Ok([]) => return (!line.is_empty() || clipped).then(|| (Ok(line_of(line, clipped)), r)),
+                Ok(chunk) => {
+                    let newline = chunk.iter().position(|b| *b == b'\n');
+                    let content = &chunk[..newline.unwrap_or(chunk.len())];
+                    let room = MAX_LINE - line.len();
+                    if content.len() > room {
+                        clipped = true;
+                    }
+                    line.extend_from_slice(&content[..content.len().min(room)]);
+                    (newline.map_or(chunk.len(), |i| i + 1), newline.is_some())
+                }
+            };
+            r.consume_unpin(used);
+            if done {
+                return Some((Ok(line_of(line, clipped)), r));
+            }
         }
     })
     .boxed()
