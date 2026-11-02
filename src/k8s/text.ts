@@ -264,3 +264,8 @@ export const CHANGE_SUCCESS = "성공";
 export const CHANGE_FAILED = "실패";
 export const CHANGE_NO_LOG = "변경 기록이 없어요";
 export const CHANGE_DENIED = (verb: string, resource: string) => `${resource}에 ${verb} 권한이 없어요`;
+export const CHANGE_PATH = "경로";
+export const CHANGE_BEFORE = "이전";
+export const CHANGE_AFTER = "이후";
+export const ROLLOUT_PROGRESS = (ready: number, desired: number) => `새 Pod ${ready}/${desired} 준비`;
+export const ROLLOUT_WAITING = "롤아웃 상태를 기다리는 중이에요";

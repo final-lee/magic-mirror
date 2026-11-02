@@ -167,6 +167,7 @@
 - 이름 입력이 필요한 위험한 변경: 네임스페이스가 `kube-system`이거나 이름에 `prod`가 들어감, drain, `cluster-admin`이나 권한 상승 경로를 주는 바인딩, 앱의 현재 신원이 권한을 잃는 변경, `AmazonEKSClusterAdminPolicy` 연결.
 - 적용 시 재확인: 미리보기 때 `resourceVersion`을 조건으로 보낸다. 409면 "미리보기 이후 바뀌었어요"로 멈춘다. 장바구니는 적용 전에 계획을 다시 만들어 미리보기와 다르면 멈춘다.
 - 기록: IAM·PG와 같은 `jsonl.rs`를 쓰는 `k8s` 기록 파일. 되돌리기는 같은 미리보기를 거친다.
+- 지금 된 것: K7 단일 변경은 서버 dry-run을 거쳐 호출·diff·영향·경고를 보관하고 적용 시 같은 계획과 연결을 재확인한다. 변경 기록은 `k8s-changes.jsonl`, 되돌리기는 기록된 역변경을 다시 미리보기한다. Secret은 값과 재생성용 객체를 기록하지 않는다.
 
 ### A. 워크로드 조작
 | 동작 | 대상 | 되돌리기 |
@@ -179,7 +180,9 @@
 | Job 재실행 | Job, CronJob → 새 Job | 만든 Job 삭제 |
 | 일시정지·재개 | CronJob(`suspend`) | 반대 |
 - 적용 후 rollout 진행(준비된 새 Pod 수)을 보여준다.
+- K7 백엔드는 소유자 UID로 리비전을 고르고 scale·restart·rollout undo·삭제·Job 재실행·CronJob 일시정지와 재개를 수행한다. 삭제 재생성에는 서버가 채운 메타데이터와 상태를 빼며, 새 Job 이름은 미리보기에서 정한다.
 - 워크로드 변경 화면: 상단 변경 토글을 켜면 상세에서 작업을 고르고 미리보기에서 호출·필드 변경·영향·경고를 확인한다. 변경 기록의 되돌리기도 같은 미리보기를 거친다.
+- 상세의 rollout 진행은 watch 행의 ready·updated·desired를 이용한다. StatefulSet 행에는 updated 수가 없어 ready 수만 보여 준다.
 
 ### B. 노드 조작
 - cordon·uncordon: 서로 되돌리기.
