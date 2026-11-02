@@ -449,7 +449,7 @@ mod streams {
 
     use super::*;
     use crate::k8s::forward::{self, ForwardKind, ForwardRequest, Forwards};
-    use crate::k8s::shell::{self, ShellMessage, ShellMode, ShellRecord, ShellTarget, Shells};
+    use crate::k8s::shell::{self, ShellMessage, ShellMode, ShellTarget, Shells};
     use crate::k8s::target::K8sTarget;
 
     const NS: &str = "mm-k9";
@@ -529,7 +529,7 @@ spec:
     }
 
     fn log_path(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("mm-live-shell-{name}-{}", std::process::id())).join(shell::RECORD_FILE)
+        std::env::temp_dir().join(format!("mm-live-shell-{name}-{}", std::process::id())).join("k8s-changes.jsonl")
     }
 
     fn info(pod: &str, mode: ShellMode) -> ShellTarget {
@@ -572,9 +572,9 @@ spec:
 
     async fn open(client: kube::Client, shells: &Arc<Shells>, log: &std::path::Path, pod: &str, mode: ShellMode) -> (shell::ShellOpened, Screen) {
         let i = info(pod, mode);
-        let connected = shell::connect(client, mode, NS, pod, &i.container, PRIVATE).await.unwrap();
+        let connected = shell::connect(client, mode, NS, pod, &i.container, &shell::SHELL_COMMAND, PRIVATE).await.unwrap();
         let (tx, rx) = mpsc::unbounded_channel();
-        let opened = shells.start(log, i, connected, move |m| tx.send(m).is_ok()).unwrap();
+        let opened = shells.start(log, i, connected, None, move |m| tx.send(m).is_ok()).unwrap();
         (opened, Screen { rx, seen: String::new() })
     }
 
@@ -598,12 +598,12 @@ spec:
         assert_eq!(screen.exit(Duration::from_secs(20)).await, Some(Some(3)), "output: {}", screen.seen);
         // 끝난 세션은 정리되고 기록에 닫은 시각이 남는다. 입력·출력은 기록에 없다
         for _ in 0..50 {
-            if crate::jsonl::read_all::<ShellRecord>(&log).iter().all(|r| r.closed_at.is_some()) {
+            if crate::k8s::log::read_all(&log).iter().all(|r| r.closed_at.is_some()) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        let records: Vec<ShellRecord> = crate::jsonl::read_all(&log);
+        let records = crate::k8s::log::read_all(&log);
         assert_eq!(records.len(), 1);
         assert!(records[0].closed_at.is_some());
         let text = std::fs::read_to_string(&log).unwrap();
@@ -626,7 +626,7 @@ spec:
         shells.input(opened.id, "echo after-close\n".into());
         assert_eq!(screen.exit(Duration::from_secs(3)).await, None);
         assert!(!screen.seen.contains("after-close"));
-        assert!(crate::jsonl::read_all::<ShellRecord>(&log)[0].closed_at.is_some());
+        assert!(crate::k8s::log::read_all(&log)[0].closed_at.is_some());
         let _ = std::fs::remove_dir_all(log.parent().unwrap());
     }
 
@@ -667,9 +667,9 @@ spec:
     async fn a_stopped_or_unknown_container_is_refused_before_connecting() {
         fixture();
         let client = admin().await;
-        let unknown = shell::connect(client.clone(), ShellMode::Exec, NS, "plain", "nope", PRIVATE).await;
+        let unknown = shell::connect(client.clone(), ShellMode::Exec, NS, "plain", "nope", &shell::SHELL_COMMAND, PRIVATE).await;
         assert_eq!(unknown.err(), Some(AppError::other(shell::NO_SUCH_CONTAINER)));
-        let missing = shell::connect(client, ShellMode::Exec, NS, "no-such-pod", "main", PRIVATE).await;
+        let missing = shell::connect(client, ShellMode::Exec, NS, "no-such-pod", "main", &shell::SHELL_COMMAND, PRIVATE).await;
         assert!(missing.is_err());
     }
 
@@ -783,4 +783,156 @@ spec:
         // Service에 없는 포트
         assert_eq!(forward::prepare(client, &req, PRIVATE).await.err(), Some(AppError::other(forward::NO_SERVICE_PORT)));
     }
+
+    /// 노드 셸: 변경 틀로 디버그 Pod를 만들고(미리보기·확인), 노드 안으로 들어가 `hostname`이 노드 이름인지 보고, 닫으면 Pod가 지워진다.
+    #[tokio::test]
+    #[ignore]
+    async fn node_shell_enters_the_node_and_the_debug_pod_goes_away_when_it_is_closed() {
+        use crate::k8s::change::{self, Change, Operation};
+        use crate::k8s::{commit, log, node_shell};
+        fixture();
+        let client = admin().await;
+        let nodes: kube::Api<k8s_openapi::api::core::v1::Node> = kube::Api::all(client.clone());
+        let node = nodes.list(&kube::api::ListParams::default()).await.unwrap().items.remove(0).metadata.name.unwrap();
+        let pod = "mm-node-shell-live";
+        let change = Change {
+            target: change::pod_object(NS, pod),
+            operation: Operation::NodeShell { node: node.clone(), image: "busybox:1.36".into() },
+        };
+        let seen = commit::dry_plan(client.clone(), PRIVATE, &change, "").await.unwrap();
+        assert_eq!(seen.preview.confirm_name.as_deref(), Some(node.as_str()));
+        // 노드 이름을 입력하지 않으면 만들지 않는다
+        assert!(commit::apply_plan(client.clone(), PRIVATE, &change, &seen, "", Some("wrong")).await.is_err());
+        let (_, created) = commit::apply_plan(client.clone(), PRIVATE, &change, &seen, "", Some(&node)).await.unwrap();
+        created.unwrap();
+
+        let log_file = log_path("node-shell");
+        let shells = Arc::new(Shells::default());
+        node_shell::wait_ready(client.clone(), NS, pod, PRIVATE).await.unwrap();
+        let mut command = change::NODE_SHELL_COMMAND.to_vec();
+        command.push("sh");
+        let connected = shell::connect(client.clone(), ShellMode::Exec, NS, pod, change::NODE_SHELL_CONTAINER, &command, PRIVATE).await.unwrap();
+        let info = ShellTarget { target: target(), namespace: NS.into(), pod: pod.into(), container: change::NODE_SHELL_CONTAINER.into(), mode: ShellMode::Exec };
+        let cleanup: shell::Cleanup = {
+            let (client, log_file) = (client.clone(), log_file.clone());
+            Box::new(move || Box::pin(node_shell::remove(client, PRIVATE, target(), NS.into(), pod.into(), log_file)))
+        };
+        let (tx, rx) = mpsc::unbounded_channel();
+        let opened = shells.start(&log_file, info, connected, Some(cleanup), move |m| tx.send(m).is_ok()).unwrap();
+        let mut screen = Screen { rx, seen: String::new() };
+        shells.input(opened.id, "echo host=$(hostname)\n".into());
+        let expected = format!("host={node}");
+        assert!(screen.until(&expected, Duration::from_secs(30)).await, "output: {}", screen.seen);
+
+        shells.close(opened.id);
+        shells.settle(Duration::from_secs(60)).await;
+        let pods: kube::Api<k8s_openapi::api::core::v1::Pod> = kube::Api::namespaced(client.clone(), NS);
+        let mut gone = false;
+        for _ in 0..300 {
+            if pods.get_opt(pod).await.unwrap().is_none() {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(gone, "debug pod still there");
+        // 세션을 열고 닫은 기록과 Pod를 지운 기록이 남는다
+        let entries = log::read_all(&log_file);
+        assert!(entries.iter().any(|e| matches!(e.change.operation, Operation::Shell { .. }) && e.closed_at.is_some()), "{entries:?}");
+        assert!(entries.iter().any(|e| e.summary == node_shell::SUMMARY_DELETE && e.ok && e.change.operation == Operation::Delete), "{entries:?}");
+        let _ = std::fs::remove_dir_all(log_file.parent().unwrap());
+    }
+}
+
+/// 이 시험은 스크립트가 만든 kind 클러스터에서만 쓰기 요청을 보낸다.
+#[tokio::test]
+#[ignore]
+async fn workload_changes_dry_run_apply_undo_and_conflict() {
+    use super::change::{Change, ChangeObject, Operation};
+    use super::{commit, exec, read};
+    use kube::api::{DynamicObject, Patch, PatchParams, PostParams};
+
+    let client = admin().await;
+    let target = |group: &str, kind: &str, plural: &str, name: &str| ChangeObject {
+        kind: KindRef { group: group.into(), version: "v1".into(), kind: kind.into(), plural: plural.into(), namespaced: true },
+        namespace: Some("mm-k2".into()),
+        name: name.into(),
+    };
+    let deployment = target("apps", "Deployment", "deployments", "mm-k7-web");
+    let cron = target("batch", "CronJob", "cronjobs", "mm-k7-cron");
+    let config = target("", "ConfigMap", "configmaps", "mm-k7-config");
+    let fixtures = [
+        (&deployment, json!({"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"mm-k7-web","namespace":"mm-k2"},"spec":{"replicas":0,"selector":{"matchLabels":{"app":"mm-k7"}},"template":{"metadata":{"labels":{"app":"mm-k7"}},"spec":{"containers":[{"name":"app","image":"registry.k8s.io/pause:3.10"}]}}}})),
+        (&cron, json!({"apiVersion":"batch/v1","kind":"CronJob","metadata":{"name":"mm-k7-cron","namespace":"mm-k2"},"spec":{"schedule":"0 0 1 1 *","jobTemplate":{"spec":{"template":{"spec":{"restartPolicy":"Never","containers":[{"name":"app","image":"registry.k8s.io/pause:3.10"}]}}}}}})),
+        (&config, json!({"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"mm-k7-config","namespace":"mm-k2"},"data":{"key":"value"}})),
+    ];
+    for (target, fixture) in fixtures {
+        let api = read::api_for(client.clone(), &target.kind, target.namespace.as_deref());
+        let object: DynamicObject = serde_json::from_value(fixture).unwrap();
+        api.create(&PostParams::default(), &object).await.unwrap();
+    }
+    kubectl(&["-n", "mm-k2", "rollout", "status", "deployment/mm-k7-web", "--timeout=120s"]);
+
+    let scale = Change { target: deployment.clone(), operation: Operation::Scale { replicas: 1 } };
+    let scale_plan = commit::dry_plan(client.clone(), PRIVATE, &scale, "2026-01-01T00:00:00Z").await.unwrap();
+    let api = read::api_for(client.clone(), &deployment.kind, deployment.namespace.as_deref());
+    api.patch_status(&deployment.name, &PatchParams::default(), &Patch::Merge(json!({"status":{"observedGeneration":0}}))).await.unwrap();
+    assert_eq!(exec::run(client.clone(), PRIVATE, &scale, &scale_plan, true).await.unwrap_err(), AppError::other(exec::STALE));
+    let (_, result) = commit::apply_plan(client.clone(), PRIVATE, &scale, &scale_plan, "2026-01-01T00:00:00Z", None).await.unwrap();
+    result.unwrap();
+    assert_eq!(exec::run(client.clone(), PRIVATE, &scale, &scale_plan, false).await.unwrap_err(), AppError::other(exec::STALE));
+    kubectl(&["-n", "mm-k2", "rollout", "status", "deployment/mm-k7-web", "--timeout=120s"]);
+    let next_scale = Change { target: deployment.clone(), operation: Operation::Scale { replicas: 2 } };
+    let seen = commit::dry_plan(client.clone(), PRIVATE, &next_scale, "").await.unwrap();
+    let inverse = scale_plan.inverse.unwrap();
+    let inverse_plan = commit::dry_plan(client.clone(), PRIVATE, &inverse, "").await.unwrap();
+    let (_, result) = commit::apply_plan(client.clone(), PRIVATE, &inverse, &inverse_plan, "", None).await.unwrap();
+    result.unwrap();
+    assert!(commit::apply_plan(client.clone(), PRIVATE, &next_scale, &seen, "", None).await.is_err());
+    kubectl(&["-n", "mm-k2", "rollout", "status", "deployment/mm-k7-web", "--timeout=120s"]);
+
+    let suspend = Change { target: cron.clone(), operation: Operation::Suspend { suspend: true } };
+    let plan = commit::make_plan(client.clone(), PRIVATE, &suspend, "").await.unwrap();
+    exec::run(client.clone(), PRIVATE, &suspend, &plan, true).await.unwrap();
+    exec::run(client.clone(), PRIVATE, &suspend, &plan, false).await.unwrap();
+    let rerun = Change { target: cron, operation: Operation::Rerun { job_name: "mm-k7-job".into() } };
+    let plan = commit::make_plan(client.clone(), PRIVATE, &rerun, "").await.unwrap();
+    exec::run(client.clone(), PRIVATE, &rerun, &plan, true).await.unwrap();
+    exec::run(client.clone(), PRIVATE, &rerun, &plan, false).await.unwrap();
+
+    let delete = Change { target: config, operation: Operation::Delete };
+    let plan = commit::make_plan(client.clone(), PRIVATE, &delete, "").await.unwrap();
+    exec::run(client.clone(), PRIVATE, &delete, &plan, true).await.unwrap();
+    exec::run(client.clone(), PRIVATE, &delete, &plan, false).await.unwrap();
+    let recreate = plan.inverse.unwrap();
+    let plan = commit::make_plan(client.clone(), PRIVATE, &recreate, "").await.unwrap();
+    exec::run(client.clone(), PRIVATE, &recreate, &plan, true).await.unwrap();
+    exec::run(client.clone(), PRIVATE, &recreate, &plan, false).await.unwrap();
+
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if !commit::revisions(client.clone(), PRIVATE, &deployment).await.unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }).await.expect("첫 롤아웃 리비전이 만들어지지 않았어요");
+    let restart = Change { target: deployment.clone(), operation: Operation::Restart };
+    let plan = commit::make_plan(client.clone(), PRIVATE, &restart, "2026-01-01T00:00:00Z").await.unwrap();
+    exec::run(client.clone(), PRIVATE, &restart, &plan, true).await.unwrap();
+    exec::run(client.clone(), PRIVATE, &restart, &plan, false).await.unwrap();
+    let revisions = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let revisions = commit::revisions(client.clone(), PRIVATE, &deployment).await.unwrap();
+            if revisions.len() >= 2 {
+                break revisions;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }).await.expect("롤아웃 리비전이 만들어지지 않았어요");
+    let undo = Change { target: deployment, operation: Operation::RolloutUndo { revision: revisions.last().unwrap().revision.clone() } };
+    let plan = commit::dry_plan(client.clone(), PRIVATE, &undo, "").await.unwrap();
+    assert!(plan.inverse.is_some(), "현재 리비전의 역변경이 필요해요");
+    let (_, result) = commit::apply_plan(client, PRIVATE, &undo, &plan, "", None).await.unwrap();
+    result.unwrap();
 }

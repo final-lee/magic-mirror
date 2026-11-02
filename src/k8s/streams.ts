@@ -2,11 +2,6 @@ import { can } from "./can";
 import { noStreamPermission, SHELL_PERMISSION_CHECKING } from "./text";
 import type { K8sForward, K8sRules } from "./types";
 
-/** 셸·attach를 열 때 Pod 이름을 입력해야 하는 네임스페이스: kube-system이거나 이름에 prod가 들어간다(백엔드 shell::needs_typed_name과 같다) */
-export function needsTypedName(namespace: string): boolean {
-  return namespace === "kube-system" || namespace.toLowerCase().includes("prod");
-}
-
 export type StreamResource = "exec" | "attach" | "portforward";
 
 export interface StreamPermission {

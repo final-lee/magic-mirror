@@ -1,9 +1,11 @@
 import { useState } from "react";
+import { errorMessage } from "../api/errors";
+import { k8sApi } from "./api";
 import { PodTerminal } from "./PodTerminal";
-import { needsTypedName, streamPermission } from "./streams";
+import { streamPermission } from "./streams";
 import {
   ATTACH_WARNING, LOG_CONTAINER, SHELL_CANCEL, SHELL_CLOSE, SHELL_CONFIRM, SHELL_MODE_ATTACH, SHELL_MODE_EXEC, SHELL_MODE_LABEL, SHELL_NO_CONTAINER,
-  SHELL_OPEN, SHELL_TYPED_LABEL, shellConfirmTitle, shellTypedHint,
+  SHELL_CHECKING_NAME, SHELL_OPEN, SHELL_TYPED_LABEL, shellConfirmTitle, shellTypedHint,
 } from "./text";
 import type { K8sContainer, K8sRules, K8sShellMode, K8sTarget } from "./types";
 
@@ -39,13 +41,24 @@ export function ShellTab({ target, ssoProfile, namespace, pod, containers, rules
   const [nonce, setNonce] = useState(0);
   const chosen = containers.some((c) => c.name === container) ? container : (containers[0]?.name ?? "");
   const perm = streamPermission(rules, mode === "attach" ? "attach" : "exec", pod);
-  const danger = needsTypedName(namespace);
+  // 입력해야 하는 이름은 백엔드의 위험 판단(변경 공통 틀과 같은 규칙) 하나에서 온다. undefined: 아직 모름, null: 필요 없음
+  const [required, setRequired] = useState<string | null | undefined>(undefined);
+  const [checkError, setCheckError] = useState("");
 
-  const confirm = () => {
-    setSession({ container: chosen, mode, confirmText: danger ? typed : null });
-    setNonce((n) => n + 1);
+  const ask = () => {
+    setConfirming(true);
+    setRequired(undefined);
+    setCheckError("");
+    k8sApi.shellConfirmName(namespace, pod).then(setRequired, (e: unknown) => setCheckError(errorMessage(e)));
+  };
+  const close = () => {
     setConfirming(false);
     setTyped("");
+  };
+  const confirm = () => {
+    setSession({ container: chosen, mode, confirmText: required ? typed : null });
+    setNonce((n) => n + 1);
+    close();
   };
 
   return (
@@ -78,7 +91,7 @@ export function ShellTab({ target, ssoProfile, namespace, pod, containers, rules
                 </label>
               </div>
               <div className="k8s-actions">
-                <button className="btn" disabled={!perm.allowed} title={perm.reason ?? undefined} onClick={() => setConfirming(true)}>
+                <button className="btn" disabled={!perm.allowed} title={perm.reason ?? undefined} onClick={ask}>
                   {SHELL_OPEN}
                 </button>
               </div>
@@ -91,23 +104,19 @@ export function ShellTab({ target, ssoProfile, namespace, pod, containers, rules
         <div className="k8s-confirm" role="dialog" aria-label={shellConfirmTitle(pod, chosen)}>
           <p>{shellConfirmTitle(pod, chosen)}</p>
           {mode === "attach" && <p className="err">{ATTACH_WARNING}</p>}
-          {danger && (
+          {required === undefined && !checkError && <p className="dim k8s-hint">{SHELL_CHECKING_NAME}</p>}
+          {checkError && <p className="err">{checkError}</p>}
+          {required && (
             <label className="k8s-field">
-              <span>{shellTypedHint(pod)}</span>
+              <span>{shellTypedHint(required)}</span>
               <input aria-label={SHELL_TYPED_LABEL} value={typed} onChange={(e) => setTyped(e.target.value)} autoFocus />
             </label>
           )}
           <div className="k8s-actions">
-            <button className="btn" disabled={danger && typed !== pod} onClick={confirm}>
+            <button className="btn" disabled={required === undefined || (required !== null && typed !== required)} onClick={confirm}>
               {SHELL_CONFIRM}
             </button>
-            <button
-              className="btn"
-              onClick={() => {
-                setConfirming(false);
-                setTyped("");
-              }}
-            >
+            <button className="btn" onClick={close}>
               {SHELL_CANCEL}
             </button>
           </div>

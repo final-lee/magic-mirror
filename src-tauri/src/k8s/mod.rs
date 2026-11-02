@@ -1,9 +1,14 @@
-//! EKS 탭. kubeconfig의 context로 접속해 클러스터를 읽는다. K1·K2는 클러스터에 아무것도 쓰지 않는다(`hygiene`이 지킨다).
+//! EKS 탭. 조회와 변경을 분리하며 클러스터 쓰기는 `exec`에서만 보낸다.
+pub mod change;
+pub mod commit;
+pub mod exec;
+pub mod log;
 pub mod connect;
 pub mod failure;
 pub mod forward;
 pub mod kubeconfig;
 pub mod logs;
+pub mod node_shell;
 pub mod path;
 pub mod read;
 pub mod review;
