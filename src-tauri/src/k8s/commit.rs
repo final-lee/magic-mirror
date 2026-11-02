@@ -109,6 +109,9 @@ pub async fn make_plan(client: Client, endpoint: Endpoint, change: &Change, now:
                 plan.preview.reversible = true;
             }
         }
+        if plan.inverse.is_none() {
+            return Err(AppError::other(REVISION_MISSING));
+        }
     }
     Ok(plan)
 }

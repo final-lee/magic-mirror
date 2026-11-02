@@ -524,8 +524,8 @@ async fn workload_changes_dry_run_apply_undo_and_conflict() {
         }
     }).await.expect("롤아웃 리비전이 만들어지지 않았어요");
     let undo = Change { target: deployment, operation: Operation::RolloutUndo { revision: revisions.last().unwrap().revision.clone() } };
-    let plan = commit::make_plan(client.clone(), PRIVATE, &undo, "").await.unwrap();
+    let plan = commit::dry_plan(client.clone(), PRIVATE, &undo, "").await.unwrap();
     assert!(plan.inverse.is_some(), "현재 리비전의 역변경이 필요해요");
-    exec::run(client.clone(), PRIVATE, &undo, &plan, true).await.unwrap();
-    exec::run(client, PRIVATE, &undo, &plan, false).await.unwrap();
+    let (_, result) = commit::apply_plan(client, PRIVATE, &undo, &plan, "", None).await.unwrap();
+    result.unwrap();
 }
