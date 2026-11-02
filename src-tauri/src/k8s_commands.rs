@@ -40,8 +40,25 @@ pub struct K8sState {
     next_watch: AtomicU64,
     /// lnav를 띄운 로그 흐름(키 입력, 크기 조절, 뒷정리). 번호는 watch 번호와 같다. 항목을 지우면 lnav도 끝나고 로그 파일도 지워진다.
     terminals: Mutex<HashMap<u64, Terminal>>,
-    /// 앱이 끝나는 중이면 새 lnav를 띄우지 않는다
-    closing: std::sync::atomic::AtomicBool,
+    /// lnav 띄우기의 입장 관리. 앱이 끝날 때 새로 들어오지 못하게 하고, 이미 들어온 것이 등록이나 뒷정리를 마칠 때까지 기다린다.
+    starts: Mutex<Starts>,
+    starts_done: std::sync::Condvar,
+}
+
+#[derive(Default)]
+struct Starts {
+    closing: bool,
+    in_flight: usize,
+}
+
+/// 입장권. 버리면(성공, 실패 어느 쪽이든) 나간 것으로 센다.
+struct StartTicket<'a>(&'a K8sState);
+
+impl Drop for StartTicket<'_> {
+    fn drop(&mut self) {
+        locked(&self.0.starts).in_flight -= 1;
+        self.0.starts_done.notify_all();
+    }
 }
 
 struct Terminal {
@@ -149,19 +166,30 @@ impl K8sState {
         }
     }
 
-    /// 앱이 끝날 때: 새 lnav를 막고, 떠 있는 lnav를 모두 그 자리에서 끝내고, 이 앱의 로그 폴더를 통째로 지운다
-    /// (종료는 비동기 작업을 버리지 않고 프로세스를 끝내므로 여기서 직접 한다. 막 만들어지던 파일도 폴더와 함께 지워지고, 그보다 늦은 것은 다음 실행의 `sweep_stale`이 지운다).
+    /// lnav 띄우기에 들어간다. 앱이 끝나는 중이면 거절한다.
+    fn admit(&self) -> Result<StartTicket<'_>, AppError> {
+        let mut s = locked(&self.starts);
+        if s.closing {
+            return Err(AppError::other(NOT_OPENED));
+        }
+        s.in_flight += 1;
+        Ok(StartTicket(self))
+    }
+
+    /// 앱이 끝날 때: 새 lnav를 막고, 이미 띄우는 중인 것이 등록을 마치기를 기다리고(입장 뒤는 동기 코드라 짧다, 최대 3초),
+    /// 떠 있는 lnav를 모두 그 자리에서 끝내고, 이 앱의 로그 폴더를 통째로 지운다.
+    /// 종료는 비동기 작업을 버리지 않고 프로세스를 끝내므로 여기서 직접 한다. 비정상 종료로 남은 폴더는 다음 실행의 `sweep_stale`이 지운다.
     pub fn shutdown(&self) {
-        self.closing.store(true, Ordering::SeqCst);
+        {
+            let mut s = locked(&self.starts);
+            s.closing = true;
+            let _ = self.starts_done.wait_timeout_while(s, std::time::Duration::from_secs(3), |s| s.in_flight > 0);
+        }
         let all: Vec<Terminal> = locked(&self.terminals).drain().map(|(_, t)| t).collect();
         for mut t in all {
             t.cleanup.finish_now();
         }
         let _ = std::fs::remove_dir_all(lnav::process_dir(&lnav::logs_root()));
-    }
-
-    fn closing(&self) -> bool {
-        self.closing.load(Ordering::SeqCst)
     }
 }
 
@@ -375,14 +403,14 @@ pub async fn k8s_lnav(
     on_event: tauri::ipc::Channel<LnavMessage>,
 ) -> Result<u64, AppError> {
     let program = lnav::find_lnav().await.ok_or_else(|| AppError::other(LNAV_MISSING))?;
-    if k8s.closing() {
-        return Err(AppError::other(NOT_OPENED));
-    }
+    let path_env = login_path().await;
+    // 여기서부터 등록까지는 기다림 없는 동기 코드다. 앱이 끝날 때 `shutdown`이 이 구간이 끝나기를 기다린다.
+    let _ticket = k8s.admit()?;
     let started = k8s.epoch(&target);
     let session = k8s.session(&target)?;
     let (client, endpoint) = (session.client.clone(), session.endpoint);
     let (path, mut file) = lnav::log_file(&lnav::logs_root()).map_err(|_| AppError::other(LOG_FILE_FAILED))?;
-    let spawned = lnav::spawn(&program, &[path.as_path()], cols, rows, login_path().await);
+    let spawned = lnav::spawn(&program, &[path.as_path()], cols, rows, path_env);
     let Spawned { child, reader, writer, master } = match spawned {
         Ok(s) => s,
         Err(e) => {
@@ -392,11 +420,6 @@ pub async fn k8s_lnav(
     };
     // 항목을 지우거나(작업 끝) 등록하지 못해 버려지면(그사이 대상이 닫힘) lnav를 끝내고 파일을 지운다
     let terminal = Terminal { input: lnav::input_worker(writer), master, cleanup: Cleanup::new(child, path) };
-    if k8s.closing() {
-        // 버리면 그 자리에서 파일을 지우고 lnav를 죽인다
-        drop(terminal);
-        return Err(AppError::other(NOT_OPENED));
-    }
     k8s.register_watch(&target, started, |id| {
         k8s.put_terminal(id, terminal);
         // 첫 실행 전에 중단돼도 항목이 남지 않도록 지킴이를 먼저 만들어 작업에 넘긴다
