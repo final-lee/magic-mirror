@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
 import { DEPLOYMENTS, NODES, PODS } from "./kinds";
-import { BACK, CAT_CUSTOM, KIND_TREE_LABEL, TAB_SUMMARY, TAB_YAML } from "./text";
+import { BACK, CAT_CUSTOM, DETAIL_LABEL, KIND_TREE_LABEL, TAB_SUMMARY, TAB_YAML } from "./text";
 import type { K8sKind, K8sObjectView, K8sRow, K8sWatchMessage } from "./types";
 import { WorkloadsView, type WorkloadsFocus } from "./WorkloadsView";
 
@@ -76,6 +76,34 @@ test("a bookmark view shows only its kind, without the kind tree", async () => {
   await vi.waitFor(() => expect(m.watch).toHaveBeenCalledWith(T, DEPLOYMENTS, "prod", "p", expect.any(Function)));
   expect(screen.queryByRole("navigation", { name: KIND_TREE_LABEL })).toBeNull();
   expect(m.watch).not.toHaveBeenCalledWith(T, PODS, expect.anything(), expect.anything(), expect.anything());
+});
+
+test("clicking the open row again closes the detail; Enter on it keeps it open; ↑ on the first row changes nothing", async () => {
+  m.get.mockImplementation(async (_t, _kind, _ns, name) => view(name));
+  setup();
+  await vi.waitFor(() => expect(m.watch).toHaveBeenCalled());
+  send("pods", { type: "reset", rows: [row("a"), row("b")] });
+  fireEvent.click(screen.getByText("a"));
+  expect(await screen.findByRole("complementary", { name: DETAIL_LABEL })).toBeInTheDocument();
+  fireEvent.keyDown(screen.getByTestId("iam-list"), { key: "ArrowUp" });
+  expect(screen.getByRole("complementary", { name: DETAIL_LABEL })).toBeInTheDocument();
+  fireEvent.keyDown(screen.getByTestId("iam-list"), { key: "Enter" });
+  expect(screen.getByRole("complementary", { name: DETAIL_LABEL })).toBeInTheDocument();
+  fireEvent.click(screen.getByText("b"));
+  await vi.waitFor(() => expect(m.get).toHaveBeenLastCalledWith(T, PODS, "prod", "b", "p"));
+  fireEvent.click(screen.getByText("b"));
+  expect(screen.queryByRole("complementary", { name: DETAIL_LABEL })).toBeNull();
+});
+
+test("the detail covers 70% of the list unless a width was saved", async () => {
+  m.get.mockImplementation(async (_t, _kind, _ns, name) => view(name));
+  const { rerender } = setup();
+  await vi.waitFor(() => expect(m.watch).toHaveBeenCalled());
+  send("pods", { type: "reset", rows: [row("a")] });
+  fireEvent.click(screen.getByText("a"));
+  expect(await screen.findByRole("complementary", { name: DETAIL_LABEL })).toHaveStyle({ width: "70%" });
+  rerender({ lanes: { ...LANES, width: (lane) => (lane === "detailPct" ? 55 : undefined) } });
+  expect(screen.getByRole("complementary", { name: DETAIL_LABEL })).toHaveStyle({ width: "55%" });
 });
 
 test("cluster-scoped kinds watch all namespaces", async () => {

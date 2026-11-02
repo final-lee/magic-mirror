@@ -57,7 +57,8 @@ export function ListTable<T>({ label, rows, columns, rowKey, selectedId, onSelec
     e.preventDefault();
     const i = sorted.findIndex((r) => rowKey(r) === selectedId);
     const next = e.key === "ArrowDown" ? Math.min(sorted.length - 1, i + 1) : Math.max(0, i - 1);
-    if (sorted[next]) onSelect(rowKey(sorted[next]));
+    // 맨 끝에서 더 가려 하면 그대로 둔다(같은 행을 다시 고르면 토글하는 목록이 있다)
+    if (sorted[next] && next !== i) onSelect(rowKey(sorted[next]));
   };
 
   return (

@@ -69,9 +69,12 @@
 - 업그레이드 점검: EKS Upgrade Insights 결과, 다음 마이너 버전에서 제거되는 API를 쓰는 리소스(고정 표), 노드와 컨트롤 플레인의 버전 차이.
 
 ### 워크로드 (메뉴 이름 "All")
+- 화면 열 이름(사용자와 합의): **1열 메뉴**(북마크·개요·All·이벤트·내 권한, `K8sNav`), **2열 종류**(리소스 종류 트리, `KindTree`), **3열 목록**(고른 종류의 객체 목록, `ObjectList`), **4열 상세**(객체 요약·YAML, `ObjectDetail`). 번호는 역할에 붙인다: 북마크 화면은 2열이 없고, 상세를 열기 전에는 4열이 없다. 개요·이벤트·내 권한은 "1열 + 본문".
 - 트리: 워크로드(Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob, Pod), 네트워크(Service, Ingress, NetworkPolicy, Endpoints), 설정(ConfigMap, Secret, ServiceAccount), 저장소(PVC, PV, StorageClass), 네임스페이스, CRD(API discovery로 나열).
 - 북마크: 트리의 종류마다 별(☆/★)로 북마크한다. 북마크는 왼쪽 메뉴의 개요 위에 북마크한 순서대로 붙고, 끌어서 순서를 바꾸며 ✕로 뺀다. 누르면 그 종류의 목록만(트리 없이) 연다. 설정(`k8sBookmarks`)에 저장하고 모든 클러스터에 같이 쓴다. 이 클러스터에 없는 사용자 정의 종류는 흐리게 두고 열지 않는다.
-- 레인(메뉴, 종류 트리, 목록, 상세) 사이의 손잡이를 끌어 너비를 바꾼다. 놓을 때 설정(`k8sLaneWidths`)에 저장한다.
+- 1열·2열 오른쪽 경계를 끌어 너비(px)를 바꾼다. 놓을 때 설정(`k8sLaneWidths.nav`, `.tree`)에 저장한다.
+- 3열에서 행을 누르면 4열이 열리고, 열린 행을 다시 누르면 닫힌다(더블클릭·Enter는 늘 연다).
+- 4열은 3열 위에 떠서 오른쪽부터 3열 너비의 70%를 덮는다. 왼쪽 경계를 끌어 30~95%로 바꾸고 `k8sLaneWidths.detailPct`에 저장한다.
 - 목록: 종류별 핵심 열, 이상 표시(CrashLoopBackOff, ImagePullBackOff, Pending, OOMKilled, 준비 안 됨), 이름·레이블 셀렉터 필터, "문제 있는 것만".
 - 상세: 요약, 소유 관계(ownerReferences 위아래 이동), 컨테이너별 상태와 마지막 종료 이유, 관련 이벤트, YAML 탭.
 - 앱 안 연결: 노드 → 노드 상세, ServiceAccount → 접근 화면, IAM 역할 → IAM 워크스페이스.

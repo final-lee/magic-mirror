@@ -818,7 +818,7 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .k8s-secret pre { margin: 0 0 4px; padding: 6px 8px; background: #00000040; border-radius: 6px; white-space: pre-wrap; word-break: break-all; user-select: text; }
 
 .k8s-workloads { flex: 1; min-height: 0; display: flex; }
-.k8s-list-pane { flex: 1; min-width: 200px; min-height: 0; display: flex; flex-direction: column; }
+.k8s-list-pane { flex: 1; min-width: 200px; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .k8s-resizer { flex: none; width: 6px; margin: 0 -3px; position: relative; z-index: 1; cursor: col-resize; background: transparent; }
 .k8s-resizer:hover, .k8s-resizer.on, .k8s-resizer:focus-visible { background: var(--accent); outline: none; }
 .k8s-bms { display: flex; flex-direction: column; gap: 1px; }
@@ -829,7 +829,10 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .k8s-bm-x { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--dim); cursor: pointer; opacity: 0; }
 .k8s-bm:hover .k8s-bm-x, .k8s-bm-x:focus-visible { opacity: 1; }
 .k8s-bm-x:hover { background: #ffffff1a; color: inherit; }
-.k8s-detail { width: 46%; min-width: 360px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--panel); }
+/* 4열 상세: 3열 목록 위에 떠서 오른쪽부터 목록 너비의 일부(기본 70%)를 덮는다. 너비는 style로 준다. */
+.k8s-detail { position: absolute; top: 0; right: 0; bottom: 0; z-index: 2; min-width: 320px; max-width: 100%; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--panel); box-shadow: -10px 0 28px #00000073; animation: k8s-pop 0.12s ease-out; }
+@keyframes k8s-pop { from { transform: translateX(18px); opacity: 0; } }
+.k8s-detail-resizer { position: absolute; top: 0; bottom: 0; margin: 0; transform: translateX(50%); z-index: 3; }
 .k8s-detail-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
 .k8s-push { margin-left: auto; }
 .k8s-tabs { display: flex; gap: 2px; padding: 4px 12px 0; border-bottom: 1px solid var(--line); }

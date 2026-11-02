@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { K8sError } from "./K8sError";
 import { KindTree } from "./KindTree";
-import { LaneResizer, type Lane } from "./lanes";
+import { DETAIL_PCT, LaneResizer, type Lane } from "./lanes";
 import { CATEGORIES, PODS, customCategories, sameKind } from "./kinds";
 import { ObjectDetail } from "./ObjectDetail";
 import { ObjectList } from "./ObjectList";
@@ -65,12 +65,14 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
     setKind(k);
     setStack([]);
   };
+  // 4열 상세는 3열 목록 위에 떠서 목록 너비의 이만큼을 덮는다
+  const detailPct = lanes.width("detailPct") ?? DETAIL_PCT;
   return (
     <div className="k8s-workloads">
       {!fixedKind && (
         <>
           <KindTree categories={categories} selected={kind} onSelect={pickKind} bookmarked={bookmarked} onToggleBookmark={onToggleBookmark} width={lanes.width("tree")} />
-          <LaneResizer lane="tree" side="before" onResize={lanes.resize} onCommit={lanes.commit} />
+          <LaneResizer lane="tree" onResize={lanes.resize} onCommit={lanes.commit} />
         </>
       )}
       <div className="k8s-list-pane">
@@ -82,27 +84,28 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
           status={watch.status}
           showNamespace={namespace === null}
           selectedUid={topRow?.uid ?? null}
-          onSelect={(r) => setStack([{ kind, namespace: r.namespace, name: r.name }])}
+          onSelect={(r) => setStack(r.uid === topRow?.uid ? [] : [{ kind, namespace: r.namespace, name: r.name }])}
+          onOpen={(r) => setStack([{ kind, namespace: r.namespace, name: r.name }])}
         />
+        {top && <LaneResizer lane="detailPct" onResize={lanes.resize} onCommit={lanes.commit} style={{ right: `${detailPct}%` }} />}
+        {top && (
+          <ObjectDetail
+            key={JSON.stringify([kindKey(top.kind), top.namespace, top.name])}
+            target={target}
+            context={context}
+            ssoProfile={ssoProfile}
+            live={live}
+            objectRef={top}
+            resourceVersion={topRow?.resourceVersion ?? null}
+            kinds={kinds}
+            onOpen={(ref) => setStack((s) => [...s, ref])}
+            onBack={stack.length > 1 ? () => setStack((s) => s.slice(0, -1)) : null}
+            onClose={() => setStack([])}
+            onOpenIam={onOpenIam}
+            widthPct={detailPct}
+          />
+        )}
       </div>
-      {top && <LaneResizer lane="detail" side="after" onResize={lanes.resize} onCommit={lanes.commit} />}
-      {top && (
-        <ObjectDetail
-          key={JSON.stringify([kindKey(top.kind), top.namespace, top.name])}
-          target={target}
-          context={context}
-          ssoProfile={ssoProfile}
-          live={live}
-          objectRef={top}
-          resourceVersion={topRow?.resourceVersion ?? null}
-          kinds={kinds}
-          onOpen={(ref) => setStack((s) => [...s, ref])}
-          onBack={stack.length > 1 ? () => setStack((s) => s.slice(0, -1)) : null}
-          onClose={() => setStack([])}
-          onOpenIam={onOpenIam}
-          width={lanes.width("detail")}
-        />
-      )}
     </div>
   );
 }
