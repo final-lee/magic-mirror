@@ -310,7 +310,8 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
   const logContainers = pod && q.data ? q.data.containers.filter((c) => c.state !== "template") : podContainers;
   // 워크로드 로그 탭의 컨테이너 선택은 Pod 템플릿의 컨테이너. 다시 읽는 동안에도 선택이 사라지지 않게 마지막으로 읽은 것을 두되, 다른 객체의 것은 쓰지 않는다
   const workload = hasWorkloadLogs(objectRef.kind) && objectRef.namespace !== null;
-  const usage = pod || (objectRef.namespace !== null && objectRef.kind.group === "apps" && ["Deployment", "StatefulSet", "DaemonSet"].includes(objectRef.kind.kind));
+  const usage = pod || (objectRef.kind.group === "" && objectRef.kind.kind === "Node")
+    || (objectRef.namespace !== null && objectRef.kind.group === "apps" && ["Deployment", "StatefulSet", "DaemonSet"].includes(objectRef.kind.kind));
   const objectKey = `${objectRef.kind.group}/${objectRef.kind.kind}/${objectRef.namespace}/${objectRef.name}`;
   const [templates, setTemplates] = useState<{ key: string; containers: K8sContainer[] } | null>(null);
   useEffect(() => {

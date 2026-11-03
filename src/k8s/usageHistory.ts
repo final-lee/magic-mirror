@@ -25,7 +25,7 @@ export interface UsageView {
   memory: UsageSeries[];
   /** 마지막으로 모은 시각. 아직 모은 적이 없으면 null */
   lastAt: number | null;
-  /** 마지막으로 읽었을 때 Pod 사용량을 읽지 못한 까닭 */
+  /** 마지막으로 읽었을 때 이 객체의 사용량(Pod 또는 노드)을 읽지 못한 까닭 */
   unavailable: K8sMetricsUnavailable | null;
 }
 
@@ -45,9 +45,12 @@ interface PodTrack {
 
 interface History {
   lastAt: number | null;
-  unavailable: K8sMetricsUnavailable | null;
+  podsUnavailable: K8sMetricsUnavailable | null;
+  nodesUnavailable: K8sMetricsUnavailable | null;
   /** 키: podKey */
   pods: Map<string, PodTrack>;
+  /** 키: 노드 이름 */
+  nodes: Map<string, Track>;
   /** 값이 바뀔 때마다 늘어난다. 화면이 다시 그릴 때를 안다 */
   version: number;
 }
@@ -86,12 +89,13 @@ function notify(key: string) {
 export function recordUsage(key: string, at: number, metrics: K8sMetrics) {
   let history = histories.get(key);
   if (!history) {
-    history = { lastAt: null, unavailable: null, pods: new Map(), version: 0 };
+    history = { lastAt: null, podsUnavailable: null, nodesUnavailable: null, pods: new Map(), nodes: new Map(), version: 0 };
     histories.set(key, history);
   }
   if (history.lastAt !== null && at - history.lastAt < MIN_GAP_MS) return;
   history.lastAt = at;
-  history.unavailable = metrics.podsUnavailable;
+  history.podsUnavailable = metrics.podsUnavailable;
+  history.nodesUnavailable = metrics.nodesUnavailable;
   for (const pod of metrics.pods) {
     const id = podKey(pod.namespace, pod.name);
     let track = history.pods.get(id);
@@ -110,12 +114,23 @@ export function recordUsage(key: string, at: number, metrics: K8sMetrics) {
       push(containerTrack, at, container.cpuMilli, container.memoryBytes);
     }
   }
+  for (const node of metrics.nodes) {
+    let track = history.nodes.get(node.name);
+    if (!track) {
+      track = emptyTrack();
+      history.nodes.set(node.name, track);
+    }
+    push(track, at, node.cpuMilli, node.memoryBytes);
+  }
   const from = at - HISTORY_MS;
   for (const [id, track] of history.pods) {
     for (const [name, containerTrack] of track.containers) {
       if (trim(containerTrack, from)) track.containers.delete(name);
     }
     if (trim(track.total, from)) history.pods.delete(id);
+  }
+  for (const [name, track] of history.nodes) {
+    if (trim(track, from)) history.nodes.delete(name);
   }
   history.version += 1;
   notify(key);
@@ -146,19 +161,27 @@ export function subscribeUsage(key: string, listener: () => void): () => void {
 
 export const usageVersion = (key: string) => histories.get(key)?.version ?? 0;
 
-/** 목록의 작은 그래프에 쓰는 Pod 합계 기록. 시각은 오래된 것부터, CPU는 코어, 메모리는 바이트. end는 마지막으로 모은 시각 */
-export interface PodTrend {
+/** 목록의 작은 그래프에 쓰는 Pod 합계 또는 노드 기록. 시각은 오래된 것부터, CPU는 코어, 메모리는 바이트. end는 마지막으로 모은 시각 */
+export interface UsageTrend {
   at: readonly number[];
   cpu: readonly number[];
   memory: readonly number[];
   end: number;
 }
 
-export function podTrend(key: string, namespace: string, name: string): PodTrend | null {
-  const history = histories.get(key);
-  const track = history?.pods.get(podKey(namespace, name));
+function trendOf(history: History | undefined, track: Track | undefined): UsageTrend | null {
   if (!history || history.lastAt === null || !track) return null;
-  return { at: track.total.at, cpu: track.total.cpu, memory: track.total.memory, end: history.lastAt };
+  return { at: track.at, cpu: track.cpu, memory: track.memory, end: history.lastAt };
+}
+
+export function podTrend(key: string, namespace: string, name: string): UsageTrend | null {
+  const history = histories.get(key);
+  return trendOf(history, history?.pods.get(podKey(namespace, name))?.total);
+}
+
+export function nodeTrend(key: string, name: string): UsageTrend | null {
+  const history = histories.get(key);
+  return trendOf(history, history?.nodes.get(name));
 }
 
 /** 값이 GAP_MS보다 오래 빈 곳에서 선을 끊는다 */
@@ -179,13 +202,20 @@ function series(name: string, track: Track): [UsageSeries, UsageSeries] {
   ];
 }
 
-/** Pod는 컨테이너별, 워크로드는 그 컨트롤러 사슬에 든 Pod별 선 */
+/** Pod는 컨테이너별, 워크로드는 그 컨트롤러 사슬에 든 Pod별, 노드는 노드 하나의 선 */
 export function usageOf(key: string, ref: ObjectRef): UsageView {
   const history = histories.get(key);
-  const view: UsageView = { cpu: [], memory: [], lastAt: history?.lastAt ?? null, unavailable: history?.unavailable ?? null };
-  if (!history || ref.namespace === null) return view;
+  const node = ref.kind.group === "" && ref.kind.kind === "Node";
+  const unavailable = (node ? history?.nodesUnavailable : history?.podsUnavailable) ?? null;
+  const view: UsageView = { cpu: [], memory: [], lastAt: history?.lastAt ?? null, unavailable };
+  if (!history) return view;
   const lines: [UsageSeries, UsageSeries][] = [];
-  if (ref.kind.group === "" && ref.kind.kind === "Pod") {
+  if (node) {
+    const track = history.nodes.get(ref.name);
+    if (track) lines.push(series(ref.name, track));
+  } else if (ref.namespace === null) {
+    return view;
+  } else if (ref.kind.group === "" && ref.kind.kind === "Pod") {
     const pod = history.pods.get(podKey(ref.namespace, ref.name));
     for (const [name, track] of pod?.containers ?? []) lines.push(series(name, track));
   } else {

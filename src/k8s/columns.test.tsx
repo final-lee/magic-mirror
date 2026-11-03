@@ -75,7 +75,7 @@ test("usage over 90% is highlighted, exactly 90% is not", () => {
 test("pod percent cells draw the collected trend against today's request or limit, breaking where sampling stopped", () => {
   const usage = usageOf({ pods: [{ namespace: "web", name: "api", cpuMilli: 2000, memoryBytes: 50, containers: [], owners: [] }] });
   const hour = 3_600_000;
-  const trendOf = (namespace: string, name: string) => (namespace === "web" && name === "api"
+  const trendOf = (r: K8sRow) => (r.namespace === "web" && r.name === "api"
     ? { at: [0, 15_000, hour], cpu: [0.25, 0.5, 2], memory: [10, 20, 50], end: hour }
     : null);
   const cols = columnsFor(PODS, false, 0, usage, trendOf);
@@ -127,6 +127,19 @@ test("node usage columns compare with allocatable", () => {
   expect(text(col(cols, COL_CPU_OF_ALLOCATABLE), n1)).toBe("50%");
   expect(text(col(cols, COL_MEMORY_OF_ALLOCATABLE), n1)).toBe("50%");
   expect(labelsOf(cols)).not.toContain(COL_CPU_OF_REQUEST);
+});
+
+test("node percent cells draw the collected trend against allocatable", () => {
+  const usage = usageOf({ nodes: [{ name: "n1", cpuMilli: 1000, memoryBytes: 4 * 1024 ** 3 }] });
+  const trendOf = (r: K8sRow) => (r.name === "n1" ? { at: [0, 15_000], cpu: [0.5, 1], memory: [2 * 1024 ** 3, 4 * 1024 ** 3], end: 15_000 } : null);
+  const cols = columnsFor(NODES, false, 0, usage, trendOf);
+  const n1 = { ...podRow("n1", { cpuAllocatable: "2000", memoryAllocatable: String(8 * 1024 ** 3) }), namespace: null };
+  for (const label of [COL_CPU_OF_ALLOCATABLE, COL_MEMORY_OF_ALLOCATABLE]) {
+    const cell = render(<>{col(cols, label).render(n1)}</>).container;
+    expect(cell).toHaveTextContent("50%");
+    // 25% → 50%: 선의 끝이 아래 절반 높이에서 가운데로 올라온다
+    expect(cell.querySelector(".k8s-trend-line")!.getAttribute("points")).toBe("99.58333333333333,15 100,10");
+  }
 });
 
 test("workload usage is the sum over its pods, only cpu and memory", () => {

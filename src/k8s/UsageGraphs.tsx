@@ -1,9 +1,11 @@
 import { useSyncExternalStore } from "react";
 import * as t from "./text";
 import type { K8sContainer, K8sObjectView, K8sTarget, ObjectRef } from "./types";
+import { numValue } from "./usage";
 import { HISTORY_MS, historyKey, splitAtGaps, subscribeUsage, usageOf, usageVersion, type UsageSeries } from "./usageHistory";
 
-type Reference = { name: string; value: number; limit: boolean };
+/** 그래프의 기준선. name이 선 이름과 같으면 그 선의 색, label은 범례 글(예: "web 요청"), limit이면 긴 점선 */
+export type Reference = { name: string; label: string; value: number; limit: boolean };
 const COLORS = Array.from({ length: 8 }, (_, i) => `var(--log-c${i + 1})`);
 
 /** 상세가 읽은 요청·제한을 그래프 단위로 바꾼다. 워크로드는 Pod 템플릿 합계다. */
@@ -18,10 +20,10 @@ function references(containers: K8sContainer[], pod: boolean, cpu: boolean): Ref
     });
     if (pod) {
       for (const item of values) {
-        if (item.value !== null) result.push({ name: item.name, value: item.value, limit });
+        if (item.value !== null) result.push({ name: item.name, label: `${item.name} ${limit ? t.USAGE_LIMIT : t.USAGE_REQUEST}`, value: item.value, limit });
       }
     } else if (values.every((item) => item.value !== null)) {
-      result.push({ name: "Pod", value: values.reduce((sum, item) => sum + (item.value ?? 0), 0), limit });
+      result.push({ name: "Pod", label: `Pod ${limit ? t.USAGE_LIMIT : t.USAGE_REQUEST}`, value: values.reduce((sum, item) => sum + (item.value ?? 0), 0), limit });
     }
   }
   return result;
@@ -40,8 +42,8 @@ function timeLabel(ms: number): string {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
-/** 모은 값과 요청·제한을 최근 HISTORY_MS 축 위에 그리고 범례와 눈금을 붙인다 */
-function Chart({ title, series, refs, end, cpu }: {
+/** 모은 값과 요청·제한(기준선)을 최근 HISTORY_MS 축 위에 그리고 범례와 눈금을 붙인다 */
+export function UsageChart({ title, series, refs, end, cpu }: {
   title: string; series: UsageSeries[]; refs: Reference[]; end: number; cpu: boolean;
 }) {
   const points = series.flatMap((s) => s.points);
@@ -73,12 +75,12 @@ function Chart({ title, series, refs, end, cpu }: {
             const color = index < 0 ? "var(--dim)" : COLORS[index % COLORS.length];
             return (
               <line
-                key={`${ref.name}-${ref.limit}`}
+                key={ref.label}
                 x1="0" x2="600" y1={y(ref.value)} y2={y(ref.value)}
                 stroke={color} strokeDasharray={ref.limit ? "6 3" : "2 3"}
                 vectorEffect="non-scaling-stroke"
               >
-                <title>{`${ref.name} ${ref.limit ? t.USAGE_LIMIT : t.USAGE_REQUEST}: ${axisValue(ref.value, max, cpu)}`}</title>
+                <title>{`${ref.label}: ${axisValue(ref.value, max, cpu)}`}</title>
               </line>
             );
           })}
@@ -118,7 +120,7 @@ function Chart({ title, series, refs, end, cpu }: {
       {refs.length > 0 && (
         <div className="dim">
           {refs.map((ref) =>
-            `${ref.name} ${ref.limit ? t.USAGE_LIMIT : t.USAGE_REQUEST}: ${axisValue(ref.value, max, cpu)}`,
+            `${ref.label}: ${axisValue(ref.value, max, cpu)}`,
           ).join(" · ")}
         </div>
       )}
@@ -126,7 +128,13 @@ function Chart({ title, series, refs, end, cpu }: {
   );
 }
 
-/** Pod·워크로드 상세 요약의 사용량 절: 앱이 metrics-server로부터 모아 둔 최근 사용량 */
+/** 노드의 할당 가능량 기준선(목록 줄 값: 밀리코어·바이트) */
+function allocatable(view: K8sObjectView, name: string, cpu: boolean): Reference[] {
+  const value = numValue(view.row, cpu ? "cpuAllocatable" : "memoryAllocatable");
+  return value === null ? [] : [{ name, label: t.USAGE_ALLOCATABLE, value: cpu ? value / 1000 : value, limit: true }];
+}
+
+/** Pod·워크로드·노드 상세 요약의 사용량 절: 앱이 metrics-server로부터 모아 둔 최근 사용량 */
 export function UsageGraphs({ target, context, objectRef, view }: {
   target: K8sTarget; context: string; objectRef: ObjectRef; view: K8sObjectView;
 }) {
@@ -135,6 +143,8 @@ export function UsageGraphs({ target, context, objectRef, view }: {
   useSyncExternalStore((listener) => subscribeUsage(key, listener), () => usageVersion(key));
   const usage = usageOf(key, objectRef);
   const pod = objectRef.kind.kind === "Pod" && objectRef.kind.group === "";
+  const node = objectRef.kind.kind === "Node" && objectRef.kind.group === "";
+  const refs = (cpu: boolean) => (node ? allocatable(view, objectRef.name, cpu) : references(view.containers, pod, cpu));
 
   return (
     <section className="k8s-sect k8s-usage" aria-label={t.SEC_USAGE}>
@@ -146,8 +156,8 @@ export function UsageGraphs({ target, context, objectRef, view }: {
         <div className="empty small">{t.USAGE_GRAPH_WAITING}</div>
       ) : (
         <div className="k8s-usage-charts">
-          <Chart title={t.COL_CPU} series={usage.cpu} refs={references(view.containers, pod, true)} end={usage.lastAt} cpu />
-          <Chart title={t.COL_MEMORY} series={usage.memory} refs={references(view.containers, pod, false)} end={usage.lastAt} cpu={false} />
+          <UsageChart title={t.COL_CPU} series={usage.cpu} refs={refs(true)} end={usage.lastAt} cpu />
+          <UsageChart title={t.COL_MEMORY} series={usage.memory} refs={refs(false)} end={usage.lastAt} cpu={false} />
         </div>
       )}
     </section>
