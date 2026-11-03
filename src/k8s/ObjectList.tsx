@@ -4,8 +4,8 @@ import { columnsFor, type TrendOf } from "./columns";
 import { matchesFilter, parseFilter } from "./selector";
 import { BAD_SELECTOR, FILTER_PLACEHOLDER, LIST_EMPTY, LIST_NO_MATCH, LOADING, METRICS_UNAVAILABLE, ONLY_PROBLEMS } from "./text";
 import type { K8sKindRef, K8sRow } from "./types";
-import { unavailableFor, type UsageIndex } from "./usage";
-import { podTrend, subscribeUsage, usageVersion } from "./usageHistory";
+import { unavailableFor, usageKindOf, type UsageIndex } from "./usage";
+import { nodeTrend, podTrend, subscribeUsage, usageVersion } from "./usageHistory";
 
 interface Props {
   kind: K8sKindRef;
@@ -22,7 +22,7 @@ interface Props {
   now?: number;
   /** 사용량(metrics-server). 없으면 사용량 열도 안내도 없다 */
   usage?: UsageIndex | null;
-  /** 앱이 모은 사용량 기록의 키(usageHistory.historyKey). 있으면 Pod 비율 칸에 최근 추이 그래프를 둔다 */
+  /** 앱이 모은 사용량 기록의 키(usageHistory.historyKey). 있으면 Pod·노드 비율 칸에 최근 추이 그래프를 둔다 */
   historyKey?: string | null;
 }
 
@@ -37,11 +37,14 @@ export function ObjectList({ kind, rows, status, showNamespace, selectedUid, onS
   const subscribe = useCallback((listener: () => void) => (historyKey ? subscribeUsage(historyKey, listener) : () => {}), [historyKey]);
   const version = useSyncExternalStore(subscribe, () => (historyKey ? usageVersion(historyKey) : 0));
   // version이 바뀌면(같은 키에 기록이 늘면) 새 함수로 열을 다시 만든다
-  const trendOf = useMemo<TrendOf | null>(
-    () => (historyKey ? (namespace, name) => podTrend(historyKey, namespace, name) : null),
+  const usageKind = usageKindOf(kind);
+  const trendOf = useMemo<TrendOf | null>(() => {
+    if (!historyKey) return null;
+    if (usageKind === "pod") return (r) => podTrend(historyKey, r.namespace ?? "", r.name);
+    if (usageKind === "node") return (r) => nodeTrend(historyKey, r.name);
+    return null;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- version은 다시 만들 때를 알리는 값이다
-    [historyKey, version],
-  );
+  }, [historyKey, usageKind, version]);
   const columns = useMemo(() => columnsFor(kind, showNamespace, at, usage, trendOf), [kind, showNamespace, at, usage, trendOf]);
   const unavailable = usage ? unavailableFor(kind, usage) : null;
   const pick = (uid: string, then: (row: K8sRow) => void) => {

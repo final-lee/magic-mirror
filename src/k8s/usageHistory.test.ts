@@ -45,3 +45,13 @@ test("closing a target forgets only that target's history", () => {
   expect(usageOf(key, podRef("web")).lastAt).toBeNull();
   expect(usageOf(other, podRef("web")).lastAt).toBe(0);
 });
+
+test("keeps node history apart from pods, with its own unavailable reason", () => {
+  const nodeRef: ObjectRef = { kind: { group: "", version: "v1", kind: "Node", plural: "nodes", namespaced: false }, namespace: null, name: "n1" };
+  recordUsage(key, 0, { ...metrics(["web", 100]), nodes: [{ name: "n1", cpuMilli: 1500, memoryBytes: 8 }] });
+  recordUsage(key, 15_000, { ...metrics(["web", 100]), nodesUnavailable: "forbidden", nodes: [] });
+  const node = usageOf(key, nodeRef);
+  expect(node.cpu).toEqual([{ name: "n1", points: [[0, 1.5]] }]);
+  expect(node.unavailable).toBe("forbidden");
+  expect(usageOf(key, podRef("web")).unavailable).toBeNull();
+});

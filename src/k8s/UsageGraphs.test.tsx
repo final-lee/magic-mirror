@@ -81,3 +81,13 @@ test("a workload draws one line per pod it controls and sums only complete templ
   expect(screen.getAllByText("Pod 요청: 750m")).toHaveLength(2);
   expect(screen.queryByText(/Pod 제한/)).not.toBeInTheDocument();
 });
+
+test("a node draws its own line against allocatable", () => {
+  const node: ObjectRef = { kind: { group: "", version: "v1", kind: "Node", plural: "nodes", namespaced: false }, namespace: null, name: "ip-1" };
+  recordUsage(key, T0, { ...metrics(), nodes: [{ name: "ip-1", cpuMilli: 1000, memoryBytes: 2 * 1024 ** 3 }] });
+  const nodeView = { containers: [], row: { values: { cpuAllocatable: "2000", memoryAllocatable: String(8 * 1024 ** 3) } } } as unknown as K8sObjectView;
+  const { container } = setup(node, nodeView);
+  expect([...container.querySelectorAll(".k8s-usage-legend span")].map((s) => s.textContent)).toEqual(["ip-1", "ip-1"]);
+  expect(screen.getAllByText("할당 가능: 2 코어")).toHaveLength(2);
+  expect(screen.getAllByText("할당 가능: 8 GiB")).toHaveLength(2);
+});

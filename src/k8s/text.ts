@@ -494,3 +494,4 @@ export const H_CPU_USAGE = "CPU 사용";
 export const H_MEMORY_USAGE = "메모리 사용";
 export const USAGE_REQUEST = "요청";
 export const USAGE_LIMIT = "제한";
+export const USAGE_ALLOCATABLE = "할당 가능";

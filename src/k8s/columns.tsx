@@ -8,10 +8,10 @@ import {
 } from "./text";
 import type { K8sKindRef, K8sProblem, K8sRow } from "./types";
 import { isHot, numValue, pct, podKey, unavailableFor, usageKindOf, workloadKey, type Usage, type UsageIndex } from "./usage";
-import { HISTORY_MS, splitAtGaps, type PodTrend } from "./usageHistory";
+import { HISTORY_MS, splitAtGaps, type UsageTrend } from "./usageHistory";
 
-/** 목록 줄의 Pod 사용량 기록. 앱이 아직 모으지 않았으면 null */
-export type TrendOf = (namespace: string, name: string) => PodTrend | null;
+/** 목록 줄(Pod 또는 노드)의 사용량 기록. 앱이 아직 모으지 않았으면 null */
+export type TrendOf = (row: K8sRow) => UsageTrend | null;
 
 /** 그래프 좌표계. 칸 크기에 맞춰 늘어난다(preserveAspectRatio none) */
 const TREND_W = 100;
@@ -142,7 +142,7 @@ function usageOf(kind: K8sKindRef, usage: UsageIndex, r: K8sRow): Usage | null {
 
 /**
  * 사용량 열. 읽을 수 없거나 사용량을 붙이지 않는 종류면 열을 만들지 않는다(빈 열을 두지 않는다).
- * Pod: CPU·메모리와 요청·제한 대비 %(k9s의 %CPU/R, %CPU/L, %MEM/R, %MEM/L, trendOf가 있으면 최근 추이 그래프와 함께), 노드: 할당 가능량 대비 %, 워크로드: Pod 사용량의 합.
+ * Pod: CPU·메모리와 요청·제한 대비 %(k9s의 %CPU/R, %CPU/L, %MEM/R, %MEM/L, trendOf가 있으면 최근 추이 그래프와 함께), 노드: 할당 가능량 대비 %(같은 그래프), 워크로드: Pod 사용량의 합.
  */
 export function usageColumns(kind: K8sKindRef, usage: UsageIndex | null | undefined, trendOf?: TrendOf | null): ListColumn<K8sRow>[] {
   const k = usageKindOf(kind);
@@ -152,13 +152,13 @@ export function usageColumns(kind: K8sKindRef, usage: UsageIndex | null | undefi
     { key: "u:cpu", label: COL_CPU, numeric: true, render: (r) => { const u = used(r); return u ? formatCpu(u.cpuMilli) : ""; }, sort: (r) => used(r)?.cpuMilli ?? null },
     { key: "u:memory", label: COL_MEMORY, numeric: true, render: (r) => { const u = used(r); return u ? formatBytes(u.memoryBytes) : ""; }, sort: (r) => used(r)?.memoryBytes ?? null },
   ];
-  const ratio = (key: string, label: string, pick: (u: Usage) => number, base: string, pickTrend?: (t: PodTrend, i: number) => number): ListColumn<K8sRow> => {
+  const ratio = (key: string, label: string, pick: (u: Usage) => number, base: string, pickTrend?: (t: UsageTrend, i: number) => number): ListColumn<K8sRow> => {
     const value = (r: K8sRow) => { const u = used(r); return u ? pct(pick(u), numValue(r, base)) : null; };
     // 지금의 요청·제한을 기준으로 모아 둔 사용량의 비율을 다시 셈한다. 기록을 모으는 중인데 이 Pod의 값이 아직 없으면 빈 그래프
     const trend = (r: K8sRow) => {
       const b = numValue(r, base);
       if (!pickTrend || !trendOf || b === null || b <= 0) return null;
-      const t = trendOf(r.namespace ?? "", r.name);
+      const t = trendOf(r);
       if (!t) return { points: [], end: 0 };
       return { points: t.at.map((at, i): [number, number] => [at, (pickTrend(t, i) * 100) / b]), end: t.end };
     };
@@ -166,8 +166,8 @@ export function usageColumns(kind: K8sKindRef, usage: UsageIndex | null | undefi
   };
   const cpu = (u: Usage) => u.cpuMilli;
   const memory = (u: Usage) => u.memoryBytes;
-  const cpuTrend = (t: PodTrend, i: number) => t.cpu[i] * 1000;
-  const memoryTrend = (t: PodTrend, i: number) => t.memory[i];
+  const cpuTrend = (t: UsageTrend, i: number) => t.cpu[i] * 1000;
+  const memoryTrend = (t: UsageTrend, i: number) => t.memory[i];
   if (k === "pod") {
     cols.push(
       ratio("u:cpuRequest", COL_CPU_OF_REQUEST, cpu, "cpuRequest", cpuTrend),
@@ -176,7 +176,10 @@ export function usageColumns(kind: K8sKindRef, usage: UsageIndex | null | undefi
       ratio("u:memoryLimit", COL_MEMORY_OF_LIMIT, memory, "memoryLimit", memoryTrend),
     );
   } else if (k === "node") {
-    cols.push(ratio("u:cpuAllocatable", COL_CPU_OF_ALLOCATABLE, cpu, "cpuAllocatable"), ratio("u:memoryAllocatable", COL_MEMORY_OF_ALLOCATABLE, memory, "memoryAllocatable"));
+    cols.push(
+      ratio("u:cpuAllocatable", COL_CPU_OF_ALLOCATABLE, cpu, "cpuAllocatable", cpuTrend),
+      ratio("u:memoryAllocatable", COL_MEMORY_OF_ALLOCATABLE, memory, "memoryAllocatable", memoryTrend),
+    );
   }
   return cols;
 }
