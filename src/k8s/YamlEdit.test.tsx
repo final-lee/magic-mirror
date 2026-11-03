@@ -112,11 +112,12 @@ test("secret editing starts masked, reveals one key on demand and sends untouche
   expect(screen.getByText(t.SECRET_EDIT_NOTE)).toBeInTheDocument();
   const [passwordReveal] = screen.getAllByRole("button", { name: t.SHOW_VALUE });
   fireEvent.click(passwordReveal);
-  const field = await screen.findByLabelText(t.SECRET_VALUE_LABEL("password"));
-  expect(field).toHaveValue("hunter2");
+  const password = t.SECRET_VALUE_LABEL("password");
+  await screen.findByLabelText(password);
+  expect(editorView(password).state.doc.toString()).toBe("hunter2");
   expect(m.secretValue).toHaveBeenCalledTimes(1);
   expect(m.secretValue).toHaveBeenCalledWith(T, "prod", "db", "password", "p");
-  fireEvent.change(field, { target: { value: "hunter3" } });
+  typeYaml("hunter3", password);
   fireEvent.click(screen.getByRole("button", { name: t.YAML_PREVIEW }));
   const change = onChange.mock.calls[0][0];
   expect(change.type).toBe("apply");
@@ -131,12 +132,13 @@ test("secret values can be replaced without reading them, keys added, and unchan
   const onChange = setup(SECRETS, "db");
   await edit();
   fireEvent.click(screen.getAllByRole("button", { name: t.SECRET_NEW_VALUE })[1]);
-  fireEvent.change(screen.getByLabelText(t.SECRET_VALUE_LABEL("token")), { target: { value: "fresh" } });
+  typeYaml("fresh", t.SECRET_VALUE_LABEL("token"));
   expect(m.secretValue).not.toHaveBeenCalled();
   fireEvent.click(screen.getAllByRole("button", { name: t.SHOW_VALUE })[0]);
-  const password = await screen.findByLabelText(t.SECRET_VALUE_LABEL("password"));
-  fireEvent.change(password, { target: { value: "changed" } });
-  fireEvent.change(password, { target: { value: "same" } });
+  const password = t.SECRET_VALUE_LABEL("password");
+  await screen.findByLabelText(password);
+  typeYaml("changed", password);
+  typeYaml("same", password);
   fireEvent.change(screen.getByLabelText(t.SECRET_NEW_KEY_NAME), { target: { value: "extra" } });
   fireEvent.change(screen.getByLabelText(t.SECRET_NEW_KEY_VALUE), { target: { value: "x" } });
   fireEvent.click(screen.getByRole("button", { name: t.SECRET_ADD }));
@@ -144,6 +146,24 @@ test("secret values can be replaced without reading them, keys added, and unchan
   const { object } = onChange.mock.calls[0][0];
   expect(object.data).toEqual({ password: "••••" });
   expect(object.stringData).toEqual({ token: "fresh", extra: "x" });
+});
+
+test("keeping a revealed secret value puts its text back in the editor, and a new value starts empty", async () => {
+  m.get.mockResolvedValue(secretView());
+  m.secretValue.mockResolvedValue({ text: "hunter2", encoding: "utf8" });
+  const onChange = setup(SECRETS, "db");
+  await edit();
+  fireEvent.click(screen.getAllByRole("button", { name: t.SHOW_VALUE })[0]);
+  const password = t.SECRET_VALUE_LABEL("password");
+  await screen.findByLabelText(password);
+  typeYaml("typo", password);
+  fireEvent.click(screen.getByRole("button", { name: t.SECRET_KEEP }));
+  expect(editorView(password).state.doc.toString()).toBe("hunter2");
+  fireEvent.click(screen.getAllByRole("button", { name: t.SECRET_NEW_VALUE })[0]);
+  expect(editorView(password).state.doc.toString()).toBe("");
+  typeYaml("rotated", password);
+  fireEvent.click(screen.getByRole("button", { name: t.YAML_PREVIEW }));
+  expect(onChange.mock.calls[0][0].object.stringData).toEqual({ password: "rotated" });
 });
 
 test("binary secret values are shown read-only", async () => {
