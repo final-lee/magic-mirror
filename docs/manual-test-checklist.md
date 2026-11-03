@@ -35,6 +35,7 @@
 - [ ] ⌘R 새로고침 후 상태바 시간이 갱신된다
 - [ ] 행 선택 후 ⌘C로 ID(S3는 s3:// URI) 복사
 - [ ] ↑↓로 행 이동, Enter로 S3 버킷/폴더 열기
+- [ ] 스크롤바: 어느 화면에서도 스크롤바가 자리를 차지하지 않는다(마우스를 연결해 macOS가 막대를 늘 보이는 설정이어도). 스크롤하는 동안만 얇은 막대가 내용 위에 겹쳐 보이다가 1초쯤 뒤 사라지고, 보일 때 막대를 끌면 스크롤된다
 - [ ] 리소스 타입 우클릭으로 즐겨찾기 추가/제거
 - [ ] ⚙에서 서비스를 끄면 사이드바에서 즉시 사라진다
 - [ ] 원본 데이터 보기 모달이 열리고 닫힌다
@@ -257,3 +258,29 @@
 - [ ] 셸·attach: Pod 상세 "셸" 탭에서 컨테이너를 골라 열면 bash(없으면 sh)가 뜨고 창 크기를 바꾸면 `stty size`가 따라간다. 다른 탭에 갔다 와도 세션이 살아 있다. attach는 stdin·tty가 켜진 컨테이너에서만 입력이 되고 "입력·Ctrl-C가 주 프로세스로 가요" 경고가 보인다. 변경 기록에는 열고 닫은 시각만 있고 입출력은 없다
 - [ ] 노드 셸: Node 상세 [노드 셸]은 이미지(기본 busybox)를 고칠 수 있는 디버그 Pod 미리보기를 열고 노드 이름 입력을 요구한다. 열리면 `hostname`이 노드 이름이고, 닫으면 디버그 Pod가 지워진다(변경 기록에 만들기와 지우기가 남는다). 노드 이미지 레지스트리에 닿지 않는 노드면 Pod가 Ready가 안 돼 60초 뒤 실패하고 Pod는 지워진다
 - [ ] port-forward: Pod·Service 상세에서 포트를 골라 열면 왼쪽 메뉴 "포트포워딩"에 `127.0.0.1:<포트>`가 보이고 브라우저로 열린다. Service 포워드는 쓰던 Pod를 지워도 다른 준비된 Pod로 다시 붙는다. [닫기]로 닫히고, 클러스터 탭을 닫거나 앱을 끄면 모두 닫힌다
+## ⚙️ Argo Workflows (personal `stg-eks`의 Argo Server, 조작은 시험용 템플릿으로만)
+준비: Tailscale로 personal Argo Server(`https://argo-workflows-stg.<tailnet>.ts.net`)에 닿고, kubeconfig에 `stg-eks` context(exec가 `AWS_PROFILE=personal`)가 있다. 실제 잡(예: notification Cron)에는 조작하지 않는다. 조작 확인은 따로 만든 시험용 WorkflowTemplate(예: `echo` 한 단계, `activeDeadlineSeconds` 있음)으로만 한다.
+
+- [ ] 연결: 사이드바 EKS 아래 `⚙️ Argo Workflows`를 누르면 탭이 하나 열리고 다시 눌러도 하나다. 서버 주소를 넣으면 2단계(인증)에서 kubeconfig context 목록이 보이고, `stg-eks`를 골라 [연결]하면 머리에 `stg-eks · v4.1.6`이 보인다. 프로필을 바꿔도 탭은 남는다
+- [ ] SSO: `aws sso logout` 뒤 탭을 열면 SSO 자동 로그인이 뜨고, 승인하면 목록이 저절로 읽힌다
+- [ ] 토큰: [인증 변경] → [API 토큰으로]에서 틀린 토큰은 "토큰이 만료됐거나 맞지 않아요", 맞는 토큰은 키체인에 저장된다(키체인 접근에서 `magic-mirror.argo-workflows` 항목). 서버를 빼면 키체인 항목도 사라진다. `http://` 주소는 평문 경고
+- [ ] Workflows: 모든 네임스페이스의 Workflow가 실행 중·대기 → 최근 실패 → 나머지 순서로 보이고, 요약 띠의 숫자가 목록과 맞다. phase 칩·네임스페이스·원천 거르기와 퍼지 검색이 동작하고, 탭을 닫았다 열면 거르기(검색어 빼고)가 남는다. 탭이 가려지면 5초마다 읽기를 멈춘다
+- [ ] 상세: 실패한 Workflow를 열면 개요(파라미터, ServiceAccount, 제한 시간, podGC, TTL, 자원 사용량), 단계 트리와 타임라인, YAML이 보인다. [실패 단계로]는 재시도로 성공한 이전 시도가 아니라 실제로 실패한 단계를 고른다. Pod가 지워진 실행의 로그는 "Pod가 지워져 로그가 없어요"
+- [ ] 로그·이벤트: 실행 중인 시험 Workflow에서 로그가 따라 흐르고(follow), 검색·일시정지·JSON 줄 펼치기가 동작하며, 상세를 닫으면 흐름이 멈춘다. 이벤트 탭에 Workflow와 Pod 이벤트가 보인다(토큰 연결이면 안내만)
+- [ ] CronWorkflows: `30 19 * * *` + Asia/Seoul이 "매일 19:30 (Asia/Seoul)"과 다음 5회(19:30 KST)로 보이고, 최근 실행 막대가 Workflows 목록과 맞다
+- [ ] 템플릿: 시험용 템플릿의 파라미터·쓰는 Cron·최근 실행이 보이고, [실행]의 폼(enum은 고르기)으로 실행하면 새 Workflow 상세가 열린다
+- [ ] 조작(시험용 Workflow만): Stop·Terminate·Suspend·Resume·Retry·다시 제출·삭제가 phase에 맞게 켜지고 확인 창을 거친다. 이름이나 네임스페이스에 `prod`가 있으면 이름을 쳐야 삭제·Stop·Terminate가 켜진다. 다시 제출하면 새 Workflow가 열린다
+- [ ] 점검: 카드 6개가 보이고, 항목을 누르면 그 Workflow·Cron·템플릿 상세가 열린다
+- [ ] 실시간: 시험 Workflow를 하나 제출하면 목록에 곧바로 나타나고 phase가 바뀔 때 5초를 기다리지 않고 바뀐다. 네트워크를 잠깐 끊었다 이으면 다시 붙는다. 열어 둔 상세도 그대로 따라온다
+- [ ] 목록 조건: 레이블 칩(`workflows.argoproj.io/cron-workflow=…`), 이름(정확히·접두·포함), 만든 뒤·끝나기 전 날짜, [내 것만], 열 고르기(레이블 열), 행의 레이블을 누르면 그 필터가 붙는다. 200개가 넘으면 [더 보기]로 이어진다
+- [ ] 여러 개 조작(시험용만): 체크박스로 둘 이상 골라 삭제하면 결과 표가 보이고, `prod`가 들어간 것이 섞이면 "선택한 N개"를 쳐야 켜진다
+- [ ] 네임스페이스: 위쪽 네임스페이스 드롭다운에는 Argo 자원(Workflow·Cron·템플릿·Event Binding)이 있는 네임스페이스만 있다(stg-eks라면 `backend-dev`·`backend-stg`, `kube-system` 같은 것은 없다). 고르면 Workflows·Cron·템플릿·보관함·Events가 모두 그 네임스페이스만 읽는다
+- [ ] 그래프: 실패한 Workflow에서 그래프 탭이 뜨고, 확대·축소·끌기·가로/세로·phase 거르기가 되며 노드를 누르면 노드 상세가 열린다
+- [ ] 노드 동작(시험용만): 실패한 노드에서 [이 노드만 Retry], suspend 단계에서 [값 넣고 이어 가기](출력 값 폼 → 이어 감), [노드 Stop]
+- [ ] 노드 상세: Containers(이미지·명령·자원), host node, memoization, 아티팩트 미리보기·내려받기(아티팩트 저장소가 있는 서버에서)
+- [ ] 로그 옵션: 직전 컨테이너, 최근 N초, 시각 표시, [파일로 저장](저장 창 → 파일). archiveLogs가 켜진 서버에서 Pod가 지워진 노드의 로그가 아티팩트로 보인다
+- [ ] 링크: 서버 컨트롤러 설정에 `links`가 있으면 Workflow·Pod·로그 링크가 보이고 변수(`${metadata.name}` 등)가 채워진다. [Argo UI에서 열기]·[링크 복사]·위젯 주소 복사
+- [ ] YAML 편집기(시험용만): [새 Workflow]에서 예제를 골라 [검사] → [만들기], 템플릿·Cron [고치기]로 저장(충돌이면 서버 메시지), [YAML로 고쳐 다시 제출]은 새 이름으로 만들어진다
+- [ ] Reports: Cron 레이블을 고르면 실행별 걸린 시간·CPU·메모리 막대가 보이고 막대를 누르면 그 Workflow가 열린다
+- [ ] Argo Events: Argo Events가 없는 `stg-eks`에서 Event Sources·Sensors·Event Flow가 "이 클러스터에 Argo Events가 없어요"를 보인다. Event Bindings는 빈 목록
+- [ ] User Info: 신원과 그룹이 보이고 [토큰 복사]는 클립보드에만 들어간다. Plugins는 context 연결에서 ExecutorPlugin ConfigMap을 보인다(없으면 빈 목록)

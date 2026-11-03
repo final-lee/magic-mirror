@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useResources } from "../api/queries";
 import type { Favorite, ResourceType, ServiceInfo } from "../api/types";
 import { ARGOCD_TITLE } from "../argocd/text";
+import { ARGOWF_TITLE } from "../argowf/text";
 import { COST_NAV, COST_TITLE } from "../cost/text";
 import { ServiceBadge } from "./ServiceBadge";
 
@@ -19,9 +20,10 @@ interface Props {
   onOpenCost?: () => void;
   /** 🐙 ArgoCD 탭을 연다. 주면 EKS 서비스 아래 첫 항목으로 "🐙 ArgoCD"가 보인다. */
   onOpenArgocd?: () => void;
+  onOpenArgoWorkflows?: () => void;
 }
 
-export function Sidebar({ services, profile, region, selection, favorites, onSelect, onToggleFavorite, onOpenIam, onOpenCost, onOpenArgocd }: Props) {
+export function Sidebar({ services, profile, region, selection, favorites, onSelect, onToggleFavorite, onOpenIam, onOpenCost, onOpenArgocd, onOpenArgoWorkflows }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(selection ? [selection.service] : []));
 
   // ⌘K처럼 사이드바 밖에서 고른 종류도 보이게 그 서비스를 편다
@@ -94,6 +96,11 @@ export function Sidebar({ services, profile, region, selection, favorites, onSel
               {svc.id === "eks" && onOpenArgocd && (
                 <div className="typ argocd-open" role="button" onClick={() => onOpenArgocd()}>
                   <span>{ARGOCD_TITLE}</span>
+                </div>
+              )}
+              {svc.id === "eks" && onOpenArgoWorkflows && (
+                <div className="typ argocd-open" role="button" onClick={() => onOpenArgoWorkflows()}>
+                  <span>{ARGOWF_TITLE}</span>
                 </div>
               )}
               {svc.id === "iam" && onOpenIam && (
