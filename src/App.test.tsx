@@ -516,7 +516,7 @@ describe("💰 비용 탭", () => {
   const openCost = async () => {
     renderWithClient(<App />);
     await waitFor(() => expect(screen.getByRole("combobox", { name: "프로필" })).toHaveValue("prod"));
-    fireEvent.click(await screen.findByText(COST_TITLE));
+    fireEvent.click(await screen.findByRole("button", { name: COST_TITLE }));
     await screen.findByRole("table", { name: BREAKDOWN_LABEL });
   };
 
@@ -525,7 +525,7 @@ describe("💰 비용 탭", () => {
     expect(screen.getByRole("tab", { name: COST_TITLE })).toHaveAttribute("aria-selected", "true");
     expect(cost.overview).toHaveBeenCalledWith("prod", expect.objectContaining({ period: "thisMonth" }), false);
     fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
-    fireEvent.click(screen.getByText(COST_TITLE, { selector: ".side span" }));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "서비스" })).getByRole("button", { name: COST_TITLE }));
     expect(screen.getAllByRole("tab", { name: COST_TITLE })).toHaveLength(1);
   });
 
