@@ -308,7 +308,7 @@ export interface K8sPort {
   target: string | null;
 }
 
-export type K8sProblem = "crashLoopBackOff" | "imagePullBackOff" | "pending" | "oomKilled" | "notReady";
+export type K8sProblem = "crashLoopBackOff" | "imagePullBackOff" | "pending" | "oomKilled" | "notReady" | "scalingBlocked" | "noDisruptions" | "quotaExceeded" | "notEstablished";
 
 export interface K8sKind extends K8sKindRef {
   verbs: string[];

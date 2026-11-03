@@ -8,6 +8,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::k8s::rows::{rfc3339_secs, KindRef};
+mod extra;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,6 +18,10 @@ pub enum Problem {
     Pending,
     OomKilled,
     NotReady,
+    ScalingBlocked,
+    NoDisruptions,
+    QuotaExceeded,
+    NotEstablished,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -312,6 +317,7 @@ pub fn values_of(kind: &KindRef, obj: &DynamicObject) -> Values {
             }
         }
         ("", "Namespace") => v.put_some("status", text(d, "/status/phase")),
+        (group, kind) if extra::builtin(group, kind, obj, &mut v) => {}
         // 그 밖의 종류(CRD 포함): Ready 조건이 있으면 보여 준다
         _ => {
             if let Some(s) = condition(d, "Ready") {

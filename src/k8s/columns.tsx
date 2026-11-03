@@ -1,6 +1,6 @@
 import type { ListColumn } from "../iam/ListTable";
 import { age } from "./format";
-import { BUILTIN, sameKind } from "./kinds";
+import { BUILTIN } from "./kinds";
 import { kindKey } from "./targets";
 import { COL_AGE, COL_NAME, COL_NAMESPACE, COL_PROBLEMS, COLUMN_LABELS, PROBLEM_LABELS } from "./text";
 import type { K8sKindRef, K8sProblem, K8sRow } from "./types";
@@ -26,13 +26,30 @@ const KIND_COLUMNS: Record<string, string[]> = {
   "storage.k8s.io/v1/storageclasses": ["provisioner", "reclaimPolicy", "volumeBindingMode", "default"],
   "/v1/namespaces": ["status"],
   "/v1/nodes": ["status", "version", "instanceType", "zone", "group"],
+  "autoscaling/v2/horizontalpodautoscalers": ["target", "min", "max", "current", "desired", "metrics"],
+  "policy/v1/poddisruptionbudgets": ["minAvailable", "maxUnavailable", "disruptionsAllowed", "healthy"],
+  "discovery.k8s.io/v1/endpointslices": ["addressType", "endpointReady", "ports"],
+  "networking.k8s.io/v1/ingressclasses": ["controller", "default"],
+  "/v1/resourcequotas": ["quota"],
+  "/v1/limitranges": ["limits"],
+  "rbac.authorization.k8s.io/v1/roles": ["ruleCount"],
+  "rbac.authorization.k8s.io/v1/clusterroles": ["ruleCount", "aggregation"],
+  "rbac.authorization.k8s.io/v1/rolebindings": ["roleRef", "subjects"],
+  "rbac.authorization.k8s.io/v1/clusterrolebindings": ["roleRef", "subjects"],
+  "scheduling.k8s.io/v1/priorityclasses": ["value", "globalDefault", "preemption"],
+  "node.k8s.io/v1/runtimeclasses": ["handler"],
+  "coordination.k8s.io/v1/leases": ["holder", "renewTime"],
+  "admissionregistration.k8s.io/v1/mutatingwebhookconfigurations": ["webhookCount", "failurePolicy"],
+  "admissionregistration.k8s.io/v1/validatingwebhookconfigurations": ["webhookCount", "failurePolicy"],
+  "apiextensions.k8s.io/v1/customresourcedefinitions": ["apiGroup", "versions", "scope", "established"],
 };
 
 /** 내장 종류는 표대로, 그 밖의 종류(사용자 정의)는 Ready 조건 하나 */
 export function valueKeys(kind: K8sKindRef): string[] {
-  const known = KIND_COLUMNS[kindKey(kind)];
+  const builtin = BUILTIN.find((b) => b.group === kind.group && b.plural === kind.plural);
+  const known = KIND_COLUMNS[kindKey(kind)] ?? (builtin && KIND_COLUMNS[kindKey(builtin)]);
   if (known) return known;
-  return BUILTIN.some((b) => sameKind(b, kind)) ? [] : ["ready"];
+  return builtin ? [] : ["ready"];
 }
 
 export function Problems({ problems }: { problems: K8sProblem[] }) {

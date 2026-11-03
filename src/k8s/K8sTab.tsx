@@ -14,7 +14,7 @@ import { EventsView } from "./EventsView";
 import { ForwardsView } from "./ForwardsView";
 import { K8sError } from "./K8sError";
 import { K8sNav, type K8sView, type NavBookmark } from "./K8sNav";
-import { BUILTIN, NODES, bookmarkKey, bookmarkOf } from "./kinds";
+import { NODES, bookmarkKey, bookmarkOf } from "./kinds";
 import { LaneResizer, useLaneWidths } from "./lanes";
 import { moved } from "./useReorder";
 import { MyRules } from "./MyRules";
@@ -103,12 +103,12 @@ export function K8sTab({ target, onOpenIam }: Props) {
   const lanes = useLaneWidths();
   const bookmarks = settings?.k8sBookmarks ?? [];
   const marks = new Set(bookmarks.map(bookmarkKey));
-  // 내장 종류는 All 트리처럼 늘 연다. 사용자 정의 종류는 이 클러스터의 목록에 있어야 연다(목록을 아직 모르면 일단 연다).
+  // 발견 결과가 있으면 제공하지 않는 북마크는 열지 않는다.
   const served = (b: K8sKindRef): K8sKindRef | null => {
     const key = bookmarkKey(b);
     const found = kinds.data?.find((k) => bookmarkKey(k) === key);
     if (found) return found;
-    return !kinds.data || BUILTIN.some((k) => bookmarkKey(k) === key) ? b : null;
+    return !kinds.data ? b : null;
   };
   const navBookmarks: NavBookmark[] = bookmarks.map((b) => {
     const missing = served(b) === null;
@@ -199,6 +199,7 @@ export function K8sTab({ target, onOpenIam }: Props) {
               live={live}
               namespace={nsOrAll}
               kinds={kinds.data ?? []}
+              discoveryAvailable={kinds.data !== undefined}
               focus={focus}
               onOpenIam={onOpenIam}
               onChange={change.start}
