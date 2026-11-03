@@ -47,6 +47,8 @@ function updateStatus(u: Updater): string {
       return `새 버전 ${u.state.version} 내려받는 중…`;
     case "error":
       return `확인하지 못했어요: ${u.state.message}`;
+    case "devBuild":
+      return "개발 빌드라 업데이트를 확인하지 않아요.";
     default:
       return "";
   }
@@ -152,7 +154,7 @@ export function ServiceSettings({
               현재 버전 {appVersion ?? "—"} {updateStatus(updater) && `· ${updateStatus(updater)}`}
             </p>
             <div className="tools">
-              <button className="btn small" disabled={updater.state.kind === "checking" || updater.state.kind === "downloading"} onClick={() => void updater.checkNow()}>
+              <button className="btn small" disabled={updater.state.kind === "checking" || updater.state.kind === "downloading" || updater.state.kind === "devBuild"} onClick={() => void updater.checkNow()}>
                 업데이트 확인
               </button>
               {updater.state.kind === "available" && (

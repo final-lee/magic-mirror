@@ -10,17 +10,22 @@ export type UpdaterState =
   | { kind: "upToDate" }
   | { kind: "available"; version: string; notes: string | null }
   | { kind: "downloading"; version: string; percent: number | null }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string }
+  /** 개발 빌드(`npm run tauri:dev`): 릴리스와 버전을 비교하지 않는다 */
+  | { kind: "devBuild" };
 
-/** 시작할 때와 6시간마다 새 버전을 확인한다. 설치는 사용자가 고를 때만 한다. */
-export function useUpdater() {
-  const [state, setState] = useState<UpdaterState>({ kind: "idle" });
+/**
+ * 시작할 때와 6시간마다 새 버전을 확인한다. 설치는 사용자가 고를 때만 한다.
+ * 개발 빌드는 브랜치의 버전이 릴리스와 어긋나기 쉽고 설치할 대상도 아니라서 확인하지 않는다.
+ */
+export function useUpdater({ devBuild = false }: { devBuild?: boolean } = {}) {
+  const [state, setState] = useState<UpdaterState>(devBuild ? { kind: "devBuild" } : { kind: "idle" });
   const [dismissed, setDismissed] = useState<string | null>(null);
   const update = useRef<Update | null>(null);
   const busy = useRef(false);
 
   const checkNow = useCallback(async (manual = false) => {
-    if (busy.current) return;
+    if (devBuild || busy.current) return;
     busy.current = true;
     if (manual) setState({ kind: "checking" });
     try {
@@ -38,13 +43,14 @@ export function useUpdater() {
     } finally {
       busy.current = false;
     }
-  }, []);
+  }, [devBuild]);
 
   useEffect(() => {
+    if (devBuild) return;
     void checkNow();
     const id = window.setInterval(() => void checkNow(), CHECK_INTERVAL_MS);
     return () => window.clearInterval(id);
-  }, [checkNow]);
+  }, [checkNow, devBuild]);
 
   const install = useCallback(async () => {
     const u = update.current;
