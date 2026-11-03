@@ -390,3 +390,10 @@ fn identity_of_reports_the_user_and_groups_including_the_defaults() {
     assert_eq!(user.as_deref(), Some("system:serviceaccount:ns:x"));
     assert_eq!(groups, vec![SERVICE_ACCOUNTS.to_string(), "system:serviceaccounts:ns".to_string(), AUTHENTICATED.to_string()]);
 }
+
+#[test]
+fn a_group_subject_is_reviewed_as_that_group_alone() {
+    let e = evaluate(Rbac::default(), vec![]);
+    let (user, groups) = e.identity_of(&Subject::group("devs"));
+    assert_eq!((user, groups), (None, vec!["devs".to_string()]));
+}
