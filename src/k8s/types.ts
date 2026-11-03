@@ -308,7 +308,7 @@ export interface K8sPort {
   target: string | null;
 }
 
-export type K8sProblem = "crashLoopBackOff" | "imagePullBackOff" | "pending" | "oomKilled" | "notReady";
+export type K8sProblem = "crashLoopBackOff" | "imagePullBackOff" | "pending" | "oomKilled" | "notReady" | "scalingBlocked" | "noDisruptions" | "quotaExceeded" | "notEstablished";
 
 export interface K8sKind extends K8sKindRef {
   verbs: string[];
@@ -345,6 +345,11 @@ export interface K8sContainer {
   reason: string | null;
   message: string | null;
   lastTermination: K8sTermination | null;
+  /** 요청·제한(없으면 null). 컨테이너의 사용량과 견준다 */
+  cpuRequest?: number | null;
+  cpuLimit?: number | null;
+  memoryRequest?: number | null;
+  memoryLimit?: number | null;
 }
 
 export interface K8sCondition {
@@ -441,8 +446,12 @@ export interface K8sNodeView {
   groupKind: K8sGroupKind;
   group: string | null;
   kubeletVersion: string;
+  /** 노드 전체 용량(status.capacity) */
+  capacity: K8sResources;
   allocatable: K8sResources;
   requested: K8sResources;
+  /** 놓인 Pod의 제한 합. 제한 없는 컨테이너는 0으로 센다 */
+  limits: K8sResources;
   usage: { cpuMilli: number; memoryBytes: number } | null;
 }
 
@@ -512,4 +521,42 @@ export interface ObjectRef {
   kind: K8sKindRef;
   namespace: string | null;
   name: string;
+}
+
+/** metrics-server에서 사용량을 읽지 못하는 까닭(없음·권한 없음·응답 없음) */
+export type K8sMetricsUnavailable = "notInstalled" | "forbidden" | "notReady";
+
+export interface K8sContainerUsage {
+  name: string;
+  cpuMilli: number;
+  memoryBytes: number;
+}
+
+export interface K8sOwnerRef {
+  kind: string;
+  name: string;
+}
+
+export interface K8sPodUsage {
+  namespace: string;
+  name: string;
+  cpuMilli: number;
+  memoryBytes: number;
+  containers: K8sContainerUsage[];
+  /** 컨트롤러 사슬: 가까운 것부터 맨 위까지(ReplicaSet, Deployment) */
+  owners: K8sOwnerRef[];
+}
+
+export interface K8sNodeUsage {
+  name: string;
+  cpuMilli: number;
+  memoryBytes: number;
+}
+
+/** k8s_metrics. Pod와 노드는 따로 읽어, 한쪽만 막혀도 다른 쪽은 보인다 */
+export interface K8sMetrics {
+  podsUnavailable: K8sMetricsUnavailable | null;
+  nodesUnavailable: K8sMetricsUnavailable | null;
+  pods: K8sPodUsage[];
+  nodes: K8sNodeUsage[];
 }

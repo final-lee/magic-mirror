@@ -42,6 +42,8 @@ interface Props {
   onKinds: (next: RoleKindsValue) => void;
   selectedId: string | null;
   onSelect: (name: string) => void;
+  /** 선택을 푼다(고른 행을 다시 누르거나 빈 곳) */
+  onClear: () => void;
   onOpen: (name: string) => void;
   /** [역할 만들기]. 주지 않으면 버튼이 없다 */
   onCreate?: () => void;
@@ -49,7 +51,7 @@ interface Props {
   blockReason?: string | null;
 }
 
-export function RoleList({ roles, filter, kinds, onKinds, selectedId, onSelect, onOpen, onCreate, blockReason = null }: Props) {
+export function RoleList({ roles, filter, kinds, onKinds, selectedId, onSelect, onClear, onOpen, onCreate, blockReason = null }: Props) {
   // 툴바 필터는 이름에만 적용한다(대소문자 무시). 권한 표와 같은 규칙이다.
   const rows = filterRoles(roles, kinds, filter);
   return (
@@ -71,6 +73,7 @@ export function RoleList({ roles, filter, kinds, onKinds, selectedId, onSelect, 
         rowKey={(r) => r.name}
         selectedId={selectedId}
         onSelect={onSelect}
+        onClear={onClear}
         onOpen={onOpen}
         empty={roles.length === 0 ? "역할이 없어요" : "조건에 맞는 역할이 없어요"}
       />

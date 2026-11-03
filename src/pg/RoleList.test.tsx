@@ -10,7 +10,7 @@ type Props = React.ComponentProps<typeof RoleList>;
 function Harness(props: Partial<Props> & { initialKinds?: RoleKindsValue }) {
   const [kinds, setKinds] = useState(props.initialKinds ?? DEFAULT_KINDS);
   return (
-    <RoleList roles={ROLES} filter="" kinds={kinds} onKinds={setKinds} selectedId={null} onSelect={vi.fn()} onOpen={vi.fn()} {...props} />
+    <RoleList roles={ROLES} filter="" kinds={kinds} onKinds={setKinds} selectedId={null} onSelect={vi.fn()} onClear={() => {}} onOpen={vi.fn()} {...props} />
   );
 }
 
@@ -115,7 +115,7 @@ test("roles without an expiry go last whichever way the 만료일 column is sort
 test("click selects, double click opens, Enter opens the selected row", () => {
   const onSelect = vi.fn();
   const onOpen = vi.fn();
-  render(<Harness selectedId="bob" onSelect={onSelect} onOpen={onOpen} />);
+  render(<Harness selectedId="bob" onSelect={onSelect} onClear={() => {}} onOpen={onOpen} />);
   expect(rowOf("bob")).toHaveAttribute("aria-selected", "true");
   fireEvent.click(screen.getByText("alice"));
   expect(onSelect).toHaveBeenCalledWith("alice");

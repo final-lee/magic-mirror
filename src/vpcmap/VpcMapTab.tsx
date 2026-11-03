@@ -239,8 +239,8 @@ export function VpcMapTab({ profile, region, vpcId, name, active }: Props) {
             </svg>
           </div>
         )}
+        <DetailPanel detail={detail} onShowRaw={() => {}} onClose={() => setSelection(null)} />
       </div>
-      <DetailPanel detail={detail} onShowRaw={() => {}} />
     </>
   );
 }

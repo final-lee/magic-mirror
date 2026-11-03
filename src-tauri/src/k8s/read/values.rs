@@ -7,7 +7,10 @@ use kube::api::DynamicObject;
 use serde::Serialize;
 use serde_json::Value;
 
+use super::metrics::bounds_of_pod;
+use super::quantity::{bytes, cpu_milli};
 use crate::k8s::rows::{rfc3339_secs, KindRef};
+mod extra;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,6 +20,10 @@ pub enum Problem {
     Pending,
     OomKilled,
     NotReady,
+    ScalingBlocked,
+    NoDisruptions,
+    QuotaExceeded,
+    NotEstablished,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -294,6 +301,13 @@ pub fn values_of(kind: &KindRef, obj: &DynamicObject) -> Values {
             }
             v.put("status", status);
             v.put_some("version", text(d, "/status/nodeInfo/kubeletVersion"));
+            // 사용량 열이 견주는 할당 가능량(밀리코어·바이트 정수 글)
+            if let Some(n) = text(d, "/status/allocatable/cpu").and_then(cpu_milli) {
+                v.put("cpuAllocatable", n.to_string());
+            }
+            if let Some(n) = text(d, "/status/allocatable/memory").and_then(bytes) {
+                v.put("memoryAllocatable", n.to_string());
+            }
             let labels = labels_of(obj);
             v.put_some("instanceType", labels.get(INSTANCE_TYPE_LABEL).map(String::as_str));
             v.put_some("zone", labels.get(ZONE_LABEL).map(String::as_str));
@@ -312,6 +326,7 @@ pub fn values_of(kind: &KindRef, obj: &DynamicObject) -> Values {
             }
         }
         ("", "Namespace") => v.put_some("status", text(d, "/status/phase")),
+        (group, kind) if extra::builtin(group, kind, obj, &mut v) => {}
         // 그 밖의 종류(CRD 포함): Ready 조건이 있으면 보여 준다
         _ => {
             if let Some(s) = condition(d, "Ready") {
@@ -347,6 +362,13 @@ fn pod(obj: &DynamicObject, v: &mut Values) {
     v.put("restarts", restarts.to_string());
     v.put_some("node", text(d, "/spec/nodeName"));
     v.put_some("ip", text(d, "/status/podIP"));
+    // 사용량 열이 견주는 요청·제한(컨테이너가 모두 설정한 값의 합). 값은 밀리코어·바이트 정수 글이다.
+    let bounds = bounds_of_pod(d);
+    for (key, n) in [("cpuRequest", bounds.cpu_request), ("cpuLimit", bounds.cpu_limit), ("memoryRequest", bounds.memory_request), ("memoryLimit", bounds.memory_limit)] {
+        if let Some(n) = n {
+            v.put(key, n.to_string());
+        }
+    }
     v.put("status", pod_status(obj, statuses, inits, phase));
     for s in statuses.iter().chain(inits) {
         match s.pointer("/state/waiting/reason").and_then(Value::as_str) {
@@ -390,3 +412,6 @@ fn pod_status(obj: &DynamicObject, statuses: &[Value], inits: &[Value], phase: &
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod extra_tests;

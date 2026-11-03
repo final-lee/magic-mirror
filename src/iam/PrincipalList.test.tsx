@@ -8,7 +8,7 @@ const users = [bob, alice, ciBot];
 function renderUsers(props: Partial<React.ComponentProps<typeof PrincipalList>> = {}) {
   const onSelect = vi.fn();
   const onOpen = vi.fn();
-  render(<PrincipalList kind="user" items={users} filter="" selectedId={null} onSelect={onSelect} onOpen={onOpen} {...props} />);
+  render(<PrincipalList kind="user" items={users} filter="" selectedId={null} onSelect={onSelect} onClear={() => {}} onOpen={onOpen} {...props} />);
   return { onSelect, onOpen };
 }
 
@@ -29,7 +29,7 @@ test("lists users sorted by name with badges, last used and policy count", () =>
 });
 
 test("groups show member counts instead of last used", () => {
-  render(<PrincipalList kind="group" items={[devTeam, admins]} filter="" selectedId={null} onSelect={vi.fn()} onOpen={vi.fn()} />);
+  render(<PrincipalList kind="group" items={[devTeam, admins]} filter="" selectedId={null} onSelect={vi.fn()} onClear={() => {}} onOpen={vi.fn()} />);
   expect(screen.getByRole("columnheader", { name: /구성원/ })).toBeInTheDocument();
   expect(screen.queryByRole("columnheader", { name: /마지막 사용/ })).not.toBeInTheDocument();
   const row = screen.getByText("dev-team").closest("tr")!;
@@ -44,14 +44,14 @@ test("shows the path under the name when it is not the root path", () => {
 
 test("filters by name or ARN, case-insensitively", () => {
   const { rerender } = render(
-    <PrincipalList kind="user" items={users} filter="BOB" selectedId={null} onSelect={vi.fn()} onOpen={vi.fn()} />,
+    <PrincipalList kind="user" items={users} filter="BOB" selectedId={null} onSelect={vi.fn()} onClear={() => {}} onOpen={vi.fn()} />,
   );
   expect(screen.getAllByRole("row")).toHaveLength(2);
   expect(screen.getByText("bob")).toBeInTheDocument();
-  rerender(<PrincipalList kind="user" items={users} filter="user/ci-" selectedId={null} onSelect={vi.fn()} onOpen={vi.fn()} />);
+  rerender(<PrincipalList kind="user" items={users} filter="user/ci-" selectedId={null} onSelect={vi.fn()} onClear={() => {}} onOpen={vi.fn()} />);
   expect(screen.getByText("ci-bot")).toBeInTheDocument();
   expect(screen.queryByText("bob")).not.toBeInTheDocument();
-  rerender(<PrincipalList kind="user" items={users} filter="zzz" selectedId={null} onSelect={vi.fn()} onOpen={vi.fn()} />);
+  rerender(<PrincipalList kind="user" items={users} filter="zzz" selectedId={null} onSelect={vi.fn()} onClear={() => {}} onOpen={vi.fn()} />);
   expect(screen.getByText("조건에 맞는 사용자가 없어요")).toBeInTheDocument();
 });
 
@@ -114,7 +114,7 @@ describe("PolicyList", () => {
   const policies = [readOnlyPolicy, orphanPolicy, adminPolicy, deployPolicy];
 
   test("shows scope, attachment count, updated date and badges", () => {
-    render(<PolicyList items={policies} filter="" selectedId={null} onSelect={vi.fn()} onOpen={vi.fn()} />);
+    render(<PolicyList items={policies} filter="" selectedId={null} onSelect={vi.fn()} onClear={() => {}} onOpen={vi.fn()} />);
     const rows = screen.getAllByRole("row").slice(1);
     expect(rows.map((r) => within(r).getAllByRole("cell")[0].textContent)).toEqual([
       "AdministratorAccess",
@@ -133,20 +133,20 @@ describe("PolicyList", () => {
   });
 
   test("does not repeat the AWS-managed badge next to the scope column", () => {
-    render(<PolicyList items={[adminPolicy]} filter="" selectedId={null} onSelect={vi.fn()} onOpen={vi.fn()} />);
+    render(<PolicyList items={[adminPolicy]} filter="" selectedId={null} onSelect={vi.fn()} onClear={() => {}} onOpen={vi.fn()} />);
     expect(screen.getAllByText("AWS 관리형")).toHaveLength(1);
   });
 
   test("filters by name and opens with double click", () => {
     const onOpen = vi.fn();
-    render(<PolicyList items={policies} filter="deploy" selectedId={null} onSelect={vi.fn()} onOpen={onOpen} />);
+    render(<PolicyList items={policies} filter="deploy" selectedId={null} onSelect={vi.fn()} onClear={() => {}} onOpen={onOpen} />);
     expect(screen.getAllByRole("row")).toHaveLength(2);
     fireEvent.doubleClick(screen.getByText("app-deploy"));
     expect(onOpen).toHaveBeenCalledWith(deployPolicy.id);
   });
 
   test("shows an empty message", () => {
-    render(<PolicyList items={[]} filter="" selectedId={null} onSelect={vi.fn()} onOpen={vi.fn()} />);
+    render(<PolicyList items={[]} filter="" selectedId={null} onSelect={vi.fn()} onClear={() => {}} onOpen={vi.fn()} />);
     expect(screen.getByText("정책이 없어요")).toBeInTheDocument();
   });
 });
@@ -168,8 +168,8 @@ describe("scrolling to the selection", () => {
   test("follows the selection when it moves, e.g. with the arrow keys", () => {
     const scroll = vi.fn();
     HTMLElement.prototype.scrollIntoView = scroll;
-    const { rerender } = render(<PrincipalList kind="user" items={users} filter="" selectedId={alice.arn} onSelect={vi.fn()} onOpen={vi.fn()} />);
-    rerender(<PrincipalList kind="user" items={users} filter="" selectedId={bob.arn} onSelect={vi.fn()} onOpen={vi.fn()} />);
+    const { rerender } = render(<PrincipalList kind="user" items={users} filter="" selectedId={alice.arn} onSelect={vi.fn()} onClear={() => {}} onOpen={vi.fn()} />);
+    rerender(<PrincipalList kind="user" items={users} filter="" selectedId={bob.arn} onSelect={vi.fn()} onClear={() => {}} onOpen={vi.fn()} />);
     expect(scroll).toHaveBeenCalledTimes(2);
     expect(scroll.mock.contexts[1]).toBe(screen.getByText("bob").closest("tr"));
   });

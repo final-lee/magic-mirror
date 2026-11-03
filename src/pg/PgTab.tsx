@@ -261,6 +261,7 @@ export function PgTab({ target, active, filter }: Props) {
               onKinds={setKinds}
               selectedId={selectedRole}
               onSelect={setSelectedRole}
+              onClear={() => setSelectedRole(null)}
               onOpen={(name) => go(roleRoute(name))}
               onCreate={() => setCreating(true)}
               blockReason={blockReason}

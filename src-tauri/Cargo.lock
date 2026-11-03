@@ -4134,6 +4134,7 @@ dependencies = [
  "base64 0.22.1",
  "block2",
  "futures",
+ "http 1.5.0",
  "k8s-openapi",
  "keyring",
  "kube",

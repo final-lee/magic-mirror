@@ -1,6 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useSettings } from "../api/queries";
 import { ErrorState } from "../components/ErrorState";
 import { DoneNotice } from "../components/DoneNotice";
 import { useApplyNotices } from "../iam/useApplyFlow";
@@ -14,18 +13,19 @@ import { EventsView } from "./EventsView";
 import { ForwardsView } from "./ForwardsView";
 import { K8sError } from "./K8sError";
 import { K8sNav, type K8sView, type NavBookmark } from "./K8sNav";
-import { BUILTIN, NODES, bookmarkKey, bookmarkOf } from "./kinds";
+import { NODES, bookmarkKey, bookmarkOf } from "./kinds";
 import { LaneResizer, useLaneWidths } from "./lanes";
 import { moved } from "./useReorder";
 import { MyRules } from "./MyRules";
 import { NoContext } from "./NoContext";
 import { OverviewView } from "./OverviewView";
-import { NAMESPACES, chooseContext, ssoProfileOf } from "./targets";
+import { NAMESPACES } from "./targets";
 import { ALL, TopBar, type K8sConnection } from "./TopBar";
 import { WorkloadsView, type WorkloadsFocus } from "./WorkloadsView";
 import { YamlCreate } from "./YamlCreate";
 import { BOOKMARK_MISSING, savedMissing, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNECTING, updateCommand } from "./text";
-import { refreshK8s, useK8sContext, useK8sKinds, useK8sRules, useK8sSession } from "./queries";
+import { refreshK8s, useK8sKinds, useK8sRules, useUsageSampler } from "./queries";
+import { useK8sConnection } from "./useK8sConnection";
 import type { K8sChange, K8sKindRef, K8sTarget } from "./types";
 import { useK8sWatch } from "./useK8sWatch";
 
@@ -37,30 +37,22 @@ interface Props {
   onOpenIam?: (arn: string) => void;
 }
 
-export function K8sTab({ target, onOpenIam }: Props) {
+/** 사용량 그래프의 기록을 모은다. 읽을 때마다 다시 그려지는 것이 이 빈 컴포넌트뿐이도록 탭과 떼어 둔다. */
+function UsageSampler({ target, context, namespace, ssoProfile, live }: {
+  target: K8sTarget; context: string; namespace: string | null; ssoProfile: string; live: boolean;
+}) {
+  useUsageSampler(target, context, namespace, ssoProfile, live);
+  return null;
+}
+
+export function K8sTab({ target, active, onOpenIam }: Props) {
   const qc = useQueryClient();
-  const { settings, isError: settingsFailed, update } = useSettings();
-  const settingsReady = settings !== undefined || settingsFailed;
-  const kubeconfig = settings?.kubeconfigPath ?? null;
-  // 저장해 둔 context는 ARN을 알아야 찾을 수 있어서, 백엔드에는 늘 null을 넘기고 고르는 일은 여기서 한다.
-  const ctx = useK8sContext(target, kubeconfig, null, settingsReady);
-  const info = ctx.data;
-  const saved = info ? settings?.k8sContexts?.[info.arn] ?? null : null;
-  const [chosen, missing] = info
-    ? chooseContext(
-        info.candidates.map((c) => c.name),
-        saved,
-      )
-    : [null, null];
-  const candidate = info?.candidates.find((c) => c.name === chosen) ?? null;
+  const { settings, update, settingsReady, ctx, info, chosen, missing, candidate, session, ssoProfile, live } = useK8sConnection(target);
 
   const [userNs, setUserNs] = useState<string | null>(null);
   const [view, setView] = useState<K8sView>("overview");
   const [appliedChange, setAppliedChange] = useState<K8sChange | null>(null);
   const [focus, setFocus] = useState<WorkloadsFocus | null>(null);
-  const session = useK8sSession(target, kubeconfig, settingsReady ? chosen : null, ssoProfileOf(target, candidate, null));
-  const ssoProfile = ssoProfileOf(target, candidate, session.data);
-  const live = session.isSuccess && !session.isFetching;
   const notices = useApplyNotices();
   const change = useK8sChange(
     target,
@@ -103,12 +95,12 @@ export function K8sTab({ target, onOpenIam }: Props) {
   const lanes = useLaneWidths();
   const bookmarks = settings?.k8sBookmarks ?? [];
   const marks = new Set(bookmarks.map(bookmarkKey));
-  // 내장 종류는 All 트리처럼 늘 연다. 사용자 정의 종류는 이 클러스터의 목록에 있어야 연다(목록을 아직 모르면 일단 연다).
+  // 발견 결과가 있으면 제공하지 않는 북마크는 열지 않는다.
   const served = (b: K8sKindRef): K8sKindRef | null => {
     const key = bookmarkKey(b);
     const found = kinds.data?.find((k) => bookmarkKey(k) === key);
     if (found) return found;
-    return !kinds.data || BUILTIN.some((k) => bookmarkKey(k) === key) ? b : null;
+    return !kinds.data ? b : null;
   };
   const navBookmarks: NavBookmark[] = bookmarks.map((b) => {
     const missing = served(b) === null;
@@ -145,6 +137,8 @@ export function K8sTab({ target, onOpenIam }: Props) {
   const connection: K8sConnection = session.isError ? "failed" : session.isSuccess && !session.isFetching ? "connected" : "connecting";
   return (
     <div className="pg">
+      {/* 연결돼 있는 동안 고른 네임스페이스(전체면 모두)의 사용량을 계속 모은다 */}
+      <UsageSampler target={target} context={chosen} namespace={nsOrAll} ssoProfile={ssoProfile} live={live} />
       <TopBar
         context={chosen}
         identity={session.data?.identity ?? null}
@@ -188,7 +182,16 @@ export function K8sTab({ target, onOpenIam }: Props) {
           {session.isError ? (
             <K8sError error={session.error} target={target} ssoProfile={ssoProfile} />
           ) : view === "overview" ? (
-            <OverviewView target={target} context={chosen} ssoProfile={ssoProfile} live={live} onOpenNode={openNode} />
+            <OverviewView
+              target={target}
+              context={chosen}
+              ssoProfile={ssoProfile}
+              live={live}
+              visible={active}
+              onOpenNode={openNode}
+              sessionEpoch={session.dataUpdatedAt}
+              onOpenEvents={() => setView("events")}
+            />
           ) : listView ? (
             <WorkloadsView
               key={view}
@@ -197,8 +200,10 @@ export function K8sTab({ target, onOpenIam }: Props) {
               sessionEpoch={session.dataUpdatedAt}
               ssoProfile={ssoProfile}
               live={live}
+              visible={active}
               namespace={nsOrAll}
               kinds={kinds.data ?? []}
+              discoveryAvailable={kinds.data !== undefined}
               focus={focus}
               onOpenIam={onOpenIam}
               onChange={change.start}

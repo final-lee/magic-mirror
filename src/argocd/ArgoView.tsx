@@ -430,7 +430,13 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
           {allOpen ? ARGO_FOLD_OK : ARGO_EXPAND_ALL}
         </button>
       </div>
-      <div className="argo-scroll">
+      <div
+        className="argo-scroll"
+        onClick={(e) => {
+          // 행·머리글·묶음 단추 밖의 빈 곳을 누르면 선택을 푼다
+          if (!(e.target as Element).closest("thead, tbody tr, button")) setSelected(null);
+        }}
+      >
         {apps.isPending ? (
           <div className="empty">{LOADING}</div>
         ) : appRows.length === 0 ? (

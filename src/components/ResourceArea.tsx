@@ -6,6 +6,8 @@ import { resourceDetail } from "../lib/detail";
 import type { S3Location } from "../lib/s3";
 import { NOT_POSTGRES, pgTargetOf } from "../pg/targets";
 import type { K8sTarget } from "../k8s/types";
+import { ClusterDetailSummary } from "../k8s/ClusterDetailSummary";
+import { OPEN_EKS_TAB } from "../k8s/text";
 import type { PgTarget } from "../pg/types";
 import { Breadcrumb } from "./Breadcrumb";
 import { DetailPanel } from "./DetailPanel";
@@ -65,6 +67,7 @@ export function ResourceArea({ service, type, profile, region, account, filter, 
   useEffect(() => () => clearTimeout(noticeTimer.current), []);
   const items = q.data?.items ?? [];
   const selected = items.find((r) => r.id === selectedId) ?? null;
+  const eksCluster = service.id === "eks" && type.id === "clusters";
   useCopyShortcut(active ? (selected?.id ?? null) : null);
 
   // 안내는 띄운 때부터 NOTICE_MS 뒤에 사라진다. 그 사이에 다시 띄우면 처음부터 센다.
@@ -101,7 +104,7 @@ export function ResourceArea({ service, type, profile, region, account, filter, 
 
   return (
     <>
-      <section className="center">
+      <section className="center detail-host">
         <Breadcrumb service={service} segments={[{ label: type.name }]} count={q.data ? items.length : undefined} />
         {q.data?.truncated && <div className="notice">1,000개까지만 표시해요</div>}
         {notice && (
@@ -121,14 +124,28 @@ export function ResourceArea({ service, type, profile, region, account, filter, 
             filter={filter}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            onClear={() => setSelectedId(null)}
             onOpen={open}
             revealId={reveal}
             onRevealed={revealed}
           />
         )}
         <StatusBar profile={profile} account={account} region={service.global ? GLOBAL : region} updatedAt={q.dataUpdatedAt} />
+        <DetailPanel
+          detail={selected ? resourceDetail(selected, type, service) : null}
+          onShowRaw={() => setShowRaw(true)}
+          onClose={() => setSelectedId(null)}
+          actions={eksCluster && selected && (
+            <button className="btn small tone-nav" onClick={() => onOpenK8s?.({ profile, region, cluster: selected.id })}>
+              {OPEN_EKS_TAB}
+            </button>
+          )}
+        >
+          {eksCluster && selected && (
+            <ClusterDetailSummary key={`${profile}|${region}|${selected.id}`} target={{ profile, region, cluster: selected.id }} />
+          )}
+        </DetailPanel>
       </section>
-      <DetailPanel detail={selected ? resourceDetail(selected, type, service) : null} onShowRaw={() => setShowRaw(true)} />
       {showRaw && selected && <RawModal title={selected.name} text={selected.raw} onClose={() => setShowRaw(false)} />}
     </>
   );

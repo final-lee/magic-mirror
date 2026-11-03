@@ -7,6 +7,7 @@ use kube::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::metrics::{bounds_of_container, Bounds};
 use super::secret::{is_secret, keys, mask, SecretKey};
 use super::values::{event_count, event_last_seen, event_object, list, text, Problem};
 use super::yaml::{edit_yaml, view_yaml, YAML_FAILED};
@@ -62,6 +63,9 @@ pub struct Container {
     pub reason: Option<String>,
     pub message: Option<String>,
     pub last_termination: Option<Termination>,
+    /// 요청·제한(없으면 None). 사용량 열이 견주는 값
+    #[serde(flatten)]
+    pub bounds: Bounds,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -216,6 +220,7 @@ fn pod_containers(d: &Value, spec_path: &str, status_path: &str, init: bool) -> 
                 reason,
                 message,
                 last_termination: termination(status),
+                bounds: bounds_of_container(c),
             }
         })
         .collect()
@@ -246,6 +251,7 @@ pub fn containers_of(kind: &KindRef, d: &Value) -> Vec<Container> {
                 reason: None,
                 message: None,
                 last_termination: None,
+                bounds: bounds_of_container(c),
             })
             .collect()
     };

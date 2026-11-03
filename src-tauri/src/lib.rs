@@ -133,6 +133,7 @@ pub fn run() {
             k8s_commands::k8s_unwatch,
             k8s_commands::k8s_kinds,
             k8s_commands::k8s_get,
+            k8s_commands::k8s_metrics,
             k8s_commands::k8s_overview,
             k8s_commands::k8s_secret_value,
             k8s_commands::k8s_logs,

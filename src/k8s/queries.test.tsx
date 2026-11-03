@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { k8sApi } from "./api";
-import { closeK8s, k8sKeys, refreshK8s, useK8sContext, useK8sKinds, useK8sObject, useK8sOverview, useK8sRules, useK8sSession } from "./queries";
+import { closeK8s, k8sKeys, refreshK8s, useK8sContext, useK8sKinds, useK8sMetrics, useK8sObject, useK8sOverview, useK8sRules, useK8sSession, useUsageSampler } from "./queries";
+import { historyKey, usageOf } from "./usageHistory";
 
-vi.mock("./api", () => ({ k8sApi: { context: vi.fn(), open: vi.fn(), close: vi.fn(), rules: vi.fn(), kinds: vi.fn(), get: vi.fn(), secretValue: vi.fn(), overview: vi.fn(), watch: vi.fn(), unwatch: vi.fn() } }));
+vi.mock("./api", () => ({ k8sApi: { context: vi.fn(), open: vi.fn(), close: vi.fn(), rules: vi.fn(), kinds: vi.fn(), get: vi.fn(), secretValue: vi.fn(), overview: vi.fn(), metrics: vi.fn(), watch: vi.fn(), unwatch: vi.fn() } }));
 const api = vi.mocked(k8sApi);
 
 const T = { profile: "app", region: "r", cluster: "prod" };
@@ -150,4 +151,46 @@ test("refreshK8s removes K2 data so it is read again on the new connection", asy
   expect(qc.getQueryData(k8sKeys.kinds(T, "ctx"))).toBeUndefined();
   expect(qc.getQueryData(k8sKeys.overview(T, "ctx"))).toBeUndefined();
   expect(qc.getQueriesData({ queryKey: [...k8sKeys.root(T), "object"] })).toEqual([]);
+});
+
+test("useK8sMetrics polls every 15 s only while enabled, with a key per namespace", async () => {
+  const qc = client();
+  api.metrics.mockResolvedValue({ podsUnavailable: null, nodesUnavailable: null, pods: [], nodes: [] });
+  renderHook(() => useK8sMetrics(T, "ctx", "web", "p", false), { wrapper: wrap(qc) });
+  renderHook(() => useK8sMetrics(T, null, "web", "p", true), { wrapper: wrap(qc) });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(api.metrics).not.toHaveBeenCalled();
+  const on = renderHook(() => useK8sMetrics(T, "ctx", "web", "p", true), { wrapper: wrap(qc) });
+  await waitFor(() => expect(on.result.current.isSuccess).toBe(true));
+  expect(api.metrics).toHaveBeenCalledWith(T, "web", "p");
+  const observer = qc.getQueryCache().find({ queryKey: k8sKeys.metrics(T, "ctx", "web") })?.observers[0];
+  expect(observer?.options.refetchInterval).toBe(15_000);
+  expect(observer?.options.refetchIntervalInBackground).toBe(false);
+  expect(k8sKeys.metrics(T, "ctx", "web")).not.toEqual(k8sKeys.metrics(T, "ctx", null));
+  expect(k8sKeys.metrics(T, "ctx", null).slice(0, 2)).toEqual(k8sKeys.root(T));
+});
+
+test("useUsageSampler records every read into the target's history and keeps polling in the background until the tab closes", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    const qc = client();
+    const pod = (cpuMilli: number) => ({ namespace: "web", name: "api", cpuMilli, memoryBytes: 1, containers: [{ name: "main", cpuMilli, memoryBytes: 1 }], owners: [] });
+    api.metrics.mockResolvedValueOnce({ podsUnavailable: null, nodesUnavailable: null, pods: [pod(100)], nodes: [] });
+    api.metrics.mockResolvedValue({ podsUnavailable: null, nodesUnavailable: null, pods: [pod(300)], nodes: [] });
+    renderHook(() => useUsageSampler(T, "ctx", "web", "p", true), { wrapper: wrap(qc) });
+    const ref = { kind: { group: "", version: "v1", kind: "Pod", plural: "pods", namespaced: true }, namespace: "web", name: "api" };
+    const cpu = () => usageOf(historyKey(T, "ctx"), ref).cpu[0]?.points.map(([, v]) => v);
+    await waitFor(() => expect(cpu()).toEqual([0.1]));
+    const observer = qc.getQueryCache().find({ queryKey: k8sKeys.metrics(T, "ctx", "web") })?.observers[0];
+    expect(observer?.options.refetchInterval).toBe(15_000);
+    expect(observer?.options.refetchIntervalInBackground).toBe(true);
+    // 다음 주기의 읽기
+    vi.setSystemTime(Date.now() + 15_000);
+    await act(() => qc.refetchQueries({ queryKey: k8sKeys.metrics(T, "ctx", "web") }));
+    await waitFor(() => expect(cpu()).toEqual([0.1, 0.3]));
+    await closeK8s(qc, T, "p");
+    expect(cpu()).toBeUndefined();
+  } finally {
+    vi.useRealTimers();
+  }
 });
