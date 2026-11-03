@@ -339,7 +339,15 @@ tbody tr.on td { background: var(--accent) !important; color: var(--on-accent); 
 .dot.green { background: var(--green); } .dot.red { background: var(--red); } .dot.yellow { background: var(--yellow); }
 .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
 .status { padding: 5px 14px; border-top: 1px solid var(--line); color: var(--dim); font-size: 11px; display: flex; justify-content: space-between; }
-.detail { width: 320px; background: var(--panel); border-left: 1px solid var(--line); overflow: auto; padding: 14px; user-select: text; }
+/* 오른쪽 상세는 늘 화면 비율로 연다(고정 px 너비를 쓰지 않는다). 탐색기·VPC 지도·IAM 작업 목록이 함께 쓴다 */
+.detail { flex: none; box-sizing: border-box; width: 35%; background: var(--panel); border-left: 1px solid var(--line); overflow: auto; padding: 14px; user-select: text; }
+/* 탐색기 상세에 붙는 EKS 클러스터 사용량 요약 */
+.k8s-cluster-detail { margin: 0 0 14px; }
+.k8s-cluster-detail h4 { margin: 12px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }
+/* 좁은 상세에서는 경고 표의 글을 줄바꿈하고, 고리 카드의 범례를 고리 아래로 내린다 */
+.k8s-cluster-detail .k8s-table td { max-width: none; }
+.k8s-cluster-detail .k8s-table td:nth-child(n+3) { white-space: normal; overflow-wrap: anywhere; }
+.k8s-cluster-detail .k8s-cluster-card { flex-wrap: wrap; }
 .detail h3 { margin: 0 0 2px; font-size: 15px; word-break: break-all; }
 .detail .sub { color: var(--dim); font-size: 11px; margin-bottom: 12px; }
 .kv { display: grid; grid-template-columns: 110px 1fr; gap: 5px 8px; font-size: 12px; margin: 0 0 14px; }
@@ -1131,8 +1139,8 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .k8s-bm-x { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--dim); cursor: pointer; opacity: 0; }
 .k8s-bm:hover .k8s-bm-x, .k8s-bm-x:focus-visible { opacity: 1; }
 .k8s-bm-x:hover { background: var(--neutral-alpha-1a); color: inherit; }
-/* 4열 상세: 3열 목록 위에 떠서 오른쪽부터 목록 너비의 일부(기본 70%)를 덮는다. 너비는 style로 준다. */
-.k8s-detail { position: absolute; top: 0; right: 0; bottom: 0; z-index: 2; min-width: 320px; max-width: 100%; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--panel); box-shadow: -10px 0 28px var(--tone-00000073); animation: k8s-pop 0.12s ease-out; }
+/* 4열 상세: 3열 목록 위에 떠서 오른쪽부터 목록 너비의 일부(기본 70%)를 덮는다. 너비는 style로 주고, 늘 그 비율을 지킨다(최소 px 없음). */
+.k8s-detail { position: absolute; top: 0; right: 0; bottom: 0; z-index: 2; box-sizing: border-box; max-width: 100%; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--panel); box-shadow: -10px 0 28px var(--tone-00000073); animation: k8s-pop 0.12s ease-out; }
 @keyframes k8s-pop { from { transform: translateX(18px); opacity: 0; } }
 .k8s-detail-resizer { position: absolute; top: 0; bottom: 0; margin: 0; transform: translateX(50%); z-index: 3; }
 .k8s-detail-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 10px; border-bottom: 1px solid var(--line); }

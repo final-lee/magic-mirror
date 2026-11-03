@@ -1,6 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useSettings } from "../api/queries";
 import { ErrorState } from "../components/ErrorState";
 import { DoneNotice } from "../components/DoneNotice";
 import { useApplyNotices } from "../iam/useApplyFlow";
@@ -20,12 +19,13 @@ import { moved } from "./useReorder";
 import { MyRules } from "./MyRules";
 import { NoContext } from "./NoContext";
 import { OverviewView } from "./OverviewView";
-import { NAMESPACES, chooseContext, ssoProfileOf } from "./targets";
+import { NAMESPACES } from "./targets";
 import { ALL, TopBar, type K8sConnection } from "./TopBar";
 import { WorkloadsView, type WorkloadsFocus } from "./WorkloadsView";
 import { YamlCreate } from "./YamlCreate";
 import { BOOKMARK_MISSING, savedMissing, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNECTING, updateCommand } from "./text";
-import { refreshK8s, useK8sContext, useK8sKinds, useK8sRules, useK8sSession, useUsageSampler } from "./queries";
+import { refreshK8s, useK8sKinds, useK8sRules, useUsageSampler } from "./queries";
+import { useK8sConnection } from "./useK8sConnection";
 import type { K8sChange, K8sKindRef, K8sTarget } from "./types";
 import { useK8sWatch } from "./useK8sWatch";
 
@@ -47,28 +47,12 @@ function UsageSampler({ target, context, namespace, ssoProfile, live }: {
 
 export function K8sTab({ target, active, onOpenIam }: Props) {
   const qc = useQueryClient();
-  const { settings, isError: settingsFailed, update } = useSettings();
-  const settingsReady = settings !== undefined || settingsFailed;
-  const kubeconfig = settings?.kubeconfigPath ?? null;
-  // 저장해 둔 context는 ARN을 알아야 찾을 수 있어서, 백엔드에는 늘 null을 넘기고 고르는 일은 여기서 한다.
-  const ctx = useK8sContext(target, kubeconfig, null, settingsReady);
-  const info = ctx.data;
-  const saved = info ? settings?.k8sContexts?.[info.arn] ?? null : null;
-  const [chosen, missing] = info
-    ? chooseContext(
-        info.candidates.map((c) => c.name),
-        saved,
-      )
-    : [null, null];
-  const candidate = info?.candidates.find((c) => c.name === chosen) ?? null;
+  const { settings, update, settingsReady, ctx, info, chosen, missing, candidate, session, ssoProfile, live } = useK8sConnection(target);
 
   const [userNs, setUserNs] = useState<string | null>(null);
   const [view, setView] = useState<K8sView>("overview");
   const [appliedChange, setAppliedChange] = useState<K8sChange | null>(null);
   const [focus, setFocus] = useState<WorkloadsFocus | null>(null);
-  const session = useK8sSession(target, kubeconfig, settingsReady ? chosen : null, ssoProfileOf(target, candidate, null));
-  const ssoProfile = ssoProfileOf(target, candidate, session.data);
-  const live = session.isSuccess && !session.isFetching;
   const notices = useApplyNotices();
   const change = useK8sChange(
     target,

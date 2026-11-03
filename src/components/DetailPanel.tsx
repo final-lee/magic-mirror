@@ -1,8 +1,9 @@
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
 import { desktop } from "../api/desktop";
 import type { DetailData } from "../lib/detail";
 
-export function DetailPanel({ detail, onShowRaw }: { detail: DetailData | null; onShowRaw: () => void }) {
+/** children: 기본 값 목록 바로 아래에 붙는 서비스별 요약(예: EKS 클러스터 사용량) */
+export function DetailPanel({ detail, onShowRaw, children }: { detail: DetailData | null; onShowRaw: () => void; children?: ReactNode }) {
   if (!detail) {
     return (
       <aside className="detail">
@@ -23,6 +24,7 @@ export function DetailPanel({ detail, onShowRaw }: { detail: DetailData | null; 
           </Fragment>
         ))}
       </dl>
+      {children}
       {tags.length > 0 && (
         <>
           <div className="sect">Tags</div>

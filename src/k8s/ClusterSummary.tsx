@@ -179,8 +179,11 @@ export function ClusterSummary({ nodes, live, historyKey, metrics }: {
 const WARNINGS_MAX = 8;
 
 /** 클러스터 전체의 최근 Warning 이벤트 몇 개와 이벤트 화면으로 가는 단추 */
-export function RecentWarnings({ target, context, sessionEpoch, ssoProfile, live, onOpenEvents, now }: {
-  target: K8sTarget; context: string; sessionEpoch: number; ssoProfile: string; live: boolean; onOpenEvents: () => void; now?: number;
+export function RecentWarnings({ target, context, sessionEpoch, ssoProfile, live, onOpenEvents, actionLabel, now }: {
+  target: K8sTarget; context: string; sessionEpoch: number; ssoProfile: string; live: boolean; onOpenEvents: () => void;
+  /** 단추 글. 없으면 이벤트 화면으로 가는 글 */
+  actionLabel?: string;
+  now?: number;
 }) {
   const w = useK8sWatch(target, context, sessionEpoch, ssoProfile, EVENTS, null, live);
   const warnings = useMemo(
@@ -213,7 +216,7 @@ export function RecentWarnings({ target, context, sessionEpoch, ssoProfile, live
         </table>
       )}
       <div className="k8s-actions">
-        <button className="btn tone-nav" onClick={onOpenEvents}>{t.warningsMore(warnings.length)}</button>
+        <button className="btn tone-nav" onClick={onOpenEvents}>{actionLabel ?? t.warningsMore(warnings.length)}</button>
       </div>
     </>
   );
