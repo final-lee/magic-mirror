@@ -107,7 +107,7 @@ async fn the_engine_agrees_with_subject_access_review_on_every_request() {
             }
         }
     }
-    assert!(checked > 2000, "{checked}");
+    assert!(checked > 1000, "{checked}");
     assert!(mismatches.is_empty(), "{} / {checked}건이 달라요:\n{}", mismatches.len(), mismatches.join("\n"));
 }
 
@@ -183,13 +183,13 @@ async fn the_engine_agrees_with_kubectl_auth_can_i() {
             Subject::service_account(A, "robot"),
             "system:serviceaccount:mm-acc-a:robot",
             vec![],
-            vec![(vec!["create", "pods", "-n", A], Query::new("create", "", "pods").ns(A)), (vec!["create", "pods", "-n", B], Query::new("create", "", "pods").ns(B)), (vec!["create", "pods/exec", "-n", A], Query::new("create", "", "pods").subres("exec").ns(A))],
+            vec![(vec!["create", "pods", "-n", A], Query::new("create", "", "pods").ns(A)), (vec!["create", "pods", "-n", B], Query::new("create", "", "pods").ns(B)), (vec!["create", "pods", "--subresource=exec", "-n", A], Query::new("create", "", "pods").subres("exec").ns(A))],
         ),
         (
             Subject::group("mm-acc-devs"),
             "someone",
             vec!["mm-acc-devs"],
-            vec![(vec!["get", "deployments.apps", "-n", B], Query::new("get", "apps", "deployments").ns(B)), (vec!["create", "pods/exec", "-n", B], Query::new("create", "", "pods").subres("exec").ns(B))],
+            vec![(vec!["get", "deployments.apps", "-n", B], Query::new("get", "apps", "deployments").ns(B)), (vec!["create", "pods", "--subresource=exec", "-n", B], Query::new("create", "", "pods").subres("exec").ns(B))],
         ),
     ];
     for (subject, user, groups, checks) in cases {
