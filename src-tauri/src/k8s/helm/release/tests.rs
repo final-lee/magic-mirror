@@ -133,3 +133,18 @@ fn storage_object_names_follow_each_driver() {
     assert_eq!(object_name(Driver::Secret, "web", 7), "sh.helm.release.v1.web.v7");
     assert_eq!(object_name(Driver::ConfigMap, "web", 7), "web.v7");
 }
+
+#[test]
+fn go_nulls_for_empty_lists_and_texts_decode_as_empty() {
+    // helm은 파일·훅·의존 차트가 없으면 빈 목록 대신 null로 저장한다(kind의 helm v4에서 확인)
+    let mut value = sample();
+    value["hooks"] = Value::Null;
+    value["info"]["notes"] = Value::Null;
+    value["chart"]["files"] = Value::Null;
+    value["chart"]["dependencies"] = Value::Null;
+    value["chart"]["templates"] = Value::Null;
+    value["manifest"] = Value::Null;
+    let release: Release = serde_json::from_value(value).unwrap();
+    assert!(release.hooks.is_empty() && release.chart.files.is_empty() && release.chart.dependencies.is_empty() && release.chart.templates.is_empty());
+    assert_eq!((release.info.notes.as_str(), release.manifest.as_str()), ("", ""));
+}

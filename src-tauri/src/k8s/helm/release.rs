@@ -6,7 +6,7 @@ use std::io::Read;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use flate2::read::GzDecoder;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
 use crate::error::AppError;
@@ -19,6 +19,15 @@ pub const UNREADABLE: &str = "릴리스 데이터를 읽지 못했어요";
 /// 풀린 JSON의 한도. 이보다 크면 압축 폭탄으로 보고 거절한다(Secret은 1MiB라 정상 릴리스는 훨씬 작다)
 const DECODED_MAX: u64 = 64 * 1024 * 1024;
 const GZIP_MAGIC: [u8; 3] = [0x1f, 0x8b, 0x08];
+
+/// Go가 빈 목록·빈 글을 `null`로 저장하는 필드(`files`, `hooks`, `dependencies` 등)도 기본값으로 읽는다
+fn null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
 
 /// 릴리스가 저장된 곳. helm은 `HELM_DRIVER`로 하나를 고른다(기본 secret).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -52,21 +61,21 @@ pub struct Info {
     pub first_deployed: Option<String>,
     #[serde(default)]
     pub last_deployed: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub description: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub status: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub notes: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct Hook {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub kind: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub events: Vec<String>,
 }
 
@@ -74,7 +83,7 @@ pub struct Hook {
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct File {
     pub name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub data: String,
 }
 
@@ -83,7 +92,7 @@ pub struct Chart {
     /// Chart.yaml의 내용. 키 이름은 Chart.yaml과 같다(`appVersion` 등)
     #[serde(default)]
     pub metadata: Value,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub templates: Vec<File>,
     /// 차트의 기본값(values.yaml)
     #[serde(default)]
@@ -92,9 +101,9 @@ pub struct Chart {
     #[serde(default)]
     pub schema: Option<String>,
     /// templates 밖의 파일: 보통 파일, `crds/`, README 등
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub files: Vec<File>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub dependencies: Vec<Chart>,
 }
 
@@ -129,7 +138,7 @@ impl Chart {
 #[derive(Clone, Debug, Deserialize)]
 pub struct Release {
     pub name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub namespace: String,
     pub version: u32,
     #[serde(default)]
@@ -139,9 +148,9 @@ pub struct Release {
     /// 사용자가 준 values(`--set`·`-f`를 합친 것). 없으면 null이거나 빈 맵
     #[serde(default)]
     pub config: Option<Value>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub manifest: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub hooks: Vec<Hook>,
 }
 
