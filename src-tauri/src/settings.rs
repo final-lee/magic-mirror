@@ -66,6 +66,8 @@ pub struct Settings {
     pub argocd_servers: Vec<ArgocdServer>,
     /// ArgoCD 서버 주소 → 그 서버 목록의 필터·묶기 상태
     pub argocd_views: BTreeMap<String, ArgocdView>,
+    /// 리소스 목록 캐시 유효 시간(분). 없으면 앱 기본값(15분), 0이면 무제한. Rust는 저장만 하고 프론트엔드가 해석한다.
+    pub resource_cache_ttl_minutes: Option<u32>,
 }
 
 #[derive(Deserialize, Default)]
@@ -85,6 +87,7 @@ struct RawSettings {
     k8s_lane_widths: K8sLaneWidths,
     argocd_servers: Vec<ArgocdServer>,
     argocd_views: BTreeMap<String, ArgocdView>,
+    resource_cache_ttl_minutes: Option<u32>,
 }
 
 fn defaults(all_services: &[&str]) -> Settings {
@@ -116,6 +119,7 @@ pub fn load(path: &Path, all_services: &[&str]) -> Settings {
                 k8s_lane_widths: raw.k8s_lane_widths,
                 argocd_servers: raw.argocd_servers,
                 argocd_views: raw.argocd_views,
+                resource_cache_ttl_minutes: raw.resource_cache_ttl_minutes,
             },
             Err(_) => defaults(all_services),
         },
@@ -197,6 +201,19 @@ mod tests {
         assert_eq!(load(&path, &[]).argocd_views, settings.argocd_views);
         let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
         assert_eq!(json["argocdViews"]["https://a.test"]["thenBy"], "label:type");
+    }
+
+    #[test]
+    fn resource_cache_ttl_distinguishes_absent_zero_and_value() {
+        assert_eq!(load_text("{}").resource_cache_ttl_minutes, None);
+        assert_eq!(load_text(r#"{"resourceCacheTtlMinutes":null}"#).resource_cache_ttl_minutes, None);
+        assert_eq!(load_text(r#"{"resourceCacheTtlMinutes":0}"#).resource_cache_ttl_minutes, Some(0));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        save(&path, &Settings { resource_cache_ttl_minutes: Some(30), ..Default::default() }).unwrap();
+        assert_eq!(load(&path, &[]).resource_cache_ttl_minutes, Some(30));
+        let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(json["resourceCacheTtlMinutes"], 30);
     }
 
 

@@ -65,3 +65,21 @@ test("shows empty message when nothing matches", () => {
   render(<ResourceTable columns={columns} items={items} filter="zzz" selectedId={null} onSelect={() => {}} onOpen={() => {}} />);
   expect(screen.getByText("표시할 리소스가 없어요")).toBeInTheDocument();
 });
+
+test("while filtering the best match comes first, until a header click puts that column back in charge", () => {
+  const rows = [makeResource("a", { name: "deploy-orders-api" }), makeResource("b", { name: "prod-orders-api" })];
+  render(<ResourceTable columns={columns} items={rows} filter="poa" selectedId={null} onSelect={() => {}} onOpen={() => {}} />);
+  expect(rowNames()).toEqual(["prod-orders-api", "deploy-orders-api"]);
+  expect(screen.getByRole("columnheader", { name: /Name/ })).not.toHaveTextContent("▲");
+  fireEvent.click(screen.getByRole("columnheader", { name: /Name/ }));
+  expect(rowNames()).toEqual(["deploy-orders-api", "prod-orders-api"]);
+  expect(screen.getByRole("columnheader", { name: /Name/ })).toHaveTextContent("▲");
+});
+
+test("the filter also matches text column values and tags", () => {
+  const rows = [...items, makeResource("i-4", { name: "cron", id: "i-4", state: "running" }, { tags: { team: "payments" } })];
+  const { rerender } = render(<ResourceTable columns={columns} items={rows} filter="stop" selectedId={null} onSelect={() => {}} onOpen={() => {}} />);
+  expect(rowNames()).toEqual(["web-2"]);
+  rerender(<ResourceTable columns={columns} items={rows} filter="team=pay" selectedId={null} onSelect={() => {}} onOpen={() => {}} />);
+  expect(rowNames()).toEqual(["cron"]);
+});

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { fuzzyFilter, fuzzyKeep } from "../lib/fuzzy";
 import { groupColumns, policyColumns, type AssignmentTab, type DraftItem } from "./assignments";
 import { AssignmentGrid } from "./AssignmentGrid";
 import { KIND_LABEL } from "./labels";
@@ -58,8 +59,9 @@ export function Assignments({ profile, overview, draft, extra, onAddColumn, tab,
 
   const pool = useMemo(() => principalsOf(overview, tab), [overview, tab]);
   const rows = useMemo(() => {
-    const f = filter.trim().toLowerCase();
-    return pool.filter((p) => (tab === "members" || kinds[p.kind]) && (!f || p.name.toLowerCase().includes(f)));
+    const pickable = pool.filter((p) => tab === "members" || kinds[p.kind]);
+    // 정책 탭은 종류별 묶음이 의미라 그 순서를 지키고, 구성원 탭은 잘 맞는 순서로 보인다.
+    return tab === "policies" ? fuzzyKeep(pickable, filter, (p) => [p.name]) : fuzzyFilter(pickable, filter, (p) => [p.name]);
   }, [pool, tab, kinds, filter]);
 
   // 장바구니에 붙이기가 담긴 정책은 열로 더한 적이 없어도 표에 보인다(개요를 다시 읽어 그 정책을 가진 주체가 없어져도 담긴 변경이 안 보이면 안 된다)

@@ -1162,7 +1162,7 @@ describe("tall grids", () => {
     await loaded();
     scroller().scrollTop = 200 * ROW_H;
     fireEvent.scroll(scroller());
-    update({ filter: "user-00" });
+    update({ filter: "user-005" });
     expect(within(grid()).getByRole("rowheader", { name: "user-005" })).toBeInTheDocument();
   });
 
