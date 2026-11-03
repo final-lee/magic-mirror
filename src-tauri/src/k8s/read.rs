@@ -13,6 +13,7 @@ use crate::error::AppError;
 pub mod detail;
 pub mod eks;
 pub mod kinds;
+pub mod metrics;
 pub mod nodes;
 pub mod overview;
 pub mod quantity;

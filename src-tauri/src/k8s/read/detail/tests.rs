@@ -195,3 +195,16 @@ fn ports_come_from_pod_containers_and_service_ports_and_only_tcp() {
     assert_eq!(shown, [(80, Some("8080")), (81, Some("metrics")), (82, None)]);
     assert!(ports_of(&kind("apps", "Deployment", "deployments"), &pod).is_empty());
 }
+
+#[test]
+fn containers_carry_their_own_requests_and_limits() {
+    let mut p = pod();
+    p.data["spec"]["containers"][0]["resources"] = json!({ "requests": { "cpu": "100m" }, "limits": { "memory": "256Mi" } });
+    let c = containers_of(&kind("", "Pod", "pods"), &p.data);
+    let app = c.iter().find(|c| c.name == "app").unwrap();
+    assert_eq!(app.bounds, Bounds { cpu_request: Some(100), memory_limit: Some(256 * 1024 * 1024), ..Bounds::default() });
+    assert_eq!(c.iter().find(|c| c.name == "side").unwrap().bounds, Bounds::default());
+    let json = serde_json::to_value(app).unwrap();
+    assert_eq!(json["cpuRequest"], 100);
+    assert!(json["cpuLimit"].is_null());
+}
