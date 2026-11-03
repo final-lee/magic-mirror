@@ -1,6 +1,7 @@
 //! Helm 변경의 미리보기와 적용. 변경 공통 틀(`k8s_preview`·`k8s_apply`)이 `dry_plan`과 `apply`를 부른다.
 //! - 계획을 만드는 순수 함수(`plan_*`): 현재 릴리스와 목표(렌더링 결과 또는 다른 리비전)에서 객체별 차이, values 차이, 경고, 되돌리기를 만든다.
 //! - 입출력(`prepare`): 저장소에서 현재 릴리스를 읽고, 업그레이드·설치는 임시 폴더에 차트와 values를 쓰고 `helm --dry-run=server`로 렌더링한다.
+//!
 //! 적용 직전에 같은 계획을 다시 만들어 릴리스가 그대로인지(리비전과 내용 해시)와 이름 입력을 확인한 뒤 helm을 실행한다.
 use std::path::PathBuf;
 use std::time::Duration;
@@ -85,6 +86,7 @@ fn confirm_name(change: &Change, always: bool) -> Option<String> {
     (always || dangerous(target.namespace.as_deref(), &target.name)).then(|| target.name.clone())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn assemble(
     change: &Change,
     shown: &str,

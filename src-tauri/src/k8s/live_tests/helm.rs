@@ -1,7 +1,7 @@
 //! Helm 시험: 실제 kind 클러스터에 helm이 설치한 릴리스(`scripts/k8s-live/helm.sh`)를 앱이 읽고, 변경 틀의 미리보기 → 확인 → 적용 → 기록 → 되돌리기로 바꾼다.
 //! 환경: `K8S_LIVE_KUBECONFIG`, `K8S_LIVE_HELM_CHART`(로컬 차트 폴더), `K8S_LIVE_HELM_REPO`(로컬 차트 저장소 주소). 확인은 helm·kubectl로 따로 한다.
 //! 릴리스: `flow`(helm이 만든 리비전 둘), `broken`(failed), `cmrel`(ConfigMap 드라이버). 앱이 설치하는 릴리스는 이름이 따로다.
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::{json, Value};
@@ -61,7 +61,7 @@ fn log_path(name: &str) -> PathBuf {
 }
 
 /// `k8s_apply`가 하는 것처럼 미리보기 → (다시 계산·재확인 → helm 실행) → 기록(values 없이) 까지 한다. 돌려주는 값은 기록 번호.
-async fn apply_and_log(cluster: &Cluster, change: &Change, confirm: Option<&str>, undo_of: Option<&str>, log_file: &PathBuf) -> Result<String, AppError> {
+async fn apply_and_log(cluster: &Cluster, change: &Change, confirm: Option<&str>, undo_of: Option<&str>, log_file: &Path) -> Result<String, AppError> {
     let seen = plan::dry_plan(cluster, change).await?;
     let (current, outcome) = plan::apply(cluster, change, &seen, confirm).await?;
     let id = format!("live-{}", log::read_all(log_file).len() + 1);
