@@ -288,6 +288,26 @@ describe("bucket explorer tabs", () => {
     expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
   });
 
+  test("⌘⇧{ / ⌘⇧} move to the previous / next tab and wrap around at the ends", async () => {
+    renderWithClient(<App />);
+    await openAssetsBucket();
+    const s3 = await screen.findByRole("tab", { name: /S3: assets/ });
+    const resources = screen.getByRole("tab", { name: "리소스" });
+    const prev = () => fireEvent.keyDown(window, { key: "{", code: "BracketLeft", metaKey: true, shiftKey: true });
+    const next = () => fireEvent.keyDown(window, { key: "}", code: "BracketRight", metaKey: true, shiftKey: true });
+    prev();
+    expect(resources).toHaveAttribute("aria-selected", "true");
+    prev();
+    expect(s3).toHaveAttribute("aria-selected", "true");
+    next();
+    expect(resources).toHaveAttribute("aria-selected", "true");
+    next();
+    expect(s3).toHaveAttribute("aria-selected", "true");
+    // ⇧ 없는 ⌘[ 는 탭을 바꾸지 않는다(폴더 기록용)
+    fireEvent.keyDown(window, { key: "[", code: "BracketLeft", metaKey: true });
+    expect(s3).toHaveAttribute("aria-selected", "true");
+  });
+
   test("there is no explorer tab until a bucket is opened", async () => {
     renderWithClient(<App />);
     await screen.findByText("EC2");

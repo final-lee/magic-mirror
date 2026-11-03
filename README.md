@@ -19,6 +19,7 @@ A macOS desktop app for browsing AWS resources by service, without clicking thro
 - **Find anything you've opened (⌘K)**: searches every list this profile has read, in every region, without calling AWS. Words can also match the service, type, or region (`west web`). Pick a result to jump to its region and type with the row selected. Results show how old the list is; lists past the cache TTL are marked and reload when opened.
 - Refresh (⌘R). Lists stay cached while the app runs and reload in the background when you reopen one older than the cache TTL (Settings → 리소스 캐시: 5 min to 6 h, or unlimited; default 15 min). **캐시 비우기** or ⌘⇧R drops every cached list for all profiles and regions, on disk too, and reloads what's on screen.
 - The ⌘K index is kept on disk for 7 days (`resource-index.json` in the app data folder, readable only by you). It holds only names, IDs, column values, and tags — never raw JSON or detail fields, which can contain secrets such as Lambda environment variables.
+- Switch to the previous / next tab (⌘⇧{ / ⌘⇧})
 - Read-only: it never calls APIs that change resources, and it never reads Secrets Manager secret values.
 
 ### VPC network diagram

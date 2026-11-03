@@ -383,7 +383,7 @@ export function ExplorerTab(p: Props) {
         if (el && el !== document.body && !inTable) return;
         e.preventDefault();
         setFocused((f) => (f === "local" ? "s3" : "local"));
-      } else if (e.metaKey && (e.key === "[" || e.key === "]")) {
+      } else if (e.metaKey && !e.shiftKey && (e.key === "[" || e.key === "]")) {
         e.preventDefault();
         handlers.current.go(focused, e.key === "[" ? "back" : "fwd");
       } else if (e.metaKey && e.key.toLowerCase() === "d") {

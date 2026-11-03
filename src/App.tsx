@@ -43,6 +43,14 @@ import { useTheme } from "./lib/theme";
 
 const sameFav = (a: Favorite, b: Favorite) => a.service === b.service && a.type === b.type;
 
+/** ⌘⇧{ 는 -1, ⌘⇧} 는 +1, 그 밖의 키는 0. ⇧를 누르면 e.key가 "{" "}"가 되고, 한글 입력 중에도 e.code는 그대로다. */
+function tabStep(e: KeyboardEvent): -1 | 0 | 1 {
+  if (!e.metaKey || !e.shiftKey) return 0;
+  if (e.code === "BracketLeft" || e.key === "{") return -1;
+  if (e.code === "BracketRight" || e.key === "}") return 1;
+  return 0;
+}
+
 export default function App() {
   const qc = useQueryClient();
   const services = useServices();
@@ -59,6 +67,8 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [focus, setFocus] = useState<ResourceFocus | null>(null);
   const focusNonce = useRef(0);
+  // 탭 막대에 보이는 순서. ⌘⇧{ / ⌘⇧} 단축키가 렌더 때마다 갱신된 이 순서를 따라 움직인다.
+  const tabOrderRef = useRef<string[]>([]);
   const account = useAccount(profile);
   const [activeTab, setActiveTab] = useState<string>("resources");
   const [explorerTabs, setExplorerTabs] = useState<{ id: string; location: S3Location }[]>([]);
@@ -127,6 +137,20 @@ export default function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!e.metaKey) return;
       const key = e.key.toLowerCase();
+      // ⌘⇧{ / ⌘⇧}: 이전·다음 탭. 끝에서는 반대쪽 끝으로 돌아간다. 확인 창이 떠 있으면 건드리지 않는다.
+      const step = tabStep(e);
+      if (step !== 0) {
+        if (document.querySelector(".modal")) return;
+        e.preventDefault();
+        const order = tabOrderRef.current;
+        setActiveTab((cur) => {
+          const i = order.indexOf(cur);
+          if (order.length === 0 || i < 0) return cur;
+          return order[(i + step + order.length) % order.length];
+        });
+        setFilter("");
+        return;
+      }
       if (key === "f") {
         e.preventDefault();
         filterRef.current?.focus();
@@ -245,6 +269,7 @@ export default function App() {
     ...k8sTabs.map((t) => ({ id: t.id, title: tabTitle(t.target.cluster), closable: true })),
     ...diffTabs.map((t) => ({ id: t.id, title: diffTitle(t.left, t.right), closable: true })),
   ];
+  tabOrderRef.current = tabs.map((t) => t.id);
   const diffTool: DiffTool = settings.diffTool ?? "filemerge";
 
   const changeProfile = (name: string) => {

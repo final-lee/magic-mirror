@@ -11,7 +11,7 @@ export function useHistoryKeys(active: boolean, back: () => void, forward: () =>
   useEffect(() => {
     if (!active) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!e.metaKey || (e.key !== "[" && e.key !== "]")) return;
+      if (!e.metaKey || e.shiftKey || (e.key !== "[" && e.key !== "]")) return;
       const tag = (document.activeElement as HTMLElement | null)?.tagName;
       if (hasOpenDialog() || tag === "INPUT" || tag === "TEXTAREA") return;
       e.preventDefault();
