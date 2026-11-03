@@ -21,6 +21,15 @@ pub struct K8sLaneWidths {
     pub tree: Option<u32>,
     pub detail_pct: Option<u32>,
 }
+/// EKS 보안 점검 설정: 끈 점검 항목과 시스템 네임스페이스 포함 여부. 비어 있으면 모든 항목을 켜고 시스템 네임스페이스(`kube-system` 등)는 뺀다.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct K8sSecurityChecks {
+    /// 끈 점검 항목의 이름(`privileged`, `clusterAwsAuth` …). 모든 클러스터에 같이 쓴다.
+    pub disabled: Vec<String>,
+    pub include_system: bool,
+}
+
 /// ArgoCD API 서버의 표시 이름과 주소.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ArgocdServer {
@@ -64,6 +73,7 @@ pub struct Settings {
     /// EKS 탭 왼쪽 메뉴에 북마크한 리소스 종류. 북마크한 순서(드래그로 바꾼 순서)대로 둔다.
     pub k8s_bookmarks: Vec<KindRef>,
     pub k8s_lane_widths: K8sLaneWidths,
+    pub k8s_security_checks: K8sSecurityChecks,
     /// ArgoCD 서버 목록. 토큰은 설정이 아니라 키체인에 저장한다.
     pub argocd_servers: Vec<ArgocdServer>,
     /// ArgoCD 서버 주소 → 그 서버 목록의 필터·묶기 상태
@@ -88,6 +98,7 @@ struct RawSettings {
     kubeconfig_path: Option<String>,
     k8s_bookmarks: Vec<KindRef>,
     k8s_lane_widths: K8sLaneWidths,
+    k8s_security_checks: K8sSecurityChecks,
     argocd_servers: Vec<ArgocdServer>,
     argocd_views: BTreeMap<String, ArgocdView>,
     resource_cache_ttl_minutes: Option<u32>,
@@ -121,6 +132,7 @@ pub fn load(path: &Path, all_services: &[&str]) -> Settings {
                 kubeconfig_path: raw.kubeconfig_path,
                 k8s_bookmarks: raw.k8s_bookmarks,
                 k8s_lane_widths: raw.k8s_lane_widths,
+                k8s_security_checks: raw.k8s_security_checks,
                 argocd_servers: raw.argocd_servers,
                 argocd_views: raw.argocd_views,
                 resource_cache_ttl_minutes: raw.resource_cache_ttl_minutes,
@@ -268,6 +280,25 @@ mod tests {
         // 예전 px 값(detail)은 읽지 않는다
         let old = load_text(r#"{"k8sLaneWidths":{"nav":200,"detail":640}}"#);
         assert_eq!(old.k8s_lane_widths, K8sLaneWidths { nav: Some(200), tree: None, detail_pct: None });
+    }
+
+    #[test]
+    fn k8s_security_checks_default_all_on_and_roundtrip() {
+        // 예전 설정 파일에는 이 키가 없다: 모든 항목이 켜지고 시스템 네임스페이스는 뺀다
+        let old = load_text(r#"{"k8sBookmarks":[]}"#);
+        assert_eq!(old.k8s_security_checks, K8sSecurityChecks::default());
+        assert!(old.k8s_security_checks.disabled.is_empty() && !old.k8s_security_checks.include_system);
+        // 일부 필드만 있어도 읽힌다
+        let partial = load_text(r#"{"k8sSecurityChecks":{"disabled":["probesMissing"]}}"#);
+        assert_eq!(partial.k8s_security_checks, K8sSecurityChecks { disabled: vec!["probesMissing".into()], include_system: false });
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let s = Settings { k8s_security_checks: K8sSecurityChecks { disabled: vec!["privileged".into(), "imageLatest".into()], include_system: true }, ..Default::default() };
+        save(&path, &s).unwrap();
+        assert_eq!(load(&path, &[]).k8s_security_checks, s.k8s_security_checks);
+        let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(json["k8sSecurityChecks"]["includeSystem"], true);
+        assert_eq!(json["k8sSecurityChecks"]["disabled"][1], "imageLatest");
     }
 
     #[test]
