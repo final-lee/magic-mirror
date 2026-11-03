@@ -12,17 +12,13 @@ vi.mock("./api", () => ({ k8sApi: { changeLog: vi.fn(), undo: vi.fn(), preview: 
 const target = { profile: "p", region: "r", cluster: "c" };
 const change: K8sChange = { kind: DEPLOYMENTS, namespace: "default", name: "web", type: "scale", replicas: 2 };
 
-test("history is scoped to the cluster and undo prepares a preview only in change mode", async () => {
+test("history is scoped to the cluster and undo prepares a preview", async () => {
   vi.mocked(k8sApi.changeLog).mockResolvedValue([{ id: "one", at: "2026-10-30T11:00:00Z", target, change, summary: "scale web", ok: true, error: null, inverse: change, undoOf: null, undone: false }, { id: "two", at: "2026-10-30T11:00:00Z", target: { ...target, cluster: "other" }, change, summary: "other cluster", ok: true, error: null, inverse: change, undoOf: null, undone: false }]);
   vi.mocked(k8sApi.undo).mockResolvedValue({ target, change });
   const onStart = vi.fn();
-  const qc = newQueryClient();
-  const renderView = (mode: boolean) => withClientAndSso(<ChangeLog target={target} onStart={onStart} changeMode={mode} />, qc, ssoLoginStub());
-  const { rerender } = render(renderView(false));
+  render(withClientAndSso(<ChangeLog target={target} onStart={onStart} />, newQueryClient(), ssoLoginStub()));
   expect(await screen.findByText("scale web")).toBeInTheDocument();
   expect(screen.queryByText("other cluster")).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: CHANGE_UNDO })).not.toBeInTheDocument();
-  rerender(renderView(true));
   fireEvent.click(screen.getByRole("button", { name: CHANGE_UNDO }));
   await waitFor(() => expect(onStart).toHaveBeenCalledWith(change, "one"));
 });
@@ -32,7 +28,7 @@ function HistoryFlow() {
   const flow = useK8sChange(target, "p", () => {});
   return (
     <>
-      <ChangeLog target={target} onStart={flow.start} changeMode />
+      <ChangeLog target={target} onStart={flow.start} />
       {flow.pending && <ChangeDialog pending={flow.pending} apply={flow.apply} retry={flow.retry} cancel={flow.cancel} />}
     </>
   );
@@ -67,7 +63,7 @@ test("a shell session shows when it was opened and closed and can never be undon
   vi.mocked(k8sApi.changeLog).mockResolvedValue([
     { id: "s1", at: "2026-10-30T11:00:00Z", target, change: session, summary: "Pod 셸 열기: dev/web-1 (app)", ok: true, error: null, inverse: null, undoOf: null, undone: false, closedAt: "2026-10-30T11:05:00Z" },
   ]);
-  render(withClientAndSso(<ChangeLog target={target} onStart={vi.fn()} changeMode />, newQueryClient(), ssoLoginStub()));
+  render(withClientAndSso(<ChangeLog target={target} onStart={vi.fn()} />, newQueryClient(), ssoLoginStub()));
   expect(await screen.findByText("Pod 셸 열기: dev/web-1 (app)")).toBeInTheDocument();
   expect(screen.getByText(new RegExp(SHELL_CLOSED_AT(formatDateTime("2026-10-30T11:05:00Z"))))).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: CHANGE_UNDO })).not.toBeInTheDocument();

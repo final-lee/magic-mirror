@@ -20,11 +20,11 @@ const view = (kind: K8sKindRef, name: string, over: Partial<K8sObjectView> = {})
 });
 const allowed: K8sRules = { namespace: "prod", incomplete: true, nonResourceRules: [], resourceRules: [] };
 
-function setup(kind: K8sKindRef, name: string, changeMode = true) {
+function setup(kind: K8sKindRef, name: string) {
   const onChange = vi.fn();
   render(withClientAndSso(
     <ObjectDetail target={T} context="ctx" ssoProfile="p" live objectRef={{ kind, namespace: "prod", name }} resourceVersion="7" kinds={[]}
-      onOpen={vi.fn()} onBack={null} onClose={vi.fn()} changeMode={changeMode} onChange={onChange} />,
+      onOpen={vi.fn()} onBack={null} onClose={vi.fn()} onChange={onChange} />,
     newQueryClient(), ssoLoginStub(),
   ));
   return onChange;
@@ -40,13 +40,6 @@ const edit = async () => {
 beforeEach(() => {
   vi.resetAllMocks();
   m.rules.mockResolvedValue(allowed);
-});
-
-test("the edit button appears only with change mode", async () => {
-  m.get.mockResolvedValue(view(CONFIGMAPS, "app"));
-  setup(CONFIGMAPS, "app", false);
-  await openYaml();
-  expect(screen.queryByRole("button", { name: t.YAML_EDIT })).not.toBeInTheDocument();
 });
 
 test("editing shows the cleaned YAML in an editor and cancel returns to the read-only view", async () => {

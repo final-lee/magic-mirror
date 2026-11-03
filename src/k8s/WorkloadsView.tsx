@@ -27,7 +27,6 @@ interface Props {
   kinds: K8sKind[];
   focus: WorkloadsFocus | null;
   onOpenIam?: (arn: string) => void;
-  changeMode?: boolean;
   onChange?: (change: K8sChange) => void;
   appliedChange?: K8sChange | null;
   /** 목록 위에 붙이는 알림(종류 발견 실패 등). 종류 트리와 기본 종류 탐색은 그대로 쓴다. */
@@ -46,7 +45,7 @@ interface Props {
 
 /** 종류 트리 + 감시 목록 + 상세 스택 */
 export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live, namespace, kinds, focus, onOpenIam, banner,
-  fixedKind, bookmarked, onToggleBookmark, lanes, changeMode, onChange, appliedChange }: Props) {
+  fixedKind, bookmarked, onToggleBookmark, lanes, onChange, appliedChange }: Props) {
   const [picked, setKind] = useState<K8sKindRef>(PODS);
   const kind = fixedKind ?? picked;
   const [stack, setStack] = useState<ObjectRef[]>([]);
@@ -133,7 +132,6 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
             onBack={stack.length > 1 ? () => setStack((s) => s.slice(0, -1)) : null}
             onClose={() => setStack([])}
             onOpenIam={onOpenIam}
-            changeMode={changeMode}
             onChange={onChange ? startChange : undefined}
             rolloutProgress={progress}
             appliedChange={appliedChange}
