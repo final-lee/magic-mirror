@@ -573,6 +573,10 @@ impl Evaluation {
     pub fn identity_of(&self, subject: &Subject) -> (Option<String>, Vec<String>) {
         let actor = self.actor(subject);
         let mut groups = actor.groups;
+        // 그룹 주체는 그 그룹 하나만 가진 신원이다(기본 그룹은 물려받지 않는다)
+        if subject.kind == SubjectKind::Group {
+            groups.push(subject.name.clone());
+        }
         groups.extend(actor.defaults);
         (actor.username, groups)
     }
