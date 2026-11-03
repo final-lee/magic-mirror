@@ -481,6 +481,8 @@ export const nodeCount = (n: number) => `노드 ${n}`;
 export const CLUSTER_GRAPH_NOTE = "모든 노드 사용량의 합 · 최근 1시간 · 연결된 동안 15초마다 모은 값이에요.";
 export const NO_WARNINGS = "최근 Warning 이벤트가 없어요";
 export const warningsMore = (n: number) => (n > 0 ? `이벤트 화면에서 모두 보기 (Warning ${n}개)` : "이벤트 화면 열기");
+export const OPEN_EKS_TAB = "EKS 탭에서 열기";
+export const CLUSTER_DETAIL_NO_CONTEXT = "이 클러스터에 붙을 kubeconfig context를 아직 고르지 않았어요. EKS 탭에서 고르면 여기에도 요약이 보여요.";
 
 // 사용량(metrics-server)
 export const COL_CPU = "CPU";

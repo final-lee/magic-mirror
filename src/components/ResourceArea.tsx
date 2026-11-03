@@ -6,6 +6,7 @@ import { resourceDetail } from "../lib/detail";
 import type { S3Location } from "../lib/s3";
 import { NOT_POSTGRES, pgTargetOf } from "../pg/targets";
 import type { K8sTarget } from "../k8s/types";
+import { ClusterDetailSummary } from "../k8s/ClusterDetailSummary";
 import type { PgTarget } from "../pg/types";
 import { Breadcrumb } from "./Breadcrumb";
 import { DetailPanel } from "./DetailPanel";
@@ -100,7 +101,15 @@ export function ResourceArea({ service, type, profile, region, account, filter, 
         )}
         <StatusBar profile={profile} account={account} region={service.global ? GLOBAL : region} updatedAt={q.dataUpdatedAt} />
       </section>
-      <DetailPanel detail={selected ? resourceDetail(selected, type, service) : null} onShowRaw={() => setShowRaw(true)} />
+      <DetailPanel detail={selected ? resourceDetail(selected, type, service) : null} onShowRaw={() => setShowRaw(true)}>
+        {selected && service.id === "eks" && type.id === "clusters" && (
+          <ClusterDetailSummary
+            key={`${profile}|${region}|${selected.id}`}
+            target={{ profile, region, cluster: selected.id }}
+            onOpen={() => onOpenK8s?.({ profile, region, cluster: selected.id })}
+          />
+        )}
+      </DetailPanel>
       {showRaw && selected && <RawModal title={selected.name} text={selected.raw} onClose={() => setShowRaw(false)} />}
     </>
   );
