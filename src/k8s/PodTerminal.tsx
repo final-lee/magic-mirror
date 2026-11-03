@@ -127,7 +127,7 @@ export function PodTerminal({ target, ssoProfile, namespace, pod, container, mod
             <p>{shellExited(state.code, state.reason)}</p>
             {/* 노드 셸 Pod는 세션이 끝나면 지워지니 같은 Pod로 다시 열 수 없다 */}
             {mode !== "node" && (
-              <button className="btn" onClick={restart}>
+              <button className="btn tone-secondary" onClick={restart}>
                 {SHELL_REOPEN}
               </button>
             )}

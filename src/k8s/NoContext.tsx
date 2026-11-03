@@ -25,10 +25,10 @@ export function NoContext({ message, command, onRecheck }: Props) {
         <p>{message}</p>
         <code className="k8s-cmd">{command}</code>
         <div className="k8s-actions">
-          <button className="btn" onClick={() => void copy()}>
+          <button className="btn tone-secondary" onClick={() => void copy()}>
             {copied ? COPIED : COPY}
           </button>
-          <button className="btn" onClick={onRecheck}>
+          <button className="btn tone-secondary" onClick={onRecheck}>
             {RECHECK}
           </button>
         </div>

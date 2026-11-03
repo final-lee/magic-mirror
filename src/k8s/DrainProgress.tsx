@@ -62,11 +62,11 @@ export function DrainProgress({ run, onStop, onClose }: Props) {
         </div>
         <div className="foot">
           {finished ? (
-            <button ref={closeRef} className="btn primary" onClick={onClose}>
+            <button ref={closeRef} className="btn tone-ghost" onClick={onClose}>
               {t.DRAIN_CLOSE}
             </button>
           ) : (
-            <button ref={stopRef} className="btn danger" disabled={run.id === null || run.stopping} onClick={onStop}>
+            <button ref={stopRef} className="btn tone-warn" disabled={run.id === null || run.stopping} onClick={onStop}>
               {t.DRAIN_STOP}
             </button>
           )}

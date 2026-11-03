@@ -145,17 +145,17 @@ export function SecretEdit({ target, ssoProfile, namespace, name, keys, canRead,
                     </div>
                   )}
                   {!value && !editing && (
-                    <button className="btn" disabled={canRead === "no" || busy.has(key)} title={canRead === "no" ? t.NO_SECRET_PERMISSION : undefined} onClick={() => void reveal(key)}>
+                    <button className="btn tone-secondary" disabled={canRead === "no" || busy.has(key)} title={canRead === "no" ? t.NO_SECRET_PERMISSION : undefined} onClick={() => void reveal(key)}>
                       {t.SHOW_VALUE}
                     </button>
                   )}{" "}
                   {!editing && (
-                    <button className="btn" onClick={() => onEdits({ ...edits, values: { ...edits.values, [key]: "" } })}>
+                    <button className="btn tone-secondary" onClick={() => onEdits({ ...edits, values: { ...edits.values, [key]: "" } })}>
                       {t.SECRET_NEW_VALUE}
                     </button>
                   )}
                   {editing && (
-                    <button className="btn" onClick={() => keep(key)}>
+                    <button className="btn tone-ghost" onClick={() => keep(key)}>
                       {t.SECRET_KEEP}
                     </button>
                   )}
@@ -169,7 +169,7 @@ export function SecretEdit({ target, ssoProfile, namespace, name, keys, canRead,
               <td className="mono">{key}</td>
               <td />
               <td>
-                <button className="btn" onClick={() => onEdits({ ...edits, extra: edits.extra.filter((e) => e.key !== key) })}>
+                <button className="btn tone-ghost" onClick={() => onEdits({ ...edits, extra: edits.extra.filter((e) => e.key !== key) })}>
                   {t.CHANGE_CANCEL}
                 </button>
               </td>
@@ -180,7 +180,7 @@ export function SecretEdit({ target, ssoProfile, namespace, name, keys, canRead,
       <div className="k8s-actions">
         <input aria-label={t.SECRET_NEW_KEY_NAME} placeholder={t.SECRET_NEW_KEY_NAME} value={newKey} onChange={(e) => setNewKey(e.target.value)} />
         <input aria-label={t.SECRET_NEW_KEY_VALUE} placeholder={t.SECRET_NEW_KEY_VALUE} value={newValue} onChange={(e) => setNewValue(e.target.value)} />
-        <button className="btn" disabled={!addable} onClick={add}>
+        <button className="btn tone-secondary" disabled={!addable} onClick={add}>
           {t.SECRET_ADD}
         </button>
       </div>

@@ -61,10 +61,10 @@ export function YamlCreate({ kinds, namespace, onPreview, onClose }: Props) {
           )}
         </div>
         <div className="foot">
-          <button ref={cancelRef} className="btn plain" onClick={onClose}>
+          <button ref={cancelRef} className="btn tone-ghost" onClick={onClose}>
             {t.CHANGE_CANCEL}
           </button>
-          <button className="btn primary" disabled={problems.length > 0 || text.trim() === ""} onClick={preview}>
+          <button className="btn tone-primary" disabled={problems.length > 0 || text.trim() === ""} onClick={preview}>
             {t.YAML_PREVIEW}
           </button>
         </div>

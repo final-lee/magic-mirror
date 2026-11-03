@@ -1120,4 +1120,14 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .btn.tone-warn:hover:not(:disabled) { background: #ffe14d; }
 .btn.tone-danger { background: var(--red); border-color: var(--red); color: #fff; }
 .btn.tone-danger:hover:not(:disabled) { background: #ff6b62; }
+.btn.tone-secondary { background: #3a3a3d; border-color: #4a4a4e; color: #fff; }
+.btn.tone-secondary:hover:not(:disabled) { background: #45454a; }
+.btn.tone-nav { background: transparent; border-color: var(--accent); color: var(--accent); }
+.btn.tone-nav:hover:not(:disabled) { background: #0a84ff1a; }
+.btn.tone-ghost { background: transparent; border-color: var(--line); color: var(--dim); }
+.btn.tone-ghost:hover:not(:disabled) { background: transparent; color: var(--text); }
+.btn.tone-ghost-danger { background: transparent; border-color: #ff453a66; color: var(--red); }
+.btn.tone-ghost-danger:hover:not(:disabled) { background: transparent; color: var(--text); }
+.argo-token-acts .btn.tone-primary { width: auto; padding: 6px 16px; display: inline-block; }
+.argo-token-acts .btn.tone-ghost { width: auto; display: inline-block; }
 .btn.tone-primary:disabled, .btn.tone-warn:disabled, .btn.tone-danger:disabled { opacity: .4; }

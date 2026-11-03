@@ -174,7 +174,7 @@ export function PreviewBody({ preview, typed, onTyped, locked, onForce }: BodyPr
           {onForce && (
             <>
               <p className="dim">{t.CHANGE_FORCE_NOTE}</p>
-              <button className="btn" onClick={onForce}>{t.CHANGE_FORCE}</button>
+              <button className="btn tone-warn" onClick={onForce}>{t.CHANGE_FORCE}</button>
             </>
           )}
         </>

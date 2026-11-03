@@ -50,7 +50,7 @@ export function OverviewView({ target, context, ssoProfile, live, onOpenNode }: 
   return (
     <div className="k8s-overview">
       <div className="k8s-actions">
-        <button className="btn" onClick={refetch} disabled={q.isFetching}>{REFRESH}</button>
+        <button className="btn tone-secondary" onClick={refetch} disabled={q.isFetching}>{REFRESH}</button>
       </div>
       <Sect title={SEC_CLUSTER}>
         {gaps("cluster")}

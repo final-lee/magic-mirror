@@ -55,11 +55,11 @@ export function ForwardsView({ target, ssoProfile }: Props) {
                 <td className="mono">{f.pod ?? ""}</td>
                 <td>{f.pod === null ? FORWARD_NO_POD : (f.error ?? FORWARD_HEALTHY)}</td>
                 <td className="k8s-actions">
-                  <button className="btn" onClick={() => void desktop.openUrl(forwardUrl(f))}>
+                  <button className="btn tone-secondary" onClick={() => void desktop.openUrl(forwardUrl(f))}>
                     {FORWARD_OPEN_BROWSER}
                   </button>
                   <button
-                    className="btn"
+                    className="btn tone-secondary"
                     onClick={() => {
                       void desktop.copy(forwardUrl(f));
                       setCopied(f.id);
@@ -67,7 +67,7 @@ export function ForwardsView({ target, ssoProfile }: Props) {
                   >
                     {copied === f.id ? COPIED : FORWARD_COPY_URL}
                   </button>
-                  <button className="btn" onClick={() => void close(f.id)}>
+                  <button className="btn tone-ghost" onClick={() => void close(f.id)}>
                     {FORWARD_CLOSE}
                   </button>
                 </td>

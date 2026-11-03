@@ -419,7 +419,7 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
           </select>
         </label>
         <button
-          className="btn small"
+          className="btn small tone-secondary"
           onClick={() => {
             setAllOpen(!allOpen);
             setManual(new Map());
