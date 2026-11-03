@@ -261,7 +261,9 @@ export const FORWARD_PORT = "대상 포트";
 export const FORWARD_CUSTOM = "직접 입력";
 export const FORWARD_LOCAL = "로컬 포트";
 export const FORWARD_LOCAL_AUTO = "자동";
-export const FORWARD_OPEN = "열기";
+/** 포트포워딩 열기 버튼의 이름(화면 글은 FORWARD_OPEN_SHORT). 셸 탭의 [열기]와 구분된다 */
+export const FORWARD_OPEN = "포트포워딩 열기";
+export const FORWARD_OPEN_SHORT = "열기";
 export const FORWARD_BAD_PORT = "포트는 1~65535 숫자로 입력해 주세요";
 export const FORWARD_NO_PORTS = "컨테이너가 포트를 선언하지 않았어요. 직접 입력할 수 있어요";
 export const forwardPortLabel = (p: { port: number; name: string | null; container: string | null; target: string | null }) =>

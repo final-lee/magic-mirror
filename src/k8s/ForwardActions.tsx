@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { desktop } from "../api/desktop";
 import { ErrorState } from "../components/ErrorState";
 import { k8sApi } from "./api";
@@ -59,21 +59,24 @@ interface ObjectForwardsProps {
   kind: K8sForwardKind;
   name: string;
   live: boolean;
+  /** 맨 위에 놓을 포트포워딩 열기 줄. 있으면 열린 것이 없어도 영역을 그린다 */
+  children?: ReactNode;
 }
 
 /**
- * Pod·Service 상세에 보이는 이 객체의 열린 port-forward. Pod 상세에는 지금 이 Pod로 이어진 Service 포워드도 함께 보인다.
- * 열린 것이 없으면 아무것도 그리지 않는다.
+ * Pod·Service 상세의 포트포워딩 영역: 열기 줄과 이 객체의 열린 port-forward. Pod 상세에는 지금 이 Pod로 이어진 Service 포워드도 함께 보인다.
+ * 열기 줄도 열린 것도 없으면 아무것도 그리지 않는다.
  */
-export function ObjectForwards({ target, ssoProfile, namespace, kind, name, live }: ObjectForwardsProps) {
+export function ObjectForwards({ target, ssoProfile, namespace, kind, name, live, children }: ObjectForwardsProps) {
   const forwards = useK8sForwards(live);
   const { close, error, clearError } = useCloseForward();
   const here = (forwards.data ?? []).filter(
     (f) => targetKey(f.target) === targetKey(target) && f.namespace === namespace && ((f.kind === kind && f.name === name) || (kind === "pod" && f.pod === name)),
   );
-  if (here.length === 0 && error === null) return null;
+  if (here.length === 0 && error === null && !children) return null;
   return (
     <div className="k8s-obj-forwards" role="region" aria-label={FORWARDS_HERE}>
+      {children}
       {error !== null && <ErrorState error={error} profile={ssoProfile} compact onRetry={clearError} />}
       {here.map((f) => (
         <div key={f.id} className={`k8s-obj-forward${f.error || f.pod === null ? " k8s-warn" : ""}`}>

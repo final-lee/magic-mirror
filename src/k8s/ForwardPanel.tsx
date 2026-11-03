@@ -5,7 +5,7 @@ import { k8sApi } from "./api";
 import { FORWARDS_KEY } from "./forwards";
 import { parsePort, streamPermission } from "./streams";
 import {
-  FORWARD_BAD_PORT, FORWARD_CUSTOM, FORWARD_LOCAL, FORWARD_LOCAL_AUTO, FORWARD_NO_PORTS, FORWARD_OPEN, FORWARD_PORT, FORWARD_START, forwardPortLabel,
+  FORWARD_BAD_PORT, FORWARD_CUSTOM, FORWARD_LOCAL, FORWARD_LOCAL_AUTO, FORWARD_NO_PORTS, FORWARD_OPEN, FORWARD_OPEN_SHORT, FORWARD_PORT, FORWARD_START, forwardPortLabel,
 } from "./text";
 import type { K8sForwardKind, K8sPort, K8sRules, K8sTarget } from "./types";
 
@@ -22,11 +22,10 @@ interface Props {
   rules: K8sRules | undefined;
 }
 
-/** Pod나 Service 상세의 port-forward 버튼과 포트 고르기. 연 포트포워딩은 상세의 "이 객체의 포트포워딩" 줄에 보인다. */
+/** Pod나 Service 상세의 포트포워딩 열기 줄: 대상 포트·로컬 포트·[열기]가 한 줄. 연 포트포워딩은 그 아래 줄들에 보인다. */
 export function ForwardPanel({ target, ssoProfile, namespace, kind, name, ports, rules }: Props) {
   const qc = useQueryClient();
   const perm = streamPermission(rules, "portforward", kind === "pod" ? name : undefined);
-  const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<string>(ports.length > 0 ? String(ports[0].port) : CUSTOM);
   const [custom, setCustom] = useState("");
   const [local, setLocal] = useState("");
@@ -46,7 +45,7 @@ export function ForwardPanel({ target, ssoProfile, namespace, kind, name, ports,
     setBusy(true);
     try {
       await k8sApi.forwardOpen(target, { namespace, kind, name, remotePort: remote, localPort }, ssoProfile);
-      setOpen(false);
+      setLocal("");
       void qc.invalidateQueries({ queryKey: FORWARDS_KEY });
     } catch (e) {
       setError(e);
@@ -57,37 +56,39 @@ export function ForwardPanel({ target, ssoProfile, namespace, kind, name, ports,
 
   return (
     <>
-      <button className="btn small tone-primary" disabled={!perm.allowed} title={perm.reason ?? undefined} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        {FORWARD_START}
-      </button>
-      {open && perm.allowed && (
-        <div className="k8s-forward-panel">
-          {ports.length === 0 && <p className="dim k8s-hint">{FORWARD_NO_PORTS}</p>}
-          <label className="k8s-field">
-            {FORWARD_PORT}
-            <select value={selected} onChange={(e) => setSelected(e.target.value)}>
-              {ports.map((p) => (
-                <option key={`${p.container ?? ""}/${p.port}`} value={String(p.port)}>
-                  {forwardPortLabel(p)}
-                </option>
-              ))}
-              <option value={CUSTOM}>{FORWARD_CUSTOM}</option>
-            </select>
-          </label>
-          {selected === CUSTOM && <input aria-label={FORWARD_CUSTOM} inputMode="numeric" value={custom} onChange={(e) => setCustom(e.target.value)} />}
-          <label className="k8s-field">
-            {FORWARD_LOCAL}
-            <input inputMode="numeric" placeholder={FORWARD_LOCAL_AUTO} value={local} onChange={(e) => setLocal(e.target.value)} />
-          </label>
-          <div className="k8s-actions">
-            <button className="btn tone-primary" disabled={busy} onClick={() => void start()}>
-              {FORWARD_OPEN}
-            </button>
-          </div>
-          {problem && <p className="err">{problem}</p>}
-          {error !== null && <ErrorState error={error} profile={ssoProfile} compact onRetry={() => void start()} onLoggedIn={() => void start()} />}
-        </div>
-      )}
+      <div className="k8s-forward-form">
+        <span className="k8s-forward-title">{FORWARD_START}</span>
+        <label>
+          {FORWARD_PORT}
+          <select value={selected} onChange={(e) => setSelected(e.target.value)}>
+            {ports.map((p) => (
+              <option key={`${p.container ?? ""}/${p.port}`} value={String(p.port)}>
+                {forwardPortLabel(p)}
+              </option>
+            ))}
+            <option value={CUSTOM}>{FORWARD_CUSTOM}</option>
+          </select>
+        </label>
+        {selected === CUSTOM && (
+          <input
+            className="k8s-port-input"
+            aria-label={FORWARD_CUSTOM}
+            title={ports.length === 0 ? FORWARD_NO_PORTS : undefined}
+            inputMode="numeric"
+            value={custom}
+            onChange={(e) => setCustom(e.target.value)}
+          />
+        )}
+        <label>
+          {FORWARD_LOCAL}
+          <input className="k8s-port-input" inputMode="numeric" placeholder={FORWARD_LOCAL_AUTO} value={local} onChange={(e) => setLocal(e.target.value)} />
+        </label>
+        <button className="btn tone-primary" aria-label={FORWARD_OPEN} disabled={!perm.allowed || busy} title={perm.reason ?? undefined} onClick={() => void start()}>
+          {FORWARD_OPEN_SHORT}
+        </button>
+      </div>
+      {problem && <p className="err">{problem}</p>}
+      {error !== null && <ErrorState error={error} profile={ssoProfile} compact onRetry={() => void start()} onLoggedIn={() => void start()} />}
     </>
   );
 }

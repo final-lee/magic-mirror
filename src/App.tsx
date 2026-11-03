@@ -326,7 +326,7 @@ export default function App() {
           </div>
         )}
         {argocdTab && (
-          <div className="tabpane" hidden={activeTab !== "argocd"}>
+          <div className="tabpane argo-pane" hidden={activeTab !== "argocd"}>
             <ArgocdTab active={activeTab === "argocd"} />
           </div>
         )}
@@ -359,7 +359,7 @@ export default function App() {
           </div>
         ))}
         {k8sTabs.map((t) => (
-          <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
+          <div key={t.id} className="tabpane k8s-pane" hidden={activeTab !== t.id}>
             <K8sTab target={t.target} active={activeTab === t.id} onOpenIam={openIam} />
           </div>
         ))}

@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
 import { ForwardPanel } from "./ForwardPanel";
-import { FORWARD_BAD_PORT, FORWARD_CUSTOM, FORWARD_LOCAL, FORWARD_OPEN, FORWARD_PORT, FORWARD_START, noStreamPermission } from "./text";
+import { FORWARD_BAD_PORT, FORWARD_CUSTOM, FORWARD_LOCAL, FORWARD_OPEN, FORWARD_PORT, noStreamPermission } from "./text";
 import type { K8sForward, K8sPort, K8sRules } from "./types";
 
 vi.mock("./api", () => ({ k8sApi: { forwardOpen: vi.fn() } }));
@@ -29,20 +29,18 @@ function setup(props: Partial<Parameters<typeof ForwardPanel>[0]> = {}) {
 
 beforeEach(() => vi.clearAllMocks());
 
-test("the first declared port is preselected, the local port is automatic, and the picker closes once opened", async () => {
+test("the port-forward line is there without any button: first declared port preselected, local port automatic", async () => {
   m.forwardOpen.mockResolvedValue(forward());
   setup();
-  fireEvent.click(screen.getByRole("button", { name: FORWARD_START }));
+  expect(screen.getByLabelText(FORWARD_PORT)).toHaveValue("8080");
   fireEvent.click(screen.getByRole("button", { name: FORWARD_OPEN }));
   await act(async () => {});
   expect(m.forwardOpen).toHaveBeenCalledWith(T, { namespace: "dev", kind: "pod", name: "web-1", remotePort: 8080, localPort: null }, "p");
-  expect(screen.queryByRole("button", { name: FORWARD_OPEN })).not.toBeInTheDocument();
 });
 
 test("picks another declared port and a chosen local port", async () => {
   m.forwardOpen.mockResolvedValue(forward({ localPort: 5000, remotePort: 9090 }));
   setup();
-  fireEvent.click(screen.getByRole("button", { name: FORWARD_START }));
   fireEvent.change(screen.getByLabelText(FORWARD_PORT), { target: { value: "9090" } });
   fireEvent.change(screen.getByLabelText(FORWARD_LOCAL), { target: { value: "5000" } });
   fireEvent.click(screen.getByRole("button", { name: FORWARD_OPEN }));
@@ -53,7 +51,6 @@ test("picks another declared port and a chosen local port", async () => {
 test("a service forward sends the service kind and a typed port when none is declared", async () => {
   m.forwardOpen.mockResolvedValue(forward({ kind: "service", name: "web", remotePort: 80 }));
   setup({ kind: "service", name: "web", ports: [] });
-  fireEvent.click(screen.getByRole("button", { name: FORWARD_START }));
   fireEvent.change(screen.getByLabelText(FORWARD_CUSTOM), { target: { value: "80" } });
   fireEvent.click(screen.getByRole("button", { name: FORWARD_OPEN }));
   await act(async () => {});
@@ -62,7 +59,6 @@ test("a service forward sends the service kind and a typed port when none is dec
 
 test("a bad port is refused before anything is sent", async () => {
   setup({ ports: [] });
-  fireEvent.click(screen.getByRole("button", { name: FORWARD_START }));
   fireEvent.change(screen.getByLabelText(FORWARD_CUSTOM), { target: { value: "99999" } });
   fireEvent.click(screen.getByRole("button", { name: FORWARD_OPEN }));
   expect(screen.getByText(FORWARD_BAD_PORT)).toBeInTheDocument();
@@ -72,15 +68,14 @@ test("a bad port is refused before anything is sent", async () => {
 test("a failed open shows the error", async () => {
   m.forwardOpen.mockRejectedValue({ kind: "other", message: "로컬 포트 80를 쓸 수 없어요" });
   setup();
-  fireEvent.click(screen.getByRole("button", { name: FORWARD_START }));
   fireEvent.click(screen.getByRole("button", { name: FORWARD_OPEN }));
   await act(async () => {});
   expect(screen.getByText(/로컬 포트 80/)).toBeInTheDocument();
 });
 
-test("without pods/portforward permission the button is off and its reason is the tooltip", () => {
+test("without pods/portforward permission the open button is off and its reason is the tooltip", () => {
   setup({ rules: { ...rules, resourceRules: [] } });
-  const b = screen.getByRole("button", { name: FORWARD_START });
+  const b = screen.getByRole("button", { name: FORWARD_OPEN });
   expect(b).toBeDisabled();
   expect(b).toHaveAttribute("title", noStreamPermission("pods/portforward"));
 });
