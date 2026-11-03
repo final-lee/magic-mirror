@@ -558,6 +558,13 @@ pub async fn k8s_get(k8s: State<'_, K8sState>, target: K8sTarget, kind: KindRef,
     detail::get(&s.client, &kind, namespace.as_deref(), &name, s.endpoint).await
 }
 
+/// 사용량(metrics-server). 네임스페이스가 없으면 모든 네임스페이스. 서버가 없거나 권한이 없으면 오류 대신 `unavailable` 사유를 돌려준다.
+#[tauri::command]
+pub async fn k8s_metrics(k8s: State<'_, K8sState>, target: K8sTarget, namespace: Option<String>) -> Result<crate::k8s::read::metrics::Metrics, AppError> {
+    let s = k8s.session(&target)?;
+    crate::k8s::read::metrics::metrics(&s.client, namespace.as_deref(), s.endpoint).await
+}
+
 /// 개요. 부분마다 실패를 `gaps`에 담아 돌려주므로 연결이 없을 때와 AWS 프로필 설정을 읽지 못할 때만 실패한다.
 #[tauri::command]
 pub async fn k8s_overview(app: State<'_, AppState>, k8s: State<'_, K8sState>, target: K8sTarget) -> Result<Overview, AppError> {

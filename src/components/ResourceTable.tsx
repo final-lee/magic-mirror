@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useToggleSelect } from "../hooks/useToggleSelect";
 import type { Column, Resource } from "../api/types";
 import { compareValues } from "../lib/format";
 import { fuzzyFilter, fuzzyKeep, tokenize } from "../lib/fuzzy";
@@ -10,6 +11,8 @@ interface Props {
   filter: string;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** 고른 행을 다시 누르거나 빈 곳을 누르면 선택을 푼다 */
+  onClear: () => void;
   onOpen: (id: string) => void;
   /** 이 행이 보이게 스크롤한다(⌘K로 찾아 온 리소스). 보이게 한 뒤 onRevealed를 부른다 */
   revealId?: string | null;
@@ -26,7 +29,8 @@ export function resourceSearchFields(r: Pick<Resource, "name" | "id" | "values" 
   ];
 }
 
-export function ResourceTable({ columns, items, filter, selectedId, onSelect, onOpen, revealId = null, onRevealed }: Props) {
+export function ResourceTable({ columns, items, filter, selectedId, onSelect, onClear, onOpen, revealId = null, onRevealed }: Props) {
+  const toggle = useToggleSelect(selectedId, onSelect, onClear);
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: columns[0]?.key ?? "", dir: 1 });
   // 필터가 있으면 잘 맞는 순서로 보인다. 사용자가 열 머리를 누르면 그 뒤로는 그 열 순서가 이긴다.
   const [userSorted, setUserSorted] = useState(false);
@@ -64,7 +68,7 @@ export function ResourceTable({ columns, items, filter, selectedId, onSelect, on
   };
 
   return (
-    <div className="tbl" tabIndex={0} onKeyDown={onKeyDown} data-testid="resource-table">
+    <div className="tbl" tabIndex={0} onKeyDown={onKeyDown} onClick={toggle.blank} data-testid="resource-table">
       <table>
         <thead>
           <tr>
@@ -82,8 +86,11 @@ export function ResourceTable({ columns, items, filter, selectedId, onSelect, on
               data-id={r.id}
               className={r.id === selectedId ? "on" : undefined}
               aria-selected={r.id === selectedId}
-              onClick={() => onSelect(r.id)}
-              onDoubleClick={() => onOpen(r.id)}
+              onClick={(e) => toggle.row(r.id, e)}
+              onDoubleClick={() => {
+                toggle.dblclick();
+                onOpen(r.id);
+              }}
             >
               {columns.map((c) => (
                 <td key={c.key}>

@@ -41,14 +41,15 @@ import {
   YAML_PREVIEW,
   profileMismatch,
   savedMissing,
+  WARNINGS_ONLY,
 } from "./text";
-import { DEPLOYMENTS, EVENTS, NODES, PODS } from "./kinds";
+import { DEPLOYMENTS, NODES, PODS } from "./kinds";
 import type { K8sContextCandidate, K8sContextInfo, K8sRow, K8sRules, K8sSession, K8sTarget, K8sWatchMessage } from "./types";
 
 // 터미널(xterm)은 PodTerminal.test에서 본다
 vi.mock("./PodTerminal", () => ({ PodTerminal: () => null }));
 vi.mock("./api", () => ({
-  k8sApi: { context: vi.fn(), open: vi.fn(), close: vi.fn(), rules: vi.fn(), watch: vi.fn(), unwatch: vi.fn(), kinds: vi.fn(), get: vi.fn(), secretValue: vi.fn(), overview: vi.fn(), preview: vi.fn(), apply: vi.fn() },
+  k8sApi: { context: vi.fn(), open: vi.fn(), close: vi.fn(), rules: vi.fn(), watch: vi.fn(), unwatch: vi.fn(), kinds: vi.fn(), get: vi.fn(), secretValue: vi.fn(), overview: vi.fn(), metrics: vi.fn(), preview: vi.fn(), apply: vi.fn() },
 }));
 vi.mock("../api/client", () => ({ api: { getSettings: vi.fn(), saveSettings: vi.fn(), ssoLogin: vi.fn() } }));
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: vi.fn(async () => {}) }));
@@ -90,7 +91,9 @@ function setup(settings: Partial<Settings> = {}, sso = ssoLoginStub()) {
   const tree = () => withClientAndSso(<K8sTab target={target} active />, qc, sso);
   return { qc, ...render(tree()) };
 }
-const watchCalls = () => m.watch.mock.calls;
+// 개요의 최근 경고가 이벤트도 감시하므로, 연결·다시 연결 시험은 네임스페이스 감시만 센다
+const watchCalls = () => m.watch.mock.calls.filter((c) => c[1].plural === "namespaces");
+const allWatchCalls = () => m.watch.mock.calls;
 const sendNamespaces = (rows: K8sRow[]) => act(() => emit({ type: "reset", rows }));
 
 beforeEach(() => {
@@ -101,10 +104,11 @@ beforeEach(() => {
   m.rules.mockResolvedValue(rules());
   m.kinds.mockResolvedValue([]);
   m.overview.mockResolvedValue(emptyOverview);
+  m.metrics.mockResolvedValue({ podsUnavailable: null, nodesUnavailable: null, pods: [], nodes: [] });
   m.unwatch.mockResolvedValue(null);
-  m.watch.mockImplementation(async (_t, _k, _n, _p, onMessage) => {
-    emit = onMessage;
-    return 1;
+  m.watch.mockImplementation(async (_t, k, _n, _p, onMessage) => {
+    if (k.plural === "namespaces") emit = onMessage;
+    return m.watch.mock.calls.length;
   });
 });
 
@@ -348,6 +352,17 @@ test("the context is not read until the settings have loaded", async () => {
   await waitFor(() => expect(m.context).toHaveBeenCalledWith(target, "/kc", null));
 });
 
+test("a hidden tab keeps collecting usage for the graphs", async () => {
+  m.context.mockResolvedValue(info([cand("ctx")]));
+  const qc = newQueryClient();
+  qc.setQueryData(["settings"], { enabledServices: [], favorites: [], lastProfile: "app", lastRegion: null });
+  vi.mocked(api.getSettings).mockResolvedValue({ enabledServices: [], favorites: [], lastProfile: "app", lastRegion: null });
+  render(withClientAndSso(<K8sTab target={target} active={false} />, qc, ssoLoginStub()));
+  await screen.findByText(STATE_CONNECTED);
+  // 고른 네임스페이스(여기서는 전체)를 읽는다
+  await waitFor(() => expect(m.metrics).toHaveBeenCalledWith(target, null, target.profile));
+});
+
 test("opens on the overview once connected", async () => {
   m.context.mockResolvedValue(info([cand("ctx")]));
   setup();
@@ -363,16 +378,18 @@ test("the nav switches to All (pods) and events", async () => {
   setup();
   await screen.findByText(STATE_CONNECTED);
   fireEvent.click(screen.getByRole("button", { name: NAV_ALL }));
-  await waitFor(() => expect(watchCalls().some((c) => c[1].plural === PODS.plural)).toBe(true));
+  await waitFor(() => expect(allWatchCalls().some((c) => c[1].plural === PODS.plural)).toBe(true));
   fireEvent.click(screen.getByRole("button", { name: NAV_EVENTS }));
-  await waitFor(() => expect(watchCalls().some((c) => c[1].plural === EVENTS.plural)).toBe(true));
+  // 이벤트 화면에만 있는 Warning만 보기 선택
+  expect(await screen.findByRole("checkbox", { name: WARNINGS_ONLY })).toBeInTheDocument();
 });
 
 test("a node name in the overview opens its detail in workloads", async () => {
   m.context.mockResolvedValue(info([cand("ctx")]));
   m.overview.mockResolvedValue({ ...emptyOverview, nodes: [{
     name: "ip-1", ready: true, unschedulable: false, pressures: [], instanceType: null, zone: null, groupKind: "self", group: null, kubeletVersion: "v1.31.0",
-    allocatable: { cpuMilli: 1000, memoryBytes: 1, pods: 1 }, requested: { cpuMilli: 0, memoryBytes: 0, pods: 0 }, usage: null,
+    capacity: { cpuMilli: 1000, memoryBytes: 1, pods: 1 }, allocatable: { cpuMilli: 1000, memoryBytes: 1, pods: 1 },
+    requested: { cpuMilli: 0, memoryBytes: 0, pods: 0 }, limits: { cpuMilli: 0, memoryBytes: 0, pods: 0 }, usage: null,
   }] });
   m.get.mockResolvedValue({ kind: NODES, row: ns("ip-1"), annotations: {}, owners: [], children: [], childrenTruncated: false, childrenError: null, containers: [], conditions: [], events: [], eventsError: null, yaml: "", editYaml: "", secretKeys: null });
   setup();
@@ -390,7 +407,7 @@ test("a failed kinds discovery shows next to the workloads tree, and retry refet
   fireEvent.click(screen.getByRole("button", { name: NAV_ALL }));
   expect(await screen.findByText("discovery broke")).toBeInTheDocument();
   expect(screen.getByRole("navigation", { name: KIND_TREE_LABEL })).toBeInTheDocument();
-  await waitFor(() => expect(watchCalls().some((c) => c[1].plural === PODS.plural)).toBe(true));
+  await waitFor(() => expect(allWatchCalls().some((c) => c[1].plural === PODS.plural)).toBe(true));
   fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
   await waitFor(() => expect(m.kinds).toHaveBeenCalledTimes(2));
   expect(m.kinds).toHaveBeenLastCalledWith(target, "pa");
@@ -425,6 +442,7 @@ const navLabels = () => Array.from(screen.getByRole("navigation", { name: "클�
 
 test("a star in All saves a bookmark after the earlier ones; the bookmark opens its kind without the tree", async () => {
   m.context.mockResolvedValue(info([cand("ctx")]));
+  m.kinds.mockResolvedValue([{ ...PODS, verbs: ["list", "watch"], custom: false }, { ...DEPLOYMENTS, verbs: ["list", "watch"], custom: false }]);
   setup({ k8sBookmarks: [PODS] });
   await screen.findByText(STATE_CONNECTED);
   expect(navLabels().slice(0, 2)).toEqual(["Pod", NAV_OVERVIEW]);
@@ -433,7 +451,7 @@ test("a star in All saves a bookmark after the earlier ones; the bookmark opens 
   expect(api.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ k8sBookmarks: [PODS, DEPLOYMENTS] }));
   await waitFor(() => expect(navLabels().slice(0, 3)).toEqual(["Pod", "Deployment", NAV_OVERVIEW]));
   fireEvent.click(within(screen.getByRole("navigation", { name: "클러스터 메뉴" })).getByRole("button", { name: "Deployment" }));
-  await waitFor(() => expect(watchCalls().some((c) => c[1].plural === DEPLOYMENTS.plural)).toBe(true));
+  await waitFor(() => expect(allWatchCalls().some((c) => c[1].plural === DEPLOYMENTS.plural)).toBe(true));
   expect(screen.queryByRole("navigation", { name: KIND_TREE_LABEL })).toBeNull();
   expect(within(screen.getByRole("navigation", { name: "클러스터 메뉴" })).getByRole("button", { name: "Deployment" })).toHaveAttribute("aria-current", "page");
 });

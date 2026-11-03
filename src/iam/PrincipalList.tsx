@@ -72,10 +72,12 @@ interface Props {
   filter: string;
   selectedId: string | null;
   onSelect: (arn: string) => void;
+  /** 선택을 푼다(고른 행을 다시 누르거나 빈 곳) */
+  onClear: () => void;
   onOpen: (arn: string) => void;
 }
 
-export function PrincipalList({ kind, items, filter, selectedId, onSelect, onOpen }: Props) {
+export function PrincipalList({ kind, items, filter, selectedId, onSelect, onClear, onOpen }: Props) {
   const text = TEXT[kind];
   return (
     <ListTable
@@ -86,6 +88,7 @@ export function PrincipalList({ kind, items, filter, selectedId, onSelect, onOpe
       rowKey={(p) => p.arn}
       selectedId={selectedId}
       onSelect={onSelect}
+      onClear={onClear}
       onOpen={onOpen}
       empty={items.length === 0 ? text.empty : text.noMatch}
     />

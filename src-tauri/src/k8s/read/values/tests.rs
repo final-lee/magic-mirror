@@ -316,3 +316,34 @@ fn custom_kinds_use_the_ready_condition() {
     assert_eq!(v.problems, [Problem::NotReady]);
     assert!(of("mm.example.com", "Widget", json!({})).values.is_empty());
 }
+
+#[test]
+fn pod_row_carries_summed_requests_and_limits_when_every_container_sets_them() {
+    let sized = |side: serde_json::Value| {
+        let o = obj(json!({ "apiVersion": "v1", "kind": "Pod", "metadata": {},
+            "spec": { "containers": [
+                { "name": "app", "resources": { "requests": { "cpu": "100m", "memory": "64Mi" }, "limits": { "cpu": "200m", "memory": "128Mi" } } },
+                { "name": "side", "resources": side }
+            ] }, "status": { "phase": "Running" } }));
+        values_of(&kind("", "Pod"), &o)
+    };
+    let full = sized(json!({ "requests": { "cpu": "50m", "memory": "32Mi" }, "limits": { "cpu": "100m", "memory": "64Mi" } }));
+    assert_eq!(get(&full, "cpuRequest"), Some("150"));
+    assert_eq!(get(&full, "cpuLimit"), Some("300"));
+    assert_eq!(get(&full, "memoryRequest"), Some(&*(96 * 1024 * 1024).to_string()));
+    assert_eq!(get(&full, "memoryLimit"), Some(&*(192 * 1024 * 1024).to_string()));
+    let partial = sized(json!({ "requests": { "cpu": "50m" } }));
+    assert_eq!(get(&partial, "cpuRequest"), Some("150"));
+    assert_eq!(get(&partial, "cpuLimit"), None);
+    assert_eq!(get(&partial, "memoryRequest"), None);
+}
+
+#[test]
+fn node_row_carries_allocatable_cpu_and_memory() {
+    let o = obj(json!({ "apiVersion": "v1", "kind": "Node", "metadata": {}, "status": { "allocatable": { "cpu": "1930m", "memory": "3900Mi", "pods": "110" } } }));
+    let v = values_of(&kind("", "Node"), &o);
+    assert_eq!(get(&v, "cpuAllocatable"), Some("1930"));
+    assert_eq!(get(&v, "memoryAllocatable"), Some(&*(3900_i64 * 1024 * 1024).to_string()));
+    let bare = values_of(&kind("", "Node"), &obj(json!({ "apiVersion": "v1", "kind": "Node", "metadata": {} })));
+    assert_eq!(get(&bare, "cpuAllocatable"), None);
+}

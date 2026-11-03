@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { api } from "../api/client";
 import { onSsoExpired } from "../api/invoke";
 import { SsoLoginContext, useSsoLogin, type SsoLogin } from "../lib/useSsoLogin";
@@ -7,18 +7,19 @@ import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
 import { OverviewView } from "./OverviewView";
 import {
-  CORDONED, NO_METRICS, NO_SKEW, OFF, ON, REFRESH, REQUESTS_PARTIAL, SECTION_LABELS, SEC_NODEPOOLS, UP_TO_DATE, gapText, noRemoved, removedTitle, skewText,
+  CORDONED, METRICS_UNAVAILABLE, NO_METRICS, SEC_NAMESPACE_USAGE, SEC_WARNINGS, warningsMore, SUB_TOP_CPU, SUB_TOP_MEMORY, NO_SKEW, OFF, ON, REFRESH, REQUESTS_PARTIAL, SECTION_LABELS, SEC_NODEPOOLS, UP_TO_DATE, gapText, noRemoved, removedTitle, skewText,
 } from "./text";
-import type { K8sNodeView, K8sOverview } from "./types";
+import type { K8sMetrics, K8sNodeView, K8sOverview, K8sPodUsage, K8sWatchMessage } from "./types";
 
-vi.mock("./api", () => ({ k8sApi: { overview: vi.fn() } }));
+vi.mock("./api", () => ({ k8sApi: { overview: vi.fn(), metrics: vi.fn(), watch: vi.fn(), unwatch: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 const m = vi.mocked(k8sApi);
 const T = { profile: "app", region: "r", cluster: "c" };
 
 const node = (over: Partial<K8sNodeView> = {}): K8sNodeView => ({
   name: "ip-1", ready: true, unschedulable: false, pressures: [], instanceType: "m6i.large", zone: "ap-northeast-2a", groupKind: "managed", group: "ng-1",
-  kubeletVersion: "v1.31.4", allocatable: { cpuMilli: 2000, memoryBytes: 8 * 1024 ** 3, pods: 29 }, requested: { cpuMilli: 500, memoryBytes: 2 * 1024 ** 3, pods: 5 }, usage: null, ...over,
+  kubeletVersion: "v1.31.4", capacity: { cpuMilli: 2000, memoryBytes: 8 * 1024 ** 3, pods: 29 }, allocatable: { cpuMilli: 2000, memoryBytes: 8 * 1024 ** 3, pods: 29 },
+  requested: { cpuMilli: 500, memoryBytes: 2 * 1024 ** 3, pods: 5 }, limits: { cpuMilli: 1000, memoryBytes: 4 * 1024 ** 3, pods: 5 }, usage: null, ...over,
 });
 const overview = (over: Partial<K8sOverview> = {}): K8sOverview => ({
   cluster: { version: "1.31", platformVersion: "eks.12", status: "ACTIVE", endpointPublic: true, endpointPrivate: false, publicCidrs: ["0.0.0.0/0"], logging: [], secretsEncrypted: true, oidcIssuer: null, authenticationMode: "API" },
@@ -29,11 +30,23 @@ const overview = (over: Partial<K8sOverview> = {}): K8sOverview => ({
 
 function setup() {
   const onOpenNode = vi.fn();
-  render(withClientAndSso(<OverviewView target={T} context="ctx" ssoProfile="exec" live onOpenNode={onOpenNode} />, newQueryClient(), ssoLoginStub()));
-  return { onOpenNode };
+  const onOpenEvents = vi.fn();
+  render(withClientAndSso(<OverviewView target={T} context="ctx" ssoProfile="exec" live onOpenNode={onOpenNode} sessionEpoch={1} onOpenEvents={onOpenEvents} />, newQueryClient(), ssoLoginStub()));
+  return { onOpenNode, onOpenEvents };
 }
 
-beforeEach(() => vi.clearAllMocks());
+const noMetrics: K8sMetrics = { podsUnavailable: null, nodesUnavailable: null, pods: [], nodes: [] };
+let emitEvents: (msg: K8sWatchMessage) => void = () => {};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  m.metrics.mockResolvedValue(noMetrics);
+  m.unwatch.mockResolvedValue(null);
+  m.watch.mockImplementation(async (_t, _k, _n, _p, onMessage) => {
+    emitEvents = onMessage;
+    return 1;
+  });
+});
 
 test("cluster, nodes, add-ons and upgrade checks", async () => {
   m.overview.mockResolvedValue(overview({ skew: [{ node: "ip-1", kubeletVersion: "v1.29.0", minorsBehind: 2 }] }));
@@ -113,7 +126,7 @@ test.each([
   const manager = ssoLoginStub();
   const at = Date.now() + 1000;
   const ui = (successProfile: string | null) => withClientAndSso(
-    <OverviewView target={T} context="ctx" ssoProfile="exec" live onOpenNode={vi.fn()} />,
+    <OverviewView target={T} context="ctx" ssoProfile="exec" live onOpenNode={vi.fn()} sessionEpoch={1} onOpenEvents={vi.fn()} />,
     qc, { ...manager, lastSuccessAt: (p) => p === successProfile ? at : null },
   );
   const rendered = render(ui(null));
@@ -130,7 +143,7 @@ test("managed SSO retries a failed overview with the app profile", async () => {
   const manager = ssoLoginStub();
   const at = Date.now() + 1000;
   const ui = (successProfile: string | null) => withClientAndSso(
-    <OverviewView target={T} context="ctx" ssoProfile="exec" live onOpenNode={vi.fn()} />,
+    <OverviewView target={T} context="ctx" ssoProfile="exec" live onOpenNode={vi.fn()} sessionEpoch={1} onOpenEvents={vi.fn()} />,
     qc, { ...manager, lastSuccessAt: (p) => p === successProfile ? at : null },
   );
   const rendered = render(ui(null));
@@ -203,7 +216,7 @@ describe("SSO-expired gaps and the login manager", () => {
       sso.current = useSsoLogin(PROFILES, "app");
       return (
         <SsoLoginContext.Provider value={sso.current}>
-          {show && <OverviewView target={T} context="ctx" ssoProfile="exec" live onOpenNode={vi.fn()} />}
+          {show && <OverviewView target={T} context="ctx" ssoProfile="exec" live onOpenNode={vi.fn()} sessionEpoch={1} onOpenEvents={vi.fn()} />}
         </SsoLoginContext.Provider>
       );
     };
@@ -257,4 +270,87 @@ describe("SSO-expired gaps and the login manager", () => {
     await waitFor(() => expect(h.sso.current.entries[0]?.status).toMatchObject({ kind: "failed", afterSuccess: true }));
     expect(api.ssoLogin).toHaveBeenCalledTimes(1);
   });
+});
+
+const podUsage = (namespace: string, name: string, cpuMilli: number, memoryBytes: number): K8sPodUsage => ({ namespace, name, cpuMilli, memoryBytes, containers: [], owners: [] });
+
+test("namespace usage: top by cpu and by memory, summed over pods, read for all namespaces", async () => {
+  m.overview.mockResolvedValue(overview({ metrics: true }));
+  m.metrics.mockResolvedValue({ ...noMetrics, pods: [
+    podUsage("web", "a", 300, 100 * 1024 ** 2), podUsage("web", "b", 200, 100 * 1024 ** 2), podUsage("db", "c", 400, 2 * 1024 ** 3), podUsage("ops", "d", 50, 1024 ** 2),
+  ] });
+  setup();
+  const cpu = await screen.findByRole("table", { name: SUB_TOP_CPU });
+  expect(screen.getByText(SEC_NAMESPACE_USAGE)).toBeInTheDocument();
+  expect(m.metrics).toHaveBeenCalledWith(T, null, "exec");
+  const body = (t: HTMLElement) => within(t).getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell").map((c) => c.textContent));
+  // CPU 순: web 500m(Pod 2), db 400m, ops 50m
+  expect(body(cpu)).toEqual([["web", "500m", "200 MiB", "2"], ["db", "400m", "2 GiB", "1"], ["ops", "50m", "1 MiB", "1"]]);
+  // 메모리 순: db, web, ops
+  expect(body(screen.getByRole("table", { name: SUB_TOP_MEMORY })).map((r) => r[0])).toEqual(["db", "web", "ops"]);
+});
+
+test("namespace usage is limited to the top 10 namespaces", async () => {
+  m.overview.mockResolvedValue(overview({ metrics: true }));
+  m.metrics.mockResolvedValue({ ...noMetrics, pods: Array.from({ length: 12 }, (_, i) => podUsage(`ns${String(i).padStart(2, "0")}`, "p", 100 + i, 1024)) });
+  setup();
+  const cpu = await screen.findByRole("table", { name: SUB_TOP_CPU });
+  expect(within(cpu).getAllByRole("row")).toHaveLength(11);
+  expect(within(cpu).queryByText("ns00")).toBeNull();
+});
+
+test("without metrics-server there is one hint and no usage tables", async () => {
+  m.overview.mockResolvedValue(overview({ metrics: false }));
+  m.metrics.mockResolvedValue({ ...noMetrics, podsUnavailable: "notInstalled", nodesUnavailable: "notInstalled" });
+  setup();
+  expect(await screen.findByText(NO_METRICS)).toBeInTheDocument();
+  await vi.waitFor(() => expect(m.metrics).toHaveBeenCalled());
+  expect(screen.queryByText(SEC_NAMESPACE_USAGE)).toBeNull();
+  expect(screen.queryByText(METRICS_UNAVAILABLE.notInstalled)).toBeNull();
+  expect(screen.queryByRole("table", { name: SUB_TOP_CPU })).toBeNull();
+});
+
+test("forbidden pod metrics with readable node metrics explains itself in the usage section", async () => {
+  m.overview.mockResolvedValue(overview({ metrics: true }));
+  m.metrics.mockResolvedValue({ ...noMetrics, podsUnavailable: "forbidden" });
+  setup();
+  expect(await screen.findByText(METRICS_UNAVAILABLE.forbidden)).toBeInTheDocument();
+  expect(screen.queryByRole("table", { name: SUB_TOP_CPU })).toBeNull();
+});
+
+test("a tab that is not visible does not read usage", async () => {
+  m.overview.mockResolvedValue(overview({ metrics: true }));
+  render(withClientAndSso(<OverviewView target={T} context="ctx" ssoProfile="exec" live visible={false} onOpenNode={vi.fn()} sessionEpoch={1} onOpenEvents={vi.fn()} />, newQueryClient(), ssoLoginStub()));
+  expect(await screen.findByText("eks.12")).toBeInTheDocument();
+  expect(m.metrics).not.toHaveBeenCalled();
+});
+
+test("cluster usage sums nodes into CPU, memory and pod rings against allocatable, with live usage", async () => {
+  m.overview.mockResolvedValue(overview({ metrics: true, nodes: [node(), node({ name: "ip-2", ready: false, unschedulable: true })] }));
+  m.metrics.mockResolvedValue({ ...noMetrics, nodes: [{ name: "ip-1", cpuMilli: 1000, memoryBytes: 2 * 1024 ** 3 }, { name: "ip-2", cpuMilli: 1000, memoryBytes: 2 * 1024 ** 3 }] });
+  setup();
+  const cpu = await screen.findByRole("region", { name: "CPU" });
+  // 사용량 2 / 할당 가능 4 코어, 요청 1 / 4, 제한 2 / 4
+  await waitFor(() => expect(within(cpu).getByRole("img")).toHaveAccessibleName("CPU 사용량 50%"));
+  const rows = within(cpu).getAllByRole("row").map((r) => r.textContent);
+  expect(rows).toEqual(["사용량250%", "요청125%", "제한250%", "할당 가능4", "용량4"]);
+  const pods = screen.getByRole("region", { name: "Pod" });
+  expect(within(pods).getAllByRole("row").map((r) => r.textContent)).toEqual(["실행 중1017%", "할당 가능58", "용량58"]);
+  expect(screen.getByText("NotReady 1")).toBeInTheDocument();
+  expect(screen.getByText(`${CORDONED} 1`)).toBeInTheDocument();
+});
+
+test("recent warnings list the newest Warning events and lead to the events view", async () => {
+  m.overview.mockResolvedValue(overview());
+  const { onOpenEvents } = setup();
+  await screen.findByText("eks.12");
+  const ev = (uid: string, type: string, reason: string, lastSeen: string) => ({
+    uid, name: uid, namespace: "app", resourceVersion: "1", createdAt: null, labels: {}, problems: [],
+    values: { type, reason, object: `Pod/${uid}`, message: `${reason} happened`, lastSeen },
+  });
+  act(() => emitEvents({ type: "reset", rows: [ev("a", "Warning", "BackOff", "2026-11-03T10:00:00Z"), ev("b", "Normal", "Pulled", "2026-11-03T10:05:00Z"), ev("c", "Warning", "FailedMount", "2026-11-03T10:10:00Z")] }));
+  const table = await screen.findByRole("table", { name: SEC_WARNINGS });
+  expect(within(table).getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[1].textContent)).toEqual(["FailedMount", "BackOff"]);
+  fireEvent.click(screen.getByRole("button", { name: warningsMore(2) }));
+  expect(onOpenEvents).toHaveBeenCalled();
 });

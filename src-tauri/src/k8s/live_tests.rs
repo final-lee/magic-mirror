@@ -14,8 +14,10 @@ use super::kubeconfig::{load, with_path};
 use super::logs::{self, LogMessage, LogOptions};
 use super::review::{identity, rules, IdentitySource};
 use super::rows::KindRef;
+use super::read::api_for;
 use super::read::detail::{get, ContainerState};
 use super::read::kinds::{discover, kinds_of};
+use super::read::metrics::{metrics, Unavailable};
 use super::read::overview::k8s_parts;
 use super::read::secret::{key_missing, secret_value, secrets_kind, Encoding, SecretKey, SecretValue, MASK};
 use super::read::values::Problem;
@@ -301,6 +303,20 @@ async fn discovery_lists_builtin_and_custom_kinds() {
 
 #[tokio::test]
 #[ignore]
+async fn discovery_kinds_can_be_listed_in_the_watch() {
+    let client = admin().await;
+    let kinds = kinds_of(&discover(&client, PRIVATE).await.unwrap());
+    for (group, name) in [("coordination.k8s.io", "Lease"), ("rbac.authorization.k8s.io", "ClusterRole"), ("discovery.k8s.io", "EndpointSlice")] {
+        let kind = kinds.iter().find(|k| k.kind.group == group && k.kind.kind == name).expect("served kind").kind.clone();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let task = tokio::spawn(run(client.clone(), kind, None, PRIVATE, move |m| tx.send(m).is_ok()));
+        assert!(matches!(recv(&mut rx, Duration::from_secs(15)).await, Some(WatchMessage::Reset { .. })), "{name} list");
+        task.abort();
+    }
+}
+
+#[tokio::test]
+#[ignore]
 async fn deployment_owns_a_replicaset_that_owns_a_pod() {
     let client = admin().await;
     let d = get(&client, &kind_ref("apps", "v1", "Deployment", "deployments"), Some("mm-k2"), "web", PRIVATE).await.unwrap();
@@ -376,10 +392,10 @@ async fn overview_kubernetes_part_reads_nodes_and_requests() {
     let client = admin().await;
     let parts = k8s_parts(&client, Some("1.33"), PRIVATE).await;
     assert!(!parts.nodes.unwrap().is_empty());
-    let (requests, partial) = parts.requests.unwrap();
+    let (allocated, partial) = parts.allocated.unwrap();
     assert!(!partial);
     // coredns가 CPU를 요청한다
-    assert!(requests.values().any(|r| r.cpu_milli > 0 && r.pods > 0), "{requests:?}");
+    assert!(allocated.values().any(|a| a.requested.cpu_milli > 0 && a.requested.pods > 0), "{allocated:?}");
     // kind에는 metrics-server와 Karpenter가 없다
     assert_eq!(parts.usage.unwrap(), None);
     assert_eq!(parts.node_pools.unwrap(), None);
@@ -1473,4 +1489,89 @@ async fn unowned_job_delete_recreates_and_cluster_admin_binding_needs_the_name()
         "roleRef":{"apiGroup":"rbac.authorization.k8s.io","kind":"ClusterRole","name":"view"},"subjects":[{"kind":"User","name":"mm-e-nobody","apiGroup":"rbac.authorization.k8s.io"}]}), force: false } };
     assert!(commit::dry_plan(client.clone(), PRIVATE, &ordinary, "").await.unwrap().preview.confirm_name.is_none());
     kubectl(&["delete", "clusterrolebinding/mm-e-admin", "--ignore-not-found"]);
+}
+
+// ---- 사용량(metrics-server) ----
+// kind에는 metrics-server가 없다. 스크립트가 첫 판을 끝낸 뒤 설치하고 `K8S_LIVE_METRICS=1`로 `metrics_with_server`만 다시 돌린다.
+
+fn has_metrics_server() -> bool {
+    std::env::var("K8S_LIVE_METRICS").is_ok()
+}
+
+#[tokio::test]
+#[ignore]
+async fn metrics_without_server_are_unavailable_not_an_error() {
+    if has_metrics_server() {
+        return;
+    }
+    let client = admin().await;
+    for namespace in [None, Some("kube-system")] {
+        let m = metrics(&client, namespace, PRIVATE).await.unwrap();
+        assert_eq!((m.pods_unavailable, m.nodes_unavailable), (Some(Unavailable::NotInstalled), Some(Unavailable::NotInstalled)));
+        assert!(m.pods.is_empty() && m.nodes.is_empty());
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn metrics_for_a_reader_without_access_are_forbidden() {
+    let (context, value) = reader_config();
+    let client = client_for(&build(&value), &context, PRIVATE).await.unwrap();
+    let m = metrics(&client, Some("mm-live"), PRIVATE).await.unwrap();
+    assert_eq!((m.pods_unavailable, m.nodes_unavailable), (Some(Unavailable::Forbidden), Some(Unavailable::Forbidden)));
+}
+
+#[tokio::test]
+#[ignore]
+async fn metrics_with_server_read_pods_nodes_and_controller_chains() {
+    if !has_metrics_server() {
+        eprintln!("K8S_LIVE_METRICS가 없어 건너뛰어요");
+        return;
+    }
+    let client = admin().await;
+    // metrics-server가 첫 수집을 끝낼 때까지 기다린다: web Pod의 사용량이 보일 때까지
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(180);
+    let all = loop {
+        let m = metrics(&client, None, PRIVATE).await.unwrap();
+        if m.pods_unavailable.is_none() && m.pods.iter().any(|p| p.namespace == "mm-k2" && p.name.starts_with("web-")) && !m.nodes.is_empty() {
+            break m;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "metrics never covered mm-k2/web: {m:?}");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    };
+    assert_eq!((all.pods_unavailable, all.nodes_unavailable), (None, None));
+    assert!(all.nodes.iter().all(|n| n.cpu_milli > 0 && n.memory_bytes > 0), "{:?}", all.nodes);
+    let web = all.pods.iter().find(|p| p.namespace == "mm-k2" && p.name.starts_with("web-")).unwrap();
+    assert!(web.memory_bytes > 0 && web.containers.len() == 1 && web.containers[0].name == "app");
+    assert_eq!(web.memory_bytes, web.containers[0].memory_bytes);
+    // Pod → ReplicaSet → Deployment
+    let names: Vec<(&str, &str)> = web.owners.iter().map(|o| (o.kind.as_str(), o.name.as_str())).collect();
+    assert!(matches!(names.as_slice(), [("ReplicaSet", rs), ("Deployment", "web")] if rs.starts_with("web-")), "{names:?}");
+    // coredns도 Deployment까지 올라간다
+    let dns = all.pods.iter().find(|p| p.namespace == "kube-system" && p.name.starts_with("coredns-")).expect("coredns metrics");
+    assert_eq!(dns.owners.last().map(|o| (o.kind.as_str(), o.name.as_str())), Some(("Deployment", "coredns")));
+    // 네임스페이스 하나로 좁히면 그 네임스페이스 Pod만 온다
+    let one = metrics(&client, Some("mm-k2"), PRIVATE).await.unwrap();
+    assert!(!one.pods.is_empty() && one.pods.iter().all(|p| p.namespace == "mm-k2"));
+    assert!(one.pods.iter().any(|p| p.name == web.name));
+}
+
+#[tokio::test]
+#[ignore]
+async fn pod_and_node_rows_carry_bounds_and_allocatable() {
+    use super::rows::row_of;
+    let client = admin().await;
+    let pods = api_for(client.clone(), &kind_ref("", "v1", "Pod", "pods"), Some("kube-system"));
+    let dns = pods.list(&kube::api::ListParams::default().labels("k8s-app=kube-dns")).await.unwrap();
+    let row = row_of(&kind_ref("", "v1", "Pod", "pods"), dns.items.first().expect("a coredns pod"));
+    // coredns는 CPU·메모리 요청과 메모리 제한을 두고 CPU 제한은 두지 않는다
+    assert_eq!(row.values.get("cpuRequest").map(String::as_str), Some("100"));
+    assert!(row.values.contains_key("memoryRequest") && row.values.contains_key("memoryLimit"), "{:?}", row.values);
+    assert!(!row.values.contains_key("cpuLimit"));
+    let node_kind = KindRef { group: String::new(), version: "v1".into(), kind: "Node".into(), plural: "nodes".into(), namespaced: false };
+    let list = api_for(client, &node_kind, None).list(&kube::api::ListParams::default()).await.unwrap();
+    for n in &list.items {
+        let row = row_of(&node_kind, n);
+        assert!(row.values["cpuAllocatable"].parse::<i64>().unwrap() > 0 && row.values["memoryAllocatable"].parse::<i64>().unwrap() > 0, "{:?}", row.values);
+    }
 }

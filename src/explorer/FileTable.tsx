@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { Column, Resource } from "../api/types";
 import { Cell } from "../components/Cell";
+import { DESELECT_DELAY_MS } from "../hooks/useToggleSelect";
 import { compareValues } from "../lib/format";
 import { fuzzyFilter, fuzzyKeep } from "../lib/fuzzy";
 import { nextSelection, type SelectionState } from "./selection";
 
 const DRAG_THRESHOLD = 5;
-const DESELECT_DELAY_MS = 300;
 const NONE: SelectionState = { selected: [], anchor: null };
 
 interface Props {

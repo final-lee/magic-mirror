@@ -30,10 +30,12 @@ interface Props {
   filter: string;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** 선택을 푼다(고른 행을 다시 누르거나 빈 곳) */
+  onClear: () => void;
   onOpen: (id: string) => void;
 }
 
-export function PolicyList({ items, filter, selectedId, onSelect, onOpen }: Props) {
+export function PolicyList({ items, filter, selectedId, onSelect, onClear, onOpen }: Props) {
   return (
     <ListTable
       label="정책 목록"
@@ -43,6 +45,7 @@ export function PolicyList({ items, filter, selectedId, onSelect, onOpen }: Prop
       rowKey={(p) => p.id}
       selectedId={selectedId}
       onSelect={onSelect}
+      onClear={onClear}
       onOpen={onOpen}
       empty={items.length === 0 ? "정책이 없어요" : "조건에 맞는 정책이 없어요"}
     />

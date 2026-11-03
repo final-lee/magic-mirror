@@ -88,5 +88,17 @@ YAML
 
   K8S_LIVE_KUBECONFIG="$kc" K8S_LIVE_BIN="$WORK/bin" K8S_LIVE_SLOW_ARM="$WORK/slow.armed" K8S_LIVE_READER_TOKEN="$reader_token" \
     cargo test --manifest-path src-tauri/Cargo.toml --lib k8s::live_tests -- --ignored --test-threads=1
+
+  # 사용량 시험: metrics-server를 설치해(kind의 kubelet 인증서는 자체 서명이라 --kubelet-insecure-tls) 사용량을 읽는 시험만 다시 돌린다.
+  # 설치하지 못하면(오프라인 등) 이 부분만 건너뛴다. 첫 판의 metrics_without_server 시험은 설치 전 클러스터에서 이미 돌았다.
+  if kubectl --kubeconfig "$kc" apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml \
+    && kubectl --kubeconfig "$kc" -n kube-system patch deployment metrics-server --type=json \
+      -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]' \
+    && kubectl --kubeconfig "$kc" wait --for=condition=Available apiservice/v1beta1.metrics.k8s.io --timeout=240s; then
+    K8S_LIVE_METRICS=1 K8S_LIVE_KUBECONFIG="$kc" K8S_LIVE_BIN="$WORK/bin" K8S_LIVE_SLOW_ARM="$WORK/slow.armed" K8S_LIVE_READER_TOKEN="$reader_token" \
+      cargo test --manifest-path src-tauri/Cargo.toml --lib k8s::live_tests::metrics_with_server -- --ignored --test-threads=1
+  else
+    echo "metrics-server를 설치하지 못해 사용량 시험(metrics_with_server)을 건너뛰어요" >&2
+  fi
   kind delete cluster --name "$name" >/dev/null 2>&1 || true
 done

@@ -36,8 +36,8 @@
 지금 된 것은 K1·K2와 K3 일부(Pod 로그)다. Lens·k9s의 주요 기능 중 없는 것:
 1. 클러스터를 바꾸는 조작: Pod 셸(exec)·port-forward(K9), scale·rollout restart·rollout undo·삭제(K7 A), cordon·uncordon·drain(K7 B), YAML 편집·적용·새로 만들기(K8 E). 컨테이너 attach와 노드 셸(디버그 Pod)은 C 절에 들어왔고(2026-11-02) 구현했다. CronJob 바로 실행은 K7 A의 Job 재실행에 포함, 일시정지는 K7 A.
 2. 로그: (2026-11-03 구현함) 워크로드 합친 로그(Pod별 색, 새 Pod 따라 붙기)·since(최근 N분)·파일 저장, 모든 컨테이너 한꺼번에, 서버 타임스탬프·줄바꿈 토글.
-3. 리소스 사용량: Pod·컨테이너 CPU/메모리 열(metrics-server, 지금은 개요의 노드 사용량만), request·limit 대비 %, Prometheus 그래프, 워크로드·네임스페이스 집계.
-4. 트리에 없는 내장 종류: HPA, PDB, ResourceQuota, LimitRange, PriorityClass, RuntimeClass, Lease, Mutating·ValidatingWebhookConfiguration, EndpointSlice, IngressClass, Role·ClusterRole·RoleBinding·ClusterRoleBinding, CustomResourceDefinition 자체.
+3. 리소스 사용량: (2026-11-03 구현함) Pod·컨테이너 CPU/메모리 열(metrics-server), request·limit 대비 %, 워크로드·네임스페이스 집계, 사용량 그래프(Prometheus 없이 앱이 metrics-server 값을 모은다). 아래 "사용량(metrics-server)"과 "사용량 그래프" 참고.
+4. 내장 종류 트리: (2026-11-03 구현함) HPA, PDB, ResourceQuota, LimitRange, PriorityClass, RuntimeClass, Lease, Mutating·ValidatingWebhookConfiguration, EndpointSlice, IngressClass, Role·ClusterRole·RoleBinding·ClusterRoleBinding, CustomResourceDefinition 자체. API discovery로 제공 버전만 표시하고 목록·상세 요약과 북마크를 지원한다.
 5. 탐색: 키보드 중심 조작(명령 팔레트, `:종류` 이동), `kubectl describe` 형식 출력, xray식 관계 트리, 앱 안 터미널(kubectl), 플러그인.
 6. Helm: 릴리스 목록·values·이력, 업그레이드·롤백·삭제, 차트 설치(설계에 없음).
 7. 점검·권한: popeye식 위생 점검(K5), RBAC 역조회(K4).
@@ -75,8 +75,12 @@
 ## 읽기 화면
 
 ### 개요
+- 클러스터 사용량(2026-11-03, Lens 개요처럼 맨 위): 노드 수와 Ready·NotReady·스케줄 중지·압박 개수 칩, CPU·메모리·Pod 고리 카드(할당 가능량 대비 사용량·요청·제한을 바깥부터 겹친 고리로, 범례에 값·비율과 할당 가능량·용량). 사용량은 15초마다 다시 읽은 노드 사용량 합(읽을 수 없으면 개요를 읽을 때의 값), 요청·제한은 끝나지 않은 Pod의 합(kubectl describe node와 같은 셈, 제한 없는 컨테이너는 0), 용량은 status.capacity. Pod 고리는 놓인 Pod 수 / 할당 가능 Pod 수. 아래에 앱이 모은 노드 사용량 합의 최근 1시간 CPU·메모리 그래프(요청 합·할당 가능 합 기준선).
+- 최근 경고: 클러스터 전체 이벤트를 감시해 최근 Warning 8개(시각·이유·대상·메시지)와 이벤트 화면으로 가는 단추.
+- 탐색기 상세(2026-11-03): AWS 탐색기에서 EKS 클러스터를 고르면 오른쪽 상세의 기본 값 아래에 위 클러스터 사용량(칩·고리·1시간 그래프)과 최근 경고를 같이 보인다(`ClusterDetailSummary`). EKS 탭과 같은 연결 과정(`useK8sConnection`)과 쿼리를 나눠 쓰고, 상세를 보는 동안 그래프 기록을 모은다. context를 아직 고르지 않았으면 연결하지 않고 EKS 탭으로 안내한다. 오른쪽 상세의 단추는 본문에 두지 않고 모두 제목 줄 오른쪽 위 도구 모음에 모은다("EKS 탭에서 열기", "AWS 콘솔에서 열기", "원본 데이터 보기", 닫기 순서, EKS 상세의 도구 줄과 같은 24px 크기).
+- 오른쪽 상세 너비: 앱의 모든 오른쪽 상세는 비율로 연다. 탐색기·VPC 지도·IAM 작업 목록의 상세는 고른 것이 있을 때만 본문 위에 떠서 오른쪽부터 70%를 덮고(✕로 닫는다), EKS·ArgoCD 4열 상세는 저장한 비율(기본 70%)을 쓴다. 어느 쪽도 최소 px 너비를 두지 않는다.
 - 클러스터: 버전, 플랫폼 버전, 엔드포인트 공개 범위와 허용 CIDR, 컨트롤 플레인 로깅, Secret 암호화, OIDC 공급자, 인증 모드.
-- 노드: 상태(Ready, cordon, 압박 조건), 인스턴스 타입, AZ, 노드그룹(관리형, Fargate, Karpenter NodePool, 자체 관리), kubelet 버전, 할당 가능량 대비 요청량. metrics-server가 있으면 사용량.
+- 노드: 상태(Ready, cordon, 압박 조건), 인스턴스 타입, AZ, 노드그룹(관리형, Fargate, Karpenter NodePool, 자체 관리), kubelet 버전, 할당 가능량 대비 요청량. metrics-server가 있으면 사용량. 노드 목록의 %CPU·%MEM 칸과 노드 상세 요약에도 Pod와 같은 사용량 그래프(할당 가능량 기준)를 둔다.
 - 애드온: 현재 버전, 클러스터 버전에 맞는 최신 버전, 상태와 문제.
 - 업그레이드 점검: EKS Upgrade Insights 결과, 다음 마이너 버전에서 제거되는 API를 쓰는 리소스(고정 표), 노드와 컨트롤 플레인의 버전 차이.
 
@@ -89,6 +93,12 @@
 - 4열은 3열 위에 떠서 오른쪽부터 3열 너비의 70%를 덮는다. 왼쪽 경계를 끌어 30~95%로 바꾸고 `k8sLaneWidths.detailPct`에 저장한다.
 - 목록: 종류별 핵심 열, 이상 표시(CrashLoopBackOff, ImagePullBackOff, Pending, OOMKilled, 준비 안 됨), 이름·레이블 셀렉터 필터, "문제 있는 것만".
 - 상세: 요약, 소유 관계(ownerReferences 위아래 이동), 컨테이너별 상태와 마지막 종료 이유, 관련 이벤트, YAML 탭(테마 색으로 구문 강조), Pod·Deployment·StatefulSet·DaemonSet·ReplicaSet·Job·Service는 로그 탭. 머리의 뒤로(‹)·닫기(✕)는 아이콘 버튼.
+- 사용량(metrics-server, 2026-11-03): 읽기 명령 `k8s_metrics(target, namespace|null)`가 `metrics.k8s.io/v1beta1`의 PodMetrics·NodeMetrics를 읽는다(discovery 없이 바로 목록을 읽고, 404는 없음). Pod 사용량은 컨테이너 사용량의 합이고(CPU는 올림 밀리코어, 메모리는 바이트), Pod마다 컨트롤러 사슬(Pod → ReplicaSet → Deployment, Job → CronJob, StatefulSet·DaemonSet은 그대로)을 담아 화면이 워크로드별로 합산한다. 사슬은 Pod·ReplicaSet·Job의 메타데이터만 읽어 만들고(ReplicaSet·Job은 필요한 경우에만), 읽지 못하면 사슬 없이 사용량만 보인다. Pod와 노드는 따로 읽어, 서버가 없으면(`notInstalled`)·권한이 없으면(`forbidden`)·API는 있으나 응답이 없으면(`notReady`, 503) 오류 대신 쪽마다 `podsUnavailable`·`nodesUnavailable` 사유로 돌려준다. 연결·SSO 오류는 그대로 오류다.
+  - 목록 줄: Pod는 컨테이너가 모두 설정했을 때만 요청·제한 합(`cpuRequest`·`cpuLimit`·`memoryRequest`·`memoryLimit`, 밀리코어·바이트)을 값으로 싣는다(일부만의 합은 사용량과 견줄 수 없어 비운다). 노드는 `cpuAllocatable`·`memoryAllocatable`. 상세의 컨테이너 줄도 요청·제한을 싣는다.
+  - 목록 열(사용량을 읽을 수 있을 때만, 정렬 가능): Pod는 CPU, 메모리, %CPU/R, %CPU/L, %MEM/R, %MEM/L(k9s와 같은 이름, 요청·제한이 없으면 빈 칸), 노드는 CPU, 메모리, 할당 가능량 대비 %CPU·%MEM, Deployment·StatefulSet·DaemonSet·ReplicaSet·Job·CronJob은 Pod 사용량 합(CPU, 메모리). 비율이 90%를 넘으면 빨갛게 강조한다(정확히 90%는 아님). 읽을 수 없으면 사용량 열을 만들지 않고 목록 위에 한 줄 안내("metrics-server가 없어 사용량을 보여 줄 수 없어요" 등)만 둔다.
+  - Pod 상세의 컨테이너 표에 CPU·메모리 사용량과 그 아래에 요청·제한 대비 비율을 보인다(init 컨테이너는 측정되지 않아 비움). 개요에 네임스페이스별 사용량(CPU 상위·메모리 상위 10개, Pod 수) 표를 둔다.
+  - 다시 읽기: 연결됐고 그 탭이 보이는 동안 15초마다(`refetchInterval`, 가려진 탭에서는 읽지 않는다). 사용량 열이 있는 종류를 보거나 그런 객체의 상세를 열었을 때만 읽는다. 목록은 선택한 네임스페이스(클러스터 범위 종류는 전체), 개요는 전체를 읽는다. 그와 별도로 그래프 기록용 읽기는 연결된 동안 탭이 가려져도 계속한다(아래 "사용량 그래프").
+- 사용량 그래프(2026-11-03, 같은 날 Prometheus 대신 앱 수집으로 바꿈): 클러스터에 Prometheus를 따로 운영하지 않는다. 탭이 연결돼 있는 동안 고른 네임스페이스(전체면 모두)의 `k8s_metrics`를 15초마다 읽어(탭이 가려지거나 창이 뒤로 가도 계속, 목록과 같은 쿼리 키라 같은 네임스페이스면 한 번만 읽는다) 클러스터·context별로 Pod 합계와 컨테이너별 CPU·메모리를 메모리에 모은다(`src/k8s/usageHistory.ts`). 최근 1시간만 남기고, 10초 안의 중복 값은 버리며, 탭을 닫으면 지운다. 앱을 끄면 사라진다. Pod와 Deployment·StatefulSet·DaemonSet 상세의 요약 탭에서 기본 정보(값 목록) 바로 아래, 소유 관계·컨테이너보다 먼저 "사용량" 절이 CPU·메모리 그래프(폭이 되면 나란히)를 최근 1시간 축에 컨테이너(Pod) 또는 Pod(워크로드, 컨트롤러 사슬로 찾는다)별 선을 그리고, 알려진 요청·제한을 점선으로 표시한다. 45초보다 오래 값이 비면 선을 끊는다. metrics-server가 없거나 권한이 없으면 그 까닭을 보인다. metrics-server는 EKS 기본 설치가 아니지만 AWS 커뮤니티 애드온(`metrics-server`)으로 설치할 수 있다. 같은 기록으로 Pod 목록의 %CPU/R·%CPU/L·%MEM/R·%MEM/L 칸을 작업 관리자처럼 테두리·눈금 안에 면과 선을 그린 고정 크기(64×22px, 모든 칸 같음) 추이 그래프로 그리고, 숫자는 바탕 상자 없이 작고 두꺼운 글씨(10px, 굵게)로 그 위 왼쪽에 얹는다(최근 1시간, 지금의 요청·제한 기준 비율, 세로축 0~100%이고 넘으면 최대치까지 늘리며 그때 100% 점선, 90% 넘으면 빨강). 아직 모은 값이 없는 Pod는 빈 틀에 숫자만, 요청·제한이 없으면 빈 칸, 노드 비율 칸은 숫자만 보인다.
 - 앱 안 연결: 노드 → 노드 상세, ServiceAccount → 접근 화면, IAM 역할 → IAM 워크스페이스.
 - 이벤트 화면: 네임스페이스·클러스터 전체를 시간순으로, Warning만 보기.
 

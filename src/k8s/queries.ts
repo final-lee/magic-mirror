@@ -1,9 +1,12 @@
+import { useEffect } from "react";
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { reportSsoExpired } from "../api/invoke";
 import type { AppError } from "../api/types";
 import { k8sApi } from "./api";
 import { kindKey, targetKey } from "./targets";
-import type { K8sContextInfo, K8sKind, K8sObjectView, K8sOverview, K8sOverviewSection, K8sRules, K8sSession, K8sTarget, ObjectRef } from "./types";
+import type { K8sContextInfo, K8sKind, K8sMetrics, K8sObjectView, K8sOverview, K8sOverviewSection, K8sRules, K8sSession, K8sTarget, ObjectRef } from "./types";
+import { METRICS_INTERVAL_MS } from "./usage";
+import { forgetUsage, historyKey, recordUsage } from "./usageHistory";
 import { watchRegistry } from "./watchRegistry";
 
 /** 쿼리 키. 대상별 데이터는 모두 ["k8s", targetKey(target), ...] 아래에 두어 한 번에 무효화하거나 지울 수 있다. */
@@ -16,6 +19,7 @@ export const k8sKeys = {
   object: (t: K8sTarget, context: string | null, ref: ObjectRef, resourceVersion: string | null) =>
     ["k8s", targetKey(t), "object", context, kindKey(ref.kind), ref.namespace, ref.name, resourceVersion] as const,
   overview: (t: K8sTarget, context: string | null) => ["k8s", targetKey(t), "overview", context] as const,
+  metrics: (t: K8sTarget, context: string | null, namespace: string | null) => ["k8s", targetKey(t), "metrics", context, namespace] as const,
 };
 
 /** kubeconfig와 DescribeCluster를 읽는다. 인증 명령은 실행하지 않는다. */
@@ -104,7 +108,43 @@ export function useK8sOverview(target: K8sTarget, context: string | null, ssoPro
   });
 }
 
-/** 탭을 닫을 때: 감시를 버리고 연결을 닫고 이 대상의 쿼리를 지운다. 닫기 오류는 무시한다. */
+/**
+ * Pod·노드 사용량(metrics-server). `enabled`가 켜져 있는 동안(연결됐고 탭이 보이는 동안) 15초마다 다시 읽는다.
+ * 서버가 없거나 권한이 없는 것은 오류가 아니라 응답의 unavailable 사유라서 재시도하지 않는다. 오류(연결 끊김 등)는 사용량 열만 없앤다.
+ */
+export function useK8sMetrics(target: K8sTarget, context: string | null, namespace: string | null, ssoProfile: string, enabled: boolean) {
+  return useQuery<K8sMetrics, AppError>({
+    queryKey: k8sKeys.metrics(target, context, namespace),
+    queryFn: () => k8sApi.metrics(target, namespace, ssoProfile),
+    enabled: enabled && context !== null,
+    refetchInterval: METRICS_INTERVAL_MS,
+    refetchIntervalInBackground: false,
+    staleTime: METRICS_INTERVAL_MS / 2,
+    retry: false,
+  });
+}
+
+/**
+ * 사용량 그래프에 쓸 기록을 모은다. 연결돼 있는 동안 탭이 가려지거나 창이 뒤로 가도 계속 읽는다.
+ * 목록과 같은 쿼리 키를 써서, 같은 네임스페이스를 보고 있으면 한 번만 읽는다.
+ */
+export function useUsageSampler(target: K8sTarget, context: string | null, namespace: string | null, ssoProfile: string, enabled: boolean) {
+  const q = useQuery<K8sMetrics, AppError>({
+    queryKey: k8sKeys.metrics(target, context, namespace),
+    queryFn: () => k8sApi.metrics(target, namespace, ssoProfile),
+    enabled: enabled && context !== null,
+    refetchInterval: METRICS_INTERVAL_MS,
+    refetchIntervalInBackground: true,
+    staleTime: METRICS_INTERVAL_MS / 2,
+    retry: false,
+  });
+  const key = context === null ? null : historyKey(target, context);
+  useEffect(() => {
+    if (key !== null && q.data) recordUsage(key, q.dataUpdatedAt, q.data);
+  }, [key, q.data, q.dataUpdatedAt]);
+}
+
+/** 탭을 닫을 때: 감시를 버리고 연결을 닫고 이 대상의 쿼리와 사용량 기록을 지운다. 닫기 오류는 무시한다. */
 export async function closeK8s(qc: QueryClient, target: K8sTarget, ssoProfile: string): Promise<void> {
   watchRegistry.dropTarget(targetKey(target));
   try {
@@ -113,6 +153,7 @@ export async function closeK8s(qc: QueryClient, target: K8sTarget, ssoProfile: s
     // 이미 닫혔거나 연결된 적이 없다
   }
   qc.removeQueries({ queryKey: k8sKeys.root(target) });
+  forgetUsage(target);
 }
 
 /**

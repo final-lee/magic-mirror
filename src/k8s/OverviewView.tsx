@@ -1,23 +1,32 @@
 import type { ReactNode } from "react";
 import { ErrorState } from "../components/ErrorState";
 import { formatBytes, formatCpu, percent } from "./format";
-import { EKS_SECTIONS, useK8sOverview } from "./queries";
+import { EKS_SECTIONS, useK8sMetrics, useK8sOverview } from "./queries";
 import {
-  COL_NAME, CORDONED, GROUP_KIND_LABELS, H_ADDON, H_CAPACITY_TYPE, H_CHECK, H_CPU_REQUESTED, H_CPU_USED, H_CURRENT_API, H_CURRENT_VERSION,
-  H_INSTANCE_TYPE, H_ISSUES, H_KIND, H_KUBELET, H_LATEST_VERSION, H_MEMORY_REQUESTED, H_MEMORY_USED, H_NEW_API, H_NODEGROUP, H_REASON,
+  COL_NAME, COL_NAMESPACE, CORDONED, GROUP_KIND_LABELS, H_ADDON, H_CAPACITY_TYPE, H_CHECK, H_CPU_REQUESTED, H_CPU_USED, H_CURRENT_API, H_CURRENT_VERSION,
+  H_INSTANCE_TYPE, H_ISSUES, H_KIND, H_KUBELET, H_LATEST_VERSION, H_MEMORY_REQUESTED, H_MEMORY_USED, H_NEW_API, H_POD_COUNT, H_NODEGROUP, H_REASON,
   H_SIZE_RANGE, H_STATE, H_VERSION, H_ZONE, L_AUTH_MODE, L_CIDRS, L_ENDPOINT, L_LOGGING, L_OIDC, L_PLATFORM, L_PRIVATE, L_PUBLIC,
-  L_SECRETS_ENCRYPTION, L_STATUS, L_VERSION, LOADING, NO_INSIGHTS, NO_METRICS, NO_SKEW, NONE, OFF, ON, REFRESH, REQUESTS_PARTIAL,
-  SECTION_LABELS, SEC_ADDONS, SEC_CLUSTER, SEC_FARGATE, SEC_NODEGROUPS, SEC_NODEPOOLS, SEC_NODES, SEC_UPGRADE, SUB_INSIGHTS, SUB_REMOVED,
+  L_SECRETS_ENCRYPTION, L_STATUS, L_VERSION, LOADING, METRICS_UNAVAILABLE, NO_INSIGHTS, NO_METRICS, NO_SKEW, NONE, OFF, ON, REFRESH, REQUESTS_PARTIAL,
+  SECTION_LABELS, SEC_ADDONS, SEC_CLUSTER, SEC_CLUSTER_USAGE, SEC_FARGATE, SEC_NAMESPACE_USAGE, SEC_WARNINGS, SUB_TOP_CPU, SUB_TOP_MEMORY, SEC_NODEGROUPS, SEC_NODEPOOLS, SEC_NODES, SEC_UPGRADE, SUB_INSIGHTS, SUB_REMOVED,
   SUB_SKEW, UP_TO_DATE, gapText, noRemoved, removedTitle, skewText,
 } from "./text";
 import type { K8sNodeView, K8sOverview, K8sOverviewSection, K8sTarget } from "./types";
+import { namespaceTotals, top, type NamespaceUsage } from "./usage";
+import { ClusterSummary, RecentWarnings } from "./ClusterSummary";
+import { historyKey } from "./usageHistory";
 
 interface Props {
   target: K8sTarget;
   context: string;
   ssoProfile: string;
   live: boolean;
+  /** 탭이 보이는 동안에만 네임스페이스별 사용량을 15초마다 읽는다. 없으면 보이는 것으로 본다 */
+  visible?: boolean;
   onOpenNode: (name: string) => void;
+  /** 최근 경고 감시가 새 연결에서 다시 시작되게 하는 세션 시각 */
+  sessionEpoch: number;
+  /** 이벤트 화면으로 간다 */
+  onOpenEvents: () => void;
 }
 
 const Sect = ({ title, children }: { title: string; children: ReactNode }) => (
@@ -27,12 +36,47 @@ const Sect = ({ title, children }: { title: string; children: ReactNode }) => (
   </section>
 );
 
+const TOP_NAMESPACES = 10;
+
+/** 사용량이 큰 네임스페이스 표 */
+function NamespaceTop({ title, rows }: { title: string; rows: NamespaceUsage[] }) {
+  return (
+    <>
+      <h5>{title}</h5>
+      <table className="k8s-table" aria-label={title}>
+        <thead>
+          <tr><th>{COL_NAMESPACE}</th><th>{H_CPU_USED}</th><th>{H_MEMORY_USED}</th><th>{H_POD_COUNT}</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.namespace}>
+              <td className="mono">{r.namespace}</td><td>{formatCpu(r.cpuMilli)}</td><td>{formatBytes(r.memoryBytes)}</td><td>{r.pods}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
+/** CPU 상위·메모리 상위 두 표. Pod가 없으면 아무것도 그리지 않는다 */
+function NamespaceTops({ totals }: { totals: NamespaceUsage[] }) {
+  if (totals.length === 0) return null;
+  return (
+    <>
+      <NamespaceTop title={SUB_TOP_CPU} rows={top(totals, "cpuMilli", TOP_NAMESPACES)} />
+      <NamespaceTop title={SUB_TOP_MEMORY} rows={top(totals, "memoryBytes", TOP_NAMESPACES)} />
+    </>
+  );
+}
+
 function nodeStatus(n: K8sNodeView): string {
   return [n.ready ? "Ready" : "NotReady", n.unschedulable ? CORDONED : null, n.pressures.length > 0 ? n.pressures.join(", ") : null].filter(Boolean).join(" · ");
 }
 
-export function OverviewView({ target, context, ssoProfile, live, onOpenNode }: Props) {
+export function OverviewView({ target, context, ssoProfile, live, visible = true, onOpenNode, sessionEpoch, onOpenEvents }: Props) {
   const q = useK8sOverview(target, context, ssoProfile, live);
+  const usage = useK8sMetrics(target, context, null, ssoProfile, live && visible);
   const refetch = () => void q.refetch();
   if (q.isError) return <ErrorState error={q.error} profile={target.profile} onRetry={refetch} onLoggedIn={refetch} />;
   if (!q.data) return <div className="empty">{LOADING}</div>;
@@ -47,11 +91,23 @@ export function OverviewView({ target, context, ssoProfile, live, onOpenNode }: 
         </div>
       ));
   const c = o.cluster;
+  // 노드 사용량은 15초마다 다시 읽은 값을 쓴다(읽을 수 없으면 개요를 읽을 때의 값)
+  const liveNodes = usage.data && usage.data.nodesUnavailable === null
+    ? new Map(usage.data.nodes.map((n) => [n.name, { cpuMilli: n.cpuMilli, memoryBytes: n.memoryBytes }]))
+    : null;
   return (
     <div className="k8s-overview">
       <div className="k8s-actions">
         <button className="btn tone-secondary" onClick={refetch} disabled={q.isFetching}>{REFRESH}</button>
       </div>
+      {o.nodes && (
+        <Sect title={SEC_CLUSTER_USAGE}>
+          <ClusterSummary nodes={o.nodes} live={liveNodes} historyKey={historyKey(target, context)} metrics={o.metrics || liveNodes !== null} />
+        </Sect>
+      )}
+      <Sect title={SEC_WARNINGS}>
+        <RecentWarnings target={target} context={context} sessionEpoch={sessionEpoch} ssoProfile={ssoProfile} live={live} onOpenEvents={onOpenEvents} />
+      </Sect>
       <Sect title={SEC_CLUSTER}>
         {gaps("cluster")}
         {c && (
@@ -104,6 +160,15 @@ export function OverviewView({ target, context, ssoProfile, live, onOpenNode }: 
         {o.nodes && !o.metrics && !o.gaps.some((g) => g.section === "metrics") && <p className="dim">{NO_METRICS}</p>}
         {o.requestsPartial && <p className="dim">{REQUESTS_PARTIAL}</p>}
       </Sect>
+      {usage.data && (usage.data.podsUnavailable === null || o.metrics) && (
+        <Sect title={SEC_NAMESPACE_USAGE}>
+          {usage.data.podsUnavailable ? (
+            <p className="dim">{METRICS_UNAVAILABLE[usage.data.podsUnavailable]}</p>
+          ) : (
+            <NamespaceTops totals={namespaceTotals(usage.data)} />
+          )}
+        </Sect>
+      )}
       <Sect title={SEC_NODEGROUPS}>
         {gaps("nodegroups")}
         {o.nodegroups && o.nodegroups.length > 0 && (
