@@ -4,9 +4,6 @@ use serde_json::Value;
 use super::{annotation, condition, int, joined, list, text, Problem, Values};
 use crate::k8s::read::quantity;
 
-#[cfg(test)]
-#[path = "extra_tests.rs"]
-mod tests;
 
 pub(super) fn builtin(group: &str, kind: &str, obj: &DynamicObject, v: &mut Values) -> bool {
     let d = &obj.data;

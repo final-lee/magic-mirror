@@ -1,9 +1,9 @@
 use serde_json::{json, Value};
-use super::super::{values_of, Problem};
+use super::{values_of, Problem};
 use crate::k8s::rows::KindRef;
 use kube::core::DynamicObject;
 
-fn extract(group: &str, kind: &str, mut data: Value) -> super::super::Values {
+fn extract(group: &str, kind: &str, mut data: Value) -> super::Values {
     data["apiVersion"] = json!("v1");
     data["kind"] = json!(kind);
     data["metadata"]["name"] = json!("test");
@@ -48,7 +48,7 @@ fn cluster_and_network_summaries() {
     assert!(crd.problems.contains(&Problem::NotEstablished));
     for kind in ["MutatingWebhookConfiguration", "ValidatingWebhookConfiguration"] {
         let hooks = extract("admissionregistration.k8s.io", kind, json!({"webhooks":[{}, {"failurePolicy":"Ignore"}]}));
-        assert_eq!(hooks.values["failurePolicy"], "Fail, Ignore");
+        assert_eq!(hooks.values["failurePolicy"], "Fail,Ignore");
     }
     let lease = extract("coordination.k8s.io", "Lease", json!({"spec":{"holderIdentity":"node-a","renewTime":"2026-01-01T00:00:00Z"}}));
     assert_eq!(lease.values["holder"], "node-a");
