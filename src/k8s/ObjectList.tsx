@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { ListTable } from "../iam/ListTable";
-import { columnsFor } from "./columns";
+import { columnsFor, type TrendOf } from "./columns";
 import { matchesFilter, parseFilter } from "./selector";
 import { BAD_SELECTOR, FILTER_PLACEHOLDER, LIST_EMPTY, LIST_NO_MATCH, LOADING, METRICS_UNAVAILABLE, ONLY_PROBLEMS } from "./text";
 import type { K8sKindRef, K8sRow } from "./types";
 import { unavailableFor, type UsageIndex } from "./usage";
+import { podTrend, subscribeUsage, usageVersion } from "./usageHistory";
 
 interface Props {
   kind: K8sKindRef;
@@ -21,16 +22,27 @@ interface Props {
   now?: number;
   /** 사용량(metrics-server). 없으면 사용량 열도 안내도 없다 */
   usage?: UsageIndex | null;
+  /** 앱이 모은 사용량 기록의 키(usageHistory.historyKey). 있으면 Pod 비율 칸에 최근 추이 그래프를 둔다 */
+  historyKey?: string | null;
 }
 
 /** 감시로 받은 행을 이름·레이블 셀렉터·이상 여부로 걸러 보여 준다 */
-export function ObjectList({ kind, rows, status, showNamespace, selectedUid, onSelect, onOpen, now, usage }: Props) {
+export function ObjectList({ kind, rows, status, showNamespace, selectedUid, onSelect, onOpen, now, usage, historyKey }: Props) {
   const [query, setQuery] = useState("");
   const [onlyProblems, setOnlyProblems] = useState(false);
   const filter = parseFilter(query);
   const shown = rows.filter((r) => matchesFilter(r, filter) && (!onlyProblems || r.problems.length > 0));
   const at = now ?? Date.now();
-  const columns = useMemo(() => columnsFor(kind, showNamespace, at, usage), [kind, showNamespace, at, usage]);
+  // 새 기록이 들어올 때마다 다시 그려 추이 그래프를 늘린다
+  const subscribe = useCallback((listener: () => void) => (historyKey ? subscribeUsage(historyKey, listener) : () => {}), [historyKey]);
+  const version = useSyncExternalStore(subscribe, () => (historyKey ? usageVersion(historyKey) : 0));
+  // version이 바뀌면(같은 키에 기록이 늘면) 새 함수로 열을 다시 만든다
+  const trendOf = useMemo<TrendOf | null>(
+    () => (historyKey ? (namespace, name) => podTrend(historyKey, namespace, name) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- version은 다시 만들 때를 알리는 값이다
+    [historyKey, version],
+  );
+  const columns = useMemo(() => columnsFor(kind, showNamespace, at, usage, trendOf), [kind, showNamespace, at, usage, trendOf]);
   const unavailable = usage ? unavailableFor(kind, usage) : null;
   const pick = (uid: string, then: (row: K8sRow) => void) => {
     const r = rows.find((x) => x.uid === uid);

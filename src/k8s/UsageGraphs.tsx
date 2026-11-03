@@ -1,13 +1,10 @@
 import { useSyncExternalStore } from "react";
 import * as t from "./text";
 import type { K8sContainer, K8sObjectView, K8sTarget, ObjectRef } from "./types";
-import { METRICS_INTERVAL_MS } from "./usage";
-import { HISTORY_MS, historyKey, subscribeUsage, usageOf, usageVersion, type UsageSeries } from "./usageHistory";
+import { HISTORY_MS, historyKey, splitAtGaps, subscribeUsage, usageOf, usageVersion, type UsageSeries } from "./usageHistory";
 
 type Reference = { name: string; value: number; limit: boolean };
 const COLORS = Array.from({ length: 8 }, (_, i) => `var(--log-c${i + 1})`);
-/** 이보다 오래 값이 비면(연결이 끊겼던 동안) 선을 잇지 않는다 */
-const GAP_MS = METRICS_INTERVAL_MS * 3;
 
 /** 상세가 읽은 요청·제한을 그래프 단위로 바꾼다. 워크로드는 Pod 템플릿 합계다. */
 function references(containers: K8sContainer[], pod: boolean, cpu: boolean): Reference[] {
@@ -41,17 +38,6 @@ function axisValue(value: number, max: number, cpu: boolean): string {
 function timeLabel(ms: number): string {
   const date = new Date(ms);
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
-
-/** 값이 GAP_MS보다 오래 빈 곳에서 선을 끊는다 */
-function segments(points: [number, number][]): [number, number][][] {
-  const out: [number, number][][] = [];
-  for (const point of points) {
-    const last = out[out.length - 1];
-    if (last && point[0] - last[last.length - 1][0] <= GAP_MS) last.push(point);
-    else out.push([point]);
-  }
-  return out;
 }
 
 /** 모은 값과 요청·제한을 최근 HISTORY_MS 축 위에 그리고 범례와 눈금을 붙인다 */
@@ -96,7 +82,7 @@ function Chart({ title, series, refs, end, cpu }: {
               </line>
             );
           })}
-          {series.map((item, i) => segments(item.points).map((part, j) => (
+          {series.map((item, i) => splitAtGaps(item.points).map((part, j) => (
             part.length === 1 ? (
               <circle
                 key={`${item.name}-${j}`}

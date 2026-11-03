@@ -11,6 +11,7 @@ import { CAT_CUSTOM, ROLLOUT_PROGRESS, ROLLOUT_WAITING } from "./text";
 import type { K8sChange, K8sKind, K8sKindRef, K8sTarget, ObjectRef } from "./types";
 import { buildUsageIndex, usageKindOf } from "./usage";
 import { useK8sWatch } from "./useK8sWatch";
+import { historyKey } from "./usageHistory";
 
 export interface WorkloadsFocus {
   ref: ObjectRef;
@@ -126,6 +127,7 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
           status={watch.status}
           showNamespace={namespace === null}
           usage={usage}
+          historyKey={historyKey(target, context)}
           selectedUid={topRow?.uid ?? null}
           onSelect={(r) => setStack(r.uid === topRow?.uid ? [] : [{ kind, namespace: r.namespace, name: r.name }])}
           onOpen={(r) => setStack([{ kind, namespace: r.namespace, name: r.name }])}
