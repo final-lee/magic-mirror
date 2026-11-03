@@ -76,7 +76,7 @@ export function ResourceArea({ service, type, profile, region, account, filter, 
 
   return (
     <>
-      <section className="center">
+      <section className="center detail-host">
         <Breadcrumb service={service} segments={[{ label: type.name }]} count={q.data ? items.length : undefined} />
         {q.data?.truncated && <div className="notice">1,000개까지만 표시해요</div>}
         {notice && (
@@ -100,16 +100,16 @@ export function ResourceArea({ service, type, profile, region, account, filter, 
           />
         )}
         <StatusBar profile={profile} account={account} region={service.global ? GLOBAL : region} updatedAt={q.dataUpdatedAt} />
+        <DetailPanel detail={selected ? resourceDetail(selected, type, service) : null} onShowRaw={() => setShowRaw(true)} onClose={() => setSelectedId(null)}>
+          {selected && service.id === "eks" && type.id === "clusters" && (
+            <ClusterDetailSummary
+              key={`${profile}|${region}|${selected.id}`}
+              target={{ profile, region, cluster: selected.id }}
+              onOpen={() => onOpenK8s?.({ profile, region, cluster: selected.id })}
+            />
+          )}
+        </DetailPanel>
       </section>
-      <DetailPanel detail={selected ? resourceDetail(selected, type, service) : null} onShowRaw={() => setShowRaw(true)}>
-        {selected && service.id === "eks" && type.id === "clusters" && (
-          <ClusterDetailSummary
-            key={`${profile}|${region}|${selected.id}`}
-            target={{ profile, region, cluster: selected.id }}
-            onOpen={() => onOpenK8s?.({ profile, region, cluster: selected.id })}
-          />
-        )}
-      </DetailPanel>
       {showRaw && selected && <RawModal title={selected.name} text={selected.raw} onClose={() => setShowRaw(false)} />}
     </>
   );

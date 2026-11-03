@@ -2,19 +2,21 @@ import { Fragment, type ReactNode } from "react";
 import { desktop } from "../api/desktop";
 import type { DetailData } from "../lib/detail";
 
-/** children: 기본 값 목록 바로 아래에 붙는 서비스별 요약(예: EKS 클러스터 사용량) */
-export function DetailPanel({ detail, onShowRaw, children }: { detail: DetailData | null; onShowRaw: () => void; children?: ReactNode }) {
-  if (!detail) {
-    return (
-      <aside className="detail">
-        <div className="empty">리소스를 선택하세요</div>
-      </aside>
-    );
-  }
+/**
+ * 오른쪽 상세 팝업. 고른 것이 있을 때만 목록 위에 떠서 오른쪽부터 70%를 덮는다(EKS·ArgoCD 상세와 같은 비율).
+ * children: 기본 값 목록 바로 아래에 붙는 서비스별 요약(예: EKS 클러스터 사용량)
+ */
+export function DetailPanel({ detail, onShowRaw, onClose, children }: { detail: DetailData | null; onShowRaw: () => void; onClose: () => void; children?: ReactNode }) {
+  if (!detail) return null;
   const tags = Object.entries(detail.tags);
   return (
-    <aside className="detail">
-      <h3>{detail.title}</h3>
+    <aside className="detail" aria-label="상세">
+      <div className="detail-head">
+        <h3>{detail.title}</h3>
+        <button className="icon" aria-label="닫기" title="닫기" onClick={onClose}>
+          ✕
+        </button>
+      </div>
       <div className="sub">{detail.subtitle}</div>
       <dl className="kv">
         {detail.rows.map((r) => (
