@@ -12,7 +12,7 @@ const rows = [row("api", { app: "api" }), row("worker", { app: "worker" }, ["cra
 
 function setup(over: Partial<Parameters<typeof ObjectList>[0]> = {}) {
   const onSelect = vi.fn();
-  render(<ObjectList kind={PODS} rows={rows} status="ready" showNamespace={false} selectedUid={null} onSelect={onSelect} now={0} {...over} />);
+  render(<ObjectList kind={PODS} rows={rows} status="ready" showNamespace={false} selectedUid={null} onSelect={onSelect} onClear={() => {}} now={0} {...over} />);
   return { onSelect };
 }
 const names = () => screen.queryAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[0].textContent);

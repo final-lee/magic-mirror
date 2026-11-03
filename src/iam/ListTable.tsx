@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useToggleSelect } from "../hooks/useToggleSelect";
 
 export interface ListColumn<T> {
   key: string;
@@ -16,6 +17,8 @@ interface Props<T> {
   rowKey: (row: T) => string;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** 고른 행을 다시 누르거나 빈 곳을 누르면 선택을 푼다 */
+  onClear: () => void;
   onOpen: (id: string) => void;
   empty: string;
 }
@@ -26,7 +29,8 @@ function compare(a: string | number, b: string | number): number {
 }
 
 /** 사용자·그룹·역할·정책 목록이 함께 쓰는 정렬·선택 가능한 표. 첫 열을 기준으로 처음 정렬한다. */
-export function ListTable<T>({ label, rows, columns, rowKey, selectedId, onSelect, onOpen, empty }: Props<T>) {
+export function ListTable<T>({ label, rows, columns, rowKey, selectedId, onSelect, onClear, onOpen, empty }: Props<T>) {
+  const toggle = useToggleSelect(selectedId, onSelect, onClear);
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: columns[0].key, dir: 1 });
   const box = useRef<HTMLDivElement>(null);
 
@@ -62,7 +66,7 @@ export function ListTable<T>({ label, rows, columns, rowKey, selectedId, onSelec
   };
 
   return (
-    <div className="tbl iam-list" tabIndex={0} onKeyDown={onKeyDown} data-testid="iam-list" ref={box}>
+    <div className="tbl iam-list" tabIndex={0} onKeyDown={onKeyDown} onClick={toggle.blank} data-testid="iam-list" ref={box}>
       <table aria-label={label}>
         <thead>
           <tr>
@@ -83,7 +87,12 @@ export function ListTable<T>({ label, rows, columns, rowKey, selectedId, onSelec
           {sorted.map((r) => {
             const id = rowKey(r);
             return (
-              <tr key={id} className={id === selectedId ? "on" : undefined} aria-selected={id === selectedId} onClick={() => onSelect(id)} onDoubleClick={() => onOpen(id)}>
+              <tr key={id} className={id === selectedId ? "on" : undefined} aria-selected={id === selectedId} onClick={(e) => toggle.row(id, e)}
+                onDoubleClick={() => {
+                  toggle.dblclick();
+                  onOpen(id);
+                }}
+              >
                 {columns.map((c) => (
                   <td key={c.key} className={c.numeric ? "num" : undefined}>
                     {c.render(r)}

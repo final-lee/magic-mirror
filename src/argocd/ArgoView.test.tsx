@@ -409,6 +409,16 @@ describe("detail", () => {
     fireEvent.click(await screen.findByRole("button", { name: "닫기" }));
     expect(screen.queryByRole("complementary")).toBeNull();
   });
+
+  test("clicking the empty part of the list closes it; a header does not", async () => {
+    await ready([appRow("web")]);
+    fireEvent.click(screen.getByText("web"));
+    expect(await screen.findByRole("complementary")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("columnheader")[0]);
+    expect(screen.getByRole("complementary")).toBeInTheDocument();
+    fireEvent.click(document.querySelector(".argo-scroll") as HTMLElement);
+    expect(screen.queryByRole("complementary")).toBeNull();
+  });
 });
 
 describe("empty and error states", () => {

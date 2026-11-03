@@ -122,7 +122,7 @@ test("clicking the open row again closes the detail; Enter on it keeps it open; 
   fireEvent.click(screen.getByText("b"));
   await vi.waitFor(() => expect(m.get).toHaveBeenLastCalledWith(T, PODS, "prod", "b", "p"));
   fireEvent.click(screen.getByText("b"));
-  expect(screen.queryByRole("complementary", { name: DETAIL_LABEL })).toBeNull();
+  await vi.waitFor(() => expect(screen.queryByRole("complementary", { name: DETAIL_LABEL })).toBeNull());
 });
 
 test("the detail covers 70% of the list unless a width was saved", async () => {

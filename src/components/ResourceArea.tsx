@@ -96,6 +96,7 @@ export function ResourceArea({ service, type, profile, region, account, filter, 
             filter={filter}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            onClear={() => setSelectedId(null)}
             onOpen={open}
           />
         )}
