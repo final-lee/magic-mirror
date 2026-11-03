@@ -16,6 +16,8 @@ interface Props {
   selectedUid: string | null;
   /** 클릭·↑/↓ 선택 */
   onSelect: (row: K8sRow) => void;
+  /** 선택을 푼다(고른 행을 다시 누르거나 빈 곳) */
+  onClear: () => void;
   /** 더블클릭·Enter. 없으면 onSelect */
   onOpen?: (row: K8sRow) => void;
   /** 나이 계산 기준(시험용). 없으면 그리는 시각 */
@@ -27,7 +29,7 @@ interface Props {
 }
 
 /** 감시로 받은 행을 이름·레이블 셀렉터·이상 여부로 걸러 보여 준다 */
-export function ObjectList({ kind, rows, status, showNamespace, selectedUid, onSelect, onOpen, now, usage, historyKey }: Props) {
+export function ObjectList({ kind, rows, status, showNamespace, selectedUid, onSelect, onClear, onOpen, now, usage, historyKey }: Props) {
   const [query, setQuery] = useState("");
   const [onlyProblems, setOnlyProblems] = useState(false);
   const filter = parseFilter(query);
@@ -72,6 +74,7 @@ export function ObjectList({ kind, rows, status, showNamespace, selectedUid, onS
           rowKey={(r) => r.uid}
           selectedId={selectedUid}
           onSelect={(uid) => pick(uid, onSelect)}
+          onClear={onClear}
           onOpen={(uid) => pick(uid, onOpen ?? onSelect)}
           empty={rows.length === 0 ? LIST_EMPTY : LIST_NO_MATCH}
         />

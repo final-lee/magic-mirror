@@ -129,7 +129,8 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
           usage={usage}
           historyKey={historyKey(target, context)}
           selectedUid={topRow?.uid ?? null}
-          onSelect={(r) => setStack(r.uid === topRow?.uid ? [] : [{ kind, namespace: r.namespace, name: r.name }])}
+          onSelect={(r) => setStack([{ kind, namespace: r.namespace, name: r.name }])}
+          onClear={() => setStack([])}
           onOpen={(r) => setStack([{ kind, namespace: r.namespace, name: r.name }])}
         />
         {top && <LaneResizer lane="detailPct" onResize={lanes.resize} onCommit={lanes.commit} style={{ right: `${detailPct}%` }} />}

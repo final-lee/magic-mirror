@@ -109,7 +109,7 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
     policies: ov.policies.length,
     assignments: draft.items.length || undefined,
   };
-  const select = (view: IamView, id: string) => setSelected((s) => ({ ...s, [view]: id }));
+  const select = (view: IamView, id: string | null) => setSelected((s) => ({ ...s, [view]: id ?? undefined }));
   // 행을 열면 그 행을 골라 둔다. 돌아왔을 때 어디서 왔는지 보이도록.
   const openRoute = (view: IamView, id: string, to: IamRoute) => {
     select(view, id);
@@ -147,6 +147,7 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
           filter={filter}
           selectedId={selected[route.view] ?? null}
           onSelect={(arn) => select(route.view, arn)}
+          onClear={() => select(route.view, null)}
           onOpen={(arn) => openRoute(route.view, arn, principalRoute(kind, arn))}
         />
       </section>
@@ -163,6 +164,7 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
           filter={filter}
           selectedId={selected.policies ?? null}
           onSelect={(id) => select("policies", id)}
+          onClear={() => select("policies", null)}
           onOpen={(id) => openRoute("policies", id, policyRoute(id))}
         />
       </section>
