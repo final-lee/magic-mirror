@@ -565,21 +565,6 @@ pub async fn k8s_metrics(k8s: State<'_, K8sState>, target: K8sTarget, namespace:
     crate::k8s::read::metrics::metrics(&s.client, namespace.as_deref(), s.endpoint).await
 }
 
-/// 서비스 프록시로 읽을 클러스터 내부 Prometheus 후보.
-#[tauri::command]
-pub async fn k8s_prometheus_candidates(k8s: State<'_, K8sState>, target: K8sTarget) -> Result<Vec<crate::k8s::read::prometheus::PrometheusEndpoint>, AppError> {
-    let s = k8s.session(&target)?;
-    crate::k8s::read::prometheus::candidates(&s.client, s.endpoint).await
-}
-
-/// Pod 또는 워크로드의 최근 CPU·메모리 그래프.
-#[tauri::command]
-pub async fn k8s_prometheus_graphs(k8s: State<'_, K8sState>, target: K8sTarget, server: crate::k8s::read::prometheus::PrometheusEndpoint, kind: KindRef, namespace: String, name: String, hours: u32) -> Result<crate::k8s::read::prometheus::Graphs, AppError> {
-    let s = k8s.session(&target)?;
-    crate::k8s::read::prometheus::graphs(&s.client, s.endpoint, &server, &kind, &namespace, &name, hours).await
-}
-
-
 /// 개요. 부분마다 실패를 `gaps`에 담아 돌려주므로 연결이 없을 때와 AWS 프로필 설정을 읽지 못할 때만 실패한다.
 #[tauri::command]
 pub async fn k8s_overview(app: State<'_, AppState>, k8s: State<'_, K8sState>, target: K8sTarget) -> Result<Overview, AppError> {

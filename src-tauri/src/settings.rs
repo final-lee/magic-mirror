@@ -59,8 +59,6 @@ pub struct Settings {
     pub pg_logins: BTreeMap<String, String>,
     /// EKS 탭이 접속할 kubeconfig context: 클러스터 ARN → context 이름
     pub k8s_contexts: BTreeMap<String, String>,
-    /// 클러스터별 Prometheus 서비스(네임스페이스/이름/포트).
-    pub k8s_prometheus: BTreeMap<String, crate::k8s::read::prometheus::PrometheusEndpoint>,
     /// kubeconfig 경로. 비우면 KUBECONFIG 또는 ~/.kube/config
     pub kubeconfig_path: Option<String>,
     /// EKS 탭 왼쪽 메뉴에 북마크한 리소스 종류. 북마크한 순서(드래그로 바꾼 순서)대로 둔다.
@@ -85,7 +83,6 @@ struct RawSettings {
     theme: Option<String>,
     pg_logins: BTreeMap<String, String>,
     k8s_contexts: BTreeMap<String, String>,
-    k8s_prometheus: BTreeMap<String, crate::k8s::read::prometheus::PrometheusEndpoint>,
     kubeconfig_path: Option<String>,
     k8s_bookmarks: Vec<KindRef>,
     k8s_lane_widths: K8sLaneWidths,
@@ -118,7 +115,6 @@ pub fn load(path: &Path, all_services: &[&str]) -> Settings {
                 theme: raw.theme,
                 pg_logins: raw.pg_logins,
                 k8s_contexts: raw.k8s_contexts,
-                k8s_prometheus: raw.k8s_prometheus,
                 kubeconfig_path: raw.kubeconfig_path,
                 k8s_bookmarks: raw.k8s_bookmarks,
                 k8s_lane_widths: raw.k8s_lane_widths,
@@ -255,20 +251,6 @@ mod tests {
         // 예전 px 값(detail)은 읽지 않는다
         let old = load_text(r#"{"k8sLaneWidths":{"nav":200,"detail":640}}"#);
         assert_eq!(old.k8s_lane_widths, K8sLaneWidths { nav: Some(200), tree: None, detail_pct: None });
-    }
-
-    #[test]
-    fn prometheus_selection_roundtrips_and_old_settings_default_empty() {
-        use crate::k8s::read::prometheus::PrometheusEndpoint;
-        assert!(load_text("{}").k8s_prometheus.is_empty());
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
-        let settings = Settings {
-            k8s_prometheus: BTreeMap::from([("cluster".into(), PrometheusEndpoint { namespace: "monitoring".into(), name: "prometheus".into(), port: 9090 })]),
-            ..Default::default()
-        };
-        save(&path, &settings).unwrap();
-        assert_eq!(load(&path, &[]).k8s_prometheus, settings.k8s_prometheus);
     }
 
     #[test]

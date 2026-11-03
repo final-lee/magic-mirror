@@ -432,7 +432,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
         ) : !q.data ? (
           <div className="empty">{LOADING}</div>
         ) : tab === "usage" && usage ? (
-          <UsageGraphs key={objectKey} target={target} context={context} ssoProfile={ssoProfile} objectRef={objectRef} view={q.data} live={live} />
+          <UsageGraphs key={objectKey} target={target} context={context} objectRef={objectRef} view={q.data} />
         ) : tab === "summary" ? (
           <Summary
             view={q.data}

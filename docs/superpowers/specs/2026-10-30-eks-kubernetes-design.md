@@ -36,7 +36,7 @@
 지금 된 것은 K1·K2와 K3 일부(Pod 로그)다. Lens·k9s의 주요 기능 중 없는 것:
 1. 클러스터를 바꾸는 조작: Pod 셸(exec)·port-forward(K9), scale·rollout restart·rollout undo·삭제(K7 A), cordon·uncordon·drain(K7 B), YAML 편집·적용·새로 만들기(K8 E). 컨테이너 attach와 노드 셸(디버그 Pod)은 C 절에 들어왔고(2026-11-02) 구현했다. CronJob 바로 실행은 K7 A의 Job 재실행에 포함, 일시정지는 K7 A.
 2. 로그: (2026-11-03 구현함) 워크로드 합친 로그(Pod별 색, 새 Pod 따라 붙기)·since(최근 N분)·파일 저장, 모든 컨테이너 한꺼번에, 서버 타임스탬프·줄바꿈 토글.
-3. 리소스 사용량: (2026-11-03 구현함) Pod·컨테이너 CPU/메모리 열(metrics-server), request·limit 대비 %, 워크로드·네임스페이스 집계, Prometheus 그래프. 아래 "사용량(metrics-server)"과 "사용량 그래프" 참고.
+3. 리소스 사용량: (2026-11-03 구현함) Pod·컨테이너 CPU/메모리 열(metrics-server), request·limit 대비 %, 워크로드·네임스페이스 집계, 사용량 그래프(Prometheus 없이 앱이 metrics-server 값을 모은다). 아래 "사용량(metrics-server)"과 "사용량 그래프" 참고.
 4. 내장 종류 트리: (2026-11-03 구현함) HPA, PDB, ResourceQuota, LimitRange, PriorityClass, RuntimeClass, Lease, Mutating·ValidatingWebhookConfiguration, EndpointSlice, IngressClass, Role·ClusterRole·RoleBinding·ClusterRoleBinding, CustomResourceDefinition 자체. API discovery로 제공 버전만 표시하고 목록·상세 요약과 북마크를 지원한다.
 5. 탐색: 키보드 중심 조작(명령 팔레트, `:종류` 이동), `kubectl describe` 형식 출력, xray식 관계 트리, 앱 안 터미널(kubectl), 플러그인.
 6. Helm: 릴리스 목록·values·이력, 업그레이드·롤백·삭제, 차트 설치(설계에 없음).
@@ -93,8 +93,8 @@
   - 목록 줄: Pod는 컨테이너가 모두 설정했을 때만 요청·제한 합(`cpuRequest`·`cpuLimit`·`memoryRequest`·`memoryLimit`, 밀리코어·바이트)을 값으로 싣는다(일부만의 합은 사용량과 견줄 수 없어 비운다). 노드는 `cpuAllocatable`·`memoryAllocatable`. 상세의 컨테이너 줄도 요청·제한을 싣는다.
   - 목록 열(사용량을 읽을 수 있을 때만, 정렬 가능): Pod는 CPU, 메모리, %CPU/R, %CPU/L, %MEM/R, %MEM/L(k9s와 같은 이름, 요청·제한이 없으면 빈 칸), 노드는 CPU, 메모리, 할당 가능량 대비 %CPU·%MEM, Deployment·StatefulSet·DaemonSet·ReplicaSet·Job·CronJob은 Pod 사용량 합(CPU, 메모리). 비율이 90%를 넘으면 빨갛게 강조한다(정확히 90%는 아님). 읽을 수 없으면 사용량 열을 만들지 않고 목록 위에 한 줄 안내("metrics-server가 없어 사용량을 보여 줄 수 없어요" 등)만 둔다.
   - Pod 상세의 컨테이너 표에 CPU·메모리 사용량과 그 아래에 요청·제한 대비 비율을 보인다(init 컨테이너는 측정되지 않아 비움). 개요에 네임스페이스별 사용량(CPU 상위·메모리 상위 10개, Pod 수) 표를 둔다.
-  - 다시 읽기: 연결됐고 그 탭이 보이는 동안 15초마다(`refetchInterval`, 가려진 탭에서는 읽지 않는다). 사용량 열이 있는 종류를 보거나 그런 객체의 상세를 열었을 때만 읽는다. 목록은 선택한 네임스페이스(클러스터 범위 종류는 전체), 개요는 전체를 읽는다.
-- 사용량 그래프(2026-11-03): Pod와 Deployment·StatefulSet·DaemonSet 상세에서 최근 1·6·24시간 CPU·메모리를 컨테이너 또는 Pod별로 표시한다. cAdvisor의 CPU rate와 working set을 쿼리하고, 알려진 요청·제한을 점선으로 표시한다. 모든 네임스페이스의 Prometheus 서비스 후보를 찾고 여러 개면 선택하며 직접 네임스페이스·서비스·포트를 입력할 수 있다. 선택은 클러스터별 설정에 저장한다. API 서버 서비스 프록시로 읽기만 하며 Amazon Managed Prometheus는 범위 밖이다. 워크로드는 현재 셀렉터에 맞는 Pod를 대상으로 한다.
+  - 다시 읽기: 연결됐고 그 탭이 보이는 동안 15초마다(`refetchInterval`, 가려진 탭에서는 읽지 않는다). 사용량 열이 있는 종류를 보거나 그런 객체의 상세를 열었을 때만 읽는다. 목록은 선택한 네임스페이스(클러스터 범위 종류는 전체), 개요는 전체를 읽는다. 그와 별도로 그래프 기록용 읽기는 연결된 동안 탭이 가려져도 계속한다(아래 "사용량 그래프").
+- 사용량 그래프(2026-11-03, 같은 날 Prometheus 대신 앱 수집으로 바꿈): 클러스터에 Prometheus를 따로 운영하지 않는다. 탭이 연결돼 있는 동안 고른 네임스페이스(전체면 모두)의 `k8s_metrics`를 15초마다 읽어(탭이 가려지거나 창이 뒤로 가도 계속, 목록과 같은 쿼리 키라 같은 네임스페이스면 한 번만 읽는다) 클러스터·context별로 Pod 합계와 컨테이너별 CPU·메모리를 메모리에 모은다(`src/k8s/usageHistory.ts`). 최근 1시간만 남기고, 10초 안의 중복 값은 버리며, 탭을 닫으면 지운다. 앱을 끄면 사라진다. Pod와 Deployment·StatefulSet·DaemonSet 상세의 "사용량" 탭이 최근 1시간 축에 컨테이너(Pod) 또는 Pod(워크로드, 컨트롤러 사슬로 찾는다)별 선을 그리고, 알려진 요청·제한을 점선으로 표시한다. 45초보다 오래 값이 비면 선을 끊는다. metrics-server가 없거나 권한이 없으면 그 까닭을 보인다. metrics-server는 EKS 기본 설치가 아니지만 AWS 커뮤니티 애드온(`metrics-server`)으로 설치할 수 있다.
 - 앱 안 연결: 노드 → 노드 상세, ServiceAccount → 접근 화면, IAM 역할 → IAM 워크스페이스.
 - 이벤트 화면: 네임스페이스·클러스터 전체를 시간순으로, Warning만 보기.
 
