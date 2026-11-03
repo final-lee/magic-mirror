@@ -1,15 +1,15 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
-import { DEPLOYMENTS, NODES, PODS, SECRETS, SERVICES, SERVICE_ACCOUNTS } from "./kinds";
+import { CONFIGMAPS, CRONJOBS, DAEMONSETS, DEPLOYMENTS, JOBS, NODES, PODS, PVCS, REPLICASETS, SECRETS, SERVICES, SERVICE_ACCOUNTS, STATEFULSETS } from "./kinds";
 import { ObjectDetail } from "./ObjectDetail";
 import {
-  BACK, CHILDREN_TRUNCATED, CLOSE, NO_RECENT_EVENTS, NO_SECRET_PERMISSION, OPEN_IN_IAM, SEC_CHILDREN, SEC_OWNERS, SHOW_VALUE,
+  BACK, CHILDREN_TRUNCATED, CLOSE, LOG_ALL_CONTAINERS, LOG_CONTAINER, NO_RECENT_EVENTS, NO_SECRET_PERMISSION, OPEN_IN_IAM, SEC_CHILDREN, SEC_OWNERS, SHOW_VALUE,
   CHANGE_NODE_SHELL, CHANGE_NODE_SHELL_IMAGE, FORWARD_OPEN, FORWARD_PORT, SHELL_OPEN, TAB_LOGS, TAB_SHELL, TAB_YAML, YAML_SECRET_NOTE, forwardPortLabel, noStreamPermission, openNode,
 } from "./text";
 import type { K8sKind, K8sObjectView, K8sRow } from "./types";
 
-vi.mock("./api", () => ({ k8sApi: { get: vi.fn(), rules: vi.fn(), secretValue: vi.fn(), logs: vi.fn(), unwatch: vi.fn() } }));
+vi.mock("./api", () => ({ k8sApi: { get: vi.fn(), rules: vi.fn(), secretValue: vi.fn(), logs: vi.fn(), workloadLogs: vi.fn(), unwatch: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 // 터미널(xterm)은 PodTerminal.test에서 본다
 const terminalProps: Record<string, unknown>[] = [];
@@ -113,7 +113,7 @@ test("service account role opens IAM", async () => {
   expect(h.onOpenIam).toHaveBeenCalledWith("arn:aws:iam::1:role/web");
 });
 
-test("YAML tab is colored and keeps the text as is; only pods get a logs tab", async () => {
+test("YAML tab is colored and keeps the text as is; pods get a logs tab", async () => {
   m.get.mockResolvedValue(view());
   setup();
   expect(await screen.findByRole("tab", { name: TAB_LOGS })).toBeInTheDocument();
@@ -123,9 +123,24 @@ test("YAML tab is colored and keeps the text as is; only pods get a logs tab", a
   expect(Array.from(pre.querySelectorAll(".y-key")).map((e) => e.textContent)).toEqual(["apiVersion", "kind"]);
 });
 
-test("no logs tab for other kinds", async () => {
-  m.get.mockResolvedValue(view({ kind: DEPLOYMENTS }));
-  setup({ objectRef: { kind: DEPLOYMENTS, namespace: "prod", name: "web" } });
+describe.each([DEPLOYMENTS, STATEFULSETS, DAEMONSETS, REPLICASETS, JOBS, SERVICES])("workload logs tab on $kind", (kind) => {
+  test("opens the merged logs of the selector's pods, with the pod template's containers to pick from", async () => {
+    const template = { name: "app", image: "x", init: false, state: "template" as const, ready: false, restarts: 0, reason: null, message: null, lastTermination: null };
+    m.get.mockResolvedValue(view({ kind, containers: [template, { ...template, name: "sidecar" }] }));
+    m.workloadLogs.mockResolvedValue(1);
+    m.unwatch.mockResolvedValue(null);
+    setup({ objectRef: { kind, namespace: "prod", name: "web" } });
+    fireEvent.click(await screen.findByRole("tab", { name: TAB_LOGS }));
+    await vi.waitFor(() => expect(m.workloadLogs).toHaveBeenCalledWith(T, kind, "prod", "web", { container: null, follow: true, tailLines: 500, previous: false, sinceSeconds: null }, "p", expect.any(Function)));
+    expect(m.logs).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("web")).toBeInTheDocument();
+    expect(within(await screen.findByLabelText(LOG_CONTAINER)).getAllByRole("option").map((o) => o.textContent)).toEqual([LOG_ALL_CONTAINERS, "app", "sidecar"]);
+  });
+});
+
+test.each([CRONJOBS, CONFIGMAPS, SECRETS, PVCS, NODES])("no logs tab for $kind", async (kind) => {
+  m.get.mockResolvedValue(view({ kind }));
+  setup({ objectRef: { kind, namespace: kind.namespaced ? "prod" : null, name: "web" } });
   await screen.findByRole("tab", { name: TAB_YAML });
   expect(screen.queryByRole("tab", { name: TAB_LOGS })).toBeNull();
 });

@@ -131,6 +131,26 @@ export const LOG_LEVELS = "레벨 거르기";
 export const LOG_LEVEL_NAMES = { error: "오류", warn: "경고", info: "정보", debug: "디버그", other: "기타" } as const;
 export const LOG_LEVEL_OTHER_TITLE = "레벨을 알 수 없는 줄";
 export const LOG_LEVEL_NONE = "고른 레벨의 줄이 없어요";
+export const LOG_ALL_CONTAINERS = "모든 컨테이너";
+export const LOG_SINCE = "기간";
+export const LOG_SINCE_CHOICES: { seconds: number | null; label: string }[] = [
+  { seconds: null, label: "전체" },
+  { seconds: 300, label: "최근 5분" },
+  { seconds: 900, label: "최근 15분" },
+  { seconds: 3_600, label: "최근 1시간" },
+  { seconds: 21_600, label: "최근 6시간" },
+  { seconds: 86_400, label: "최근 24시간" },
+];
+export const LOG_TIME = "시각";
+export const LOG_TIME_TITLE = "서버가 줄에 붙인 시각을 보여요";
+export const LOG_WRAP = "줄바꿈";
+export const LOG_SAVE = "저장";
+export const logSaved = (path: string) => `저장했어요: ${path}`;
+export const logSaveFailed = (why: string) => `저장하지 못했어요: ${why}`;
+export const LOG_REVEAL = "Finder에서 보기";
+export const LOG_SOURCES = "로그 출처";
+export const logSourceTitle = (full: string, ended: boolean) => (ended ? `${full} (끝났어요)` : full);
+export const logSourceError = (label: string, why: string) => `${label}: ${why}`;
 export const SEC_OWNERS = "소유자";
 export const SEC_CHILDREN = "소유한 리소스";
 export const SEC_CONTAINERS = "컨테이너";

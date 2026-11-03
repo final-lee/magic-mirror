@@ -5,11 +5,11 @@ import { ChangeActions } from "./ChangeActions";
 import { can } from "./can";
 import { Problems, valueKeys } from "./columns";
 import { age } from "./format";
-import { NODES, isPod, isSecret, isService, isServiceAccount, resolveLink } from "./kinds";
+import { NODES, hasWorkloadLogs, isPod, isSecret, isService, isServiceAccount, resolveLink } from "./kinds";
 import { ObjectForwards } from "./ForwardActions";
 import { ForwardPanel } from "./ForwardPanel";
 import { DETAIL_PCT } from "./lanes";
-import { PodLogs } from "./PodLogs";
+import { PodLogs, WorkloadLogs } from "./PodLogs";
 import { useK8sObject, useK8sRules } from "./queries";
 import { SecretKeys } from "./SecretKeys";
 import { NodeShellPane } from "./NodeShellPane";
@@ -229,6 +229,14 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
     if (pod && q.data) setPodContainers(q.data.containers.filter((c) => c.state !== "template"));
   }, [pod, q.data]);
   const logContainers = pod && q.data ? q.data.containers.filter((c) => c.state !== "template") : podContainers;
+  // 워크로드 로그 탭의 컨테이너 선택은 Pod 템플릿의 컨테이너. 다시 읽는 동안에도 선택이 사라지지 않게 마지막으로 읽은 것을 두되, 다른 객체의 것은 쓰지 않는다
+  const workload = hasWorkloadLogs(objectRef.kind) && objectRef.namespace !== null;
+  const objectKey = `${objectRef.kind.group}/${objectRef.kind.kind}/${objectRef.namespace}/${objectRef.name}`;
+  const [templates, setTemplates] = useState<{ key: string; containers: K8sContainer[] } | null>(null);
+  useEffect(() => {
+    if (workload && q.data) setTemplates({ key: objectKey, containers: q.data.containers.filter((c) => c.state === "template") });
+  }, [workload, objectKey, q.data]);
+  const templateContainers = templates?.key === objectKey ? templates.containers : [];
   const shellTab = tab === "shell" && ((pod && changes) || nodeShell !== null);
   const [editing, setEditing] = useState(false);
   // YAML 편집 중의 미리보기·편집 취소 버튼이 들어갈 도구 줄 자리
@@ -300,7 +308,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
       <div role="tablist" className="k8s-tabs">
         <button role="tab" aria-selected={tab === "summary"} onClick={() => setTab("summary")}>{TAB_SUMMARY}</button>
         <button role="tab" aria-selected={tab === "yaml"} onClick={() => setTab("yaml")}>{TAB_YAML}</button>
-        {pod && <button role="tab" aria-selected={tab === "logs"} onClick={() => setTab("logs")}>{TAB_LOGS}</button>}
+        {(pod || workload) && <button role="tab" aria-selected={tab === "logs"} onClick={() => setTab("logs")}>{TAB_LOGS}</button>}
         {((pod && changes) || nodeShell) && <button role="tab" aria-selected={tab === "shell"} onClick={() => setTab("shell")}>{TAB_SHELL}</button>}
       </div>
       <div className={`k8s-detail-body${tab === "logs" || shellTab ? " flush" : ""}`}>
@@ -337,7 +345,9 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
           </div>
         )}
         {shellTab ? null : tab === "logs" && pod && objectRef.namespace && logContainers ? (
-          <PodLogs target={target} ssoProfile={ssoProfile} live={live} namespace={objectRef.namespace} pod={objectRef.name} containers={logContainers} />
+          <PodLogs key={objectKey} target={target} ssoProfile={ssoProfile} live={live} namespace={objectRef.namespace} pod={objectRef.name} containers={logContainers} />
+        ) : tab === "logs" && workload && objectRef.namespace ? (
+          <WorkloadLogs key={objectKey} target={target} ssoProfile={ssoProfile} live={live} kind={objectRef.kind} namespace={objectRef.namespace} name={objectRef.name} containers={templateContainers} />
         ) : q.isError ? (
           <ErrorState error={q.error} profile={ssoProfile} compact onRetry={() => void q.refetch()} onLoggedIn={() => void q.refetch()} />
         ) : !q.data ? (

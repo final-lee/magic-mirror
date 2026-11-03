@@ -45,6 +45,8 @@ export const sameKind = (a: K8sKindRef, b: K8sKindRef) => kindKey(a) === kindKey
 export const isSecret = (k: K8sKindRef) => k.group === "" && k.kind === "Secret";
 export const isPod = (k: K8sKindRef) => k.group === "" && k.kind === "Pod";
 export const isService = (k: K8sKindRef) => k.group === "" && k.kind === "Service";
+/** 셀렉터로 Pod를 찾아 로그를 합쳐 볼 수 있는 종류: Deployment·StatefulSet·DaemonSet·ReplicaSet·Job·Service */
+export const hasWorkloadLogs = (k: K8sKindRef) => [DEPLOYMENTS, STATEFULSETS, DAEMONSETS, REPLICASETS, JOBS, SERVICES].some((w) => w.group === k.group && w.kind === k.kind);
 export const isServiceAccount = (k: K8sKindRef) => k.group === "" && k.kind === "ServiceAccount";
 
 const strip = ({ group, version, kind, plural, namespaced }: K8sKindRef): K8sKindRef => ({ group, version, kind, plural, namespaced });
