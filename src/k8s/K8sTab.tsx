@@ -56,7 +56,6 @@ export function K8sTab({ target, onOpenIam }: Props) {
 
   const [userNs, setUserNs] = useState<string | null>(null);
   const [view, setView] = useState<K8sView>("overview");
-  const [changeMode, setChangeMode] = useState(false);
   const [appliedChange, setAppliedChange] = useState<K8sChange | null>(null);
   const [focus, setFocus] = useState<WorkloadsFocus | null>(null);
   const session = useK8sSession(target, kubeconfig, settingsReady ? chosen : null, ssoProfileOf(target, candidate, null));
@@ -156,8 +155,6 @@ export function K8sTab({ target, onOpenIam }: Props) {
         namespace={namespace}
         onNamespace={setUserNs}
         onReconnect={reconnect}
-        changeMode={changeMode}
-        onChangeMode={setChangeMode}
         onCreateYaml={() => setCreating(true)}
       />
       {missing && <p className="err k8s-notes">{savedMissing(missing)}</p>}
@@ -165,7 +162,7 @@ export function K8sTab({ target, onOpenIam }: Props) {
       {notices.notices.map((notice) => <DoneNotice key={notice.id} notice={notice} onDismiss={() => notices.dismissNotice(notice.id)} />)}
       {change.pending && <ChangeDialog pending={change.pending} apply={change.apply} retry={change.retry} cancel={change.cancel} force={change.force} />}
       {change.drain && <DrainProgress run={change.drain} onStop={change.stopDrain} onClose={change.closeDrain} />}
-      {creating && changeMode && !batch.batch && (
+      {creating && !batch.batch && (
         <YamlCreate
           kinds={kinds.data ?? []}
           namespace={nsOrAll}
@@ -204,7 +201,6 @@ export function K8sTab({ target, onOpenIam }: Props) {
               kinds={kinds.data ?? []}
               focus={focus}
               onOpenIam={onOpenIam}
-              changeMode={changeMode}
               onChange={change.start}
               appliedChange={appliedChange}
               banner={kinds.isError && <ErrorState error={kinds.error} profile={ssoProfile} compact onRetry={refetchKinds} onLoggedIn={refetchKinds} />}
@@ -220,7 +216,7 @@ export function K8sTab({ target, onOpenIam }: Props) {
           ) : view === "forwards" ? (
             <ForwardsView target={target} ssoProfile={ssoProfile} />
           ) : view === "changeLog" ? (
-            <ChangeLog target={target} onStart={change.start} changeMode={changeMode} />
+            <ChangeLog target={target} onStart={change.start} />
           ) : rules.isError ? (
             <K8sError error={rules.error} target={target} ssoProfile={ssoProfile} />
           ) : rules.data ? (

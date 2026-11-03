@@ -279,7 +279,6 @@ export const FORWARD_NO_POD = "준비된 Pod가 없어요";
 export const FORWARD_HEALTHY = "연결돼요";
 export const forwardTarget = (f: { kind: "pod" | "service"; namespace: string; name: string; remotePort: number }) =>
   `${f.kind === "pod" ? "Pod" : "Service"} ${f.namespace}/${f.name}:${f.remotePort}`;
-export const CHANGE_MODE = "변경";
 export const CHANGE_LOG = "변경 기록";
 export const CHANGE_DONE = "변경을 적용했어요";
 export const CHANGE_PREVIEW = "변경 미리보기";

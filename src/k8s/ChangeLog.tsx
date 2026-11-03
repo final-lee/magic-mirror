@@ -9,11 +9,10 @@ import type { K8sChange, K8sTarget } from "./types";
 interface Props {
   target: K8sTarget;
   onStart: (change: K8sChange, undoOf: string) => void;
-  changeMode: boolean;
 }
 
 /** 이 클러스터의 변경 기록과 되돌릴 수 있는 변경을 보여 준다. */
-export function ChangeLog({ target, onStart, changeMode }: Props) {
+export function ChangeLog({ target, onStart }: Props) {
   const q = useQuery({ queryKey: ["k8s-change-log"], queryFn: k8sApi.changeLog });
   const { busy, errors, prepare } = usePrepare();
   const entries = (q.data ?? [])
@@ -34,7 +33,7 @@ export function ChangeLog({ target, onStart, changeMode }: Props) {
               <td>{entry.summary}</td>
               <td>{entry.ok ? t.CHANGE_SUCCESS : `${t.CHANGE_FAILED}: ${entry.error ?? ""}`}{entry.closedAt ? ` · ${t.SHELL_CLOSED_AT(formatDateTime(entry.closedAt))}` : ""}</td>
               <td>
-                {changeMode && entry.ok && entry.inverse && !entry.undone && (
+                {entry.ok && entry.inverse && !entry.undone && (
                   <button className="btn small" disabled={busy !== null} onClick={() => void prepare(entry.id, async () => {
                     const undo = await k8sApi.undo(entry.id);
                     onStart(undo.change, entry.id);

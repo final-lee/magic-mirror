@@ -36,7 +36,6 @@ import {
   WILDCARD,
   BATCH_APPLY,
   BATCH_DONE,
-  CHANGE_MODE,
   CHANGE_DONE,
   YAML_CREATE,
   YAML_PREVIEW,
@@ -464,14 +463,12 @@ test("dragging the handle beside the menu resizes it and saves the width when re
   expect(nav.style.width).toBe("250px");
 });
 
-test("create from YAML: the button needs change mode, the selected namespace fills in, and the document is previewed then applied", async () => {
+test("create from YAML: the selected namespace fills in, and the document is previewed then applied", async () => {
   m.context.mockResolvedValue(info([cand("ctx", { namespace: "team" })]));
   m.preview.mockResolvedValue({ calls: [], diff: [], impact: ["ConfigMap c: 새 객체를 만듭니다"], warnings: [], confirmName: null, reversible: true, conflicts: [] });
   m.apply.mockResolvedValue({ logId: "log-1" });
   setup();
   await screen.findByText(STATE_CONNECTED);
-  expect(screen.queryByRole("button", { name: YAML_CREATE })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByLabelText(CHANGE_MODE));
   fireEvent.click(screen.getByRole("button", { name: YAML_CREATE }));
   typeYaml("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\n");
   fireEvent.click(screen.getByRole("button", { name: YAML_PREVIEW }));

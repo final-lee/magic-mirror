@@ -49,7 +49,7 @@
 - 대상은 `{ profile, region, cluster }`. 같은 대상의 탭은 하나만 열린다.
 - 탭을 닫으면 그 탭의 watch, 로그 스트림, 셸, port-forward, 연결을 모두 정리한다.
 - 하위 화면: 개요, 워크로드, 로그, 접근, 보안 점검, 네트워크, 셸, 포트포워딩, 변경 기록.
-- 상단 막대: kubeconfig context 이름, 클러스터에서 보이는 신원, 네임스페이스 선택(전체 포함), **변경** 토글.
+- 상단 막대: kubeconfig context 이름, 클러스터에서 보이는 신원, 네임스페이스 선택(전체 포함), "YAML로 만들기".
 
 ## 접속
 1. kubeconfig 경로: 앱 설정의 경로 → `KUBECONFIG`(콜론으로 여러 파일) → `~/.kube/config`.
@@ -162,7 +162,7 @@
 ## 변경
 
 ### 공통
-- **변경** 토글을 켜야 버튼이 보인다. 권한이 없으면 이유와 함께 비활성화.
+- 변경 버튼은 토글 없이 늘 보인다(사용자 결정 2026-11-03: 처음 설계의 **변경** 토글은 버튼을 찾지 못하게 만들어 없앴다). 권한이 없으면 이유와 함께 비활성화. 안전은 미리보기·이름 입력·재확인이 맡는다.
 - 미리보기: API 호출(동사, 경로, 본문), 필드 diff, 영향, 경고. 쿠버네티스 쓰기는 모두 server-side dry-run을 먼저 돌린다.
 - 이름 입력이 필요한 위험한 변경: 네임스페이스가 `kube-system`이거나 이름에 `prod`가 들어감, drain, `cluster-admin`이나 권한 상승 경로를 주는 바인딩, 앱의 현재 신원이 권한을 잃는 변경, `AmazonEKSClusterAdminPolicy` 연결.
 - 적용 시 재확인: 미리보기 직전에 GET한 `resourceVersion`을 조건으로 보낸다. status 갱신만으로 409가 생긴 경우 status·resourceVersion·managedFields를 뺀 객체 전체(메모리의 SHA-256으로 비교)와 계획이 같으면 새 버전으로 dry-run을 다시 하고 적용한다. generation이나 spec 등 그 밖의 내용이 바뀌면 "미리보기 이후 바뀌었어요"로 멈춘다. 미리보기 dry-run 중 버전이 바뀌면 최신 객체로 다시 계획한다. 장바구니는 적용 전에 계획을 다시 만들어 미리보기와 다르면 멈춘다.
@@ -182,7 +182,7 @@
 - 소유자 없는 Job을 지울 때 기록하는 되살리기용 객체에서는 서버가 만든 selector(`manualSelector: true`가 아닐 때)와 `controller-uid`·`job-name`(`batch.kubernetes.io/` 포함) 라벨을 뺀다(남기면 새 UID와 맞지 않아 dry-run이 거부한다).
 - 적용 후 rollout 진행(준비된 새 Pod 수)을 보여준다.
 - K7 백엔드는 소유자 UID로 리비전을 고르고 scale·restart·rollout undo·삭제·Job 재실행·CronJob 일시정지와 재개를 수행한다. 삭제 재생성에는 서버가 채운 메타데이터와 상태를 빼며, 새 Job 이름은 미리보기에서 정한다.
-- 워크로드 변경 화면: 상단 변경 토글을 켜면 상세에서 작업을 고르고 미리보기에서 호출·필드 변경·영향·경고를 확인한다. 변경 기록의 되돌리기도 같은 미리보기를 거친다.
+- 워크로드 변경 화면: 상세에서 작업을 고르고 미리보기에서 호출·필드 변경·영향·경고를 확인한다. 변경 기록의 되돌리기도 같은 미리보기를 거친다.
 - 상세의 rollout 진행은 watch 행의 ready·updated·desired를 이용한다. StatefulSet 행에는 updated 수가 없어 ready 수만 보여 준다.
 - rollout undo 리비전 선택은 대상 get과 ReplicaSet 또는 ControllerRevision list 권한도 확인한다.
 
@@ -215,9 +215,9 @@
   - 확인과 위험 판단: 위험한 대상(네임스페이스가 `kube-system`이거나 이름에 `prod`, 또는 객체 이름에 `prod`)은 `confirmText`가 Pod 이름과 같아야 열린다. 판단은 변경 공통 틀의 `change::dangerous`·`confirm_name` 하나다(미리보기의 `confirmName`과 셸 확인이 같은 함수를 쓴다). 화면은 규칙을 따로 갖지 않고 `k8s_shell_confirm_name`으로 입력할 이름을 묻는다.
   - 기록: 셸·attach·노드 셸 세션은 변경 기록(`k8s-changes.jsonl`)에 한 줄(`Operation::Shell { container, mode }`, 대상 Pod, 되돌리기 없음)로 남고 닫을 때 `closedAt`이 채워진다(열고 닫은 시각과 대상만, 입력·출력은 어디에도 없다). 기록을 쓰지 못하면 열지 않는다. 변경 기록 화면이 이 줄을 "닫음 시각"과 함께 보인다(되돌리기 버튼 없음). `k8s-shell.jsonl`은 없앴다.
   - port-forward: 로컬은 `127.0.0.1`만. 로컬 포트를 정하지 않으면 원격과 같은 번호(1024 이상)를 먼저 시도하고 안 되면 운영체제가 고른 포트. 열기 전에 대상을 읽고 웹소켓을 한 번 열어 보고 닫아 권한·연결 오류를 바로 알린다. 로컬 연결이 올 때마다 `pods/portforward`를 하나씩 연다. Service는 셀렉터의 준비된(Ready, 지워지는 중 아님) Pod 중 이름순 첫 Pod에 붙고(붙어 있던 Pod가 아직 준비돼 있으면 옮기지 않는다), Pod를 지켜보다가 그 Pod가 사라지거나 준비가 풀리면 다른 Pod로 옮긴다(이름 있는 `targetPort`는 고른 Pod의 컨테이너 포트 이름으로 푼다). 준비된 Pod가 없으면 연결 하나가 최대 15초 기다린다. TCP 포트만.
-  - 화면: 변경 토글이 켜졌을 때만 Pod 상세에 "셸" 탭(컨테이너 고르기, 셸/attach, 확인 창)과 터미널(xterm.js, 다른 탭을 봐도 세션 유지, Pod를 바꾸거나 세션을 닫으면 끊김), Pod·Service 상세에 "포트포워딩" 버튼(`k8s_get`의 `ports`에서 고르거나 직접 입력, 로컬 포트는 비우면 자동)이 보인다. 왼쪽 메뉴 "포트포워딩"(이 클러스터의 목록: 브라우저로 열기, 주소 복사, 닫기)은 토글과 무관하게 늘 보인다: 읽기이고, 닫는 것은 이 컴퓨터의 소켓이지 클러스터 변경이 아니다. 권한은 `pods/exec`·`pods/attach`·`pods/portforward`의 `create`를 내 권한(`can`)으로 보고, 없으면 버튼을 끄고 이유를 보인다.
+  - 화면: Pod 상세에 "셸" 탭(컨테이너 고르기, 셸/attach, 확인 창)과 터미널(xterm.js, 다른 탭을 봐도 세션 유지, Pod를 바꾸거나 세션을 닫으면 끊김), Pod·Service 상세에 "포트포워딩" 버튼(`k8s_get`의 `ports`에서 고르거나 직접 입력, 로컬 포트는 비우면 자동)이 늘 보인다. 왼쪽 메뉴 "포트포워딩"은 이 클러스터의 목록(브라우저로 열기, 주소 복사, 닫기)이다. 권한은 `pods/exec`·`pods/attach`·`pods/portforward`의 `create`를 내 권한(`can`)으로 보고, 없으면 버튼을 끄고 이유를 보인다.
   - 계약에 더한 것: `k8s_attach_open`, `k8s_shell_confirm_name(namespace, pod): string | null`, `k8s_node_shell_open(target, namespace, pod, channel): ShellId`, `ShellId = { id, input }`, `K8sForward`의 `target`·`namespace`·`kind`·`name`·`remotePort`·`pod`·`error`, `k8s_get` 결과의 `ports`(Pod는 컨테이너 포트, Service는 Service 포트와 `target`), 변경 종류 `shell`(기록 전용)·`nodeShell`, 변경 기록 `closedAt`.
-  - 노드 셸(구현): Node 상세(변경 토글 켜짐)의 "노드 셸" 버튼(이미지 입력칸, 기본 `busybox:1.36`, 권한은 pods create와 pods/exec)이 변경 틀의 `nodeShell` 변경을 시작한다. 대상은 만들 Pod(`mm-node-shell-<시각>`, 고른 네임스페이스, 모든 네임스페이스면 `default`), 노드는 변경의 `node`. 미리보기는 `POST /api/v1/namespaces/<ns>/pods`와 본문(`nodeName`, `hostPID`·`hostNetwork`·`hostIPC`, privileged, 노드 루트를 `/host`에 마운트, 모든 taint 허용, 8시간 `activeDeadlineSeconds`와 `terminationGracePeriodSeconds: 0`)과 경고를 보이고, 입력할 이름은 늘 노드 이름이다. 서버 dry-run을 거치고(Pod 보안 정책이 막으면 미리보기에서 실패) 적용은 변경 기록에 남는다. 적용이 끝나면 노드 상세가 `k8s_node_shell_open`으로 Pod의 `shell` 컨테이너가 실행될 때까지(최대 60초) 기다렸다가 `nsenter -t 1 -m -u -i -n -p -- sh`로 들어간다. 적용이 성공하는 즉시 백엔드가 만든 Pod의 UID를 읽어 세션 상태(`NodeShells`)에 등록하고, `k8s_node_shell_open`은 그 대상에서 등록한 Pod(이름과 UID가 모두 같은 것)만 한 번 연다(표시가 같아도 YAML 적용 등으로 만든 Pod는 거부). 등록한 Pod는 터미널이 가져가기 전에 탭을 닫거나 앱을 끄거나 적용 기록 쓰기가 실패해도 지운다(지우기는 UID가 같은 Pod만). 열지 못하거나 세션이 끝나거나(셸 종료, 세션 닫기, 탭 닫기, 앱 종료) 하면 같은 변경 틀(미리보기·재확인·`exec.rs`)로 Pod를 지우고 그 지우기도 변경 기록에 남긴다(앱 종료는 최대 10초 기다린다). 끝난 노드 셸은 "다시 열기"가 없다.
+  - 노드 셸(구현): Node 상세의 "노드 셸" 버튼(이미지 입력칸, 기본 `busybox:1.36`, 권한은 pods create와 pods/exec)이 변경 틀의 `nodeShell` 변경을 시작한다. 대상은 만들 Pod(`mm-node-shell-<시각>`, 고른 네임스페이스, 모든 네임스페이스면 `default`), 노드는 변경의 `node`. 미리보기는 `POST /api/v1/namespaces/<ns>/pods`와 본문(`nodeName`, `hostPID`·`hostNetwork`·`hostIPC`, privileged, 노드 루트를 `/host`에 마운트, 모든 taint 허용, 8시간 `activeDeadlineSeconds`와 `terminationGracePeriodSeconds: 0`)과 경고를 보이고, 입력할 이름은 늘 노드 이름이다. 서버 dry-run을 거치고(Pod 보안 정책이 막으면 미리보기에서 실패) 적용은 변경 기록에 남는다. 적용이 끝나면 노드 상세가 `k8s_node_shell_open`으로 Pod의 `shell` 컨테이너가 실행될 때까지(최대 60초) 기다렸다가 `nsenter -t 1 -m -u -i -n -p -- sh`로 들어간다. 적용이 성공하는 즉시 백엔드가 만든 Pod의 UID를 읽어 세션 상태(`NodeShells`)에 등록하고, `k8s_node_shell_open`은 그 대상에서 등록한 Pod(이름과 UID가 모두 같은 것)만 한 번 연다(표시가 같아도 YAML 적용 등으로 만든 Pod는 거부). 등록한 Pod는 터미널이 가져가기 전에 탭을 닫거나 앱을 끄거나 적용 기록 쓰기가 실패해도 지운다(지우기는 UID가 같은 Pod만). 열지 못하거나 세션이 끝나거나(셸 종료, 세션 닫기, 탭 닫기, 앱 종료) 하면 같은 변경 틀(미리보기·재확인·`exec.rs`)로 Pod를 지우고 그 지우기도 변경 기록에 남긴다(앱 종료는 최대 10초 기다린다). 끝난 노드 셸은 "다시 열기"가 없다.
   - 남은 것: 없음(K9 범위).
 - 노드 셸(2026-11-02 추가, `kubectl debug node`와 같은 방식): 그 노드에 고정한(`nodeName`) 디버그 Pod를 만든다. `hostPID`·`hostNetwork`·`hostIPC`, `privileged`, 노드 루트를 `/host`에 마운트, 이미지는 미리보기에서 고칠 수 있는 기본값(busybox), 명령은 `nsenter -t 1 -m -u -i -n -p -- sh`. Pod 만들기는 변경 공통 틀(미리보기·이름 입력 필수·기록)을 거치고, 셸을 닫으면 Pod를 지운다(지우기도 기록). 네임스페이스는 고른 네임스페이스, 모든 네임스페이스면 `default`.
 

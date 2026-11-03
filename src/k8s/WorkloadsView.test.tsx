@@ -53,7 +53,7 @@ test("rollout progress follows the watched deployment and disappears once ready"
   m.get.mockResolvedValue(view("web", { kind: DEPLOYMENTS, row: initial }));
   m.rules.mockResolvedValue({ namespace: "prod", resourceRules: [], nonResourceRules: [], incomplete: true });
   const onChange = vi.fn();
-  const { rerender } = setup({ fixedKind: DEPLOYMENTS, changeMode: true, onChange });
+  const { rerender } = setup({ fixedKind: DEPLOYMENTS, onChange });
   await vi.waitFor(() => expect(m.watch).toHaveBeenCalled());
   send("deployments", { type: "reset", rows: [initial] });
   fireEvent.click(screen.getByText("web"));

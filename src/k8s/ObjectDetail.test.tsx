@@ -42,20 +42,18 @@ beforeEach(() => {
   m.rules.mockResolvedValue({ namespace: "prod", resourceRules: [], nonResourceRules: [], incomplete: false });
 });
 
-test("change actions appear only while change mode is enabled", async () => {
+test("change actions are there without any switch when the detail can start changes", async () => {
   m.get.mockResolvedValue(view());
   m.rules.mockResolvedValue({ namespace: "prod", resourceRules: [], nonResourceRules: [], incomplete: true });
   const qc = newQueryClient();
-  const renderDetail = (changeMode: boolean) => withClientAndSso(
-    <ObjectDetail target={T} context="ctx" ssoProfile="p" live objectRef={{ kind: PODS, namespace: "prod", name: "web-1" }} resourceVersion="1" kinds={[]} onOpen={vi.fn()} onBack={null} onClose={vi.fn()} changeMode={changeMode} onChange={vi.fn()} />,
+  const renderDetail = (onChange?: () => void) => withClientAndSso(
+    <ObjectDetail target={T} context="ctx" ssoProfile="p" live objectRef={{ kind: PODS, namespace: "prod", name: "web-1" }} resourceVersion="1" kinds={[]} onOpen={vi.fn()} onBack={null} onClose={vi.fn()} onChange={onChange} />,
     qc, ssoLoginStub(),
   );
-  const result = render(renderDetail(false));
-  await screen.findByRole("tab", { name: TAB_YAML });
-  expect(screen.queryByRole("button", { name: "삭제" })).not.toBeInTheDocument();
-  result.rerender(renderDetail(true));
+  const result = render(renderDetail(vi.fn()));
   expect(await screen.findByRole("button", { name: "삭제" })).toBeInTheDocument();
-  result.rerender(renderDetail(false));
+  expect(screen.getByRole("tab", { name: TAB_SHELL })).toBeInTheDocument();
+  result.rerender(renderDetail());
   expect(screen.queryByRole("button", { name: "삭제" })).not.toBeInTheDocument();
 });
 
@@ -195,7 +193,7 @@ const running = { name: "app", image: "x", init: false, state: "running" as cons
 test("a pod gets a shell tab with the container picker, gated by pods/exec", async () => {
   m.get.mockResolvedValue(view({ containers: [running] }));
   m.rules.mockResolvedValue(grant("pods/exec"));
-  setup({ changeMode: true, onChange: vi.fn() });
+  setup({ onChange: vi.fn() });
   await screen.findByRole("tab", { name: TAB_SHELL });
   fireEvent.click(screen.getByRole("tab", { name: TAB_SHELL }));
   expect(await screen.findByRole("button", { name: SHELL_OPEN })).toBeEnabled();
@@ -205,7 +203,7 @@ test("a pod gets a shell tab with the container picker, gated by pods/exec", asy
 test("without pods/exec the shell button is off with the reason", async () => {
   m.get.mockResolvedValue(view({ containers: [running] }));
   m.rules.mockResolvedValue(grant("pods/log"));
-  setup({ changeMode: true, onChange: vi.fn() });
+  setup({ onChange: vi.fn() });
   fireEvent.click(await screen.findByRole("tab", { name: TAB_SHELL }));
   expect(await screen.findByText(noStreamPermission("pods/exec"))).toBeInTheDocument();
   expect(screen.getByRole("button", { name: SHELL_OPEN })).toBeDisabled();
@@ -215,7 +213,7 @@ test("a service has no shell tab but a port-forward picker over its service port
   const ports = [{ name: "web", port: 80, container: null, target: "8080" }];
   m.get.mockResolvedValue(view({ kind: SERVICES, row: row({ name: "web" }), ports }));
   m.rules.mockResolvedValue(grant("pods/portforward"));
-  setup({ objectRef: { kind: SERVICES, namespace: "prod", name: "web" }, changeMode: true, onChange: vi.fn() });
+  setup({ objectRef: { kind: SERVICES, namespace: "prod", name: "web" }, onChange: vi.fn() });
   const start = await screen.findByRole("button", { name: FORWARD_START });
   expect(screen.queryByRole("tab", { name: TAB_SHELL })).not.toBeInTheDocument();
   await waitFor(() => expect(start).toBeEnabled());
@@ -226,7 +224,7 @@ test("a service has no shell tab but a port-forward picker over its service port
 test("port-forward is off on a pod when pods/portforward is missing", async () => {
   m.get.mockResolvedValue(view());
   m.rules.mockResolvedValue(grant("pods/exec"));
-  setup({ changeMode: true, onChange: vi.fn() });
+  setup({ onChange: vi.fn() });
   const start = await screen.findByRole("button", { name: FORWARD_START });
   await waitFor(() => expect(start).toHaveAttribute("title", noStreamPermission("pods/portforward")));
   expect(start).toBeDisabled();
@@ -247,7 +245,7 @@ test("a node offers a node shell that previews a debug pod in the chosen namespa
   m.get.mockResolvedValue(nodeView());
   m.rules.mockResolvedValue({ namespace: "dev", resourceRules: [{ verbs: ["create"], apiGroups: [""], resources: ["pods", "pods/exec"], resourceNames: [] }], nonResourceRules: [], incomplete: false });
   const onChange = vi.fn();
-  setup({ objectRef: { kind: NODES, namespace: null, name: "node-1" }, changeMode: true, shellNamespace: "dev", onChange });
+  setup({ objectRef: { kind: NODES, namespace: null, name: "node-1" }, shellNamespace: "dev", onChange });
   const button = await screen.findByRole("button", { name: CHANGE_NODE_SHELL });
   await waitFor(() => expect(button).toBeEnabled());
   expect(m.rules).toHaveBeenCalledWith(T, "dev", "p");
@@ -259,7 +257,7 @@ test("a node offers a node shell that previews a debug pod in the chosen namespa
 test("a node shell needs pods create and pods/exec; without them the button is off with the reason", async () => {
   m.get.mockResolvedValue(nodeView());
   m.rules.mockResolvedValue(grant("pods/exec"));
-  setup({ objectRef: { kind: NODES, namespace: null, name: "node-1" }, changeMode: true, onChange: vi.fn() });
+  setup({ objectRef: { kind: NODES, namespace: null, name: "node-1" }, onChange: vi.fn() });
   const button = await screen.findByRole("button", { name: CHANGE_NODE_SHELL });
   await waitFor(() => expect(button).toBeDisabled());
 });
@@ -267,7 +265,7 @@ test("a node shell needs pods create and pods/exec; without them the button is o
 test("after the node shell change is applied the node detail opens the terminal on that pod; a stale change does not", async () => {
   m.get.mockResolvedValue(nodeView());
   const applied = { kind: PODS, namespace: "dev", name: "mm-node-shell-x", type: "nodeShell" as const, node: "node-1", image: "busybox:1.36" };
-  const props = { objectRef: { kind: NODES, namespace: null, name: "node-1" }, changeMode: true, onChange: vi.fn() };
+  const props = { objectRef: { kind: NODES, namespace: null, name: "node-1" }, onChange: vi.fn() };
   const view1 = (change: typeof applied | null) => withClientAndSso(
     <ObjectDetail target={T} context="ctx" ssoProfile="p" live resourceVersion="1" kinds={[]} onOpen={vi.fn()} onBack={null} onClose={vi.fn()} appliedChange={change} {...props} />,
     qc, ssoLoginStub());
