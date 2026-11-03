@@ -3,6 +3,18 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { ServiceSettings } from "./ServiceSettings";
 import { sampleServices } from "../test/utils";
 
+test("theme choice reports the setting to save", () => {
+  const onThemeChange = vi.fn();
+  const { rerender } = render(<ServiceSettings services={sampleServices} enabled={[]} onChange={() => {}} onClose={() => {}} onThemeChange={onThemeChange} />);
+  expect(screen.getByLabelText("시스템 설정 따르기")).toBeChecked();
+  fireEvent.click(screen.getByLabelText("밝게"));
+  expect(onThemeChange).toHaveBeenCalledWith("light");
+  rerender(<ServiceSettings services={sampleServices} enabled={[]} onChange={() => {}} onClose={() => {}} theme="light" onThemeChange={onThemeChange} />);
+  expect(screen.getByLabelText("밝게")).toBeChecked();
+  fireEvent.click(screen.getByLabelText("어둡게"));
+  expect(onThemeChange).toHaveBeenCalledWith("dark");
+});
+
 test("toggling checkboxes reports new enabled list", () => {
   const onChange = vi.fn();
   render(<ServiceSettings services={sampleServices} enabled={["ec2"]} onChange={onChange} onClose={() => {}} />);

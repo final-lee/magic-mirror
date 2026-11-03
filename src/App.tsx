@@ -37,6 +37,7 @@ import { UpdateBanner } from "./components/UpdateBanner";
 import { useUpdater } from "./lib/useUpdater";
 import { SsoBanner } from "./components/SsoBanner";
 import { SsoLoginContext, useSsoLogin } from "./lib/useSsoLogin";
+import { useTheme } from "./lib/theme";
 
 const sameFav = (a: Favorite, b: Favorite) => a.service === b.service && a.type === b.type;
 
@@ -45,6 +46,7 @@ export default function App() {
   const services = useServices();
   const profiles = useProfiles();
   const { settings, update, ...settingsQuery } = useSettings();
+  useTheme(settings?.theme, !!settings);
   const [profile, setProfile] = useState<string | null>(null);
   const [region, setRegion] = useState("us-east-1");
   const [selection, setSelection] = useState<Favorite | null>(null);
@@ -380,6 +382,8 @@ export default function App() {
             enabled={settings.enabledServices}
             onChange={(ids) => update({ enabledServices: ids })}
             onClose={() => setShowSettings(false)}
+            theme={settings.theme}
+            onThemeChange={(theme) => update({ theme })}
             diffTool={diffTool}
             diffToolCommand={settings.diffToolCommand ?? null}
             onDiffToolChange={(tool, command) => update({ diffTool: tool, diffToolCommand: command })}

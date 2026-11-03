@@ -127,6 +127,17 @@ test("service settings toggles sidebar services", async () => {
   expect(m.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ enabledServices: ["ec2", "iam", "s3"] }));
 });
 
+test("loads and saves the selected theme", async () => {
+  m.getSettings.mockResolvedValue({ enabledServices: ["ec2"], favorites: [], lastProfile: "prod", lastRegion: null, theme: "dark" });
+  renderWithClient(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "서비스 설정" }));
+  expect(screen.getByLabelText("어둡게")).toBeChecked();
+  expect(document.documentElement.dataset.theme).toBe("dark");
+  fireEvent.click(screen.getByLabelText("밝게"));
+  expect(m.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ theme: "light" }));
+  await waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
+});
+
 test("cmd+F focuses the filter", async () => {
   renderWithClient(<App />);
   const filter = await screen.findByPlaceholderText(/필터/);
