@@ -10,6 +10,7 @@ pub mod failure;
 pub mod forward;
 pub mod kubeconfig;
 pub mod logs;
+pub mod network;
 pub mod node_shell;
 pub mod path;
 pub mod read;

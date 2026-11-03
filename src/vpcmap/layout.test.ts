@@ -103,3 +103,24 @@ test("legend sits inside the VPC bounds, bottom-right, below the content", () =>
   if (l.band) expect(overlap(g, l.band)).toBe(false);
   expect(g.x + g.w).toBeGreaterThan(l.vpc.x + l.vpc.w - 40);
 });
+
+test("highlighted resources are placed first so a full subnet's overflow tile never hides them", () => {
+  const t = sampleTopology();
+  const extra = Array.from({ length: MAX_TILES + 3 }, (_, i) => node(`i-x${String(i).padStart(2, "0")}`, "ec2", ["subnet-prv-c"], { name: `x${String(i).padStart(2, "0")}` }));
+  // 이름 순으로는 맨 뒤라 평소에는 "+N"에 묻히는 리소스
+  const late = node("i-zzz", "ec2", ["subnet-prv-c"], { name: "zzz-last" });
+  t.resources.push(...extra, late);
+  const shown = (l: ReturnType<typeof layoutTopology>) => l.subnets.find((s) => s.subnet.id === "subnet-prv-c")!.tiles.flatMap((x) => (x.resource ? [x.resource.id] : []));
+  expect(shown(layoutTopology(t))).not.toContain("i-zzz");
+  const l = layoutTopology(t, new Set(["i-zzz"]));
+  expect(shown(l)[0]).toBe("i-zzz");
+  // 칸 수는 그대로다(강조해도 서브넷 높이가 바뀌지 않는다)
+  expect(l.subnets.find((s) => s.subnet.id === "subnet-prv-c")!.tiles).toHaveLength(MAX_TILES);
+  expect(l.height).toBe(layoutTopology(t).height);
+});
+
+test("an empty or missing highlight changes nothing", () => {
+  const t = sampleTopology();
+  expect(layoutTopology(t, new Set())).toEqual(layoutTopology(t));
+  expect(layoutTopology(t, null)).toEqual(layoutTopology(t));
+});
