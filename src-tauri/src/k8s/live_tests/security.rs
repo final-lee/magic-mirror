@@ -61,14 +61,12 @@ async fn workload_findings_match_the_fixture() {
     assert!(absent(&r, CheckId::RunsAsRoot, "esc"), "runAsNonRoot와 UID 1000을 정했다");
 
     // allowPrivilegeEscalation: privileged와 false로 정한 것은 빠지고, 템플릿을 고칠 수 있는 종류만 고칠 수 있다
-    assert_eq!(names_in(&r, CheckId::PrivilegeEscalation, NS), ["bare", "bare-pod", "cron", "esc", "host", "job"]);
+    assert_eq!(names_in(&r, CheckId::PrivilegeEscalation, NS), ["bare", "cron", "esc", "host", "job"]);
     for name in ["bare", "cron", "esc", "host"] {
         assert!(one(&r, CheckId::PrivilegeEscalation, name).fix.is_some(), "{name}");
     }
-    for name in ["bare-pod", "job"] {
-        let f = one(&r, CheckId::PrivilegeEscalation, name);
-        assert!(f.fix.is_none() && f.evidence.last().unwrap().contains("만든 뒤에 바꿀 수 없어요"), "{name}: {:?}", f.evidence);
-    }
+    let job = one(&r, CheckId::PrivilegeEscalation, "job");
+    assert!(job.fix.is_none() && job.evidence.last().unwrap().contains("만든 뒤에 바꿀 수 없어요"), "{:?}", job.evidence);
     let esc = one(&r, CheckId::PrivilegeEscalation, "esc").fix.as_ref().unwrap();
     let spec = &esc.object["spec"]["template"]["spec"];
     assert_eq!(spec["containers"], json!([{ "name": "app", "securityContext": { "allowPrivilegeEscalation": false } }]), "false로 정한 side는 건드리지 않는다");

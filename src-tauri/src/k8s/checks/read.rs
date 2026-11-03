@@ -97,6 +97,9 @@ pub async fn versions(eks: &aws_sdk_eks::Client) -> Result<Vec<VersionSupport>, 
     Ok(out)
 }
 
+/// 노드그룹 하나와 그 시작 템플릿을 읽지 못한 이유
+type Described = (NodegroupImds, Option<AppError>);
+
 /// 노드그룹마다 시작 템플릿의 IMDS 설정. 시작 템플릿 하나를 읽지 못하면 그 노드그룹만 gap으로 남는다.
 pub async fn nodegroups(aws: &Aws, cluster: &str) -> Result<(Vec<NodegroupImds>, Vec<Gap>), AppError> {
     let mut names = Vec::new();
@@ -109,7 +112,7 @@ pub async fn nodegroups(aws: &Aws, cluster: &str) -> Result<(Vec<NodegroupImds>,
             break;
         }
     }
-    let described: Vec<Result<Option<(NodegroupImds, Option<AppError>)>, AppError>> = stream::iter(names)
+    let described: Vec<Result<Option<Described>, AppError>> = stream::iter(names)
         .map(|name| async move {
             let out = call(aws.eks.describe_nodegroup().cluster_name(cluster).nodegroup_name(&name).send(), "eks:DescribeNodegroup").await?;
             let Some(group) = out.nodegroup() else { return Ok(None) };
