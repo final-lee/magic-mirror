@@ -298,7 +298,7 @@ function History({ detail, viewing, writeReason, onView, onRollback }: {
       </thead>
       <tbody>
         {detail.history.map((h) => (
-          <tr key={h.revision} className={h.revision === viewing ? "on" : undefined} aria-current={h.revision === viewing ? "true" : undefined}>
+          <tr key={h.revision} className={h.revision === viewing ? "current" : undefined} data-viewing={h.revision === viewing ? "true" : undefined}>
             <td>{h.revision}{h.revision === detail.latest ? ` (${t.HISTORY_CURRENT})` : ""}</td>
             <td><StatusBadge status={h.status} /></td>
             <td>{h.unreadable ? t.HISTORY_UNREADABLE : formatDateTime(h.updated)}</td>
