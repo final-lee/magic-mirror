@@ -1151,7 +1151,8 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .k8s-annotations .link { justify-self: start; font-size: 11px; }
 .k8s-annotation-open { white-space: pre-wrap; max-height: 360px; overflow: auto; padding: 6px 8px; background: var(--surface-2); border-radius: 4px; }
 .k8s-yaml-edit { display: flex; flex-direction: column; gap: 8px; }
-.k8s-yaml-editor .cm-editor { border: 1px solid var(--line); }
+/* 여러 줄 편집기(CodeEditor, CodeMirror)는 앱 어디서나 같은 모양 */
+.code-editor .cm-editor { border: 1px solid var(--line); }
 .k8s-secret-input { width: 100%; min-height: 48px; font-size: 12px; }
 .k8s-secret pre { margin: 0 0 4px; padding: 6px 8px; background: var(--tone-00000040); border-radius: 6px; white-space: pre-wrap; word-break: break-all; user-select: text; }
 
@@ -1743,13 +1744,9 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 /* 본문 첫 줄의 설명 */
 .awc-desc-line { margin: 0 0 12px; font-size: 12px; color: var(--dim); }
 .awc-report-label { flex: 0 1 420px; min-width: 200px; }
-/* YAML 편집기: 줄 번호와 글이 같은 글꼴·줄 높이로 바깥 상자 하나에서 함께 스크롤한다 */
+/* YAML 편집기 대화상자의 네임스페이스·예제 줄(편집기는 CodeEditor) */
 .awc-editor-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 10px 0; font-size: 12px; color: var(--dim); }
 .awc-editor-opts label { display: inline-flex; align-items: center; gap: 6px; }
-.awc-manifest-editor { display: flex; align-items: flex-start; height: 50vh; min-height: 420px; overflow: auto; background: var(--code-bg); border: 1px solid var(--border-input); border-radius: 6px; }
-.awc-editor-lines, .awc-editor-text { margin: 0; padding: 8px; font: 12px/18px ui-monospace, Menlo, monospace; }
-.awc-editor-lines { flex: none; min-height: 100%; text-align: right; color: var(--tone-6e6e73); border-right: 1px solid var(--line); user-select: none; }
-.awc-editor-text { flex: 1; min-height: 100%; min-width: 0; background: none; border: 0; border-radius: 0; color: var(--text); white-space: pre; overflow-x: auto; overflow-y: hidden; resize: none; outline: none; }
 /* 실행 폼: 실행 옵션은 두 칸 격자, 파라미터는 한 줄에 하나 */
 .awc-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
 .awc-dryrun { display: flex; align-items: center; gap: 10px; margin-top: 4px; font-size: 12px; }
