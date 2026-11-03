@@ -266,7 +266,6 @@ export const FORWARD_BAD_PORT = "포트는 1~65535 숫자로 입력해 주세요
 export const FORWARD_NO_PORTS = "컨테이너가 포트를 선언하지 않았어요. 직접 입력할 수 있어요";
 export const forwardPortLabel = (p: { port: number; name: string | null; container: string | null; target: string | null }) =>
   `${p.port}${p.name ? ` (${p.name})` : ""}${p.container ? ` · ${p.container}` : ""}${p.target ? ` → ${p.target}` : ""}`;
-export const forwardOpened = (addr: string) => `${addr}로 열었어요`;
 export const FORWARDS_EMPTY = "열린 포트포워딩이 없어요";
 export const H_FORWARD_TARGET = "대상";
 export const H_FORWARD_LOCAL = "로컬 주소";
@@ -274,7 +273,9 @@ export const H_FORWARD_POD = "연결된 Pod";
 export const H_FORWARD_STATE = "상태";
 export const FORWARD_OPEN_BROWSER = "브라우저로 열기";
 export const FORWARD_COPY_URL = "주소 복사";
-export const FORWARD_CLOSE = "닫기";
+export const FORWARD_CLOSE = "종료";
+export const FORWARDS_HERE = "이 객체의 포트포워딩";
+export const forwardPod = (pod: string) => `Pod ${pod}`;
 export const FORWARD_NO_POD = "준비된 Pod가 없어요";
 export const FORWARD_HEALTHY = "연결돼요";
 export const forwardTarget = (f: { kind: "pod" | "service"; namespace: string; name: string; remotePort: number }) =>
