@@ -97,12 +97,20 @@ export interface Settings {
   k8sBookmarks?: K8sKindRef[];
   /** EKS 탭 레인 너비(px). 비어 있으면 기본값 */
   k8sLaneWidths?: K8sLaneWidths;
+  /** EKS 보안 점검: 끈 점검 항목과 시스템 네임스페이스 포함 여부. 비어 있으면 모두 켜고 시스템 네임스페이스는 뺀다 */
+  k8sSecurityChecks?: K8sSecurityChecks;
   /** ArgoCD API 서버 목록(이름과 주소). 토큰은 넣지 않는다(키체인에 있다). */
   argocdServers?: ArgocdServer[];
   /** ArgoCD 서버 주소 → 그 서버 목록에서 마지막으로 고른 필터·묶기 */
   argocdViews?: Record<string, ArgoViewState>;
   /** 리소스 목록 캐시가 오래됐다고 보는 시간(분). 비어 있으면 기본값(15분), 0이면 무제한 */
   resourceCacheTtlMinutes?: number | null;
+}
+
+/** 보안 점검 설정. disabled는 끈 점검 항목의 이름(`privileged`, `clusterAwsAuth` …) */
+export interface K8sSecurityChecks {
+  disabled: string[];
+  includeSystem: boolean;
 }
 
 /** 메뉴(1열)·종류(2열)는 px, 상세(4열)는 목록(3열) 너비에 대한 % */

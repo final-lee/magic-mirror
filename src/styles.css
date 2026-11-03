@@ -1690,3 +1690,46 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .helm-source { margin-top: 6px; }
 /* 고른 행(파란 바탕)에서는 배지를 흰 바탕으로 두어 글자가 읽히게 한다 */
 .iam-list tr.on .helm-status { background: rgba(0, 0, 0, 0.35); color: #fff; }
+/* security */
+.sec-pane { min-width: 0; }
+.sec-pane .k8s-list-bar { flex-wrap: wrap; }
+.sec-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; padding: 8px 12px 0; }
+.sec-note { flex: 1; min-width: 200px; font-size: 12px; }
+.sec-fetched { font-size: 11px; white-space: nowrap; }
+.sec-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.sec-total { display: flex; flex-direction: column; min-width: 72px; font-size: 11px; }
+.sec-total b { font-size: 20px; line-height: 1.2; }
+.sec-cards { display: flex; gap: 6px; }
+.sec-card { display: flex; flex-direction: column; align-items: center; min-width: 76px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--code-bg); color: var(--text); font: inherit; cursor: pointer; }
+.sec-card:hover { background: var(--hover-strong); }
+.sec-card.on { border-color: var(--accent); background: var(--accent-soft); }
+.sec-card-n { font-size: 18px; font-weight: 600; line-height: 1.3; }
+.sec-card-l { font-size: 11px; color: var(--dim); }
+.sec-card.sev-high .sec-card-n { color: var(--red); }
+.sec-card.sev-medium .sec-card-n { color: var(--orange); }
+.sec-card.sev-low .sec-card-n { color: var(--accent); }
+.sec-chip { display: inline-block; padding: 0 7px; line-height: 17px; border-radius: 9px; font-size: 11px; white-space: nowrap; }
+.sec-chip.sev-high { background: var(--red-soft); color: var(--red); }
+.sec-chip.sev-medium { background: var(--yellow-soft); color: var(--orange); }
+.sec-chip.sev-low { background: var(--accent-soft); color: var(--accent); }
+.sec-fixable { font-size: 11px; color: var(--green-text); }
+.sec-gaps { padding: 4px 12px; border-bottom: 1px solid var(--line); }
+.sec-gaps p { margin: 2px 0; font-size: 12px; }
+.sec-checks { display: grid; grid-template-columns: repeat(3, minmax(220px, 1fr)); gap: 8px 20px; padding: 8px 12px; border-bottom: 1px solid var(--line); max-height: 42%; overflow: auto; }
+.sec-checks-col h4 { display: flex; align-items: center; justify-content: space-between; margin: 0 0 4px; font-size: 12px; color: var(--dim); font-weight: 600; }
+.sec-checks-all { display: inline-flex; gap: 8px; font-size: 11px; font-weight: 400; }
+.sec-check { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-size: 12px; }
+.sec-check-title { flex: 1; min-width: 0; }
+.sec-check.off .sec-check-title { color: var(--dim); }
+.sec-groups { flex: 1; min-height: 0; overflow: auto; }
+.sec-groups .tbl { flex: none; overflow: visible; }
+.sec-group { border-bottom: 1px solid var(--line); }
+.sec-group-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 12px; border: 0; background: var(--neutral-alpha-05); color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.sec-group-head:hover { background: var(--hover-strong); }
+.sec-message { margin: 0 0 8px; }
+.sec-evidence { margin: 0; padding-left: 18px; font-size: 12px; }
+.sec-evidence li { margin: 2px 0; }
+.sec-caution { margin: 6px 0; padding: 6px 8px; border-left: 3px solid var(--orange); background: var(--yellow-soft); font-size: 12px; }
+/* 고른 행(파란 바탕)에서는 배지를 어두운 바탕·흰 글자로 두어 읽히게 한다 */
+.iam-list tr.on .sec-chip { background: rgba(0, 0, 0, 0.35); color: #fff; }
+.iam-list tr.on .sec-fixable { color: #fff; }
