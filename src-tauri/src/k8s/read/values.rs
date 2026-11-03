@@ -396,3 +396,6 @@ fn pod_status(obj: &DynamicObject, statuses: &[Value], inits: &[Value], phase: &
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod extra_tests;
