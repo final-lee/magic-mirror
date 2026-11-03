@@ -78,7 +78,8 @@ export default function App() {
     [qc],
   );
   const transfers = useTransfers(profile, onTransferSettled);
-  const updater = useUpdater();
+  // vite 개발 서버로 뜬 개발 빌드(npm run tauri:dev)는 릴리스 업데이트를 확인하지 않는다
+  const updater = useUpdater({ devBuild: import.meta.env.DEV });
   const sso = useSsoLogin(profiles.data, profile);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   useEffect(() => {
