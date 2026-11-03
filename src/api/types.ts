@@ -1,5 +1,6 @@
 import type { K8sKindRef } from "../k8s/types";
 import type { ArgocdServer, ArgoViewState } from "../argocd/types";
+import type { ArgoWfServer, ArgoWfViewState } from "../argowf/types";
 
 export type ColumnKind = "text" | "mono" | "state" | "datetime" | "bytes";
 
@@ -103,6 +104,8 @@ export interface Settings {
   argocdServers?: ArgocdServer[];
   /** ArgoCD 서버 주소 → 그 서버 목록에서 마지막으로 고른 필터·묶기 */
   argocdViews?: Record<string, ArgoViewState>;
+  argoWorkflowsServers?: ArgoWfServer[];
+  argoWorkflowsViews?: Record<string, ArgoWfViewState>;
   /** 리소스 목록 캐시가 오래됐다고 보는 시간(분). 비어 있으면 기본값(15분), 0이면 무제한 */
   resourceCacheTtlMinutes?: number | null;
 }

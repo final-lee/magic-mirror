@@ -9,13 +9,14 @@ interface Props {
   /** 왜 토큰을 다시 받는지, 또는 지난 시도의 실패 */
   message: string | null;
   busy: boolean;
+  help?: string;
   onSubmit: (token: string) => void;
   /** 주면 "취소" 버튼을 보인다(지금 토큰이 아직 쓸 만할 때 폼을 닫는다) */
   onCancel?: () => void;
 }
 
 /** 2단계: API 토큰 입력 폼. 토큰은 이 폼의 상태에만 있고, 보내는 순간 비운다. */
-export function ArgoTokenForm({ server, message, busy, onSubmit, onCancel }: Props) {
+export function ArgoTokenForm({ server, message, busy, onSubmit, onCancel, help = TOKEN_HELP }: Props) {
   const [token, setToken] = useState("");
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -28,7 +29,7 @@ export function ArgoTokenForm({ server, message, busy, onSubmit, onCancel }: Pro
     <form className="argo-token" onSubmit={submit}>
       <ArgoSteps step="token" />
       <p className="mono">{tokenFor(server.name, server.url)}</p>
-      <p>{TOKEN_HELP}</p>
+      <p>{help}</p>
       {server.url.toLowerCase().startsWith("http://") && (
         <p className="err" role="alert">
           {TOKEN_HTTP_WARNING}

@@ -20,6 +20,7 @@ import { ARGOCD_TITLE, SERVER_HELP } from "./argocd/text";
 import { costApi } from "./cost/api";
 import { sampleBreakdown, sampleOverview as sampleCostOverview } from "./cost/fixtures";
 import { BREAKDOWN_LABEL, COST_TITLE } from "./cost/text";
+import { ARGOWF_TITLE } from "./argowf/text";
 
 vi.mock("./api/client", () => ({
   api: {
@@ -92,6 +93,22 @@ beforeEach(() => {
   m.getSettings.mockResolvedValue({ enabledServices: ["ec2", "iam"], favorites: [], lastProfile: "prod", lastRegion: null });
   m.saveSettings.mockResolvedValue(undefined);
   m.listResources.mockResolvedValue({ items: [makeResource("i-1", { name: "web-1", id: "i-1" })], truncated: false });
+});
+
+test("Argo Workflows는 단일 탭으로 열리고 프로필을 바꿔도 남는다", async () => {
+  m.listServices.mockResolvedValue([...sampleServices, eksService]);
+  m.getSettings.mockResolvedValue({ enabledServices: ["eks"], favorites: [], lastProfile: "prod", lastRegion: null });
+  renderWithClient(<App />);
+  fireEvent.click(await screen.findByText("EKS"));
+  fireEvent.click(screen.getByText(ARGOWF_TITLE));
+  fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+  fireEvent.click(screen.getByText(ARGOWF_TITLE, { selector: ".typ span" }));
+  expect(screen.getAllByRole("tab", { name: ARGOWF_TITLE })).toHaveLength(1);
+  expect(await screen.findByText("Argo Server 주소를 넣어 주세요")).toBeInTheDocument();
+  fireEvent.change(screen.getByRole("combobox", { name: "프로필" }), { target: { value: "dev" } });
+  expect(screen.getByText("Argo Server 주소를 넣어 주세요")).toBeInTheDocument();
+  const tab = screen.getByRole("tab", { name: new RegExp(ARGOWF_TITLE) });
+  expect(tab).toBeInTheDocument();
 });
 
 test("restores last profile, uses its region, shows only enabled services", async () => {

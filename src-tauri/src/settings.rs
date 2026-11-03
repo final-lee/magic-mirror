@@ -52,6 +52,29 @@ pub struct ArgocdView {
     pub then_by: Option<String>,
 }
 
+/// Argo Workflows 서버의 인증은 context 또는 키체인 토큰을 쓴다.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArgoWorkflowsServer {
+    pub name: String,
+    pub url: String,
+    pub context: Option<String>,
+    #[serde(default)]
+    pub namespace: Option<String>,
+    #[serde(default)]
+    pub label_columns: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ArgoWorkflowsView {
+    pub phases: Vec<String>,
+    pub namespaces: Vec<String>,
+    pub sources: Vec<String>,
+    pub labels: Vec<String>,
+    pub mine: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -78,6 +101,8 @@ pub struct Settings {
     pub argocd_servers: Vec<ArgocdServer>,
     /// ArgoCD 서버 주소 → 그 서버 목록의 필터·묶기 상태
     pub argocd_views: BTreeMap<String, ArgocdView>,
+    pub argo_workflows_servers: Vec<ArgoWorkflowsServer>,
+    pub argo_workflows_views: BTreeMap<String, ArgoWorkflowsView>,
     /// 리소스 목록 캐시 유효 시간(분). 없으면 앱 기본값(15분), 0이면 무제한. Rust는 저장만 하고 프론트엔드가 해석한다.
     pub resource_cache_ttl_minutes: Option<u32>,
 }
@@ -101,6 +126,8 @@ struct RawSettings {
     k8s_security_checks: K8sSecurityChecks,
     argocd_servers: Vec<ArgocdServer>,
     argocd_views: BTreeMap<String, ArgocdView>,
+    argo_workflows_servers: Vec<ArgoWorkflowsServer>,
+    argo_workflows_views: BTreeMap<String, ArgoWorkflowsView>,
     resource_cache_ttl_minutes: Option<u32>,
 }
 
@@ -135,6 +162,8 @@ pub fn load(path: &Path, all_services: &[&str]) -> Settings {
                 k8s_security_checks: raw.k8s_security_checks,
                 argocd_servers: raw.argocd_servers,
                 argocd_views: raw.argocd_views,
+                argo_workflows_servers: raw.argo_workflows_servers,
+                argo_workflows_views: raw.argo_workflows_views,
                 resource_cache_ttl_minutes: raw.resource_cache_ttl_minutes,
             },
             Err(_) => defaults(all_services),
@@ -299,6 +328,31 @@ mod tests {
         let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(json["k8sSecurityChecks"]["includeSystem"], true);
         assert_eq!(json["k8sSecurityChecks"]["disabled"][1], "imageLatest");
+    }
+
+    #[test]
+    fn argo_workflows_settings_roundtrip_and_old_defaults() {
+        let old = load_text(r#"{"lastProfile":"p"}"#);
+        assert!(old.argo_workflows_servers.is_empty());
+        assert!(old.argo_workflows_views.is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let s = Settings {
+            argo_workflows_servers: vec![ArgoWorkflowsServer {
+                name: "test".into(), url: "https://example.test".into(), context: Some("test".into()),
+                namespace: Some("demo".into()), label_columns: vec!["team".into()],
+            }],
+            argo_workflows_views: BTreeMap::from([("https://example.test".into(), ArgoWorkflowsView {
+                phases: vec!["Failed".into()], namespaces: vec!["demo".into()], sources: vec!["job".into()],
+                labels: vec!["team=a".into()], mine: true,
+            })]),
+            ..old
+        };
+        save(&path, &s).unwrap();
+        assert_eq!(load(&path, &["ec2", "s3"]), s);
+        let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(json["argoWorkflowsServers"][0]["context"], "test");
+        assert_eq!(json["argoWorkflowsViews"]["https://example.test"]["phases"][0], "Failed");
     }
 
     #[test]
