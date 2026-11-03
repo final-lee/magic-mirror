@@ -145,7 +145,7 @@ where F: FnMut(LogMessage) -> bool + Send {
     send(LogMessage::End);
 }
 
-fn selector(value: &serde_json::Value, service: bool) -> Result<String, AppError> {
+pub(crate) fn selector(value: &serde_json::Value, service: bool) -> Result<String, AppError> {
     let invalid = || AppError::other("Pod 선택자를 읽을 수 없어요");
     let labels = if service { value.as_object() } else { value.get("matchLabels").and_then(|v| v.as_object()) };
     let mut parts = Vec::new();
