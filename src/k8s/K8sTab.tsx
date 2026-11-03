@@ -37,7 +37,7 @@ interface Props {
   onOpenIam?: (arn: string) => void;
 }
 
-export function K8sTab({ target, onOpenIam }: Props) {
+export function K8sTab({ target, active, onOpenIam }: Props) {
   const qc = useQueryClient();
   const { settings, isError: settingsFailed, update } = useSettings();
   const settingsReady = settings !== undefined || settingsFailed;
@@ -188,7 +188,7 @@ export function K8sTab({ target, onOpenIam }: Props) {
           {session.isError ? (
             <K8sError error={session.error} target={target} ssoProfile={ssoProfile} />
           ) : view === "overview" ? (
-            <OverviewView target={target} context={chosen} ssoProfile={ssoProfile} live={live} onOpenNode={openNode} />
+            <OverviewView target={target} context={chosen} ssoProfile={ssoProfile} live={live} visible={active} onOpenNode={openNode} />
           ) : listView ? (
             <WorkloadsView
               key={view}
@@ -197,6 +197,7 @@ export function K8sTab({ target, onOpenIam }: Props) {
               sessionEpoch={session.dataUpdatedAt}
               ssoProfile={ssoProfile}
               live={live}
+              visible={active}
               namespace={nsOrAll}
               kinds={kinds.data ?? []}
               discoveryAvailable={kinds.data !== undefined}

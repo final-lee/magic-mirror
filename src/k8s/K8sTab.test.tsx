@@ -48,7 +48,7 @@ import type { K8sContextCandidate, K8sContextInfo, K8sRow, K8sRules, K8sSession,
 // 터미널(xterm)은 PodTerminal.test에서 본다
 vi.mock("./PodTerminal", () => ({ PodTerminal: () => null }));
 vi.mock("./api", () => ({
-  k8sApi: { context: vi.fn(), open: vi.fn(), close: vi.fn(), rules: vi.fn(), watch: vi.fn(), unwatch: vi.fn(), kinds: vi.fn(), get: vi.fn(), secretValue: vi.fn(), overview: vi.fn(), preview: vi.fn(), apply: vi.fn() },
+  k8sApi: { context: vi.fn(), open: vi.fn(), close: vi.fn(), rules: vi.fn(), watch: vi.fn(), unwatch: vi.fn(), kinds: vi.fn(), get: vi.fn(), secretValue: vi.fn(), overview: vi.fn(), metrics: vi.fn(), preview: vi.fn(), apply: vi.fn() },
 }));
 vi.mock("../api/client", () => ({ api: { getSettings: vi.fn(), saveSettings: vi.fn(), ssoLogin: vi.fn() } }));
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: vi.fn(async () => {}) }));
@@ -101,6 +101,7 @@ beforeEach(() => {
   m.rules.mockResolvedValue(rules());
   m.kinds.mockResolvedValue([]);
   m.overview.mockResolvedValue(emptyOverview);
+  m.metrics.mockResolvedValue({ podsUnavailable: null, nodesUnavailable: null, pods: [], nodes: [] });
   m.unwatch.mockResolvedValue(null);
   m.watch.mockImplementation(async (_t, _k, _n, _p, onMessage) => {
     emit = onMessage;
@@ -346,6 +347,20 @@ test("the context is not read until the settings have loaded", async () => {
   expect(m.context).not.toHaveBeenCalled();
   release({ enabledServices: [], favorites: [], lastProfile: "app", lastRegion: null, kubeconfigPath: "/kc" });
   await waitFor(() => expect(m.context).toHaveBeenCalledWith(target, "/kc", null));
+});
+
+test("usage is read for the overview only while the tab is the visible one", async () => {
+  m.context.mockResolvedValue(info([cand("ctx")]));
+  const qc = newQueryClient();
+  qc.setQueryData(["settings"], { enabledServices: [], favorites: [], lastProfile: "app", lastRegion: null });
+  vi.mocked(api.getSettings).mockResolvedValue({ enabledServices: [], favorites: [], lastProfile: "app", lastRegion: null });
+  const ui = (active: boolean) => withClientAndSso(<K8sTab target={target} active={active} />, qc, ssoLoginStub());
+  const r = render(ui(false));
+  await screen.findByText(STATE_CONNECTED);
+  await waitFor(() => expect(m.overview).toHaveBeenCalled());
+  expect(m.metrics).not.toHaveBeenCalled();
+  r.rerender(ui(true));
+  await waitFor(() => expect(m.metrics).toHaveBeenCalledWith(target, null, target.profile));
 });
 
 test("opens on the overview once connected", async () => {

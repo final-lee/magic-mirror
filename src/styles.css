@@ -1222,6 +1222,10 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .k8s-log.nowrap .lj-detail { white-space: pre-wrap; }
 .k8s-wrap { word-break: break-all; }
 .k8s-warn td { color: var(--orange); }
+/* 사용량이 요청·제한·할당 가능량의 90%를 넘은 비율 */
+.k8s-hot { color: var(--red); font-weight: 600; }
+.k8s-usage-sub { font-size: 11px; white-space: nowrap; }
+.k8s-usage-sub span + span { margin-left: 8px; }
 
 .k8s-events { display: flex; flex-direction: column; gap: 6px; }
 
