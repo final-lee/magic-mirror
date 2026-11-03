@@ -25,6 +25,7 @@ import { MyRules } from "./MyRules";
 import { NoContext } from "./NoContext";
 import { OverviewView } from "./OverviewView";
 import { NetworkView } from "./network/NetworkView";
+import { SecurityView } from "./security/SecurityView";
 import type { VpcOpen } from "./network/types";
 import { NAMESPACES } from "./targets";
 import { ALL, TopBar, type K8sConnection } from "./TopBar";
@@ -200,7 +201,7 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
           width={lanes.width("nav")}
         />
         <LaneResizer lane="nav" onResize={lanes.resize} onCommit={lanes.commit} />
-        <div className={`k8s-body${listView || view === "access" || view === "network" || view === "helm" ? " flush" : ""}`}>
+        <div className={`k8s-body${listView || view === "access" || view === "network" || view === "helm" || view === "security" ? " flush" : ""}`}>
           {session.isError ? (
             <K8sError error={session.error} target={target} ssoProfile={ssoProfile} />
           ) : view === "overview" ? (
@@ -246,6 +247,21 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
             <ForwardsView target={target} ssoProfile={ssoProfile} />
           ) : view === "access" ? (
             <AccessScreen target={target} context={chosen} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} onOpenIam={onOpenIam} onOpenMyRules={() => setView("myRules")} onChange={change.start} />
+          ) : view === "security" ? (
+            <SecurityView
+              target={target}
+              context={chosen}
+              ssoProfile={ssoProfile}
+              live={live}
+              setting={settings?.k8sSecurityChecks}
+              onSetting={(next) => update({ k8sSecurityChecks: next })}
+              appliedChange={appliedChange}
+              onChange={change.start}
+              onOpenObject={openObject}
+              onOpenIam={onOpenIam}
+              onOpenAccess={() => setView("access")}
+              lanes={lanes}
+            />
           ) : view === "helm" ? (
             <HelmView
               target={target}
