@@ -43,6 +43,26 @@ export interface ListResult {
   truncated: boolean;
 }
 
+/** 디스크에 남기는 검색용 리소스: 원본(raw)과 상세 필드는 비밀값이 들어 있을 수 있어 남기지 않는다 */
+export interface IndexedResource {
+  id: string;
+  name: string;
+  arn: string | null;
+  values: Record<string, string>;
+  tags: Record<string, string>;
+}
+
+/** 한 번 읽은 리소스 목록(프로필·리전·종류 하나)의 검색용 사본. region은 전역 서비스면 "global" */
+export interface IndexedList {
+  region: string;
+  service: string;
+  typeId: string;
+  /** 읽은 시각(unix ms) */
+  fetchedAt: number;
+  truncated: boolean;
+  items: IndexedResource[];
+}
+
 export interface ProfileInfo {
   name: string;
   region: string | null;
@@ -80,6 +100,8 @@ export interface Settings {
   argocdServers?: ArgocdServer[];
   /** ArgoCD 서버 주소 → 그 서버 목록에서 마지막으로 고른 필터·묶기 */
   argocdViews?: Record<string, ArgoViewState>;
+  /** 리소스 목록 캐시가 오래됐다고 보는 시간(분). 비어 있으면 기본값(15분), 0이면 무제한 */
+  resourceCacheTtlMinutes?: number | null;
 }
 
 /** 메뉴(1열)·종류(2열)는 px, 상세(4열)는 목록(3열) 너비에 대한 % */

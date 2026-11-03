@@ -110,6 +110,8 @@ tbody tr.on td { background: var(--accent) !important; color: #fff; }
 .qitem .bar i { display: block; height: 100%; background: var(--accent); }
 .ok { color: var(--green); }
 .dim { color: var(--dim); }
+/* 퍼지 검색에서 맞은 글자(Highlight) */
+mark.hl { background: none; color: var(--yellow); font-weight: 600; }
 /* 눈에는 안 보이고 읽어 주는 도구에만 읽히는 글. IAM 할당 표의 맨 끝 열 머리(.asg-sr)와 PostgreSQL 권한 표가 함께 쓴다 */
 .sr-only, .iam-asg .asg-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .drag-chip { position: fixed; z-index: 20; pointer-events: none; background: #3a3a3d; border: 1px solid #666; border-radius: 6px; padding: 4px 8px; font-size: 11px; box-shadow: 0 6px 20px #000a; }
@@ -118,6 +120,8 @@ tbody tr.on td { background: var(--accent) !important; color: #fff; }
 .field input, .field-input { background: #1c1c1e; border: 1px solid #444; border-radius: 6px; padding: 6px 8px; color: var(--text); font: inherit; }
 .tools { display: flex; gap: 14px; margin-bottom: 8px; }
 .sheet h4 { margin: 16px 0 4px; font-size: 13px; }
+.sheet .cache-ttl { display: inline-flex; margin-bottom: 8px; }
+.cache-reset { align-items: center; font-size: 12px; }
 .diff { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .diff-head { display: flex; gap: 6px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 .diff-head .sp { margin-left: auto; display: flex; gap: 6px; }
@@ -454,6 +458,15 @@ tbody tr.on .iam-badge { background: #ffffff26; color: #fff; border-color: #ffff
 .pk-detail { margin-top: 2px; font-size: 11px; }
 .sheet .pk-note { margin: 8px 0 0; font-size: 11px; }
 .pk .empty.small { padding: 16px; }
+/* ⌘K 리소스 찾기 */
+.sheet.palette { align-self: start; margin-top: 12vh; }
+.palette .pk-list { max-height: 56vh; }
+.palette .pk-top { flex-wrap: nowrap; }
+.palette .pk-name, .palette .mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pal-where { margin-left: auto; flex: none; font-size: 11px; }
+.pal-age { flex: none; min-width: 56px; text-align: right; font-size: 11px; color: var(--dim); }
+.pal-age.stale { color: var(--yellow); }
+.pk-opt.on .pal-age, .pk-opt.on mark.hl { color: #fff; }
 
 .pe { padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 6px; }
 .pe h3 { margin: 0 0 4px; font-size: 14px; }

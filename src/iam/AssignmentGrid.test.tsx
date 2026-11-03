@@ -902,7 +902,7 @@ describe("when the rows on screen change", () => {
     const scroller = grid().closest(".asg-scroll") as HTMLElement;
     scroller.scrollTop = 200 * ROW_H;
     fireEvent.scroll(scroller);
-    fireEvent.change(toolbarFilter(), { target: { value: "user-00" } });
+    fireEvent.change(toolbarFilter(), { target: { value: "user-005" } });
     expect(screen.getByRole("button", { name: "user-005" })).toBeInTheDocument();
   });
 });
