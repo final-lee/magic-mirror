@@ -1674,7 +1674,7 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .helm-banner { margin: 0; padding: 6px 12px; font-size: 12px; background: var(--yellow-soft); border-bottom: 1px solid var(--line); }
 .helm-notes { margin: 0; white-space: pre-wrap; font-size: 12px; font-family: ui-monospace, Menlo, monospace; user-select: text; }
 .helm-history td { vertical-align: middle; }
-.helm-history tr.on td { background: var(--accent-alpha-22); }
+.helm-history tr.current td { background: var(--neutral-alpha-08); }
 .helm-history-actions { display: flex; gap: 6px; justify-content: flex-end; white-space: nowrap; }
 .helm-seg { display: inline-flex; margin: 8px 0; border: 1px solid var(--border-input); border-radius: 6px; overflow: hidden; }
 .helm-seg label { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
@@ -1685,3 +1685,8 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .helm-field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--dim); align-self: stretch; }
 .helm-field input { background: var(--code-bg); border: 1px solid var(--border-input); border-radius: 6px; padding: 4px 8px; color: var(--text); font: inherit; font-size: 12px; }
 .helm-field input[aria-invalid="true"] { border-color: var(--red); }
+.helm-grid { margin-top: 10px; }
+.k8s-sect > .btn { margin-top: 8px; }
+.helm-source { margin-top: 6px; }
+/* 고른 행(파란 바탕)에서는 배지를 흰 바탕으로 두어 글자가 읽히게 한다 */
+.iam-list tr.on .helm-status { background: rgba(0, 0, 0, 0.35); color: #fff; }
