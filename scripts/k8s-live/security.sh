@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # K5 보안 점검 픽스처. scripts/k8s-live-test.sh가 source로 부른다: 첫 인자는 kubeconfig 경로(없으면 $kc).
-#   mm-sec         : 점검마다 하나씩 걸리는 워크로드(priv, host, root, esc, bare, cron, job, bare-pod)와 하나도 걸리지 않는 clean,
+#   mm-sec         : 점검마다 하나씩 걸리는 워크로드(priv, host, root, esc, bare, cron, job)와 하나도 걸리지 않는 clean,
 #                    default ServiceAccount를 쓰는 워크로드(NetworkPolicy 없음), 권한 점검용 RBAC(관리자·상승 경로·익명·안 쓰는 역할·깨진 바인딩)
 #   mm-sec-bound   : default ServiceAccount에 다른 권한(view)을 준 네임스페이스(자동 수정을 하지 않는다)
 #   mm-sec-guarded : NetworkPolicy가 있는 네임스페이스(NetworkPolicy 점검에 걸리지 않는다)
@@ -137,7 +137,7 @@ spec:
           containers:
             - { name: app, image: "registry.k8s.io/pause:3.10", securityContext: { runAsNonRoot: true, runAsUser: 1000 } }
 ---
-# 컨트롤러가 없는 Job과 Pod: 점검하지만 템플릿을 바꿀 수 없어 고치지 않는다
+# 컨트롤러가 없는 Job: 점검하지만 템플릿을 바꿀 수 없어 고치지 않는다(컨트롤러 없는 Pod는 drain 시험이 쫓아내서 두지 않는다)
 apiVersion: batch/v1
 kind: Job
 metadata: { name: job, namespace: mm-sec }
@@ -148,14 +148,6 @@ spec:
       restartPolicy: Never
       containers:
         - { name: app, image: "registry.k8s.io/pause:3.10", securityContext: { runAsNonRoot: true, runAsUser: 1000 } }
----
-apiVersion: v1
-kind: Pod
-metadata: { name: bare-pod, namespace: mm-sec }
-spec:
-  serviceAccountName: app
-  containers:
-    - { name: app, image: "registry.k8s.io/pause:3.10", securityContext: { runAsNonRoot: true, runAsUser: 1000 } }
 ---
 # 점검에 하나도 걸리지 않는 워크로드(default가 아닌 ServiceAccount, 모든 설정이 되어 있다)
 apiVersion: apps/v1

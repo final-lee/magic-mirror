@@ -170,8 +170,11 @@ impl Profile<'_> {
     }
 }
 
-/// `(동사, API 그룹, 리소스, 하위 리소스)` 요청 목록 중 허용되는 것의 증거 줄
-fn evidence_of(grants: &[&Grant], requests: &[(&str, &str, &str, Option<&str>)]) -> Vec<String> {
+/// 요청 하나: (동사, API 그룹, 리소스, 하위 리소스)
+type Request = (&'static str, &'static str, &'static str, Option<&'static str>);
+
+/// 요청 목록 중 허용되는 것의 증거 줄
+fn evidence_of(grants: &[&Grant], requests: &[Request]) -> Vec<String> {
     requests
         .iter()
         .filter_map(|(verb, group, resource, sub)| {
@@ -191,7 +194,7 @@ fn evidence_of(grants: &[&Grant], requests: &[(&str, &str, &str, Option<&str>)])
 }
 
 fn escalations(grants: &[&Grant]) -> Vec<(CheckId, Vec<String>)> {
-    let table: [(CheckId, Vec<(&str, &str, &str, Option<&str>)>); 4] = [
+    let table: [(CheckId, Vec<Request>); 4] = [
         (
             CheckId::EscalateBind,
             vec![
