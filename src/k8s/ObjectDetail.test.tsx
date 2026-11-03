@@ -90,7 +90,7 @@ test("summary: values, owners, children, containers, conditions, events", async 
       events: [{ type: "Warning", reason: "BackOff", message: "Back-off restarting", count: 3, lastSeen: "2026-10-30T11:59:00Z", source: "kubelet", object: "Pod/web-1" }],
     }),
   );
-  const h = setup();
+  const h = setup({ kinds: [widgetKind, { ...REPLICASETS, verbs: ["list", "watch"], custom: false }] });
   expect(await screen.findByText("CrashLoopBackOff", { selector: "dd" })).toBeInTheDocument();
   expect(m.get).toHaveBeenCalledWith(T, PODS, "prod", "web-1", "p");
   const owners = screen.getByRole("region", { name: SEC_OWNERS });

@@ -425,6 +425,7 @@ const navLabels = () => Array.from(screen.getByRole("navigation", { name: "í´ëŸ
 
 test("a star in All saves a bookmark after the earlier ones; the bookmark opens its kind without the tree", async () => {
   m.context.mockResolvedValue(info([cand("ctx")]));
+  m.kinds.mockResolvedValue([{ ...PODS, verbs: ["list", "watch"], custom: false }, { ...DEPLOYMENTS, verbs: ["list", "watch"], custom: false }]);
   setup({ k8sBookmarks: [PODS] });
   await screen.findByText(STATE_CONNECTED);
   expect(navLabels().slice(0, 2)).toEqual(["Pod", NAV_OVERVIEW]);
