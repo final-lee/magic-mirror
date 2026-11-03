@@ -57,7 +57,7 @@ test("change actions are there without any switch when the detail can start chan
   expect(screen.queryByRole("button", { name: "삭제" })).not.toBeInTheDocument();
 });
 
-test("long annotations and last-applied-configuration start folded; expanding shows indented JSON", async () => {
+test("long annotations and last-applied-configuration start folded; expanding shows indented, colored JSON", async () => {
   const applied = JSON.stringify({ apiVersion: "apps/v1", kind: "Deployment", metadata: { name: "web" } });
   const long = "x".repeat(400);
   m.get.mockResolvedValue(view({ annotations: { "kubectl.kubernetes.io/last-applied-configuration": applied, "note/long": long, "note/short": "hi" } }));
@@ -67,7 +67,10 @@ test("long annotations and last-applied-configuration start folded; expanding sh
   const toggles = screen.getAllByRole("button", { name: /^펼치기/ });
   expect(toggles).toHaveLength(2);
   fireEvent.click(toggles[0]);
-  expect(screen.getByText((_, el) => el?.textContent === JSON.stringify(JSON.parse(applied), null, 2))).toBeInTheDocument();
+  const pre = document.querySelector(".k8s-annotation-open pre") as HTMLElement;
+  expect(pre.textContent).toBe(JSON.stringify(JSON.parse(applied), null, 2));
+  expect(within(pre).getByText('"apiVersion"')).toHaveClass("y-key");
+  expect(within(pre).getByText('"apps/v1"')).toHaveClass("y-str");
   fireEvent.click(screen.getByRole("button", { name: ANNOTATION_FOLD_LABEL }));
   expect(screen.getAllByRole("button", { name: /^펼치기/ })).toHaveLength(2);
 });

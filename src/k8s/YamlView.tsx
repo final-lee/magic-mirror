@@ -100,11 +100,10 @@ export function tokenizeYaml(text: string): YamlToken[][] {
   return out;
 }
 
-/** 테마 색으로 칠한 YAML. 마우스로 고른 글자는 원래 YAML 그대로 복사된다. */
-export function YamlView({ text }: { text: string }) {
-  const lines = useMemo(() => tokenizeYaml(text), [text]);
+/** 칠한 줄들. 마우스로 고른 글자는 원래 글 그대로 복사된다. */
+function Painted({ lines, className }: { lines: YamlToken[][]; className?: string }) {
   return (
-    <pre className="k8s-yaml mono">
+    <pre className={`k8s-yaml mono${className ? ` ${className}` : ""}`}>
       {lines.map((tokens, i) => (
         <span key={i}>
           {tokens.map((t, j) => (t.kind === "plain" ? t.text : <span key={j} className={`y-${t.kind}`}>{t.text}</span>))}
@@ -113,4 +112,43 @@ export function YamlView({ text }: { text: string }) {
       ))}
     </pre>
   );
+}
+
+/** 테마 색으로 칠한 YAML */
+export function YamlView({ text }: { text: string }) {
+  const lines = useMemo(() => tokenizeYaml(text), [text]);
+  return <Painted lines={lines} />;
+}
+
+// JSON 토큰: 문자열(뒤에 `:`가 오면 키), 숫자, true·false·null, 기호, 그 밖(공백 등)
+const JSON_TOKEN = /("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)|\b(true|false|null)\b|([{}[\],])/g;
+
+/** JSON을 줄마다 토큰으로 자른다. 토큰을 이어 붙이면 원래 줄과 같다(색칠용, 검사하지 않는다). */
+export function tokenizeJson(text: string): YamlToken[][] {
+  return text.split("\n").map((line) => {
+    const tokens: YamlToken[] = [];
+    let at = 0;
+    for (const m of line.matchAll(JSON_TOKEN)) {
+      if (m.index > at) tokens.push({ kind: "plain", text: line.slice(at, m.index) });
+      if (m[1] !== undefined) {
+        tokens.push({ kind: m[2] ? "key" : "str", text: m[1] });
+        if (m[2]) tokens.push({ kind: "punct", text: m[2] });
+      } else if (m[3] !== undefined) {
+        tokens.push({ kind: "num", text: m[3] });
+      } else if (m[4] !== undefined) {
+        tokens.push({ kind: "bool", text: m[4] });
+      } else {
+        tokens.push({ kind: "punct", text: m[5] });
+      }
+      at = m.index + m[0].length;
+    }
+    if (at < line.length) tokens.push({ kind: "plain", text: line.slice(at) });
+    return tokens;
+  });
+}
+
+/** 테마 색으로 칠한 JSON(YAML과 같은 색). wrap이면 긴 줄을 접는다 */
+export function JsonView({ text, wrap = false }: { text: string; wrap?: boolean }) {
+  const lines = useMemo(() => tokenizeJson(text), [text]);
+  return <Painted lines={lines} className={wrap ? "k8s-code-wrap" : undefined} />;
 }
