@@ -40,7 +40,7 @@ export function ArgoServerForm({ servers, onAdd, submitLabel = SERVER_ADD }: For
       <form className="argo-server-add" onSubmit={add}>
         <input aria-label={SERVER_URL} placeholder={SERVER_URL_PLACEHOLDER} value={url} onChange={(e) => setUrl(e.target.value)} />
         <input aria-label={SERVER_NAME} placeholder={SERVER_NAME_PLACEHOLDER} value={name} onChange={(e) => setName(e.target.value)} />
-        <button className="btn small" type="submit">
+        <button className="btn small tone-primary" type="submit">
           {submitLabel}
         </button>
       </form>
@@ -67,7 +67,7 @@ export function ArgoServerEditor({ servers, onAdd, onRemove }: Props) {
         {servers.map((s) => (
           <li key={s.url}>
             <b>{s.name}</b> <span className="dim mono">{s.url}</span>
-            <button className="btn small" aria-label={serverRemoveLabel(s.name)} onClick={() => onRemove(s.url)}>
+            <button className="btn small tone-danger" aria-label={serverRemoveLabel(s.name)} onClick={() => onRemove(s.url)}>
               {SERVER_REMOVE}
             </button>
           </li>

@@ -13,6 +13,7 @@ A macOS desktop app for browsing AWS resources by service, without clicking thro
 - Uses the profiles in `~/.aws/config`, including SSO. Pick a profile and region and the list loads.
 - When an SSO session has expired — when you pick the profile, when the app starts, or while you work — the app runs `aws sso login` for you. Approve it in the browser that opens and the lists reload. A banner shows the progress and lets you cancel. Profiles that share an SSO session sign in once, and role profiles sign in through their `source_profile`.
 - Turn on only the services you use, and pin resource types as favorites.
+- Choose a light or dark appearance in settings, or follow the system appearance (the default).
 - Detail panel with key fields, tags, raw JSON, a link to the AWS console, and ID copy (⌘C)
 - Fuzzy filter (⌘F): type letters in order, skipping any — `poa` finds `prod-orders-api`. Space-separated words must all match. In the resource list it looks at the name, ID, text columns, and tags (`team=pay`); matched letters are highlighted. While filtering, the best matches come first until you click a column header. The same filter works on the other tabs (IAM, PostgreSQL, ArgoCD, Kubernetes, S3 explorer).
 - **Find anything you've opened (⌘K)**: searches every list this profile has read, in every region, without calling AWS. Words can also match the service, type, or region (`west web`). Pick a result to jump to its region and type with the row selected. Results show how old the list is; lists past the cache TTL are marked and reload when opened.

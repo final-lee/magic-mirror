@@ -2,8 +2,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useSettings } from "../api/queries";
 import { ErrorState } from "../components/ErrorState";
+import { DoneNotice } from "../components/DoneNotice";
+import { useApplyNotices } from "../iam/useApplyFlow";
+import { BatchDialog, useK8sBatch } from "./ChangeBatch";
+import { ChangeDialog, useK8sChange } from "./ChangeFlow";
+import { ChangeLog } from "./ChangeLog";
+import { DrainProgress } from "./DrainProgress";
+import { CHANGE_DONE } from "./text";
 import { ContextPicker } from "./ContextPicker";
 import { EventsView } from "./EventsView";
+import { ForwardsView } from "./ForwardsView";
 import { K8sError } from "./K8sError";
 import { K8sNav, type K8sView, type NavBookmark } from "./K8sNav";
 import { BUILTIN, NODES, bookmarkKey, bookmarkOf } from "./kinds";
@@ -15,9 +23,10 @@ import { OverviewView } from "./OverviewView";
 import { NAMESPACES, chooseContext, ssoProfileOf } from "./targets";
 import { ALL, TopBar, type K8sConnection } from "./TopBar";
 import { WorkloadsView, type WorkloadsFocus } from "./WorkloadsView";
+import { YamlCreate } from "./YamlCreate";
 import { BOOKMARK_MISSING, savedMissing, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNECTING, updateCommand } from "./text";
 import { refreshK8s, useK8sContext, useK8sKinds, useK8sRules, useK8sSession } from "./queries";
-import type { K8sKindRef, K8sTarget } from "./types";
+import type { K8sChange, K8sKindRef, K8sTarget } from "./types";
 import { useK8sWatch } from "./useK8sWatch";
 
 interface Props {
@@ -47,10 +56,28 @@ export function K8sTab({ target, onOpenIam }: Props) {
 
   const [userNs, setUserNs] = useState<string | null>(null);
   const [view, setView] = useState<K8sView>("overview");
+  const [appliedChange, setAppliedChange] = useState<K8sChange | null>(null);
   const [focus, setFocus] = useState<WorkloadsFocus | null>(null);
   const session = useK8sSession(target, kubeconfig, settingsReady ? chosen : null, ssoProfileOf(target, candidate, null));
   const ssoProfile = ssoProfileOf(target, candidate, session.data);
   const live = session.isSuccess && !session.isFetching;
+  const notices = useApplyNotices();
+  const change = useK8sChange(
+    target,
+    ssoProfile,
+    (applied) => {
+      notices.announce(CHANGE_DONE, []);
+      setAppliedChange(applied);
+      void qc.invalidateQueries({ queryKey: ["k8s-change-log"] });
+    },
+    () => void qc.invalidateQueries({ queryKey: ["k8s-change-log"] }),
+  );
+  const batch = useK8sBatch(target, ssoProfile, (applied) => {
+    notices.announce(CHANGE_DONE, []);
+    setAppliedChange(applied[applied.length - 1]);
+    void qc.invalidateQueries({ queryKey: ["k8s-change-log"] });
+  });
+  const [creating, setCreating] = useState(false);
   const namespaces = useK8sWatch(target, chosen ?? "", session.dataUpdatedAt, ssoProfile, NAMESPACES, null, live);
   const names = namespaces.rows.map((r) => r.name);
 
@@ -128,9 +155,25 @@ export function K8sTab({ target, onOpenIam }: Props) {
         namespace={namespace}
         onNamespace={setUserNs}
         onReconnect={reconnect}
+        onCreateYaml={() => setCreating(true)}
       />
       {missing && <p className="err k8s-notes">{savedMissing(missing)}</p>}
       {namespaces.error && <K8sError error={namespaces.error} target={target} ssoProfile={ssoProfile} compact />}
+      {notices.notices.map((notice) => <DoneNotice key={notice.id} notice={notice} onDismiss={() => notices.dismissNotice(notice.id)} />)}
+      {change.pending && <ChangeDialog pending={change.pending} apply={change.apply} retry={change.retry} cancel={change.cancel} force={change.force} />}
+      {change.drain && <DrainProgress run={change.drain} onStop={change.stopDrain} onClose={change.closeDrain} />}
+      {creating && !batch.batch && (
+        <YamlCreate
+          kinds={kinds.data ?? []}
+          namespace={nsOrAll}
+          onPreview={(entries) => {
+            setCreating(false);
+            batch.api.start(entries);
+          }}
+          onClose={() => setCreating(false)}
+        />
+      )}
+      {batch.batch && <BatchDialog batch={batch.batch} api={batch.api} />}
       <div className="pg-main">
         <K8sNav
           view={view}
@@ -158,6 +201,8 @@ export function K8sTab({ target, onOpenIam }: Props) {
               kinds={kinds.data ?? []}
               focus={focus}
               onOpenIam={onOpenIam}
+              onChange={change.start}
+              appliedChange={appliedChange}
               banner={kinds.isError && <ErrorState error={kinds.error} profile={ssoProfile} compact onRetry={refetchKinds} onLoggedIn={refetchKinds} />}
               fixedKind={fixedKind}
               bookmarked={marks}
@@ -168,6 +213,10 @@ export function K8sTab({ target, onOpenIam }: Props) {
             <div className="empty">{BOOKMARK_MISSING}</div>
           ) : view === "events" ? (
             <EventsView target={target} context={chosen} sessionEpoch={session.dataUpdatedAt} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} />
+          ) : view === "forwards" ? (
+            <ForwardsView target={target} ssoProfile={ssoProfile} />
+          ) : view === "changeLog" ? (
+            <ChangeLog target={target} onStart={change.start} />
           ) : rules.isError ? (
             <K8sError error={rules.error} target={target} ssoProfile={ssoProfile} />
           ) : rules.data ? (

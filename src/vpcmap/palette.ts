@@ -1,43 +1,43 @@
 import type { NodeKind, Tier } from "./types";
 
-// SVG 안에서만 쓰는 고정 색(CSS 변수는 PNG로 내보낼 때 풀리지 않는다)
+// SVG와 PNG 내보내기에서 같은 테마 색을 쓴다.
 export const C = {
-  bg: "#1b1b1e",
-  text: "#e6e6e8",
-  dim: "#9a9aa0",
-  vpc: "#8c4fff",
-  vpcFill: "#8c4fff0d",
-  accent: "#0a84ff",
-  route: "#ffb340",
-  tile: "#2b2b2e",
-  tileLine: "#4a4a4e",
-  ok: "#30d158",
-  bad: "#ff6b61",
-  warn: "#ffd60a",
+  bg: "var(--bg)",
+  text: "var(--text)",
+  dim: "var(--dim)",
+  vpc: "var(--map-purple)",
+  vpcFill: "var(--accent-soft)",
+  accent: "var(--accent)",
+  route: "var(--yellow)",
+  tile: "var(--surface-2)",
+  tileLine: "var(--line)",
+  ok: "var(--green)",
+  bad: "var(--red)",
+  warn: "var(--yellow)",
 };
 
 export const TIER_COLOR: Record<Tier, { stroke: string; fill: string; lane: string; text: string }> = {
-  public: { stroke: "#4cc26a", fill: "#30d15814", lane: "#30d1580a", text: "#7fe09a" },
-  private: { stroke: "#4c8dff", fill: "#0a84ff14", lane: "#0a84ff0a", text: "#8ab6ff" },
-  isolated: { stroke: "#8e8e93", fill: "#8e8e9314", lane: "#8e8e930a", text: "#b4b4ba" },
+  public: { stroke: "var(--green)", fill: "var(--green-soft)", lane: "var(--green-soft)", text: "var(--green)" },
+  private: { stroke: "var(--accent)", fill: "var(--accent-soft)", lane: "var(--accent-soft)", text: "var(--accent)" },
+  isolated: { stroke: "var(--dim)", fill: "var(--hover)", lane: "var(--hover)", text: "var(--dim)" },
 };
 
 export const KIND_BADGE: Record<NodeKind, { label: string; color: string }> = {
-  ec2: { label: "EC2", color: "#f58536" },
-  nat: { label: "NAT", color: "#8c4fff" },
-  rds: { label: "RDS", color: "#3b48cc" },
-  elb: { label: "ELB", color: "#8c4fff" },
-  lambda: { label: "λ", color: "#ed7100" },
-  vpce: { label: "VPCE", color: "#8c4fff" },
+  ec2: { label: "EC2", color: "var(--badge-orange)" },
+  nat: { label: "NAT", color: "var(--badge-purple)" },
+  rds: { label: "RDS", color: "var(--badge-blue)" },
+  elb: { label: "ELB", color: "var(--badge-purple)" },
+  lambda: { label: "λ", color: "var(--badge-orange)" },
+  vpce: { label: "VPCE", color: "var(--badge-purple)" },
 };
 
 export const CHIP_BADGE_COLOR: Record<string, string> = {
-  IGW: "#4cc26a",
-  EIGW: "#4cc26a",
-  VGW: "#8c4fff",
-  TGW: "#8c4fff",
-  EP: "#3f8624",
-  PCX: "#e7157b",
+  IGW: "var(--badge-green)",
+  EIGW: "var(--badge-green)",
+  VGW: "var(--badge-purple)",
+  TGW: "var(--badge-purple)",
+  EP: "var(--badge-green)",
+  PCX: "var(--badge-pink)",
 };
 
 export function stateColor(state: string): string {

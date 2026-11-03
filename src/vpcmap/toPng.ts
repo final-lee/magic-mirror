@@ -9,6 +9,11 @@ export async function svgToPng(svg: SVGSVGElement, width: number, height: number
   clone.setAttribute("height", String(height));
   clone.setAttribute("viewBox", `0 0 ${width} ${height}`);
   clone.removeAttribute("style");
+  // 복제한 SVG는 문서 밖에서 그려지므로 현재 테마 변수를 함께 담는다.
+  const rootStyle = getComputedStyle(document.documentElement);
+  for (const name of Array.from(rootStyle)) {
+    if (name.startsWith("--")) clone.style.setProperty(name, rootStyle.getPropertyValue(name));
+  }
   const xml = new XMLSerializer().serializeToString(clone);
   const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml;charset=utf-8" }));
   try {

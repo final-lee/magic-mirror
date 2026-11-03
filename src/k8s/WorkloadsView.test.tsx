@@ -6,6 +6,8 @@ import { BACK, CAT_CUSTOM, DETAIL_LABEL, KIND_TREE_LABEL, TAB_SUMMARY, TAB_YAML 
 import type { K8sKind, K8sObjectView, K8sRow, K8sWatchMessage } from "./types";
 import { WorkloadsView, type WorkloadsFocus } from "./WorkloadsView";
 
+// 터미널(xterm)은 PodTerminal.test에서 본다
+vi.mock("./PodTerminal", () => ({ PodTerminal: () => null }));
 vi.mock("./api", () => ({ k8sApi: { watch: vi.fn(), unwatch: vi.fn(), get: vi.fn(), rules: vi.fn(), secretValue: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 const m = vi.mocked(k8sApi);
@@ -15,7 +17,7 @@ let T = { profile: "app", region: "r", cluster: "c" };
 const row = (name: string): K8sRow => ({ uid: `u-${name}`, name, namespace: "prod", resourceVersion: "7", createdAt: null, labels: {}, values: {}, problems: [] });
 const view = (name: string, over: Partial<K8sObjectView> = {}): K8sObjectView => ({
   kind: PODS, row: row(name), annotations: {}, owners: [], children: [], childrenTruncated: false, childrenError: null,
-  containers: [], conditions: [], events: [], eventsError: null, yaml: "", secretKeys: null, ...over,
+  containers: [], conditions: [], events: [], eventsError: null, yaml: "", editYaml: "", secretKeys: null, ...over,
 });
 const emits = new Map<string, (msg: K8sWatchMessage) => void>();
 
@@ -23,6 +25,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   T = { ...T, cluster: `c${n++}` };
   m.unwatch.mockResolvedValue(null);
+  // Pod 상세가 셸·port-forward 버튼의 권한을 읽는다
+  m.rules.mockResolvedValue({ namespace: "prod", resourceRules: [], nonResourceRules: [], incomplete: false });
   m.watch.mockImplementation(async (_t, kind, _ns, _p, onMessage) => {
     emits.set(kind.plural, onMessage);
     return 1;
@@ -43,6 +47,31 @@ function setup(props: Partial<Parameters<typeof WorkloadsView>[0]> = {}) {
   return { rerender: (p: Partial<Parameters<typeof WorkloadsView>[0]>) => r.rerender(ui(p)) };
 }
 const send = (plural: string, msg: K8sWatchMessage) => act(() => emits.get(plural)!(msg));
+
+test("rollout progress follows the watched deployment and disappears once ready", async () => {
+  const initial = { ...row("web"), values: { ready: "3/3", upToDate: "3" } };
+  m.get.mockResolvedValue(view("web", { kind: DEPLOYMENTS, row: initial }));
+  m.rules.mockResolvedValue({ namespace: "prod", resourceRules: [], nonResourceRules: [], incomplete: true });
+  const onChange = vi.fn();
+  const { rerender } = setup({ fixedKind: DEPLOYMENTS, onChange });
+  await vi.waitFor(() => expect(m.watch).toHaveBeenCalled());
+  send("deployments", { type: "reset", rows: [initial] });
+  fireEvent.click(screen.getByText("web"));
+  fireEvent.click(await screen.findByRole("button", { name: "롤아웃 재시작" }));
+  const change = onChange.mock.calls[0][0];
+  rerender({ appliedChange: change });
+  expect(await screen.findByText("롤아웃 상태를 기다리는 중이에요")).toBeInTheDocument();
+  send("deployments", {
+    type: "reset",
+    rows: [{ ...initial, resourceVersion: "8", values: { ready: "2/3", upToDate: "2" } }],
+  });
+  expect(await screen.findByText("새 Pod 2/3 준비")).toBeInTheDocument();
+  send("deployments", {
+    type: "reset",
+    rows: [{ ...initial, resourceVersion: "9", values: { ready: "3/3", upToDate: "3" } }],
+  });
+  await vi.waitFor(() => expect(screen.queryByText("새 Pod 3/3 준비")).not.toBeInTheDocument());
+});
 
 test("starts on pods, opens a row, follows an owner, and goes back", async () => {
   m.get.mockImplementation(async (_t, kind, _ns, name) =>

@@ -1,5 +1,6 @@
 import type { K8sIdentity } from "./types";
 import {
+  YAML_CREATE,
   ALL_NAMESPACES,
   BAR_LABEL,
   IDENTITY_FALLBACK,
@@ -37,9 +38,11 @@ interface Props {
   namespace: string;
   onNamespace: (ns: string) => void;
   onReconnect: () => void;
+  /** 'YAML로 만들기'를 연다. 주지 않으면 버튼을 그리지 않는다 */
+  onCreateYaml?: () => void;
 }
 
-export function TopBar({ context, identity, connection, execProfile, profile, namespaces, namespace, onNamespace, onReconnect }: Props) {
+export function TopBar({ context, identity, connection, execProfile, profile, namespaces, namespace, onNamespace, onReconnect, onCreateYaml }: Props) {
   const shown = identity?.groups.slice(0, MAX_GROUPS) ?? [];
   const more = (identity?.groups.length ?? 0) - shown.length;
   const options = namespace !== ALL && !namespaces.includes(namespace) ? [namespace, ...namespaces] : namespaces;
@@ -84,7 +87,12 @@ export function TopBar({ context, identity, connection, execProfile, profile, na
               ))}
             </select>
           </label>
-          <button className="btn small" onClick={onReconnect}>
+          {onCreateYaml && (
+            <button className="btn small tone-primary" disabled={connection !== "connected"} onClick={onCreateYaml}>
+              {YAML_CREATE}
+            </button>
+          )}
+          <button className="btn small tone-secondary" onClick={onReconnect}>
             {RECONNECT}
           </button>
         </span>

@@ -1,21 +1,29 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { errorMessage } from "../api/errors";
 import { ErrorState } from "../components/ErrorState";
+import { ChangeActions } from "./ChangeActions";
 import { can } from "./can";
 import { Problems, valueKeys } from "./columns";
 import { age } from "./format";
-import { NODES, isPod, isSecret, isServiceAccount, resolveLink } from "./kinds";
+import { NODES, hasWorkloadLogs, isPod, isSecret, isService, isServiceAccount, resolveLink } from "./kinds";
+import { ObjectForwards } from "./ForwardActions";
+import { ForwardPanel } from "./ForwardPanel";
 import { DETAIL_PCT } from "./lanes";
-import { PodLogs } from "./PodLogs";
+import { PodLogs, WorkloadLogs } from "./PodLogs";
 import { useK8sObject, useK8sRules } from "./queries";
 import { SecretKeys } from "./SecretKeys";
-import { YamlView } from "./YamlView";
+import { NodeShellPane } from "./NodeShellPane";
+import { ShellTab } from "./ShellTab";
+import { YamlEdit } from "./YamlEdit";
+import { JsonView, YamlView } from "./YamlView";
 import {
   BACK, CHILDREN_TRUNCATED, CLOSE, COL_NAME, COLUMN_LABELS, CREATED_AT, DETAIL_LABEL, H_IMAGE, H_KIND, H_LAST_TERMINATION, H_MESSAGE,
   H_REASON, H_RESTARTS, H_STATE, INIT_MARK, LOADING, NO_RECENT_EVENTS, OPEN_IN_IAM, SEC_ANNOTATIONS, SEC_CHILDREN, SEC_CONDITIONS,
-  SEC_CONTAINERS, SEC_EVENTS, SEC_LABELS, SEC_OWNERS, TAB_LOGS, TAB_SUMMARY, TAB_YAML, YAML_SECRET_NOTE, H_TIME, H_COUNT, openNode,
+  SEC_CONTAINERS, SEC_EVENTS, SEC_LABELS, SEC_OWNERS, TAB_LOGS, TAB_SHELL, TAB_SUMMARY, TAB_YAML, YAML_SECRET_NOTE, H_TIME, H_COUNT, openNode,
+  ANNOTATION_FOLD_LABEL, annotationExpand,
+  CHANGE_DENIED, YAML_EDIT,
 } from "./text";
-import type { K8sContainer, K8sKind, K8sLink, K8sObjectView, K8sTarget, ObjectRef } from "./types";
+import type { K8sChange, K8sContainer, K8sKind, K8sLink, K8sObjectView, K8sTarget, ObjectRef } from "./types";
 
 interface Props {
   target: K8sTarget;
@@ -31,6 +39,12 @@ interface Props {
   onClose: () => void;
   onOpenIam?: (arn: string) => void;
   now?: number;
+  onChange?: (change: K8sChange) => void;
+  rolloutProgress?: string;
+  /** 방금 적용한 변경. 노드 셸이면 노드 상세가 터미널을 연다 */
+  appliedChange?: K8sChange | null;
+  /** 고른 네임스페이스(모든 네임스페이스면 없음). 노드 셸 Pod는 여기에 만든다 */
+  shellNamespace?: string;
   /** 3열 목록 너비 중 덮는 비율(%). 없으면 DETAIL_PCT */
   widthPct?: number;
 }
@@ -76,7 +90,16 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sO
           .map((k) => (
             <div key={k} className="k8s-kv">
               <dt>{COLUMN_LABELS[k] ?? k}</dt>
-              <dd>{row.values[k]}</dd>
+              <dd>
+                {k === "node" && node ? (
+                  // 노드는 소유자 링크처럼 이름을 눌러 연다
+                  <button className="link mono" aria-label={openNode(node)} title={openNode(node)} onClick={() => onOpen({ kind: NODES, namespace: null, name: node })}>
+                    {node}
+                  </button>
+                ) : (
+                  row.values[k]
+                )}
+              </dd>
             </div>
           ))}
         <div className="k8s-kv">
@@ -84,18 +107,13 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sO
           <dd title={row.createdAt ?? ""}>{age(row.createdAt, now)}</dd>
         </div>
       </dl>
-      <div className="k8s-actions">
-        {node && (
-          <button className="btn" onClick={() => onOpen({ kind: NODES, namespace: null, name: node })}>
-            {openNode(node)}
-          </button>
-        )}
-        {role && onOpenIam && (
-          <button className="btn" onClick={() => onOpenIam(role)}>
+      {role && onOpenIam && (
+        <div className="k8s-actions">
+          <button className="btn tone-nav" onClick={() => onOpenIam(role)}>
             {OPEN_IN_IAM}
           </button>
-        )}
-      </div>
+        </div>
+      )}
       {view.owners.length > 0 && <Links title={SEC_OWNERS} links={view.owners} kinds={kinds} onOpen={onOpen} />}
       {(view.children.length > 0 || view.childrenError) && (
         <>
@@ -171,24 +189,82 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sO
       {Object.keys(view.annotations).length > 0 && (
         <section className="k8s-sect">
           <h4>{SEC_ANNOTATIONS}</h4>
-          <dl className="kv">
+          <ul className="k8s-annotations">
             {Object.entries(view.annotations).map(([k, v]) => (
-              <div key={k} className="k8s-kv"><dt className="mono">{k}</dt><dd className="mono k8s-wrap">{v}</dd></div>
+              <Annotation key={k} name={k} value={v} />
             ))}
-          </dl>
+          </ul>
         </section>
       )}
     </div>
   );
 }
 
+/** 이보다 긴 어노테이션 값(또는 여러 줄·last-applied)은 접어 둔다 */
+const ANNOTATION_FOLD = 160;
+
+/** 어노테이션 한 줄: 키 아래에 값. 긴 값은 앞부분만 보이고, 펼치면 JSON은 들여쓰고 색을 입혀 보인다 */
+function Annotation({ name, value }: { name: string; value: string }) {
+  const long = value.length > ANNOTATION_FOLD || value.includes("\n") || name === LAST_APPLIED;
+  const [open, setOpen] = useState(false);
+  const json = open ? prettyJson(value) : null;
+  return (
+    <li>
+      <div className="mono dim k8s-wrap">{name}</div>
+      {open && json !== null ? (
+        <div className="k8s-annotation-open">
+          <JsonView text={json} wrap />
+        </div>
+      ) : (
+        <div className={`mono k8s-wrap${open ? " k8s-annotation-open" : ""}`}>
+          {open || !long ? value : `${value.slice(0, ANNOTATION_FOLD).replace(/\s+/g, " ")}…`}
+        </div>
+      )}
+      {long && (
+        <button className="link" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {open ? ANNOTATION_FOLD_LABEL : annotationExpand(value.length)}
+        </button>
+      )}
+    </li>
+  );
+}
+
+/** kubectl apply가 남기는, 객체 전체를 담은 어노테이션 */
+const LAST_APPLIED = "kubectl.kubernetes.io/last-applied-configuration";
+
+/** JSON 객체·배열이면 들여쓴 글, 아니면 null */
+function prettyJson(value: string): string | null {
+  const t = value.trim();
+  if (!t.startsWith("{") && !t.startsWith("[")) return null;
+  try {
+    return JSON.stringify(JSON.parse(t), null, 2);
+  } catch {
+    return null;
+  }
+}
+
 /** 객체 하나의 상세(요약·YAML). 소유자·자식·노드 링크는 onOpen으로 상세 스택에 쌓는다. */
-export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose, onOpenIam, now, widthPct = DETAIL_PCT }: Props) {
-  const [tab, setTab] = useState<"summary" | "yaml" | "logs">("summary");
+export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose,
+  onOpenIam, now, widthPct = DETAIL_PCT, onChange, rolloutProgress, appliedChange, shellNamespace }: Props) {
+  const [tab, setTab] = useState<"summary" | "yaml" | "logs" | "shell">("summary");
+  // 노드 셸: 변경 틀로 디버그 Pod를 만들고 나면 그 Pod에 들어가는 터미널을 연다
+  const [nodeShell, setNodeShell] = useState<{ namespace: string; pod: string } | null>(null);
+  const seenChange = useRef(appliedChange);
+  useEffect(() => {
+    if (appliedChange === seenChange.current) return;
+    seenChange.current = appliedChange;
+    if (appliedChange?.type === "nodeShell" && appliedChange.node === objectRef.name && objectRef.kind.kind === "Node" && appliedChange.namespace) {
+      setNodeShell({ namespace: appliedChange.namespace, pod: appliedChange.name });
+      setTab("shell");
+    }
+  }, [appliedChange, objectRef.kind.kind, objectRef.name]);
   const pod = isPod(objectRef.kind) && objectRef.namespace !== null;
+  const service = isService(objectRef.kind) && objectRef.namespace !== null;
   const q = useK8sObject(target, context, objectRef, resourceVersion, ssoProfile, live);
   const secret = isSecret(objectRef.kind);
-  const rules = useK8sRules(target, context, objectRef.namespace, ssoProfile, live && secret && objectRef.namespace !== null);
+  // 변경 버튼(셸·port-forward 포함)은 onChange를 받은 상세에 늘 있다. Secret 읽기와 같은 규칙 목록으로 권한을 확인한다
+  const changes = onChange !== undefined;
+  const rules = useK8sRules(target, context, objectRef.namespace ?? shellNamespace ?? "default", ssoProfile, live && (changes || (secret && objectRef.namespace !== null)));
   const canRead = rules.data ? can(rules.data, { verb: "get", group: "", resource: "secrets", name: objectRef.name }) : "unknown";
   const at = now ?? Date.now();
   // 로그 탭은 Pod가 바뀔 때마다(resourceVersion) 상세를 다시 읽는 동안에도 흐름·옵션·찾기를 잃지 않게, 마지막으로 읽은 컨테이너로 계속 띄워 둔다
@@ -197,6 +273,30 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
     if (pod && q.data) setPodContainers(q.data.containers.filter((c) => c.state !== "template"));
   }, [pod, q.data]);
   const logContainers = pod && q.data ? q.data.containers.filter((c) => c.state !== "template") : podContainers;
+  // 워크로드 로그 탭의 컨테이너 선택은 Pod 템플릿의 컨테이너. 다시 읽는 동안에도 선택이 사라지지 않게 마지막으로 읽은 것을 두되, 다른 객체의 것은 쓰지 않는다
+  const workload = hasWorkloadLogs(objectRef.kind) && objectRef.namespace !== null;
+  const objectKey = `${objectRef.kind.group}/${objectRef.kind.kind}/${objectRef.namespace}/${objectRef.name}`;
+  const [templates, setTemplates] = useState<{ key: string; containers: K8sContainer[] } | null>(null);
+  useEffect(() => {
+    if (workload && q.data) setTemplates({ key: objectKey, containers: q.data.containers.filter((c) => c.state === "template") });
+  }, [workload, objectKey, q.data]);
+  const templateContainers = templates?.key === objectKey ? templates.containers : [];
+  const shellTab = tab === "shell" && ((pod && changes) || nodeShell !== null);
+  const [editing, setEditing] = useState(false);
+  // YAML 편집 중의 미리보기·편집 취소 버튼이 들어갈 도구 줄 자리
+  const [editSlot, setEditSlot] = useState<HTMLSpanElement | null>(null);
+  useEffect(() => setEditing(false), [objectRef.kind, objectRef.namespace, objectRef.name]);
+  // 도구 줄의 [편집]은 YAML 탭으로 옮기며 편집을 연다. 다른 탭으로 가면 편집을 닫는다
+  useEffect(() => {
+    if (tab !== "yaml") setEditing(false);
+  }, [tab]);
+  // 적용이 끝나면 편집을 닫는다(편집하던 글은 더 이상 현재 객체가 아니다)
+  useEffect(() => {
+    if (appliedChange?.type === "apply") setEditing(false);
+  }, [appliedChange]);
+  // 불완전한 규칙은 서버 판단에 맡기고 확실히 거부된 것만 끈다. 새 객체를 만드는 apply가 아니라 있는 객체를 고치므로 patch 권한을 본다.
+  const patchRule = rules.data && can(rules.data, { verb: "patch", group: objectRef.kind.group, resource: objectRef.kind.plural, name: objectRef.name });
+  const editDenied = patchRule === "no" ? CHANGE_DENIED("patch", objectRef.kind.plural) : undefined;
   return (
     <aside className="k8s-detail" aria-label={DETAIL_LABEL} style={{ width: `${widthPct}%` }}>
       <div className="k8s-detail-head">
@@ -211,24 +311,105 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
           ✕
         </button>
       </div>
+      {rolloutProgress && <p role="status">{rolloutProgress}</p>}
+      {onChange && q.data && (
+        <div className="k8s-actions k8s-toolbar">
+          {editing ? (
+            <span className="k8s-toolbar-slot" ref={setEditSlot} />
+          ) : (
+            <button
+              className="btn small tone-primary"
+              disabled={!!editDenied}
+              title={editDenied}
+              aria-description={editDenied}
+              onClick={() => {
+                setTab("yaml");
+                setEditing(true);
+              }}
+            >
+              {YAML_EDIT}
+            </button>
+          )}
+          <ChangeActions target={target} ssoProfile={ssoProfile} objectRef={objectRef} view={q.data} rules={rules.data} shellNamespace={shellNamespace ?? "default"} onStart={onChange} />
+        </div>
+      )}
+      {(pod || service) && objectRef.namespace && (
+        <ObjectForwards target={target} ssoProfile={ssoProfile} namespace={objectRef.namespace} kind={pod ? "pod" : "service"} name={objectRef.name} live={live}>
+          {changes && q.data && (
+            <ForwardPanel
+              key={`${objectRef.namespace}/${objectRef.name}`}
+              target={target}
+              ssoProfile={ssoProfile}
+              namespace={objectRef.namespace}
+              kind={pod ? "pod" : "service"}
+              name={objectRef.name}
+              ports={q.data.ports ?? []}
+              rules={rules.data}
+            />
+          )}
+        </ObjectForwards>
+      )}
       <div role="tablist" className="k8s-tabs">
         <button role="tab" aria-selected={tab === "summary"} onClick={() => setTab("summary")}>{TAB_SUMMARY}</button>
         <button role="tab" aria-selected={tab === "yaml"} onClick={() => setTab("yaml")}>{TAB_YAML}</button>
-        {pod && <button role="tab" aria-selected={tab === "logs"} onClick={() => setTab("logs")}>{TAB_LOGS}</button>}
+        {(pod || workload) && <button role="tab" aria-selected={tab === "logs"} onClick={() => setTab("logs")}>{TAB_LOGS}</button>}
+        {((pod && changes) || nodeShell) && <button role="tab" aria-selected={tab === "shell"} onClick={() => setTab("shell")}>{TAB_SHELL}</button>}
       </div>
-      <div className={`k8s-detail-body${tab === "logs" ? " flush" : ""}`}>
-        {tab === "logs" && pod && objectRef.namespace && logContainers ? (
-          <PodLogs target={target} ssoProfile={ssoProfile} live={live} namespace={objectRef.namespace} pod={objectRef.name} containers={logContainers} />
+      <div className={`k8s-detail-body${tab === "logs" || shellTab ? " flush" : ""}`}>
+        {/* 셸 세션은 다른 탭을 보는 동안에도 유지한다: 숨기기만 한다 */}
+        {pod && changes && objectRef.namespace && logContainers && (
+          <div className="k8s-shell-host" hidden={!shellTab}>
+            <ShellTab
+              key={`${objectRef.namespace}/${objectRef.name}`}
+              target={target}
+              ssoProfile={ssoProfile}
+              namespace={objectRef.namespace}
+              pod={objectRef.name}
+              containers={logContainers.filter((c) => !c.init)}
+              rules={rules.data}
+              visible={shellTab}
+            />
+          </div>
+        )}
+        {nodeShell && (
+          <div className="k8s-shell-host" hidden={!shellTab}>
+            <NodeShellPane
+              key={nodeShell.pod}
+              target={target}
+              ssoProfile={ssoProfile}
+              node={objectRef.name}
+              namespace={nodeShell.namespace}
+              pod={nodeShell.pod}
+              visible={shellTab}
+              onClose={() => {
+                setNodeShell(null);
+                setTab("summary");
+              }}
+            />
+          </div>
+        )}
+        {shellTab ? null : tab === "logs" && pod && objectRef.namespace && logContainers ? (
+          <PodLogs key={objectKey} target={target} ssoProfile={ssoProfile} live={live} namespace={objectRef.namespace} pod={objectRef.name} containers={logContainers} />
+        ) : tab === "logs" && workload && objectRef.namespace ? (
+          <WorkloadLogs key={objectKey} target={target} ssoProfile={ssoProfile} live={live} kind={objectRef.kind} namespace={objectRef.namespace} name={objectRef.name} containers={templateContainers} />
         ) : q.isError ? (
           <ErrorState error={q.error} profile={ssoProfile} compact onRetry={() => void q.refetch()} onLoggedIn={() => void q.refetch()} />
         ) : !q.data ? (
           <div className="empty">{LOADING}</div>
         ) : tab === "summary" ? (
-          <Summary view={q.data} now={at} kinds={kinds} onOpen={onOpen} onOpenIam={onOpenIam}>
+          <Summary
+            view={q.data}
+            now={at}
+            kinds={kinds}
+            onOpen={onOpen}
+            onOpenIam={onOpenIam}
+          >
             {q.data.secretKeys && objectRef.namespace && (
               <SecretKeys target={target} ssoProfile={ssoProfile} namespace={objectRef.namespace} name={objectRef.name} keys={q.data.secretKeys} canRead={canRead} />
             )}
           </Summary>
+        ) : tab === "yaml" && editing && onChange ? (
+          <YamlEdit target={target} ssoProfile={ssoProfile} objectRef={objectRef} view={q.data} canRead={canRead} onPreview={onChange} onCancel={() => setEditing(false)} actions={editSlot} />
         ) : (
           <>
             {secret && <p className="dim">{YAML_SECRET_NOTE}</p>}

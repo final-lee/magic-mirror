@@ -4,7 +4,7 @@ import { CHART_EMPTY, CHART_LABEL, OTHER_SERIES } from "./text";
 import type { CostOverview } from "./types";
 
 /** 상위 서비스 5개와 "기타"의 색. 마지막이 기타다 */
-export const SERIES_COLORS = ["#0a84ff", "#30d158", "#ff9f0a", "#bf5af2", "#ff375f", "#8e8e93"];
+export const SERIES_COLORS = ["var(--chart-blue)", "var(--chart-green)", "var(--chart-orange)", "var(--chart-purple)", "var(--chart-red)", "var(--chart-gray)"];
 
 const SLOT = 20;
 const GAP = 3;

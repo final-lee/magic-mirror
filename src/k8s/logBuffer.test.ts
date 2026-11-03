@@ -1,7 +1,8 @@
-import { EMPTY_BUFFER, appendLines } from "./logBuffer";
+import { EMPTY_BUFFER, appendLines, type LogEntry } from "./logBuffer";
 
-const n = (from: number, count: number) => Array.from({ length: count }, (_, i) => `l${from + i}`);
-const all = (b: { chunks: { lines: string[] }[] }) => b.chunks.flatMap((c) => c.lines);
+const entry = (text: string): LogEntry => ({ source: "web-1/app", ts: null, text });
+const n = (from: number, count: number) => Array.from({ length: count }, (_, i) => entry(`l${from + i}`));
+const all = (b: { chunks: { lines: LogEntry[] }[] }) => b.chunks.flatMap((c) => c.lines);
 
 test("fills the last chunk first and leaves full chunks untouched", () => {
   const a = appendLines(EMPTY_BUFFER, n(0, 3), 100, 4);
@@ -27,6 +28,6 @@ test("drops whole old chunks past the limit and always keeps at least the limit"
 });
 
 test("an empty batch returns the same buffer", () => {
-  const a = appendLines(EMPTY_BUFFER, ["x"]);
+  const a = appendLines(EMPTY_BUFFER, [entry("x")]);
   expect(appendLines(a, [])).toBe(a);
 });

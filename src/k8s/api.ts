@@ -1,7 +1,8 @@
 import { Channel } from "@tauri-apps/api/core";
 import { invoke } from "../api/invoke";
 import type {
-  K8sContextInfo, K8sKind, K8sKindRef, K8sLogMessage, K8sLogOptions, K8sObjectView, K8sOverview, K8sSecretValue, K8sRules, K8sSession, K8sTarget, K8sWatchMessage,
+  K8sApplyResult, K8sChange, K8sChangeLogEntry, K8sChangeObject, K8sContextInfo, K8sDrainMessage, K8sForward, K8sForwardRequest, K8sKind, K8sKindRef, K8sLogMessage, K8sLogOptions,
+  K8sObjectView, K8sOverview, K8sPreview, K8sRevision, K8sSecretValue, K8sRules, K8sSession, K8sShellMessage, K8sShellOpened, K8sTarget, K8sUndo, K8sWatchMessage,
 } from "./types";
 
 // 명령 이름과 인자 이름은 K1 계획의 Contract와 같아야 한다. target은 객체 하나로 넘긴다.
@@ -27,6 +28,41 @@ export const k8sApi = {
     onEvent.onmessage = onMessage;
     return invoke<number>("k8s_logs", { target, namespace, pod, options, onEvent, profile: ssoProfile });
   },
+  /** 워크로드(Deployment·StatefulSet·DaemonSet·ReplicaSet·Job·Service)의 셀렉터에 맞는 모든 Pod 로그를 합쳐 받는다. 새 Pod에도 붙는다. 반환값은 unwatch에 넘기는 번호 */
+  workloadLogs: (target: K8sTarget, kind: K8sKindRef, namespace: string, name: string, options: K8sLogOptions, ssoProfile: string, onMessage: (m: K8sLogMessage) => void) => {
+    const onEvent = new Channel<K8sLogMessage>();
+    onEvent.onmessage = onMessage;
+    return invoke<number>("k8s_workload_logs", { target, kind, namespace, name, options, onEvent, profile: ssoProfile });
+  },
+  /** 보이는 로그를 ~/Downloads에 파일로 저장한다(fileName은 완성된 파일 이름). 반환값은 저장된 파일의 절대 경로 */
+  logsSave: (fileName: string, text: string) => invoke<string>("k8s_logs_save", { fileName, text }),
+  /** Pod 셸(exec). 위험한 네임스페이스는 confirmText가 Pod 이름과 같아야 한다. 출력은 채널로 오고, 반환값의 id로 입력·크기·닫기를 한다 */
+  shellOpen: (target: K8sTarget, namespace: string, pod: string, container: string, confirmText: string | null, ssoProfile: string, onMessage: (m: K8sShellMessage) => void) => {
+    const onEvent = new Channel<K8sShellMessage>();
+    onEvent.onmessage = onMessage;
+    return invoke<K8sShellOpened>("k8s_shell_open", { target, namespace, pod, container, confirmText, onEvent, profile: ssoProfile });
+  },
+  /** 컨테이너의 주 프로세스에 attach. 셸과 같은 채널·명령으로 다룬다 */
+  attachOpen: (target: K8sTarget, namespace: string, pod: string, container: string, confirmText: string | null, ssoProfile: string, onMessage: (m: K8sShellMessage) => void) => {
+    const onEvent = new Channel<K8sShellMessage>();
+    onEvent.onmessage = onMessage;
+    return invoke<K8sShellOpened>("k8s_attach_open", { target, namespace, pod, container, confirmText, onEvent, profile: ssoProfile });
+  },
+  /** 셸·attach를 열 때 입력해야 하는 이름. 위험하지 않으면 null(규칙은 백엔드 change::dangerous 하나) */
+  shellConfirmName: (namespace: string, pod: string) => invoke<string | null>("k8s_shell_confirm_name", { namespace, pod }),
+  /** 변경 틀로 만든 노드 셸 Pod가 준비되면 노드로 들어가는 셸을 연다. 닫으면 Pod를 지운다 */
+  nodeShellOpen: (target: K8sTarget, namespace: string, pod: string, ssoProfile: string, onMessage: (m: K8sShellMessage) => void) => {
+    const onEvent = new Channel<K8sShellMessage>();
+    onEvent.onmessage = onMessage;
+    return invoke<K8sShellOpened>("k8s_node_shell_open", { target, namespace, pod, onEvent, profile: ssoProfile });
+  },
+  shellInput: (shellId: number, data: string) => invoke<null>("k8s_shell_input", { shellId, data }),
+  shellResize: (shellId: number, cols: number, rows: number) => invoke<null>("k8s_shell_resize", { shellId, cols, rows }),
+  shellClose: (shellId: number) => invoke<null>("k8s_shell_close", { shellId }),
+  forwardOpen: (target: K8sTarget, request: K8sForwardRequest, ssoProfile: string) => invoke<K8sForward>("k8s_forward_open", { target, request, profile: ssoProfile }),
+  /** 모든 탭의 열린 port-forward */
+  forwardList: () => invoke<K8sForward[]>("k8s_forward_list", {}),
+  forwardClose: (id: number) => invoke<null>("k8s_forward_close", { id }),
   kinds: (target: K8sTarget, ssoProfile: string) => invoke<K8sKind[]>("k8s_kinds", { target, profile: ssoProfile }),
   get: (target: K8sTarget, kind: K8sKindRef, namespace: string | null, name: string, ssoProfile: string) =>
     invoke<K8sObjectView>("k8s_get", { target, kind, namespace, name, profile: ssoProfile }),
@@ -35,4 +71,18 @@ export const k8sApi = {
     invoke<K8sSecretValue>("k8s_secret_value", { target, namespace, name, key, profile: ssoProfile }),
   /** 개요가 던지는 오류는 앱 프로필의 AWS 설정에서만 나온다(쿠버네티스 쪽 실패는 gaps에 담긴다) */
   overview: (target: K8sTarget) => invoke<K8sOverview>("k8s_overview", { target, profile: target.profile }),
+  revisions: (target: K8sTarget, object: K8sChangeObject, ssoProfile: string) =>
+    invoke<K8sRevision[]>("k8s_revisions", { target, object, profile: ssoProfile }),
+  preview: (target: K8sTarget, change: K8sChange, ssoProfile: string) =>
+    invoke<K8sPreview>("k8s_preview", { target, change, profile: ssoProfile }),
+  apply: (target: K8sTarget, change: K8sChange, confirmText: string | null, undoOf: string | null, ssoProfile: string) =>
+    invoke<K8sApplyResult>("k8s_apply", { target, change, confirmText, undoOf, profile: ssoProfile }),
+  /** 미리보기한 drain을 적용한다. 진행은 채널로 오고 반환값은 `unwatch`(중단)에 넘기는 번호 */
+  drain: (target: K8sTarget, node: string, confirmText: string | null, ssoProfile: string, onMessage: (m: K8sDrainMessage) => void) => {
+    const onEvent = new Channel<K8sDrainMessage>();
+    onEvent.onmessage = onMessage;
+    return invoke<number>("k8s_drain", { target, node, confirmText, onEvent, profile: ssoProfile });
+  },
+  changeLog: () => invoke<K8sChangeLogEntry[]>("k8s_change_log"),
+  undo: (logId: string) => invoke<K8sUndo>("k8s_undo", { logId }),
 };

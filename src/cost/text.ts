@@ -2,6 +2,8 @@
 import type { CostMetric, CostPeriod } from "./types";
 
 export const COST_TITLE = "💰 비용";
+/** 사이드바 줄의 글(앞에 Cost Explorer 공식 아이콘이 붙는다) */
+export const COST_NAV = "비용";
 
 export const PERIOD_LABEL: Record<CostPeriod, string> = {
   thisMonth: "이번 달",

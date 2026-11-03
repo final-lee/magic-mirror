@@ -275,10 +275,10 @@ function SyncSheet({ app, onCancel, onConfirm }: SheetProps) {
           <span className="dim">{ARGO_DRY_RUN_HINT}</span>
         </label>
         <div className="foot">
-          <button className="btn plain" onClick={onCancel}>
+          <button className="btn plain tone-ghost" onClick={onCancel}>
             {ARGO_CANCEL}
           </button>
-          <button className="btn primary" onClick={() => onConfirm({ prune, dryRun })}>
+          <button className="btn plain tone-primary" onClick={() => onConfirm({ prune, dryRun })}>
             {ARGO_SYNC_CONFIRM}
           </button>
         </div>
@@ -368,13 +368,13 @@ export function ArgoDetail({ url, namespace, name, resourceVersion, live, onClos
           {namespace}/{name}
         </span>
         <span className="argo-acts k8s-push">
-          <button className="btn small" disabled={pending} onClick={() => refresh(false)}>
+          <button className="btn small tone-secondary" disabled={pending} onClick={() => refresh(false)}>
             {ARGO_REFRESH}
           </button>
-          <button className="btn small" disabled={pending} onClick={() => refresh(true)}>
+          <button className="btn small tone-warn" disabled={pending} onClick={() => refresh(true)}>
             {ARGO_HARD_REFRESH}
           </button>
-          <button className="btn small" disabled={pending || !app || syncBlocked} title={syncBlocked ? ARGO_SYNC_RUNNING : undefined} onClick={() => setSheet(true)}>
+          <button className="btn small tone-primary" disabled={pending || !app || syncBlocked} title={syncBlocked ? ARGO_SYNC_RUNNING : undefined} onClick={() => setSheet(true)}>
             {ARGO_SYNC}
           </button>
         </span>
