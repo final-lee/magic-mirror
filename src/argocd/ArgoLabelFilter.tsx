@@ -1,4 +1,5 @@
 import { useId, useMemo, useState } from "react";
+import { fuzzyFilter } from "../lib/fuzzy";
 import { type LabelOption, type LabelPick, parsePick, pickText } from "./argoFilter";
 import { ARGO_LABEL_FILTER, ARGO_LABEL_PLACEHOLDER, ARGO_LABEL_SUGGESTIONS, argoLabelRemove } from "./text";
 
@@ -26,13 +27,11 @@ export function ArgoLabelFilter({ options, picks, onAdd, onRemove }: Props) {
   const listId = useId();
 
   const q = text.trim().toLowerCase();
-  const suggestions = useMemo(
-    () =>
-      options
-        .filter((o) => !picks.some((p) => same(p, o.pick)) && (q === "" ? o.pick.value === null : o.text.toLowerCase().includes(q)))
-        .slice(0, MAX_SUGGESTIONS),
-    [options, picks, q],
-  );
+  const suggestions = useMemo(() => {
+    const open = options.filter((o) => !picks.some((p) => same(p, o.pick)));
+    // 입력이 없으면 키 후보만, 있으면 퍼지로 맞는 후보를 잘 맞는 순서로
+    return (q === "" ? open.filter((o) => o.pick.value === null) : fuzzyFilter(open, q, (o) => [o.text])).slice(0, MAX_SUGGESTIONS);
+  }, [options, picks, q]);
 
   const add = (pick: LabelPick | null) => {
     if (pick && !picks.some((p) => same(p, pick))) onAdd(pick);

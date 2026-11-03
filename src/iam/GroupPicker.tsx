@@ -1,12 +1,10 @@
 import { useMemo, useState } from "react";
+import { fuzzyFilter } from "../lib/fuzzy";
 import { BadgeList } from "./Badges";
 import { PickerSheet, type PickerOption } from "./PickerSheet";
 import type { PrincipalSummary } from "./types";
 
-function matches(p: PrincipalSummary, filter: string): boolean {
-  const f = filter.trim().toLowerCase();
-  return !f || p.name.toLowerCase().includes(f) || p.path.toLowerCase().includes(f);
-}
+const matchFields = (p: PrincipalSummary) => [p.name, p.path];
 
 const byName = (a: PrincipalSummary, b: PrincipalSummary) => a.name.localeCompare(b.name, "ko", { sensitivity: "base" });
 
@@ -27,11 +25,10 @@ interface PrincipalPickerProps {
 
 function PrincipalPicker({ title, intro, searchLabel, items, taken, takenReason, detail, empty, onPick, onClose }: PrincipalPickerProps) {
   const [query, setQuery] = useState("");
+  // 이름순은 검색어가 없을 때의 기본 순서: 검색 중에는 잘 맞는 순서가 앞서고 점수가 같으면 이름순이 남는다.
   const sorted = useMemo(() => [...items].sort(byName), [items]);
   const takenSet = new Set(taken);
-  const options: PickerOption[] = sorted
-    .filter((p) => matches(p, query))
-    .map((p) => ({
+  const options: PickerOption[] = fuzzyFilter(sorted, query, matchFields).map((p) => ({
       id: p.name,
       name: p.name,
       meta: <BadgeList badges={p.badges} />,

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { fuzzyFilter } from "../lib/fuzzy";
 import { LEVELS, LEVEL_LABEL } from "./labels";
 import type { MatrixCell } from "./route";
 import type { AccessLevel, LevelCell, ServicePermissions } from "./types";
@@ -63,8 +64,7 @@ function Cell({ svc, level, selected, onSelect }: { svc: ServicePermissions; lev
 /** 서비스 × 접근 수준 표. 칸의 숫자는 허용된 작업 수 / 그 수준의 전체 작업 수이고, 칸을 누르면 실제 작업 목록을 연다. */
 export function PermissionMatrix({ services, adminLike, selected, onSelect }: Props) {
   const [filter, setFilter] = useState("");
-  const f = filter.trim().toLowerCase();
-  const rows = f ? services.filter((s) => s.name.toLowerCase().includes(f) || s.prefix.toLowerCase().includes(f)) : services;
+  const rows = fuzzyFilter(services, filter, (s) => [s.name, s.prefix]);
 
   return (
     <div className="mx">

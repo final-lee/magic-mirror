@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { errorMessage } from "../api/errors";
+import { DEFAULT_RESOURCE_TTL_MINUTES } from "../api/queries";
 import type { Updater } from "../lib/useUpdater";
 import type { ServiceInfo } from "../api/types";
 import type { DiffTool } from "../explorer/types";
@@ -27,7 +29,20 @@ interface Props {
   onKubeconfigPathChange?: (path: string | null) => void;
   updater?: Updater;
   appVersion?: string | null;
+  /** 리소스 목록 캐시 TTL(분). 비어 있으면 기본값, 0이면 무제한 */
+  cacheTtlMinutes?: number | null;
+  onCacheTtlChange?: (minutes: number) => void;
+  /** 하드 리셋: 모든 리소스 목록 캐시(메모리·디스크)를 비우고 보이는 목록을 다시 읽는다 */
+  onClearCache?: () => Promise<void>;
 }
+
+const TTL_OPTIONS: { minutes: number; label: string }[] = [
+  { minutes: 5, label: "5분" },
+  { minutes: 15, label: "15분" },
+  { minutes: 60, label: "1시간" },
+  { minutes: 360, label: "6시간" },
+  { minutes: 0, label: "무제한" },
+];
 
 const TOOLS: { id: DiffTool; label: string }[] = [
   { id: "filemerge", label: "FileMerge" },
@@ -68,8 +83,22 @@ export function ServiceSettings({
   onKubeconfigPathChange,
   updater,
   appVersion,
+  cacheTtlMinutes,
+  onCacheTtlChange,
+  onClearCache,
 }: Props) {
   const [kubeconfigDraft, setKubeconfigDraft] = useState(kubeconfigPath ?? "");
+  const [clearState, setClearState] = useState<{ kind: "idle" | "busy" | "done" } | { kind: "error"; message: string }>({ kind: "idle" });
+  const clearCache = async () => {
+    if (!onClearCache) return;
+    setClearState({ kind: "busy" });
+    try {
+      await onClearCache();
+      setClearState({ kind: "done" });
+    } catch (e) {
+      setClearState({ kind: "error", message: errorMessage(e) });
+    }
+  };
   const toggle = (id: string, on: boolean) => onChange(on ? [...enabled, id] : enabled.filter((x) => x !== id));
   return (
     <div
@@ -145,6 +174,32 @@ export function ServiceSettings({
                 if (next !== (kubeconfigPath ?? null)) onKubeconfigPathChange(next);
               }}
             />
+          </>
+        )}
+        {onCacheTtlChange && (
+          <>
+            <h4>리소스 캐시</h4>
+            <p>한 번 읽은 목록은 앱이 켜져 있는 동안 남겨 두고 ⌘K로 찾아요. 이 시간이 지난 목록은 다시 열 때 뒤에서 다시 읽어요. 검색용 사본(이름·ID·열 값·태그)은 디스크에 7일 남아요.</p>
+            <label className="sel cache-ttl">
+              <small>다시 읽는 주기</small>
+              <select aria-label="리소스 캐시 TTL" value={cacheTtlMinutes ?? DEFAULT_RESOURCE_TTL_MINUTES} onChange={(e) => onCacheTtlChange(Number(e.target.value))}>
+                {TTL_OPTIONS.map((o) => (
+                  <option key={o.minutes} value={o.minutes}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {onClearCache && (
+              <div className="tools cache-reset">
+                <button className="btn small" disabled={clearState.kind === "busy"} onClick={() => void clearCache()} title="⌘⇧R">
+                  캐시 비우기
+                </button>
+                <span className={clearState.kind === "error" ? "err" : "dim"} role="status">
+                  {clearState.kind === "done" ? "비웠어요. 보이는 목록을 다시 읽어요" : clearState.kind === "error" ? clearState.message : "모든 프로필·리전의 목록과 디스크 사본을 지워요(⌘⇧R)"}
+                </span>
+              </div>
+            )}
           </>
         )}
         {updater && (

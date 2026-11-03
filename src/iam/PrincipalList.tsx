@@ -1,3 +1,4 @@
+import { fuzzyFilter } from "../lib/fuzzy";
 import { BadgeList } from "./Badges";
 import { formatAgo, formatDay } from "./format";
 import { ListTable, type ListColumn } from "./ListTable";
@@ -60,11 +61,9 @@ const TEXT: Record<PrincipalKind, { label: string; empty: string; noMatch: strin
   role: { label: "역할 목록", empty: "역할이 없어요", noMatch: "조건에 맞는 역할이 없어요" },
 };
 
-/** 이름이나 ARN에 필터 문자열이 들어 있는 항목(대소문자 무시) */
+/** 이름이나 ARN에 퍼지로 맞는 항목, 잘 맞는 순서(대소문자 무시). 검색어가 없으면 그대로 */
 export function filterPrincipals(items: PrincipalSummary[], filter: string): PrincipalSummary[] {
-  const f = filter.trim().toLowerCase();
-  if (!f) return items;
-  return items.filter((p) => p.name.toLowerCase().includes(f) || p.arn.toLowerCase().includes(f));
+  return fuzzyFilter(items, filter, (p) => [p.name, p.arn]);
 }
 
 interface Props {
@@ -84,6 +83,7 @@ export function PrincipalList({ kind, items, filter, selectedId, onSelect, onCle
     <ListTable
       label={text.label}
       rows={filterPrincipals(items, filter)}
+      ranked={filter.trim() !== ""}
       columns={COLUMNS[kind]}
       rowKey={(p) => p.arn}
       selectedId={selectedId}

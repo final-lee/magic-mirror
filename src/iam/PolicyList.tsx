@@ -1,3 +1,4 @@
+import { fuzzyFilter } from "../lib/fuzzy";
 import { BadgeList } from "./Badges";
 import { formatDay } from "./format";
 import { ListTable, type ListColumn } from "./ListTable";
@@ -19,10 +20,9 @@ const COLUMNS: ListColumn<PolicySummary>[] = [
   },
 ];
 
+/** 이름이나 ARN에 퍼지로 맞는 정책, 잘 맞는 순서. 검색어가 없으면 그대로 */
 export function filterPolicies(items: PolicySummary[], filter: string): PolicySummary[] {
-  const f = filter.trim().toLowerCase();
-  if (!f) return items;
-  return items.filter((p) => p.name.toLowerCase().includes(f) || p.arn.toLowerCase().includes(f));
+  return fuzzyFilter(items, filter, (p) => [p.name, p.arn]);
 }
 
 interface Props {
@@ -40,6 +40,7 @@ export function PolicyList({ items, filter, selectedId, onSelect, onClear, onOpe
     <ListTable
       label="정책 목록"
       rows={filterPolicies(items, filter)}
+      ranked={filter.trim() !== ""}
       columns={COLUMNS}
       rowKey={(p) => p.id}
       selectedId={selectedId}
