@@ -343,7 +343,7 @@ tbody tr.on td { background: var(--accent) !important; color: var(--on-accent); 
 .detail h3 { margin: 0 0 2px; font-size: 15px; word-break: break-all; }
 .detail .sub { color: var(--dim); font-size: 11px; margin-bottom: 12px; }
 .kv { display: grid; grid-template-columns: 110px 1fr; gap: 5px 8px; font-size: 12px; margin: 0 0 14px; }
-.kv dt { color: var(--dim); }
+.kv dt { color: var(--dim); overflow-wrap: anywhere; }
 .kv dd { margin: 0; word-break: break-all; }
 .sect { font-size: 11px; color: var(--dim); font-weight: 600; margin: 12px 0 6px; text-transform: uppercase; letter-spacing: .04em; }
 .tag { display: inline-block; background: var(--surface-2); border-radius: 4px; padding: 2px 7px; margin: 0 4px 4px 0; font-size: 11px; }
@@ -1108,6 +1108,11 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 
 .k8s-sect { margin: 12px 0; }
 .k8s-sect h4 { margin: 0 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }
+/* 어노테이션: 키 한 줄, 그 아래 값(긴 값은 접힘, 펼치면 들여쓴 JSON) */
+.k8s-annotations { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 12px; }
+.k8s-annotations li { display: grid; gap: 2px; }
+.k8s-annotations .link { justify-self: start; font-size: 11px; }
+.k8s-annotation-open { white-space: pre-wrap; max-height: 360px; overflow: auto; padding: 6px 8px; background: var(--surface-2); border-radius: 4px; }
 .k8s-yaml-edit { display: flex; flex-direction: column; gap: 8px; }
 .k8s-yaml-editor .cm-editor { border: 1px solid var(--line); }
 .k8s-secret-input { width: 100%; min-height: 48px; font-size: 12px; }

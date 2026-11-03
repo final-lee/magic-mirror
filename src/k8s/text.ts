@@ -158,6 +158,8 @@ export const SEC_CONDITIONS = "상태 조건";
 export const SEC_EVENTS = "이벤트";
 export const SEC_LABELS = "레이블";
 export const SEC_ANNOTATIONS = "어노테이션";
+export const annotationExpand = (chars: number) => `펼치기 (${chars.toLocaleString("ko-KR")}자)`;
+export const ANNOTATION_FOLD_LABEL = "접기";
 export const SEC_SECRET_KEYS = "Secret 키";
 export const BACK = "뒤로";
 export const CLOSE = "닫기";

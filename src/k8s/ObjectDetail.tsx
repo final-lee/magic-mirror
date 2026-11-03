@@ -20,6 +20,7 @@ import {
   BACK, CHILDREN_TRUNCATED, CLOSE, COL_NAME, COLUMN_LABELS, CREATED_AT, DETAIL_LABEL, H_IMAGE, H_KIND, H_LAST_TERMINATION, H_MESSAGE,
   H_REASON, H_RESTARTS, H_STATE, INIT_MARK, LOADING, NO_RECENT_EVENTS, OPEN_IN_IAM, SEC_ANNOTATIONS, SEC_CHILDREN, SEC_CONDITIONS,
   SEC_CONTAINERS, SEC_EVENTS, SEC_LABELS, SEC_OWNERS, TAB_LOGS, TAB_SHELL, TAB_SUMMARY, TAB_YAML, YAML_SECRET_NOTE, H_TIME, H_COUNT, openNode,
+  ANNOTATION_FOLD_LABEL, annotationExpand,
   CHANGE_DENIED, YAML_EDIT,
 } from "./text";
 import type { K8sChange, K8sContainer, K8sKind, K8sLink, K8sObjectView, K8sTarget, ObjectRef } from "./types";
@@ -188,15 +189,48 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sO
       {Object.keys(view.annotations).length > 0 && (
         <section className="k8s-sect">
           <h4>{SEC_ANNOTATIONS}</h4>
-          <dl className="kv">
+          <ul className="k8s-annotations">
             {Object.entries(view.annotations).map(([k, v]) => (
-              <div key={k} className="k8s-kv"><dt className="mono">{k}</dt><dd className="mono k8s-wrap">{v}</dd></div>
+              <Annotation key={k} name={k} value={v} />
             ))}
-          </dl>
+          </ul>
         </section>
       )}
     </div>
   );
+}
+
+/** 이보다 긴 어노테이션 값(또는 여러 줄·last-applied)은 접어 둔다 */
+const ANNOTATION_FOLD = 160;
+
+/** 어노테이션 한 줄: 키 아래에 값. 긴 값은 앞부분만 보이고 펼치면 JSON은 들여쓰기해 보인다 */
+function Annotation({ name, value }: { name: string; value: string }) {
+  const long = value.length > ANNOTATION_FOLD || value.includes("\n") || name === LAST_APPLIED;
+  const [open, setOpen] = useState(false);
+  const shown = open ? prettyJson(value) : long ? `${value.slice(0, ANNOTATION_FOLD).replace(/\s+/g, " ")}…` : value;
+  return (
+    <li>
+      <div className="mono dim k8s-wrap">{name}</div>
+      <div className={`mono k8s-wrap${open ? " k8s-annotation-open" : ""}`}>{shown}</div>
+      {long && (
+        <button className="link" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {open ? ANNOTATION_FOLD_LABEL : annotationExpand(value.length)}
+        </button>
+      )}
+    </li>
+  );
+}
+
+/** kubectl apply가 남기는, 객체 전체를 담은 어노테이션 */
+const LAST_APPLIED = "kubectl.kubernetes.io/last-applied-configuration";
+
+/** JSON이면 들여쓰기, 아니면 그대로 */
+function prettyJson(value: string): string {
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
 }
 
 /** 객체 하나의 상세(요약·YAML). 소유자·자식·노드 링크는 onOpen으로 상세 스택에 쌓는다. */
