@@ -64,6 +64,8 @@ pub struct K8sState {
     node_shells: Arc<node_shell::NodeShells>,
     forwards: Arc<Forwards>,
     plans: Mutex<PlanStore<StoredPlan>>,
+    /// 장바구니(권한 변경 일괄) 미리보기에서 본 계획들
+    batches: Mutex<PlanStore<StoredBatch>>,
     log_path: PathBuf,
 }
 
@@ -90,6 +92,14 @@ impl WatchEntry {
 struct StoredPlan {
     plan: Plan,
     at: String,
+    epoch: u64,
+    session: Arc<Session>,
+}
+
+/// 일괄 미리보기에서 사용자가 본 계획들(변경 순서대로)
+#[derive(Clone)]
+struct StoredBatch {
+    plans: Vec<Plan>,
     epoch: u64,
     session: Arc<Session>,
 }
@@ -608,7 +618,7 @@ fn check_recreate(k8s: &K8sState, target: &K8sTarget, change: &Change) -> Result
 
 
 #[tauri::command]
-pub async fn k8s_preview(k8s: State<'_, K8sState>, target: K8sTarget, change: Change) -> Result<Preview, AppError> {
+pub async fn k8s_preview(app: State<'_, AppState>, k8s: State<'_, K8sState>, target: K8sTarget, change: Change) -> Result<Preview, AppError> {
     check_recreate(&k8s, &target, &change)?;
     let session = k8s.session(&target)?;
     let epoch = k8s.epoch(&target);
@@ -616,6 +626,8 @@ pub async fn k8s_preview(k8s: State<'_, K8sState>, target: K8sTarget, change: Ch
     let at = iso(now);
     let plan = if helm::handles(&change) {
         helm::plan::dry_plan(&session.helm(), &change).await?
+    } else if crate::k8s::rbac::handles(&change) {
+        crate::k8s::rbac::commit::dry_plan(&rbac::context(&app, &session, &target).await?, &change).await?
     } else {
         commit::dry_plan(session.client.clone(), session.endpoint, &change, &at).await?
     };
@@ -634,7 +646,14 @@ pub struct K8sApplyResult {
 }
 
 #[tauri::command]
-pub async fn k8s_apply(k8s: State<'_, K8sState>, target: K8sTarget, change: Change, confirm_text: Option<String>, undo_of: Option<String>) -> Result<K8sApplyResult, AppError> {
+pub async fn k8s_apply(
+    app: State<'_, AppState>,
+    k8s: State<'_, K8sState>,
+    target: K8sTarget,
+    change: Change,
+    confirm_text: Option<String>,
+    undo_of: Option<String>,
+) -> Result<K8sApplyResult, AppError> {
     // drain은 진행을 채널로 알리는 `k8s_drain`으로만 적용한다
     if matches!(change.operation, Operation::Drain) {
         return Err(AppError::other(INVALID_CHANGE));
@@ -655,6 +674,8 @@ pub async fn k8s_apply(k8s: State<'_, K8sState>, target: K8sTarget, change: Chan
     }
     let (plan, outcome) = if helm::handles(&change) {
         helm::plan::apply(&session.helm(), &change, &seen.plan, confirm_text.as_deref()).await?
+    } else if crate::k8s::rbac::handles(&change) {
+        crate::k8s::rbac::commit::apply_plan(&rbac::context(&app, &session, &target).await?, &change, &seen.plan, confirm_text.as_deref()).await?
     } else {
         commit::apply_plan(session.client.clone(), session.endpoint, &change, &seen.plan, &seen.at, confirm_text.as_deref()).await?
     };
@@ -779,6 +800,8 @@ pub fn k8s_change_log(k8s: State<'_, K8sState>) -> Vec<log::Entry> {
 pub fn k8s_undo(k8s: State<'_, K8sState>, log_id: String) -> Result<log::Undo, AppError> {
     log::undo(&log::read_all(&k8s.log_path), &log_id)
 }
+
+pub mod rbac;
 
 #[cfg(test)]
 mod tests;

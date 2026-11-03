@@ -78,6 +78,9 @@ YAML
   # K4 접근 시험 픽스처(RBAC·aws-auth)
   source scripts/k8s-live/access.sh
   access_fixture "$kc"
+  # K8 D 권한 변경 픽스처(바인딩 변경 시험용 네임스페이스)
+  source scripts/k8s-live/rbac.sh
+  rbac_fixture "$kc"
   # K6 네트워크 픽스처: LoadBalancer Service, 그룹 Ingress, NetworkPolicy, 정책 없는 네임스페이스
   source scripts/k8s-live/network.sh "$kc"
 

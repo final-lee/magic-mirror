@@ -7,6 +7,7 @@ import type { PreviewWarning } from "../iam/types";
 import { usePendingFlow } from "../iam/useApplyFlow";
 import { k8sApi } from "./api";
 import { DrainPlanView } from "./DrainPlanView";
+import { EffectView } from "./rbac/EffectView";
 import { reduceDrain, startRun, type DrainRun } from "./drain";
 import * as t from "./text";
 import type { K8sChange, K8sDrainMessage, K8sPreview, K8sTarget } from "./types";
@@ -144,10 +145,12 @@ interface BodyProps {
   locked: boolean;
   /** 충돌이 있을 때 강제로 다시 미리보기 하는 버튼. 주지 않으면 그리지 않는다 */
   onForce?: () => void;
+  /** 여러 변경 미리보기 안에서는 실효 권한 영향의 목록을 접는다 */
+  compactEffect?: boolean;
 }
 
 /** 미리보기 하나의 내용: 호출, 필드 차이, 충돌, 영향, 경고, 되돌릴 수 있는지, 확인 입력. 하나짜리와 여러 문서 미리보기가 함께 쓴다. */
-export function PreviewBody({ preview, typed, onTyped, locked, onForce }: BodyProps) {
+export function PreviewBody({ preview, typed, onTyped, locked, onForce, compactEffect }: BodyProps) {
   return (
     <>
       <h4>{t.CHANGE_CALLS}</h4>
@@ -195,6 +198,7 @@ export function PreviewBody({ preview, typed, onTyped, locked, onForce }: BodyPr
       <h4>{t.CHANGE_IMPACT}</h4>
       {preview.impact.map((impact, i) => <p key={i}>{impact}</p>)}
       {preview.drain && <DrainPlanView plan={preview.drain} />}
+      {preview.effect && <EffectView effect={preview.effect} compact={compactEffect} />}
       <h4>{t.CHANGE_WARNINGS}</h4>
       {preview.warnings.map((warning, i) => <p className="err" key={i}>{warning}</p>)}
       <ReversibleNote reversible={preview.reversible} />

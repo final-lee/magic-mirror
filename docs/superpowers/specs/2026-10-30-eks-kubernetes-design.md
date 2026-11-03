@@ -279,6 +279,11 @@
 - RBAC: 바인딩 추가·제거, 바인딩의 주체 추가·빼기. 권한 표에서 셀로 담는 장바구니(최대 50), 한 번에 미리보기. 미리보기는 실효 권한 계산기로 "누가 무엇을 얻고 잃는지". 적용은 하나씩, 첫 실패에서 멈추고 이미 적용한 것은 되돌리기를 제안한다(IAM 할당 표와 같다). 제거는 원래 객체 전체를 기록해 되돌릴 때 다시 만든다.
 - access entry: 생성, 삭제, k8s 그룹 변경, access policy 연결·해제(범위 포함). EKS API로. 되돌리기도 EKS API로.
 - aws-auth는 전용 편집을 두지 않는다. E로 고치면 "access entry로 옮기세요" 경고.
+- 지금 된 것 (2026-11-04, K8 D): 백엔드 `k8s/rbac/`(`plan` 바인딩 계획, `eks` access entry 계획, `world` 상태와 `Planner`, `assess` 영향·위험, `commit` 읽기·dry-run·재확인·적용)와 `exec/eks.rs`(EKS 쓰기는 여기서만, hygiene이 지킨다). 변경 종류 `bindingCreate`·`bindingSubjects`·`accessEntryCreate|Delete|Groups`·`accessPolicyAssociate|Disassociate`, 바인딩 삭제는 공통 `delete`(되돌리기 = 지운 원본으로 `bindingCreate`). 미리보기에 `effect`(실효 권한 엔진 `access::diff`가 본 누가 무엇을 얻고 잃는지, 권한 상승 주체, 앱 신원의 손실)가 붙는다.
+  - 이름 입력: cluster-admin 바인딩, 권한 상승 경로를 새로 얻는 주체(엔진 권한 표의 "권한 상승" 칸이 직접 경로로 바뀜), `kube-system`·`prod`, 앱의 현재 신원(SelfSubjectReview → 신원 매핑, 없으면 사용자·그룹으로 만든 주체)이 권한을 잃음, `AmazonEKSClusterAdminPolicy`, 영향을 끝까지 계산하지 못함(RBAC·access entry·aws-auth를 읽지 못함). access entry는 ARN 마지막 마디를 입력한다.
+  - 장바구니(최대 50, 대상마다, 화면을 옮겨도 남음): 권한 표 칸 상세의 "권한 바꾸기"와 바인딩 상세 도구에서 담고, 막대의 [한 번에 미리보기]가 `k8s_preview_batch`로 변경을 앞 변경이 적용된 상태에서 차례로 계획(항목별 호출·차이·영향 + 전체 영향)한다. 적용은 `k8s_apply_batch`: 전체를 다시 계획해 미리보기와 다르면 아무것도 적용하지 않고, 같으면 하나씩 리소스 버전 조건으로 적용하다 첫 실패에서 멈춘다. 적용한 것은 변경 기록의 되돌리기로 거꾸로 되돌리는 미리보기를 연다. 장바구니는 RBAC 변경만 받는다(access entry는 하나씩).
+  - 신원 탭에서 access entry 만들기·그룹 변경·정책 연결·해제·삭제. EKS 권한은 미리 확인하지 못해 단추는 인증 모드가 `CONFIG_MAP`일 때만 끄고 API 오류를 그대로 보인다. 정책 연결이 실패하면 방금 만든 entry는 지운다. aws-auth 행에는 "access entry로 옮기세요"를 보이고 YAML 편집 경고(`AWS_AUTH_WARNING`)는 그대로다.
+  - 시험: 순수 계획·위험·영향·되돌리기와 가짜 쿠버네티스·EKS(`rbac/mock_kube.rs`, `mock_eks.rs`)로 미리보기·적용·재확인·일괄·중간 실패·되돌리기, kind(`k8s::live_tests::rbac`, `scripts/k8s-live/rbac.sh`).
 
 ### E. YAML 편집과 적용
 - 편집기: CodeMirror 6(YAML 모드, 문법 검사). `status`, `managedFields`, `metadata.uid`, `resourceVersion`, `creationTimestamp`, `generation`은 빼고 보여준다.
