@@ -12,6 +12,7 @@ import { CHANGE_DONE } from "./text";
 import { ContextPicker } from "./ContextPicker";
 import { EventsView } from "./EventsView";
 import { ForwardsView } from "./ForwardsView";
+import { HelmView } from "./helm/HelmView";
 import { K8sError } from "./K8sError";
 import { K8sNav, type K8sView, type NavBookmark } from "./K8sNav";
 import { NODES, bookmarkKey, bookmarkOf } from "./kinds";
@@ -90,7 +91,7 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
     setFocus((f) => ({ ref: { kind: NODES, namespace: null, name }, nonce: (f?.nonce ?? 0) + 1 }));
     setView("workloads");
   };
-  // 네트워크 화면의 링크(Service, Ingress, Pod, NetworkPolicy)도 같은 길로 워크로드 화면에서 연다
+  // 네트워크·Helm 화면의 링크(Service, Ingress, Pod, NetworkPolicy, 릴리스 리소스)도 같은 길로 워크로드 화면에서 연다
   const openObject = (ref: ObjectRef) => {
     setFocus((f) => ({ ref, nonce: (f?.nonce ?? 0) + 1 }));
     setView("workloads");
@@ -188,7 +189,7 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
           width={lanes.width("nav")}
         />
         <LaneResizer lane="nav" onResize={lanes.resize} onCommit={lanes.commit} />
-        <div className={`k8s-body${listView || view === "access" || view === "network" ? " flush" : ""}`}>
+        <div className={`k8s-body${listView || view === "access" || view === "network" || view === "helm" ? " flush" : ""}`}>
           {session.isError ? (
             <K8sError error={session.error} target={target} ssoProfile={ssoProfile} />
           ) : view === "overview" ? (
@@ -234,6 +235,20 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
             <ForwardsView target={target} ssoProfile={ssoProfile} />
           ) : view === "access" ? (
             <AccessScreen target={target} context={chosen} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} onOpenIam={onOpenIam} onOpenMyRules={() => setView("myRules")} />
+          ) : view === "helm" ? (
+            <HelmView
+              target={target}
+              context={chosen}
+              ssoProfile={ssoProfile}
+              live={live}
+              visible={active}
+              namespace={nsOrAll}
+              kinds={kinds.data ?? []}
+              appliedChange={appliedChange}
+              onChange={change.start}
+              onOpenObject={openObject}
+              lanes={lanes}
+            />
           ) : view === "changeLog" ? (
             <ChangeLog target={target} onStart={change.start} />
           ) : rules.isError ? (

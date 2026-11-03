@@ -1665,3 +1665,23 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .net-filter { width: 100%; max-width: 320px; margin-bottom: 6px; }
 /* VPC 다이어그램: EKS 탭이 노드·로드 밸런서를 강조해서 열었을 때 막대에 보이는 안내 */
 .vm-highlight { display: inline-flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 9px; font-size: 12px; border: 1px solid var(--badge-pink); }
+/* helm */
+.helm-status { display: inline-block; padding: 0 7px; line-height: 17px; border-radius: 9px; font-size: 11px; white-space: nowrap; background: var(--neutral-alpha-12); color: var(--dim); }
+.helm-status.ok { background: var(--green-soft); color: var(--green-text); }
+.helm-status.warn { background: var(--yellow-soft); color: var(--yellow); }
+.helm-status.bad { background: var(--red-soft); color: var(--tone-ff6b62); }
+.helm-refresh { margin-left: auto; font-size: 11px; white-space: nowrap; }
+.helm-banner { margin: 0; padding: 6px 12px; font-size: 12px; background: var(--yellow-soft); border-bottom: 1px solid var(--line); }
+.helm-notes { margin: 0; white-space: pre-wrap; font-size: 12px; font-family: ui-monospace, Menlo, monospace; user-select: text; }
+.helm-history td { vertical-align: middle; }
+.helm-history tr.on td { background: var(--accent-alpha-22); }
+.helm-history-actions { display: flex; gap: 6px; justify-content: flex-end; white-space: nowrap; }
+.helm-seg { display: inline-flex; margin: 8px 0; border: 1px solid var(--border-input); border-radius: 6px; overflow: hidden; }
+.helm-seg label { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+.helm-seg label.on { background: var(--accent-alpha-22); }
+.helm-seg input { position: absolute; opacity: 0; pointer-events: none; }
+.helm-source { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.helm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 6px; }
+.helm-field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--dim); align-self: stretch; }
+.helm-field input { background: var(--code-bg); border: 1px solid var(--border-input); border-radius: 6px; padding: 4px 8px; color: var(--text); font: inherit; font-size: 12px; }
+.helm-field input[aria-invalid="true"] { border-color: var(--red); }
