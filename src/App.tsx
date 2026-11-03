@@ -35,6 +35,7 @@ import { pgTabId } from "./pg/targets";
 import type { PgTarget } from "./pg/types";
 import { getVersion } from "@tauri-apps/api/app";
 import { VpcMapTab } from "./vpcmap/VpcMapTab";
+import type { VpcHighlight } from "./vpcmap/types";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { useUpdater } from "./lib/useUpdater";
 import { SsoBanner } from "./components/SsoBanner";
@@ -63,7 +64,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>("resources");
   const [explorerTabs, setExplorerTabs] = useState<{ id: string; location: S3Location }[]>([]);
   const [diffTabs, setDiffTabs] = useState<{ id: string; left: FileRef; right: FileRef }[]>([]);
-  const [vpcTabs, setVpcTabs] = useState<{ id: string; vpcId: string; name: string; region: string }[]>([]);
+  const [vpcTabs, setVpcTabs] = useState<{ id: string; vpcId: string; name: string; region: string; highlight?: VpcHighlight }[]>([]);
   // 대상(프로필·리전·종류·식별자)마다 탭 하나. 탭을 닫거나 프로필을 바꾸면 그 대상의 DB 연결도 닫는다.
   const [pgTabs, setPgTabs] = useState<{ id: string; target: PgTarget; title: string }[]>([]);
   // 클러스터마다 탭 하나(id는 리전과 이름). 탭을 닫거나 프로필을 바꾸면 그 클러스터의 연결과 감시도 닫는다.
@@ -178,9 +179,10 @@ export default function App() {
     setActiveTab(id);
     setFilter("");
   };
-  const openVpc = (v: { vpcId: string; name: string; region: string }) => {
+  // highlight는 EKS 탭이 노드·로드 밸런서를 강조해서 열 때만 온다. 이미 열린 탭은 새 강조를 받을 때만 바꾸고, 목록에서 다시 열 때는 그대로 둔다.
+  const openVpc = (v: { vpcId: string; name: string; region: string; highlight?: VpcHighlight }) => {
     const id = `vpc:${v.vpcId}`;
-    setVpcTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs : [...tabs, { id, ...v }]));
+    setVpcTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs.map((t) => (t.id === id && v.highlight ? { ...t, highlight: v.highlight } : t)) : [...tabs, { id, ...v }]));
     setActiveTab(id);
     setFilter("");
   };
@@ -385,7 +387,7 @@ export default function App() {
         {profile &&
           vpcTabs.map((t) => (
             <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
-              <VpcMapTab profile={profile} region={t.region} vpcId={t.vpcId} name={t.name} active={activeTab === t.id} />
+              <VpcMapTab profile={profile} region={t.region} vpcId={t.vpcId} name={t.name} active={activeTab === t.id} highlight={t.highlight} />
             </div>
           ))}
         {pgTabs.map((t) => (
@@ -395,7 +397,7 @@ export default function App() {
         ))}
         {k8sTabs.map((t) => (
           <div key={t.id} className="tabpane k8s-pane" hidden={activeTab !== t.id}>
-            <K8sTab target={t.target} active={activeTab === t.id} onOpenIam={openIam} />
+            <K8sTab target={t.target} active={activeTab === t.id} onOpenIam={openIam} onOpenVpc={openVpc} />
           </div>
         ))}
         {diffTabs.map((t) => (
