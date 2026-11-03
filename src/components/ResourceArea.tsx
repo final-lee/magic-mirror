@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GLOBAL, useResources } from "../api/queries";
 import type { ResourceType, ServiceInfo } from "../api/types";
 import { useCopyShortcut } from "../hooks/useCopyShortcut";
@@ -31,15 +31,34 @@ interface Props {
   onOpenK8s?: (target: K8sTarget) => void;
   onRefresh: () => void;
   active: boolean;
+  /** ⌘K에서 고른 리소스. nonce가 바뀔 때마다 그 행을 고르고 보이게 한다 */
+  focus?: ResourceFocus | null;
+}
+
+export interface ResourceFocus {
+  id: string;
+  nonce: number;
 }
 
 const IAM_OPENABLE = ["users", "roles", "policies"];
 /** 안내가 떠 있는 시간 */
 const NOTICE_MS = 5000;
+/** ⌘K에서 고른 리소스가 다시 읽은 목록에 없을 때 */
+export const FOCUS_GONE = "찾던 리소스가 지금 목록에 없어요. 지워졌을 수 있어요";
 
-export function ResourceArea({ service, type, profile, region, account, filter, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onRefresh, active }: Props) {
+export function ResourceArea({ service, type, profile, region, account, filter, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onRefresh, active, focus = null }: Props) {
   const q = useResources(profile, region, service, type.id);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(focus?.id ?? null);
+  // 보이게 할 행. 표가 보이게 하면 비우고, 다 읽었는데 없으면 안내하고 비운다.
+  const [reveal, setReveal] = useState<string | null>(focus?.id ?? null);
+  const focusNonce = useRef(focus?.nonce);
+  useEffect(() => {
+    if (!focus || focus.nonce === focusNonce.current) return;
+    focusNonce.current = focus.nonce;
+    setSelectedId(focus.id);
+    setReveal(focus.id);
+  }, [focus]);
+  const revealed = useCallback(() => setReveal(null), []);
   const [showRaw, setShowRaw] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -54,6 +73,13 @@ export function ResourceArea({ service, type, profile, region, account, filter, 
     setNotice(text);
     noticeTimer.current = setTimeout(() => setNotice(null), NOTICE_MS);
   };
+
+  useEffect(() => {
+    if (!reveal || !q.data || q.isFetching) return;
+    if (q.data.items.some((r) => r.id === reveal)) return;
+    setReveal(null);
+    showNotice(FOCUS_GONE);
+  }, [reveal, q.data, q.isFetching]);
 
   const open = (id: string) => {
     const item = items.find((r) => r.id === id);
@@ -96,6 +122,8 @@ export function ResourceArea({ service, type, profile, region, account, filter, 
             selectedId={selectedId}
             onSelect={setSelectedId}
             onOpen={open}
+            revealId={reveal}
+            onRevealed={revealed}
           />
         )}
         <StatusBar profile={profile} account={account} region={service.global ? GLOBAL : region} updatedAt={q.dataUpdatedAt} />

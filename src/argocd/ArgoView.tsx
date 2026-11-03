@@ -3,6 +3,7 @@ import { errorMessage } from "../api/errors";
 import { ErrorState } from "../components/ErrorState";
 import { age } from "../k8s/format";
 import { DETAIL_PCT } from "../k8s/lanes";
+import { tokenize } from "../lib/fuzzy";
 import { ARGO_ENVS, type ArgoEnv, envOf } from "./argoEnv";
 import { type LabelPick, labelMatch, labelOptions, parsePick, pickText, searchMatch } from "./argoFilter";
 import { type Group, type GroupDim, type Tally, bySeverityThenName, buildGroups, clusterOf, clusterText, dimText, groupLevel, isProblem, labelDim, labelKey, labelKeys, namespaceOf, parseDim, projectOf, rowKey, tally } from "./argoGroup";
@@ -192,9 +193,10 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
 
   // 조건 종류마다 앱을 거르는 함수. Sync와 Health는 한 묶음(chips)으로 취급한다.
   const tests = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    // 검색어는 한 번만 토큰으로 나눈다(행마다 나누지 않는다)
+    const tokens = tokenize(search);
     return {
-      search: (r: ArgoAppRow) => q === "" || searchMatch(q, r),
+      search: (r: ArgoAppRow) => tokens.length === 0 || searchMatch(tokens, r),
       sync: (r: ArgoAppRow) => syncPick.size === 0 || syncPick.has(syncOf(r)),
       health: (r: ArgoAppRow) => healthPick.size === 0 || healthPick.has(healthOf(r)),
       env: (r: ArgoAppRow) => envPick.size === 0 || envPick.has(envNameOf(r)),

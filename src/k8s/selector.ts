@@ -1,7 +1,9 @@
+import { scoreFields, tokenize } from "../lib/fuzzy";
 import type { K8sRow } from "./types";
 
 export type Requirement = { key: string; op: "=" | "!=" | "in" | "notin" | "exists" | "!exists"; values: string[] };
-export type Filter = { kind: "none" } | { kind: "name"; text: string } | { kind: "selector"; reqs: Requirement[] } | { kind: "invalid" };
+/** name: 이름 퍼지 검색의 토큰들(한 번만 나눠 두고 행마다 쓴다) */
+export type Filter = { kind: "none" } | { kind: "name"; tokens: string[] } | { kind: "selector"; reqs: Requirement[] } | { kind: "invalid" };
 
 // 쿠버네티스 레이블 키(접두사/이름)와 값의 모양
 const NAME = /^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$/;
@@ -67,7 +69,7 @@ export function parseSelector(s: string): Requirement[] | null {
 export function parseFilter(input: string): Filter {
   const t = input.trim();
   if (t === "") return { kind: "none" };
-  if (!/[=!(]/.test(t) && !/\s(in|notin)\s/.test(t)) return { kind: "name", text: t.toLowerCase() };
+  if (!/[=!(]/.test(t) && !/\s(in|notin)\s/.test(t)) return { kind: "name", tokens: tokenize(t) };
   const reqs = parseSelector(t);
   return reqs ? { kind: "selector", reqs } : { kind: "invalid" };
 }
@@ -93,7 +95,7 @@ function matches(labels: Record<string, string>, r: Requirement): boolean {
 
 /** 해석하지 못한 필터는 거르지 않는다(화면이 오류를 따로 보여 준다) */
 export function matchesFilter(row: K8sRow, f: Filter): boolean {
-  if (f.kind === "name") return row.name.toLowerCase().includes(f.text);
+  if (f.kind === "name") return scoreFields(f.tokens, [row.name]) !== null;
   if (f.kind === "selector") return f.reqs.every((r) => matches(row.labels, r));
   return true;
 }

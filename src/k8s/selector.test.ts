@@ -39,7 +39,7 @@ test("validates label keys and values like Kubernetes", () => {
 
 test("parseFilter decides between a name and a selector", () => {
   expect(parseFilter("  ")).toEqual({ kind: "none" });
-  expect(parseFilter("Api")).toEqual({ kind: "name", text: "api" });
+  expect(parseFilter("Api")).toEqual({ kind: "name", tokens: ["api"] });
   expect(parseFilter("app=web")).toEqual({ kind: "selector", reqs: [{ key: "app", op: "=", values: ["web"] }] });
   expect(parseFilter("env in (a)")).toEqual({ kind: "selector", reqs: [{ key: "env", op: "in", values: ["a"] }] });
   expect(parseFilter("app=")).toEqual({ kind: "invalid" });
