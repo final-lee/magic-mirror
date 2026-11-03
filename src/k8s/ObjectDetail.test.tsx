@@ -4,7 +4,7 @@ import { k8sApi } from "./api";
 import { CONFIGMAPS, CRONJOBS, DAEMONSETS, DEPLOYMENTS, JOBS, NODES, PODS, PVCS, REPLICASETS, SECRETS, SERVICES, SERVICE_ACCOUNTS, STATEFULSETS } from "./kinds";
 import { ObjectDetail } from "./ObjectDetail";
 import {
-  BACK, CHILDREN_TRUNCATED, CLOSE, LOG_ALL_CONTAINERS, LOG_CONTAINER, NO_RECENT_EVENTS, NO_SECRET_PERMISSION, OPEN_IN_IAM, SEC_CHILDREN, SEC_OWNERS, SHOW_VALUE,
+  ANNOTATION_FOLD_LABEL, BACK, CHILDREN_TRUNCATED, CLOSE, LOG_ALL_CONTAINERS, LOG_CONTAINER, NO_RECENT_EVENTS, NO_SECRET_PERMISSION, OPEN_IN_IAM, SEC_CHILDREN, SEC_OWNERS, SHOW_VALUE,
   CHANGE_NODE_SHELL, CHANGE_NODE_SHELL_IMAGE, FORWARD_OPEN, FORWARD_PORT, SHELL_OPEN, TAB_LOGS, TAB_SHELL, TAB_YAML, YAML_SECRET_NOTE, forwardPortLabel, noStreamPermission, openNode,
 } from "./text";
 import type { K8sKind, K8sObjectView, K8sRow } from "./types";
@@ -55,6 +55,21 @@ test("change actions are there without any switch when the detail can start chan
   expect(screen.getByRole("tab", { name: TAB_SHELL })).toBeInTheDocument();
   result.rerender(renderDetail());
   expect(screen.queryByRole("button", { name: "삭제" })).not.toBeInTheDocument();
+});
+
+test("long annotations and last-applied-configuration start folded; expanding shows indented JSON", async () => {
+  const applied = JSON.stringify({ apiVersion: "apps/v1", kind: "Deployment", metadata: { name: "web" } });
+  const long = "x".repeat(400);
+  m.get.mockResolvedValue(view({ annotations: { "kubectl.kubernetes.io/last-applied-configuration": applied, "note/long": long, "note/short": "hi" } }));
+  setup();
+  expect(await screen.findByText("hi")).toBeInTheDocument();
+  expect(screen.queryByText(long)).toBeNull();
+  const toggles = screen.getAllByRole("button", { name: /^펼치기/ });
+  expect(toggles).toHaveLength(2);
+  fireEvent.click(toggles[0]);
+  expect(screen.getByText((_, el) => el?.textContent === JSON.stringify(JSON.parse(applied), null, 2))).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: ANNOTATION_FOLD_LABEL }));
+  expect(screen.getAllByRole("button", { name: /^펼치기/ })).toHaveLength(2);
 });
 
 test("summary: values, owners, children, containers, conditions, events", async () => {
