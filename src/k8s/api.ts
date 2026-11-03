@@ -28,6 +28,14 @@ export const k8sApi = {
     onEvent.onmessage = onMessage;
     return invoke<number>("k8s_logs", { target, namespace, pod, options, onEvent, profile: ssoProfile });
   },
+  /** 워크로드(Deployment·StatefulSet·DaemonSet·ReplicaSet·Job·Service)의 셀렉터에 맞는 모든 Pod 로그를 합쳐 받는다. 새 Pod에도 붙는다. 반환값은 unwatch에 넘기는 번호 */
+  workloadLogs: (target: K8sTarget, kind: K8sKindRef, namespace: string, name: string, options: K8sLogOptions, ssoProfile: string, onMessage: (m: K8sLogMessage) => void) => {
+    const onEvent = new Channel<K8sLogMessage>();
+    onEvent.onmessage = onMessage;
+    return invoke<number>("k8s_workload_logs", { target, kind, namespace, name, options, onEvent, profile: ssoProfile });
+  },
+  /** 보이는 로그를 ~/Downloads에 파일로 저장한다(fileName은 완성된 파일 이름). 반환값은 저장된 파일의 절대 경로 */
+  logsSave: (fileName: string, text: string) => invoke<string>("k8s_logs_save", { fileName, text }),
   /** Pod 셸(exec). 위험한 네임스페이스는 confirmText가 Pod 이름과 같아야 한다. 출력은 채널로 오고, 반환값의 id로 입력·크기·닫기를 한다 */
   shellOpen: (target: K8sTarget, namespace: string, pod: string, container: string, confirmText: string | null, ssoProfile: string, onMessage: (m: K8sShellMessage) => void) => {
     const onEvent = new Channel<K8sShellMessage>();

@@ -2,7 +2,7 @@
    --green, --red, --yellow는 기본 색이다. --surface-*, --border-*, --hover*,
    --overlay, --shadow, --code-bg는 표면과 상호작용, --on-*, --warn-fill,
    --*-soft, --*-text, --selection-border는 상태와 채워진 요소에 쓴다.
-   --chart-*, --syntax-*, --terminal-bg, --map-*, --badge-*는 각 화면의 색이다.
+   --chart-*, --syntax-*, --terminal-bg, --log-c1~8(로그 출처 색), --map-*, --badge-*는 각 화면의 색이다.
    --*-alpha-*와 --neutral-alpha-*는 색조별 불투명도를, --tone-*은 기존
    화면의 개별 색을 보존한다. 모든 토큰은 아래 두 블록에 함께 정의한다. */
 :root {
@@ -36,6 +36,14 @@
   --syntax-number: #bf8cff;
   --syntax-keyword: #ff6b8b;
   --terminal-bg: #1a1a1c;
+  --log-c1: #64d2ff;
+  --log-c2: #ffb36b;
+  --log-c3: #bf8cff;
+  --log-c4: #7ee787;
+  --log-c5: #ff7eb6;
+  --log-c6: #f2e269;
+  --log-c7: #5eead4;
+  --log-c8: #ff8a7a;
   --orange: #ff9f0a;
   --tone-00000040: #00000040;
   --tone-00000073: #00000073;
@@ -172,6 +180,14 @@
   --syntax-number: #7836b2;
   --syntax-keyword: #b0003d;
   --terminal-bg: #f5f5f7;
+  --log-c1: #006586;
+  --log-c2: #954200;
+  --log-c3: #7836b2;
+  --log-c4: #1a7f37;
+  --log-c5: #b3236f;
+  --log-c6: #7a6500;
+  --log-c7: #0b7a6e;
+  --log-c8: #b42318;
   --orange: #a24600;
   --tone-00000040: #0000000d;
   --tone-00000073: #00000033;
@@ -1175,6 +1191,29 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .lj-num { color: var(--syntax-number); }
 .lj-lit { color: var(--syntax-keyword); }
 .lj-obj { color: var(--text); }
+/* 여러 Pod·컨테이너를 합친 로그: 출처 칩과 줄 앞의 출처 이름표는 --log-c1 ~ --log-c8 중 하나(.lc1 ~ .lc8)를 --src로 쓴다 */
+.lc1 { --src: var(--log-c1); }
+.lc2 { --src: var(--log-c2); }
+.lc3 { --src: var(--log-c3); }
+.lc4 { --src: var(--log-c4); }
+.lc5 { --src: var(--log-c5); }
+.lc6 { --src: var(--log-c6); }
+.lc7 { --src: var(--log-c7); }
+.lc8 { --src: var(--log-c8); }
+.k8s-sources { display: flex; gap: 4px; flex-wrap: wrap; padding: 6px 10px; max-height: 76px; overflow-y: auto; border-bottom: 1px solid var(--line); }
+.k8s-src-chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 9px; border: 1px solid var(--line); border-radius: 11px; background: none; color: var(--dim); font-size: 12px; cursor: pointer; }
+.k8s-src-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--src); }
+.k8s-src-chip[aria-pressed="true"] { color: var(--text); border-color: var(--src); }
+.k8s-src-chip[aria-pressed="false"] { text-decoration: line-through; }
+.k8s-src-chip[aria-pressed="false"]::before { opacity: .35; }
+.k8s-src-chip.ended { opacity: .55; }
+.k8s-log-src { color: var(--src); font-weight: 600; user-select: none; }
+.k8s-log-ts { color: var(--dim); user-select: none; }
+.k8s-log-fail { color: var(--tone-ff8a82); }
+/* 줄바꿈을 끄면 긴 줄은 옆으로 스크롤한다 */
+.k8s-log.nowrap { white-space: pre; word-break: normal; }
+.k8s-log.nowrap .lj-row { white-space: nowrap; overflow-wrap: normal; }
+.k8s-log.nowrap .lj-detail { white-space: pre-wrap; }
 .k8s-wrap { word-break: break-all; }
 .k8s-warn td { color: var(--orange); }
 

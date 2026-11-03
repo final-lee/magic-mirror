@@ -229,16 +229,36 @@ export type K8sWatchMessage =
   | { type: "changes"; upserts: K8sRow[]; deletes: string[] } // deletes는 uid
   | { type: "error"; error: AppError; fatal: boolean };
 
-/** k8s_logs 옵션(백엔드 LogOptions) */
+/** k8s_logs·k8s_workload_logs 옵션(백엔드 LogOptions) */
 export interface K8sLogOptions {
+  /** null이면 그 Pod의 모든(init이 아닌) 컨테이너 */
   container: string | null;
   follow: boolean;
+  /** 처음에 받을 줄 수(컨테이너마다) */
   tailLines: number;
   previous: boolean;
+  /** 최근 N초만. null이면 제한 없음(tailLines만) */
+  sinceSeconds: number | null;
 }
 
-/** k8s_logs 채널. error와 end에서 흐름이 끝난다. */
-export type K8sLogMessage = { type: "lines"; lines: string[] } | { type: "error"; error: AppError } | { type: "end" };
+/** 로그 한 줄. ts는 서버가 붙인 시각(RFC 3339, 나노초까지). 백엔드는 늘 timestamps=true로 받아 앞의 시각을 떼어 낸다 */
+export interface K8sLogLine {
+  ts: string | null;
+  text: string;
+}
+
+/**
+ * k8s_logs·k8s_workload_logs 채널. 줄은 어느 Pod·컨테이너의 것인지와 함께 온다.
+ * source: 워크로드 로그에서 Pod·컨테이너 흐름이 붙거나(attached) 끝날 때(ended).
+ * error에 pod가 있으면 그 흐름만 실패한 것이고 나머지는 계속된다. pod가 없거나 end면 전체가 끝난다.
+ * notice: 흐름을 다 붙이지 못했을 때 등(예: Pod가 너무 많음).
+ */
+export type K8sLogMessage =
+  | { type: "lines"; pod: string; container: string; lines: K8sLogLine[] }
+  | { type: "source"; pod: string; container: string; state: "attached" | "ended" }
+  | { type: "notice"; message: string }
+  | { type: "error"; error: AppError; pod: string | null; container: string | null }
+  | { type: "end" };
 
 /** k8s_shell_open·k8s_attach_open 채널. exit에서 세션이 끝난다(code가 없으면 연결이 끊겼거나 시작하지 못한 것, 시작하지 못했으면 reason). */
 export type K8sShellMessage = { type: "output"; data: string } | { type: "exit"; code: number | null; reason: string | null };
