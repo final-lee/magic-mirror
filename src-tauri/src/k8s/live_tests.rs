@@ -392,10 +392,10 @@ async fn overview_kubernetes_part_reads_nodes_and_requests() {
     let client = admin().await;
     let parts = k8s_parts(&client, Some("1.33"), PRIVATE).await;
     assert!(!parts.nodes.unwrap().is_empty());
-    let (requests, partial) = parts.requests.unwrap();
+    let (allocated, partial) = parts.allocated.unwrap();
     assert!(!partial);
     // coredns가 CPU를 요청한다
-    assert!(requests.values().any(|r| r.cpu_milli > 0 && r.pods > 0), "{requests:?}");
+    assert!(allocated.values().any(|a| a.requested.cpu_milli > 0 && a.requested.pods > 0), "{allocated:?}");
     // kind에는 metrics-server와 Karpenter가 없다
     assert_eq!(parts.usage.unwrap(), None);
     assert_eq!(parts.node_pools.unwrap(), None);

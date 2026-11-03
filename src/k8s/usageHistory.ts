@@ -184,6 +184,23 @@ export function nodeTrend(key: string, name: string): UsageTrend | null {
   return trendOf(history, history?.nodes.get(name));
 }
 
+/** 클러스터 전체 사용량 기록: 같은 때 모은 모든 노드 값의 합. 노드 기록이 없으면 null */
+export function clusterTrend(key: string): UsageTrend | null {
+  const history = histories.get(key);
+  if (!history || history.lastAt === null || history.nodes.size === 0) return null;
+  const sums = new Map<number, [number, number]>();
+  for (const track of history.nodes.values()) {
+    track.at.forEach((at, i) => {
+      const sum = sums.get(at) ?? [0, 0];
+      sum[0] += track.cpu[i];
+      sum[1] += track.memory[i];
+      sums.set(at, sum);
+    });
+  }
+  const at = [...sums.keys()].sort((a, b) => a - b);
+  return { at, cpu: at.map((t) => sums.get(t)![0]), memory: at.map((t) => sums.get(t)![1]), end: history.lastAt };
+}
+
 /** 값이 GAP_MS보다 오래 빈 곳에서 선을 끊는다 */
 export function splitAtGaps(points: [number, number][]): [number, number][][] {
   const out: [number, number][][] = [];

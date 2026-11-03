@@ -1256,6 +1256,23 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 
 .k8s-overview { display: flex; flex-direction: column; }
 .k8s-overview h5 { margin: 10px 0 4px; font-size: 12px; font-weight: 600; }
+/* 개요의 클러스터 사용량(Lens 개요처럼): 노드 상태 칩, CPU·메모리·Pod 고리 카드 */
+.k8s-node-counts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.k8s-chip { padding: 2px 8px; border: 1px solid var(--line); border-radius: 10px; font-size: 12px; }
+.k8s-chip.warn { border-color: var(--red); color: var(--red); }
+.k8s-cluster-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.k8s-cluster-card { display: flex; align-items: center; gap: 14px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; }
+.k8s-cluster-card h5 { margin: 0 0 4px; }
+.k8s-ring { flex: none; width: 112px; height: 112px; }
+.k8s-ring-track { fill: none; stroke: var(--line); stroke-width: 7; }
+.k8s-ring-value { fill: var(--text); font-size: 18px; font-weight: 700; }
+.k8s-ring-label { fill: var(--dim); font-size: 10px; }
+.k8s-ring-legend { border-collapse: collapse; font-size: 12px; }
+.k8s-ring-legend td { padding: 1px 8px 1px 0; white-space: nowrap; }
+.k8s-ring-legend td.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* 범례 표는 전역 줄무늬를 쓰지 않는다 */
+.k8s-ring-legend tbody tr:nth-child(even) td { background: none; }
+.k8s-swatch-empty { background: transparent; border: 1px solid var(--line); box-sizing: border-box; }
 .k8s-gap { margin: 4px 0; }
 .k8s-gap p { margin: 0 0 2px; font-size: 12px; }
 

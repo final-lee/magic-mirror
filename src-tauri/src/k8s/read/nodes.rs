@@ -1,4 +1,4 @@
-//! 개요의 노드: 상태, 묶음, 할당 가능량 대비 요청량, metrics-server 사용량, 컨트롤 플레인과의 버전 차이.
+//! 개요의 노드: 상태, 묶음, 용량·할당 가능량 대비 요청량·제한량, metrics-server 사용량, 컨트롤 플레인과의 버전 차이.
 use std::collections::HashMap;
 
 use kube::api::DynamicObject;
@@ -30,6 +30,13 @@ impl Resources {
     }
 }
 
+/// 노드에 놓인(끝나지 않은) Pod의 요청 합과 제한 합. pods는 둘 다 Pod 수다.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Allocated {
+    pub requested: Resources,
+    pub limits: Resources,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Usage {
@@ -49,8 +56,12 @@ pub struct NodeView {
     pub group_kind: GroupKind,
     pub group: Option<String>,
     pub kubelet_version: String,
+    /// 노드의 전체 용량(status.capacity)
+    pub capacity: Resources,
     pub allocatable: Resources,
     pub requested: Resources,
+    /// 제한 합. 제한을 두지 않은 컨테이너는 0으로 센다(kubectl describe node와 같다)
+    pub limits: Resources,
     pub usage: Option<Usage>,
 }
 
@@ -71,28 +82,40 @@ fn resources_at(d: &Value, path: &str) -> Resources {
     }
 }
 
-/// kubectl describe node와 같은 셈: max(컨테이너 합, 가장 큰 init 컨테이너) + overhead
-pub fn pod_requests(pod: &Value) -> Resources {
+/// kubectl describe node와 같은 셈: max(컨테이너 합, 가장 큰 init 컨테이너) + overhead. field는 requests 또는 limits
+fn pod_resources(pod: &Value, field: &str) -> Resources {
+    let path = format!("/resources/{field}");
     let mut sum = Resources::default();
     for c in list(pod, "/spec/containers") {
-        sum.add(resources_at(c, "/resources/requests"));
+        sum.add(resources_at(c, &path));
     }
-    let init = list(pod, "/spec/initContainers").iter().map(|c| resources_at(c, "/resources/requests")).fold(Resources::default(), Resources::max);
+    let init = list(pod, "/spec/initContainers").iter().map(|c| resources_at(c, &path)).fold(Resources::default(), Resources::max);
     let mut total = sum.max(init);
     total.add(resources_at(pod, "/spec/overhead"));
     total.pods = 1;
     total
 }
 
-pub fn requests_by_node(pods: &[DynamicObject]) -> HashMap<String, Resources> {
-    let mut out: HashMap<String, Resources> = HashMap::new();
+pub fn pod_requests(pod: &Value) -> Resources {
+    pod_resources(pod, "requests")
+}
+
+pub fn pod_limits(pod: &Value) -> Resources {
+    pod_resources(pod, "limits")
+}
+
+/// 노드마다 놓인 Pod의 요청·제한 합. 끝난 Pod(Succeeded·Failed)와 아직 노드가 없는 Pod는 세지 않는다.
+pub fn allocated_by_node(pods: &[DynamicObject]) -> HashMap<String, Allocated> {
+    let mut out: HashMap<String, Allocated> = HashMap::new();
     for p in pods {
         let d = &p.data;
         if matches!(text(d, "/status/phase"), Some("Succeeded" | "Failed")) {
             continue;
         }
         let Some(node) = text(d, "/spec/nodeName") else { continue };
-        out.entry(node.to_string()).or_default().add(pod_requests(d));
+        let entry = out.entry(node.to_string()).or_default();
+        entry.requested.add(pod_requests(d));
+        entry.limits.add(pod_limits(d));
     }
     out
 }
@@ -103,7 +126,7 @@ pub fn usage_of(metrics: &DynamicObject) -> (String, Usage) {
     (metrics.metadata.name.clone().unwrap_or_default(), usage)
 }
 
-pub fn node_view(node: &DynamicObject, requested: Resources, usage: Option<Usage>) -> NodeView {
+pub fn node_view(node: &DynamicObject, allocated: Allocated, usage: Option<Usage>) -> NodeView {
     let d = &node.data;
     let labels = labels_of(node);
     let (group_kind, group) = node_group(&labels);
@@ -117,8 +140,10 @@ pub fn node_view(node: &DynamicObject, requested: Resources, usage: Option<Usage
         group_kind,
         group,
         kubelet_version: text(d, "/status/nodeInfo/kubeletVersion").unwrap_or("").to_string(),
+        capacity: resources_at(d, "/status/capacity"),
         allocatable: resources_at(d, "/status/allocatable"),
-        requested,
+        requested: allocated.requested,
+        limits: allocated.limits,
         usage,
     }
 }

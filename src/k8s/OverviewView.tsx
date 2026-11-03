@@ -7,11 +7,13 @@ import {
   H_INSTANCE_TYPE, H_ISSUES, H_KIND, H_KUBELET, H_LATEST_VERSION, H_MEMORY_REQUESTED, H_MEMORY_USED, H_NEW_API, H_POD_COUNT, H_NODEGROUP, H_REASON,
   H_SIZE_RANGE, H_STATE, H_VERSION, H_ZONE, L_AUTH_MODE, L_CIDRS, L_ENDPOINT, L_LOGGING, L_OIDC, L_PLATFORM, L_PRIVATE, L_PUBLIC,
   L_SECRETS_ENCRYPTION, L_STATUS, L_VERSION, LOADING, METRICS_UNAVAILABLE, NO_INSIGHTS, NO_METRICS, NO_SKEW, NONE, OFF, ON, REFRESH, REQUESTS_PARTIAL,
-  SECTION_LABELS, SEC_ADDONS, SEC_CLUSTER, SEC_FARGATE, SEC_NAMESPACE_USAGE, SUB_TOP_CPU, SUB_TOP_MEMORY, SEC_NODEGROUPS, SEC_NODEPOOLS, SEC_NODES, SEC_UPGRADE, SUB_INSIGHTS, SUB_REMOVED,
+  SECTION_LABELS, SEC_ADDONS, SEC_CLUSTER, SEC_CLUSTER_USAGE, SEC_FARGATE, SEC_NAMESPACE_USAGE, SEC_WARNINGS, SUB_TOP_CPU, SUB_TOP_MEMORY, SEC_NODEGROUPS, SEC_NODEPOOLS, SEC_NODES, SEC_UPGRADE, SUB_INSIGHTS, SUB_REMOVED,
   SUB_SKEW, UP_TO_DATE, gapText, noRemoved, removedTitle, skewText,
 } from "./text";
 import type { K8sNodeView, K8sOverview, K8sOverviewSection, K8sTarget } from "./types";
 import { namespaceTotals, top, type NamespaceUsage } from "./usage";
+import { ClusterSummary, RecentWarnings } from "./ClusterSummary";
+import { historyKey } from "./usageHistory";
 
 interface Props {
   target: K8sTarget;
@@ -21,6 +23,10 @@ interface Props {
   /** 탭이 보이는 동안에만 네임스페이스별 사용량을 15초마다 읽는다. 없으면 보이는 것으로 본다 */
   visible?: boolean;
   onOpenNode: (name: string) => void;
+  /** 최근 경고 감시가 새 연결에서 다시 시작되게 하는 세션 시각 */
+  sessionEpoch: number;
+  /** 이벤트 화면으로 간다 */
+  onOpenEvents: () => void;
 }
 
 const Sect = ({ title, children }: { title: string; children: ReactNode }) => (
@@ -68,7 +74,7 @@ function nodeStatus(n: K8sNodeView): string {
   return [n.ready ? "Ready" : "NotReady", n.unschedulable ? CORDONED : null, n.pressures.length > 0 ? n.pressures.join(", ") : null].filter(Boolean).join(" · ");
 }
 
-export function OverviewView({ target, context, ssoProfile, live, visible = true, onOpenNode }: Props) {
+export function OverviewView({ target, context, ssoProfile, live, visible = true, onOpenNode, sessionEpoch, onOpenEvents }: Props) {
   const q = useK8sOverview(target, context, ssoProfile, live);
   const usage = useK8sMetrics(target, context, null, ssoProfile, live && visible);
   const refetch = () => void q.refetch();
@@ -85,11 +91,23 @@ export function OverviewView({ target, context, ssoProfile, live, visible = true
         </div>
       ));
   const c = o.cluster;
+  // 노드 사용량은 15초마다 다시 읽은 값을 쓴다(읽을 수 없으면 개요를 읽을 때의 값)
+  const liveNodes = usage.data && usage.data.nodesUnavailable === null
+    ? new Map(usage.data.nodes.map((n) => [n.name, { cpuMilli: n.cpuMilli, memoryBytes: n.memoryBytes }]))
+    : null;
   return (
     <div className="k8s-overview">
       <div className="k8s-actions">
         <button className="btn tone-secondary" onClick={refetch} disabled={q.isFetching}>{REFRESH}</button>
       </div>
+      {o.nodes && (
+        <Sect title={SEC_CLUSTER_USAGE}>
+          <ClusterSummary nodes={o.nodes} live={liveNodes} historyKey={historyKey(target, context)} metrics={o.metrics || liveNodes !== null} />
+        </Sect>
+      )}
+      <Sect title={SEC_WARNINGS}>
+        <RecentWarnings target={target} context={context} sessionEpoch={sessionEpoch} ssoProfile={ssoProfile} live={live} onOpenEvents={onOpenEvents} />
+      </Sect>
       <Sect title={SEC_CLUSTER}>
         {gaps("cluster")}
         {c && (

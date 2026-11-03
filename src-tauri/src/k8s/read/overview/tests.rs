@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use super::*;
+use crate::k8s::read::nodes::Resources;
 use crate::k8s::read::values::GroupKind;
 
 fn cluster(version: &str) -> ClusterView {
@@ -22,12 +23,12 @@ fn eks_ok() -> EksParts {
 
 fn k8s_ok() -> K8sParts {
     let mut req = HashMap::new();
-    req.insert("b".to_string(), Resources { cpu_milli: 500, memory_bytes: 1, pods: 3 });
+    req.insert("b".to_string(), Allocated { requested: Resources { cpu_milli: 500, memory_bytes: 1, pods: 3 }, limits: Resources { cpu_milli: 1000, memory_bytes: 2, pods: 3 } });
     let mut usage = HashMap::new();
     usage.insert("b".to_string(), Usage { cpu_milli: 100, memory_bytes: 2 });
     K8sParts {
         nodes: Ok(vec![node("b", "v1.31.1"), node("a", "v1.29.9")]),
-        requests: Ok((req, false)),
+        allocated: Ok((req, false)),
         usage: Ok(Some(usage)),
         node_pools: Ok(None),
         removed: Ok(Some(vec![])),
@@ -45,6 +46,7 @@ fn everything_loads() {
     let nodes = o.nodes.unwrap();
     assert_eq!(nodes.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["a", "b"]);
     assert_eq!(nodes[1].requested, Resources { cpu_milli: 500, memory_bytes: 1, pods: 3 });
+    assert_eq!(nodes[1].limits, Resources { cpu_milli: 1000, memory_bytes: 2, pods: 3 });
     assert_eq!(nodes[1].usage, Some(Usage { cpu_milli: 100, memory_bytes: 2 }));
     assert_eq!(nodes[0].requested, Resources::default());
     assert_eq!(nodes[0].group_kind, GroupKind::SelfManaged);
@@ -58,7 +60,7 @@ fn everything_loads() {
 #[test]
 fn failed_parts_become_gaps_and_the_rest_stays() {
     let eks = EksParts { cluster: Err(denied("eks:DescribeCluster")), addons: Err(denied("eks:ListAddons")), ..eks_ok() };
-    let k8s = K8sParts { requests: Err(denied("list pods")), usage: Err(denied("list nodes.metrics.k8s.io")), ..k8s_ok() };
+    let k8s = K8sParts { allocated: Err(denied("list pods")), usage: Err(denied("list nodes.metrics.k8s.io")), ..k8s_ok() };
     let o = assemble(eks, k8s);
     let sections: Vec<Section> = o.gaps.iter().map(|g| g.section).collect();
     assert_eq!(sections, [Section::Cluster, Section::Addons, Section::Nodes, Section::Metrics]);
@@ -82,7 +84,7 @@ fn no_metrics_server_is_not_a_gap() {
 
 #[test]
 fn overview_json_keys_match_the_ts_contract() {
-    let v = serde_json::to_value(assemble(eks_ok(), K8sParts { requests: Ok((HashMap::new(), true)), ..k8s_ok() })).unwrap();
+    let v = serde_json::to_value(assemble(eks_ok(), K8sParts { allocated: Ok((HashMap::new(), true)), ..k8s_ok() })).unwrap();
     for key in ["cluster", "nodes", "requestsPartial", "metrics", "nodegroups", "fargateProfiles", "nodePools", "addons", "insights", "removedApis", "nextVersion", "skew", "gaps"] {
         assert!(v.get(key).is_some(), "{key}");
     }

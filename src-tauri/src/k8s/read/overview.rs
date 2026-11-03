@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use super::eks::{self, AddonView, ClusterView, InsightView, NodegroupView};
 use super::kinds::discover;
-use super::nodes::{node_view, requests_by_node, skew, usage_of, NodeView, Resources, Skew, Usage};
+use super::nodes::{allocated_by_node, node_view, skew, usage_of, Allocated, NodeView, Skew, Usage};
 use super::removed::{self, next_minor, RemovedUse};
 use super::{api_for, bounded, list_all};
 use crate::error::AppError;
@@ -69,7 +69,8 @@ pub struct EksParts {
 
 pub struct K8sParts {
     pub nodes: Result<Vec<DynamicObject>, AppError>,
-    pub requests: Result<(HashMap<String, Resources>, bool), AppError>,
+    /// 노드별 요청·제한 합과, Pod 목록이 잘렸는지
+    pub allocated: Result<(HashMap<String, Allocated>, bool), AppError>,
     pub usage: Result<Option<HashMap<String, Usage>>, AppError>,
     pub node_pools: Result<Option<Vec<String>>, AppError>,
     pub removed: Result<Option<Vec<RemovedUse>>, AppError>,
@@ -93,7 +94,7 @@ pub fn assemble(eks: EksParts, k8s: K8sParts) -> Overview {
     let addons = keep(eks.addons, Section::Addons, &mut gaps);
     let insights = keep(eks.insights, Section::Insights, &mut gaps);
     let node_items = keep(k8s.nodes, Section::Nodes, &mut gaps);
-    let (requests, requests_partial) = keep(k8s.requests, Section::Nodes, &mut gaps).unwrap_or_default();
+    let (allocated, requests_partial) = keep(k8s.allocated, Section::Nodes, &mut gaps).unwrap_or_default();
     let usage = keep(k8s.usage, Section::Metrics, &mut gaps).flatten();
     let node_pools = keep(k8s.node_pools, Section::NodePools, &mut gaps).flatten();
     let removed_apis = keep(k8s.removed, Section::RemovedApis, &mut gaps).flatten();
@@ -102,7 +103,7 @@ pub fn assemble(eks: EksParts, k8s: K8sParts) -> Overview {
             .iter()
             .map(|n| {
                 let name = n.metadata.name.clone().unwrap_or_default();
-                node_view(n, requests.get(&name).copied().unwrap_or_default(), usage.as_ref().and_then(|u| u.get(&name).copied()))
+                node_view(n, allocated.get(&name).copied().unwrap_or_default(), usage.as_ref().and_then(|u| u.get(&name).copied()))
             })
             .collect();
         views.sort_by(|a, b| a.name.cmp(&b.name));
@@ -168,16 +169,16 @@ pub async fn k8s_parts(client: &Client, version: Option<&str>, endpoint: Endpoin
     let nodes_api = api_for(client.clone(), &core("Node", "nodes", false), None);
     let pods_api = api_for(client.clone(), &core("Pod", "pods", true), None);
     let pods_lp = ListParams::default().fields(RUNNING_PODS);
-    let (discovery, nodes, requests) = tokio::join!(
+    let (discovery, nodes, allocated) = tokio::join!(
         discover(client, endpoint),
         async { list_all(&nodes_api, &ListParams::default(), LIST_PAGES_MAX, "nodes", endpoint).await.map(|(items, _)| items) },
-        async { list_all(&pods_api, &pods_lp, LIST_PAGES_MAX, "pods", endpoint).await.map(|(items, partial)| (requests_by_node(&items), partial)) },
+        async { list_all(&pods_api, &pods_lp, LIST_PAGES_MAX, "pods", endpoint).await.map(|(items, partial)| (allocated_by_node(&items), partial)) },
     );
     let (usage, node_pools, removed) = match discovery {
         Err(e) => (Err(e.clone()), Err(e.clone()), Err(e)),
         Ok(d) => tokio::join!(node_usage(client, &d, endpoint), node_pools(client, &d, endpoint), removed_uses(client, &d, version, endpoint)),
     };
-    K8sParts { nodes, requests, usage, node_pools, removed }
+    K8sParts { nodes, allocated, usage, node_pools, removed }
 }
 
 /// 클러스터 버전을 먼저 읽고(애드온 최신 버전, 제거되는 API, 버전 차이에 쓴다) 나머지는 함께 읽는다

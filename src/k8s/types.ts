@@ -446,8 +446,12 @@ export interface K8sNodeView {
   groupKind: K8sGroupKind;
   group: string | null;
   kubeletVersion: string;
+  /** 노드 전체 용량(status.capacity) */
+  capacity: K8sResources;
   allocatable: K8sResources;
   requested: K8sResources;
+  /** 놓인 Pod의 제한 합. 제한 없는 컨테이너는 0으로 센다 */
+  limits: K8sResources;
   usage: { cpuMilli: number; memoryBytes: number } | null;
 }
 

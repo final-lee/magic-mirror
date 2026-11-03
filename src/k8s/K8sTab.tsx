@@ -198,7 +198,16 @@ export function K8sTab({ target, active, onOpenIam }: Props) {
           {session.isError ? (
             <K8sError error={session.error} target={target} ssoProfile={ssoProfile} />
           ) : view === "overview" ? (
-            <OverviewView target={target} context={chosen} ssoProfile={ssoProfile} live={live} visible={active} onOpenNode={openNode} />
+            <OverviewView
+              target={target}
+              context={chosen}
+              ssoProfile={ssoProfile}
+              live={live}
+              visible={active}
+              onOpenNode={openNode}
+              sessionEpoch={session.dataUpdatedAt}
+              onOpenEvents={() => setView("events")}
+            />
           ) : listView ? (
             <WorkloadsView
               key={view}
