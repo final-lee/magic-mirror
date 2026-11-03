@@ -68,3 +68,10 @@ export interface VpcTopology {
   resources: NodeResource[];
   warnings: string[];
 }
+
+/** 다이어그램에서 강조할 리소스(예: EKS 클러스터의 노드와 로드 밸런서). NodeResource.id(EC2 인스턴스 ID, 로드 밸런서 ARN)로 고른다. */
+export interface VpcHighlight {
+  ids: string[];
+  /** 막대에 보이는 이름(예: 클러스터 이름) */
+  label: string;
+}

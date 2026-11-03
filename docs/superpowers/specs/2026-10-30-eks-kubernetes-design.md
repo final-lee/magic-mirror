@@ -147,6 +147,13 @@
 - 노드 → 서브넷·AZ. VPC CNI면 Pod IP가 속한 서브넷.
 - 기존 VPC 다이어그램 열기(클러스터 노드와 로드밸런서 강조).
 - NetworkPolicy는 목록과 상세만.
+- 지금 된 것 (2026-11-03): 왼쪽 메뉴 "🌐 네트워크"(읽기 전용, `k8s_network`, `src-tauri/src/k8s/network/`, 프론트 `src/k8s/network/`). 탭 넷:
+  - **로드밸런서**: type이 LoadBalancer인 Service와 모든 Ingress. 짝은 status 호스트명(DNS 이름과 같음, 대소문자·끝 점·`dualstack.` 무시)을 먼저 보고, 없으면 태그로 찾는다. 태그는 `elbv2.k8s.aws/cluster`가 이 클러스터 이름이어야 하고 `service.k8s.aws/stack`=`네임스페이스/이름`(Service), `ingress.k8s.aws/stack`=그룹 이름 또는 `네임스페이스/이름`(Ingress)이다. 호스트명이 있으면 호스트명이 이긴다. 짝이 없으면 이유(주소 없음 / ELBv2에 없음 / AWS 읽기 실패)를 보인다. ELBv2만 읽으므로 클래식 로드 밸런서(CLB)는 "찾지 못함"으로 나오고 안내 문구에 CLB일 수 있다고 적는다(CLB SDK를 새로 들이지 않았다). 행을 누르면 70% 상세: 요약, 로드 밸런서, 리스너(기본 동작과 ALB 규칙), 대상 그룹과 대상 상태(정상·비정상과 사유, 대상 IP는 Pod로, 인스턴스 ID는 노드로 링크). 클러스터 태그가 붙었지만 어떤 객체도 가리키지 않는 로드 밸런서는 아래에 따로 보인다.
+  - **노드·서브넷**: 노드 → providerID의 인스턴스 ID → EC2(DescribeInstances, 필터로 조회) → 서브넷·AZ. 서브넷 표는 클러스터 VPC 전체(남은 IP, 용량, 노드 수, Pod 수). VPC는 EKS DescribeCluster, 실패하면 인스턴스의 VPC.
+  - **Pod IP**: kube-system에 `k8s-app=aws-node` Pod가 있으면 VPC CNI로 보고 Pod IP를 서브넷 CIDR에 대어(가장 긴 접두) 서브넷별 Pod 수를 센다. hostNetwork Pod는 노드 IP라 세지 않고, 어느 서브넷에도 없는 IP는 따로 센다. VPC CNI가 아니면 서브넷에 잇지 않고 Pod 목록만 보인다.
+  - **NetworkPolicy**: 목록과 상세(대상 Pod, 방향, 들어오고 나가는 규칙 요약: 기본 policyTypes 적용, 모두 차단·모두 허용 구분). 정책이 하나도 없는 네임스페이스에 표시(시스템 네임스페이스는 흐리게). 실제로 막히는 트래픽은 계산하지 않는다.
+  - AWS를 읽지 못한 부분(권한, SSO 만료, 시간 초과)은 화면 위에 이유와 함께 한 줄로 묶여 남고 나머지는 그대로 보인다.
+  - [VPC 다이어그램 열기]는 클러스터의 노드(인스턴스 ID)와 로드 밸런서(ARN)를 강조해서 기존 VPC 구조도 탭을 연다(`VpcMapTab`의 선택 속성 `highlight`, 앱의 `openVpc`에 선택 필드 `highlight`). 이미 열린 탭은 새 강조를 받을 때만 바꾼다. 상세의 [VPC 다이어그램에서 보기]는 그 로드 밸런서 하나만 강조한다. 강조 리소스는 칸이 넘쳐도 "+N"에 묻히지 않게 앞에 놓고, 막대에서 끌 수 있다.
 
 ## 접근
 

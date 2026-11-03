@@ -14,6 +14,8 @@ export const C = {
   ok: "var(--green)",
   bad: "var(--red)",
   warn: "var(--yellow)",
+  /** 호출한 쪽(예: EKS 탭)이 강조한 리소스 */
+  highlight: "var(--badge-pink)",
 };
 
 export const TIER_COLOR: Record<Tier, { stroke: string; fill: string; lane: string; text: string }> = {

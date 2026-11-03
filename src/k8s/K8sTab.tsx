@@ -20,6 +20,8 @@ import { moved } from "./useReorder";
 import { MyRules } from "./MyRules";
 import { NoContext } from "./NoContext";
 import { OverviewView } from "./OverviewView";
+import { NetworkView } from "./network/NetworkView";
+import type { VpcOpen } from "./network/types";
 import { NAMESPACES } from "./targets";
 import { ALL, TopBar, type K8sConnection } from "./TopBar";
 import { WorkloadsView, type WorkloadsFocus } from "./WorkloadsView";
@@ -27,7 +29,7 @@ import { YamlCreate } from "./YamlCreate";
 import { BOOKMARK_MISSING, savedMissing, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNECTING, updateCommand } from "./text";
 import { refreshK8s, useK8sKinds, useK8sRules, useUsageSampler } from "./queries";
 import { useK8sConnection } from "./useK8sConnection";
-import type { K8sChange, K8sKindRef, K8sTarget } from "./types";
+import type { K8sChange, K8sKindRef, K8sTarget, ObjectRef } from "./types";
 import { useK8sWatch } from "./useK8sWatch";
 
 interface Props {
@@ -36,6 +38,8 @@ interface Props {
   active: boolean;
   /** 서비스 어카운트의 IAM 역할 ARN을 IAM 작업 공간에서 연다 */
   onOpenIam?: (arn: string) => void;
+  /** 클러스터의 VPC 다이어그램을 노드·로드 밸런서 강조와 함께 연다(앱이 VPC 탭을 연다) */
+  onOpenVpc?: (open: VpcOpen) => void;
 }
 
 /** 사용량 그래프의 기록을 모은다. 읽을 때마다 다시 그려지는 것이 이 빈 컴포넌트뿐이도록 탭과 떼어 둔다. */
@@ -46,7 +50,7 @@ function UsageSampler({ target, context, namespace, ssoProfile, live }: {
   return null;
 }
 
-export function K8sTab({ target, active, onOpenIam }: Props) {
+export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
   const qc = useQueryClient();
   const { settings, update, settingsReady, ctx, info, chosen, missing, candidate, session, ssoProfile, live } = useK8sConnection(target);
 
@@ -84,6 +88,11 @@ export function K8sTab({ target, active, onOpenIam }: Props) {
   const nsOrAll = namespace === ALL ? null : namespace;
   const openNode = (name: string) => {
     setFocus((f) => ({ ref: { kind: NODES, namespace: null, name }, nonce: (f?.nonce ?? 0) + 1 }));
+    setView("workloads");
+  };
+  // 네트워크 화면의 링크(Service, Ingress, Pod, NetworkPolicy)도 같은 길로 워크로드 화면에서 연다
+  const openObject = (ref: ObjectRef) => {
+    setFocus((f) => ({ ref, nonce: (f?.nonce ?? 0) + 1 }));
     setView("workloads");
   };
 
@@ -179,7 +188,7 @@ export function K8sTab({ target, active, onOpenIam }: Props) {
           width={lanes.width("nav")}
         />
         <LaneResizer lane="nav" onResize={lanes.resize} onCommit={lanes.commit} />
-        <div className={`k8s-body${listView || view === "access" ? " flush" : ""}`}>
+        <div className={`k8s-body${listView || view === "access" || view === "network" ? " flush" : ""}`}>
           {session.isError ? (
             <K8sError error={session.error} target={target} ssoProfile={ssoProfile} />
           ) : view === "overview" ? (
@@ -217,6 +226,8 @@ export function K8sTab({ target, active, onOpenIam }: Props) {
             />
           ) : bookmarkView ? (
             <div className="empty">{BOOKMARK_MISSING}</div>
+          ) : view === "network" ? (
+            <NetworkView target={target} context={chosen} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} onOpenObject={openObject} onOpenVpc={onOpenVpc} lanes={lanes} />
           ) : view === "events" ? (
             <EventsView target={target} context={chosen} sessionEpoch={session.dataUpdatedAt} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} />
           ) : view === "forwards" ? (

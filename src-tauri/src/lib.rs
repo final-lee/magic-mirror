@@ -14,6 +14,7 @@ mod jsonl;
 pub mod k8s;
 mod k8s_access_commands;
 mod k8s_commands;
+mod k8s_network_commands;
 mod model;
 mod mouse_nav;
 mod pg;
@@ -163,6 +164,7 @@ pub fn run() {
             k8s_commands::k8s_drain,
             k8s_commands::k8s_change_log,
             k8s_commands::k8s_undo,
+            k8s_network_commands::k8s_network,
             argocd_commands::argocd_set_token,
             argocd_commands::argocd_forget_token,
             argocd_commands::argocd_session,

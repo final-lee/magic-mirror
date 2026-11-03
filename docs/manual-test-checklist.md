@@ -270,3 +270,10 @@
 - [ ] aggregation: `aggregate-to-view` 라벨을 단 ClusterRole을 만들면 `view`에 묶인 주체의 상세 경로에 "(그 ClusterRole에서 합쳐짐)"이 보인다(다시 읽기 후)
 - [ ] 누가 할 수 있나: `get secrets`를 네임스페이스와 함께 찾으면 직접·그룹 경유·access policy로 받은 주체가 경로와 함께 나오고, `system:authenticated` 같은 기본 그룹에서 받은 권한은 그 그룹 한 줄뿐이다. [클러스터에 대조(SubjectAccessReview)]는 SubjectAccessReview를 만들 수 없는 신원에서는 꺼지고 이유가 보인다. 만들 수 있는 신원에서는 "일치 N명, 다름 M명"이 나오고 다른 줄에는 "계산은 허용, 클러스터는 거부"가 붙는다
 - [ ] 워크로드 신원: IRSA 어노테이션이 있는 ServiceAccount와 Pod Identity 연결이 표에 보이고 쓰는 Pod 수가 맞다. 역할 신뢰 정책에 이 클러스터의 OIDC 공급자와 맞는 `sub`·`aud` 조건이 있으면 "동작해요", `sub`를 다른 ServiceAccount로 바꾸면 "연결돼 있지만 동작하지 않음"과 이유가, IAM 권한이 없으면 "확인하지 못함"이 보인다. 역할 이름을 누르면 IAM 작업 공간에서 열린다
+## EKS 네트워크 (K6)
+- [ ] 왼쪽 메뉴 "🌐 네트워크" → 로드밸런서 탭에 type이 LoadBalancer인 Service와 Ingress가 나온다. AWS Load Balancer Controller로 만든 것은 로드 밸런서 이름·ALB/NLB·리스너·대상 상태가 보이고, 행을 누르면 70% 상세에 리스너 규칙과 대상 그룹이 뜬다. 비정상 대상에는 사유가 보이고, 대상의 Pod·노드 링크가 워크로드 화면에서 그 객체를 연다
+- [ ] 주소가 아직 없는 Service는 "주소 없음", 주소는 있는데 ELBv2에 없는 것(클래식 로드 밸런서 등)은 "찾지 못함"으로 나온다. 이 클러스터 태그가 붙은 짝 없는 로드 밸런서는 표 아래에 따로 나온다
+- [ ] 노드·서브넷 탭: 노드마다 인스턴스 ID·AZ·서브넷이 나오고(Fargate는 인스턴스 없음), 서브넷 표의 남은 IP가 콘솔(VPC → 서브넷)과 맞다. VPC CNI 클러스터의 Pod IP 탭에서 서브넷별 Pod 수가 맞고, hostNetwork Pod는 "노드 IP"로 표시된다
+- [ ] NetworkPolicy 탭: 정책이 없는 네임스페이스가 위에 표시되고, 정책을 누르면 들어오고 나가는 규칙이 요약된다
+- [ ] SSO가 만료됐거나 elasticloadbalancing·ec2 읽기 권한이 없을 때 해당 부분만 "읽지 못한 부분"에 이유와 함께 나오고 쿠버네티스 쪽 화면은 그대로 보인다
+- [ ] [VPC 다이어그램 열기]로 클러스터 VPC 구조도 탭이 열리고 클러스터의 노드(EC2)와 로드 밸런서에 분홍 테두리가 있다. 막대의 [강조 끄기]로 평소 모양이 된다. 상세의 [VPC 다이어그램에서 보기]는 그 로드 밸런서만 강조한다. 라이트·다크 테마 모두 확인
