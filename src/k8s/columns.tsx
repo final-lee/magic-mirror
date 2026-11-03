@@ -8,6 +8,33 @@ import {
 } from "./text";
 import type { K8sKindRef, K8sProblem, K8sRow } from "./types";
 import { isHot, numValue, pct, podKey, unavailableFor, usageKindOf, workloadKey, type Usage, type UsageIndex } from "./usage";
+import { HISTORY_MS, splitAtGaps, type PodTrend } from "./usageHistory";
+
+/** 목록 줄의 Pod 사용량 기록. 앱이 아직 모으지 않았으면 null */
+export type TrendOf = (namespace: string, name: string) => PodTrend | null;
+
+const TREND_W = 56;
+const TREND_H = 18;
+
+/** 비율 칸의 작은 그래프: 최근 1시간의 비율(%) 추이. 세로축은 0~100%(넘으면 최대치까지), 점선이 100% */
+function TrendLine({ points, end, hot }: { points: [number, number][]; end: number; hot: boolean }) {
+  const max = Math.max(100, ...points.map(([, value]) => value));
+  const start = end - HISTORY_MS;
+  const x = (at: number) => Math.max(0, ((at - start) / HISTORY_MS) * TREND_W);
+  const y = (value: number) => TREND_H - 1 - (value / max) * (TREND_H - 2);
+  return (
+    <svg className={hot ? "k8s-trend hot" : "k8s-trend"} width={TREND_W} height={TREND_H} viewBox={`0 0 ${TREND_W} ${TREND_H}`} aria-hidden="true">
+      <line className="k8s-trend-guide" x1="0" x2={TREND_W} y1={y(100)} y2={y(100)} />
+      {splitAtGaps(points).map((part) => (
+        part.length === 1 ? (
+          <circle key={part[0][0]} cx={x(part[0][0])} cy={y(part[0][1])} r="1" />
+        ) : (
+          <polyline key={part[0][0]} points={part.map(([at, value]) => `${x(at)},${y(value)}`).join(" ")} />
+        )
+      ))}
+    </svg>
+  );
+}
 
 /** 종류별 값 열. 키는 백엔드 read/values.rs가 채우는 키다. */
 const KIND_COLUMNS: Record<string, string[]> = {
@@ -69,10 +96,18 @@ export function Problems({ problems }: { problems: K8sProblem[] }) {
   );
 }
 
-/** 비율 칸. 기준이 없으면 비우고, 90%를 넘으면 눈에 띄게 한다 */
-export function Percent({ value }: { value: number | null }) {
+/** 비율 칸. 기준이 없으면 비우고, 90%를 넘으면 눈에 띄게 한다. 앱이 모은 기록이 있으면 숫자 앞에 작은 추이 그래프를 둔다 */
+export function Percent({ value, trend }: { value: number | null; trend?: { points: [number, number][]; end: number } | null }) {
   if (value === null) return null;
-  return <span className={isHot(value) ? "k8s-hot" : undefined}>{`${Math.round(value)}%`}</span>;
+  const hot = isHot(value);
+  const text = <span className={hot ? "k8s-hot" : undefined}>{`${Math.round(value)}%`}</span>;
+  if (!trend || trend.points.length === 0) return text;
+  return (
+    <span className="k8s-trend-cell">
+      <TrendLine points={trend.points} end={trend.end} hot={hot} />
+      {text}
+    </span>
+  );
 }
 
 /** 이 줄의 사용량. metrics-server가 아직 모르는 객체(방금 만든 Pod, 사용량이 없는 워크로드)는 null */
@@ -91,9 +126,9 @@ function usageOf(kind: K8sKindRef, usage: UsageIndex, r: K8sRow): Usage | null {
 
 /**
  * 사용량 열. 읽을 수 없거나 사용량을 붙이지 않는 종류면 열을 만들지 않는다(빈 열을 두지 않는다).
- * Pod: CPU·메모리와 요청·제한 대비 %(k9s의 %CPU/R, %CPU/L, %MEM/R, %MEM/L), 노드: 할당 가능량 대비 %, 워크로드: Pod 사용량의 합.
+ * Pod: CPU·메모리와 요청·제한 대비 %(k9s의 %CPU/R, %CPU/L, %MEM/R, %MEM/L, trendOf가 있으면 최근 추이 그래프와 함께), 노드: 할당 가능량 대비 %, 워크로드: Pod 사용량의 합.
  */
-export function usageColumns(kind: K8sKindRef, usage: UsageIndex | null | undefined): ListColumn<K8sRow>[] {
+export function usageColumns(kind: K8sKindRef, usage: UsageIndex | null | undefined, trendOf?: TrendOf | null): ListColumn<K8sRow>[] {
   const k = usageKindOf(kind);
   if (!usage || k === null || unavailableFor(kind, usage) !== null) return [];
   const used = (r: K8sRow) => usageOf(kind, usage, r);
@@ -101,18 +136,27 @@ export function usageColumns(kind: K8sKindRef, usage: UsageIndex | null | undefi
     { key: "u:cpu", label: COL_CPU, numeric: true, render: (r) => { const u = used(r); return u ? formatCpu(u.cpuMilli) : ""; }, sort: (r) => used(r)?.cpuMilli ?? null },
     { key: "u:memory", label: COL_MEMORY, numeric: true, render: (r) => { const u = used(r); return u ? formatBytes(u.memoryBytes) : ""; }, sort: (r) => used(r)?.memoryBytes ?? null },
   ];
-  const ratio = (key: string, label: string, pick: (u: Usage) => number, base: string): ListColumn<K8sRow> => {
+  const ratio = (key: string, label: string, pick: (u: Usage) => number, base: string, pickTrend?: (t: PodTrend, i: number) => number): ListColumn<K8sRow> => {
     const value = (r: K8sRow) => { const u = used(r); return u ? pct(pick(u), numValue(r, base)) : null; };
-    return { key, label, numeric: true, render: (r) => <Percent value={value(r)} />, sort: value };
+    // 지금의 요청·제한을 기준으로 모아 둔 사용량의 비율을 다시 셈한다
+    const trend = (r: K8sRow) => {
+      const t = pickTrend && trendOf ? trendOf(r.namespace ?? "", r.name) : null;
+      const b = numValue(r, base);
+      if (!t || !pickTrend || b === null || b <= 0) return null;
+      return { points: t.at.map((at, i): [number, number] => [at, (pickTrend(t, i) * 100) / b]), end: t.end };
+    };
+    return { key, label, numeric: true, render: (r) => <Percent value={value(r)} trend={trend(r)} />, sort: value };
   };
   const cpu = (u: Usage) => u.cpuMilli;
   const memory = (u: Usage) => u.memoryBytes;
+  const cpuTrend = (t: PodTrend, i: number) => t.cpu[i] * 1000;
+  const memoryTrend = (t: PodTrend, i: number) => t.memory[i];
   if (k === "pod") {
     cols.push(
-      ratio("u:cpuRequest", COL_CPU_OF_REQUEST, cpu, "cpuRequest"),
-      ratio("u:cpuLimit", COL_CPU_OF_LIMIT, cpu, "cpuLimit"),
-      ratio("u:memoryRequest", COL_MEMORY_OF_REQUEST, memory, "memoryRequest"),
-      ratio("u:memoryLimit", COL_MEMORY_OF_LIMIT, memory, "memoryLimit"),
+      ratio("u:cpuRequest", COL_CPU_OF_REQUEST, cpu, "cpuRequest", cpuTrend),
+      ratio("u:cpuLimit", COL_CPU_OF_LIMIT, cpu, "cpuLimit", cpuTrend),
+      ratio("u:memoryRequest", COL_MEMORY_OF_REQUEST, memory, "memoryRequest", memoryTrend),
+      ratio("u:memoryLimit", COL_MEMORY_OF_LIMIT, memory, "memoryLimit", memoryTrend),
     );
   } else if (k === "node") {
     cols.push(ratio("u:cpuAllocatable", COL_CPU_OF_ALLOCATABLE, cpu, "cpuAllocatable"), ratio("u:memoryAllocatable", COL_MEMORY_OF_ALLOCATABLE, memory, "memoryAllocatable"));
@@ -120,13 +164,13 @@ export function usageColumns(kind: K8sKindRef, usage: UsageIndex | null | undefi
   return cols;
 }
 
-export function columnsFor(kind: K8sKindRef, showNamespace: boolean, now: number, usage?: UsageIndex | null): ListColumn<K8sRow>[] {
+export function columnsFor(kind: K8sKindRef, showNamespace: boolean, now: number, usage?: UsageIndex | null, trendOf?: TrendOf | null): ListColumn<K8sRow>[] {
   const cols: ListColumn<K8sRow>[] = [{ key: "name", label: COL_NAME, render: (r) => <span className="mono">{r.name}</span>, sort: (r) => r.name }];
   if (showNamespace && kind.namespaced) cols.push({ key: "namespace", label: COL_NAMESPACE, render: (r) => r.namespace ?? "", sort: (r) => r.namespace ?? "" });
   for (const key of valueKeys(kind)) {
     cols.push({ key: `v:${key}`, label: COLUMN_LABELS[key] ?? key, render: (r) => r.values[key] ?? "", sort: (r) => r.values[key] ?? null });
   }
-  cols.push(...usageColumns(kind, usage));
+  cols.push(...usageColumns(kind, usage, trendOf));
   cols.push({ key: "problems", label: COL_PROBLEMS, render: (r) => <Problems problems={r.problems} />, sort: (r) => r.problems.length });
   cols.push({ key: "age", label: COL_AGE, render: (r) => age(r.createdAt, now), sort: (r) => (r.createdAt ? Date.parse(r.createdAt) : null) });
   return cols;

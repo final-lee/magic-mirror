@@ -1,5 +1,5 @@
 import { targetKey } from "./targets";
-import { podKey } from "./usage";
+import { METRICS_INTERVAL_MS, podKey } from "./usage";
 import type { K8sMetrics, K8sMetricsUnavailable, K8sOwnerRef, K8sTarget, ObjectRef } from "./types";
 
 /**
@@ -11,6 +11,8 @@ import type { K8sMetrics, K8sMetricsUnavailable, K8sOwnerRef, K8sTarget, ObjectR
 export const HISTORY_MS = 60 * 60_000;
 /** 같은 클러스터를 여러 화면이 함께 읽어도 이 간격 안의 값은 한 번만 남긴다 */
 const MIN_GAP_MS = 10_000;
+/** 이보다 오래 값이 비면(연결이 끊겼던 동안) 그래프 선을 잇지 않는다 */
+const GAP_MS = METRICS_INTERVAL_MS * 3;
 
 /** 그래프 선 하나: [시각(ms), 값]. CPU는 코어, 메모리는 바이트 */
 export interface UsageSeries {
@@ -143,6 +145,32 @@ export function subscribeUsage(key: string, listener: () => void): () => void {
 }
 
 export const usageVersion = (key: string) => histories.get(key)?.version ?? 0;
+
+/** 목록의 작은 그래프에 쓰는 Pod 합계 기록. 시각은 오래된 것부터, CPU는 코어, 메모리는 바이트. end는 마지막으로 모은 시각 */
+export interface PodTrend {
+  at: readonly number[];
+  cpu: readonly number[];
+  memory: readonly number[];
+  end: number;
+}
+
+export function podTrend(key: string, namespace: string, name: string): PodTrend | null {
+  const history = histories.get(key);
+  const track = history?.pods.get(podKey(namespace, name));
+  if (!history || history.lastAt === null || !track) return null;
+  return { at: track.total.at, cpu: track.total.cpu, memory: track.total.memory, end: history.lastAt };
+}
+
+/** 값이 GAP_MS보다 오래 빈 곳에서 선을 끊는다 */
+export function splitAtGaps(points: [number, number][]): [number, number][][] {
+  const out: [number, number][][] = [];
+  for (const point of points) {
+    const last = out[out.length - 1];
+    if (last && point[0] - last[last.length - 1][0] <= GAP_MS) last.push(point);
+    else out.push([point]);
+  }
+  return out;
+}
 
 function series(name: string, track: Track): [UsageSeries, UsageSeries] {
   return [
