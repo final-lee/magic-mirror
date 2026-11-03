@@ -209,7 +209,7 @@ export function BatchDialog({ batch, api }: Props) {
               {item.error && (
                 <>
                   <p className="err">{t.BATCH_PREVIEW_FAILED}: {item.error}</p>
-                  {batch.phase === "ready" && <button className="btn small" onClick={() => api.retry(index)}>{t.CHANGE_RETRY}</button>}
+                  {batch.phase === "ready" && <button className="btn small tone-secondary" onClick={() => api.retry(index)}>{t.CHANGE_RETRY}</button>}
                 </>
               )}
               {item.preview && (
@@ -225,14 +225,14 @@ export function BatchDialog({ batch, api }: Props) {
           {batch.phase === "stopped" && <span className="cp-hint err">{t.BATCH_STOPPED}</span>}
           {batch.phase === "finished" && <span className="cp-hint">{t.BATCH_DONE}</span>}
           {batch.phase === "ready" && pending > run.length && run.length > 0 && <span className="cp-hint">{t.BATCH_PARTIAL(run.length)}</span>}
-          <button ref={cancelRef} className="btn plain" disabled={applying} onClick={api.cancel}>
+          <button ref={cancelRef} className="btn tone-ghost" disabled={applying} onClick={api.cancel}>
             {closed ? t.BATCH_CLOSE : t.CHANGE_CANCEL}
           </button>
           {closed && !batch.undo && anyApplied && (
-            <button className="btn" onClick={api.undoApplied}>{t.BATCH_UNDO_APPLIED}</button>
+            <button className="btn tone-warn" onClick={api.undoApplied}>{t.BATCH_UNDO_APPLIED}</button>
           )}
           {!closed && (
-            <button className="btn primary" disabled={!ready || applying} onClick={api.apply}>
+            <button className="btn tone-primary" disabled={!ready || applying} onClick={api.apply}>
               {applying ? t.CHANGE_APPLYING : t.BATCH_APPLY(run.length)}
             </button>
           )}

@@ -98,12 +98,12 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sO
       </dl>
       <div className="k8s-actions">
         {node && (
-          <button className="btn" onClick={() => onOpen({ kind: NODES, namespace: null, name: node })}>
+          <button className="btn tone-nav" onClick={() => onOpen({ kind: NODES, namespace: null, name: node })}>
             {openNode(node)}
           </button>
         )}
         {role && onOpenIam && (
-          <button className="btn" onClick={() => onOpenIam(role)}>
+          <button className="btn tone-nav" onClick={() => onOpenIam(role)}>
             {OPEN_IN_IAM}
           </button>
         )}

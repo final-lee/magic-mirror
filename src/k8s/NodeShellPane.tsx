@@ -20,7 +20,7 @@ export function NodeShellPane({ target, ssoProfile, node, namespace, pod, visibl
       <div className="k8s-shell-bar">
         <span className="mono">{NODE_SHELL_BAR(node)}</span>
         <span className="dim">{NODE_SHELL_CLOSE_NOTE}</span>
-        <button className="btn k8s-push" onClick={onClose}>
+        <button className="btn k8s-push tone-ghost-danger" onClick={onClose}>
           {SHELL_CLOSE}
         </button>
       </div>

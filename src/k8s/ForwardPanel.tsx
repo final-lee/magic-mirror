@@ -85,7 +85,7 @@ export function ForwardPanel({ target, ssoProfile, namespace, kind, name, ports,
             <input inputMode="numeric" placeholder={FORWARD_LOCAL_AUTO} value={local} onChange={(e) => setLocal(e.target.value)} />
           </label>
           <div className="k8s-actions">
-            <button className="btn" disabled={busy} onClick={() => void start()}>
+            <button className="btn tone-primary" disabled={busy} onClick={() => void start()}>
               {FORWARD_OPEN}
             </button>
           </div>
@@ -94,11 +94,11 @@ export function ForwardPanel({ target, ssoProfile, namespace, kind, name, ports,
           {opened && (
             <div role="status" className="k8s-forward-done">
               <span className="mono">{forwardOpened(forwardAddress(opened))}</span>
-              <button className="btn" onClick={() => void desktop.openUrl(forwardUrl(opened))}>
+              <button className="btn tone-secondary" onClick={() => void desktop.openUrl(forwardUrl(opened))}>
                 {FORWARD_OPEN_BROWSER}
               </button>
               <button
-                className="btn"
+                className="btn tone-secondary"
                 onClick={() => {
                   void desktop.copy(forwardUrl(opened));
                   setCopied(true);

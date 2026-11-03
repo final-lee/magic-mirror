@@ -34,7 +34,7 @@ export function ChangeLog({ target, onStart }: Props) {
               <td>{entry.ok ? t.CHANGE_SUCCESS : `${t.CHANGE_FAILED}: ${entry.error ?? ""}`}{entry.closedAt ? ` · ${t.SHELL_CLOSED_AT(formatDateTime(entry.closedAt))}` : ""}</td>
               <td>
                 {entry.ok && entry.inverse && !entry.undone && (
-                  <button className="btn small" disabled={busy !== null} onClick={() => void prepare(entry.id, async () => {
+                  <button className="btn small tone-warn" disabled={busy !== null} onClick={() => void prepare(entry.id, async () => {
                     const undo = await k8sApi.undo(entry.id);
                     onStart(undo.change, entry.id);
                   })}>

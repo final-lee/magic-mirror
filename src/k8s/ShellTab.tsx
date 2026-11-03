@@ -91,7 +91,7 @@ export function ShellTab({ target, ssoProfile, namespace, pod, containers, rules
                 </label>
               </div>
               <div className="k8s-actions">
-                <button className="btn" disabled={!perm.allowed} title={perm.reason ?? undefined} onClick={ask}>
+                <button className="btn tone-primary" disabled={!perm.allowed} title={perm.reason ?? undefined} onClick={ask}>
                   {SHELL_OPEN}
                 </button>
               </div>
@@ -113,10 +113,10 @@ export function ShellTab({ target, ssoProfile, namespace, pod, containers, rules
             </label>
           )}
           <div className="k8s-actions">
-            <button className="btn" disabled={required === undefined || (required !== null && typed !== required)} onClick={confirm}>
+            <button className="btn tone-primary" disabled={required === undefined || (required !== null && typed !== required)} onClick={confirm}>
               {SHELL_CONFIRM}
             </button>
-            <button className="btn" onClick={close}>
+            <button className="btn tone-ghost" onClick={close}>
               {SHELL_CANCEL}
             </button>
           </div>
@@ -128,7 +128,7 @@ export function ShellTab({ target, ssoProfile, namespace, pod, containers, rules
             <span className="mono">
               {session.container} · {session.mode === "attach" ? SHELL_MODE_ATTACH : SHELL_MODE_EXEC}
             </span>
-            <button className="btn k8s-push" onClick={() => setSession(null)}>
+            <button className="btn k8s-push tone-ghost" onClick={() => setSession(null)}>
               {SHELL_CLOSE}
             </button>
           </div>

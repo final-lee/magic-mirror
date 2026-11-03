@@ -83,7 +83,7 @@ export function YamlEdit({ target, ssoProfile, objectRef, view, canRead, onPrevi
             <button className="btn small tone-primary" disabled={problems.length > 0} onClick={preview}>
               {t.YAML_PREVIEW}
             </button>
-            <button className="btn small" onClick={onCancel}>
+            <button className="btn small tone-ghost" onClick={onCancel}>
               {t.YAML_CANCEL_EDIT}
             </button>
           </>,

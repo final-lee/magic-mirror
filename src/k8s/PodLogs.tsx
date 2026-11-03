@@ -270,11 +270,11 @@ function LogView({ target, ssoProfile, live, namespace, pod, options, pretty }: 
         </div>
         <input type="search" className="k8s-filter" aria-label={LOG_SEARCH} placeholder={LOG_SEARCH} value={query} onChange={(e) => setQuery(e.target.value)} />
         {query && <span className="dim k8s-log-count">{logMatches(matches)}</span>}
-        <button className="btn" aria-pressed={paused !== null} onClick={() => setPaused((p) => (p ? null : buf))}>
+        <button className="btn tone-secondary" aria-pressed={paused !== null} onClick={() => setPaused((p) => (p ? null : buf))}>
           {paused ? LOG_RESUME : LOG_PAUSE}
         </button>
         {paused && buf.received > paused.received && <span className="dim k8s-log-count">{logPending(buf.received - paused.received)}</span>}
-        <button className="btn" disabled={visibleCount === 0} onClick={() => void copy()} onBlur={() => setCopied(false)}>
+        <button className="btn tone-secondary" disabled={visibleCount === 0} onClick={() => void copy()} onBlur={() => setCopied(false)}>
           {copied ? COPIED : COPY}
         </button>
       </div>
@@ -289,7 +289,7 @@ function LogView({ target, ssoProfile, live, namespace, pod, options, pretty }: 
         </div>
         {!atBottom && (
           <button
-            className="btn k8s-log-bottom"
+            className="btn k8s-log-bottom tone-secondary"
             onClick={() => {
               setAtBottom(true);
               const el = box.current;

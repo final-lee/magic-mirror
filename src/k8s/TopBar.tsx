@@ -88,11 +88,11 @@ export function TopBar({ context, identity, connection, execProfile, profile, na
             </select>
           </label>
           {onCreateYaml && (
-            <button className="btn small" disabled={connection !== "connected"} onClick={onCreateYaml}>
+            <button className="btn small tone-primary" disabled={connection !== "connected"} onClick={onCreateYaml}>
               {YAML_CREATE}
             </button>
           )}
-          <button className="btn small" onClick={onReconnect}>
+          <button className="btn small tone-secondary" onClick={onReconnect}>
             {RECONNECT}
           </button>
         </span>

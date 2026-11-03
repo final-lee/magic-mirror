@@ -69,10 +69,10 @@ export function SecretKeys({ target, ssoProfile, namespace, name, keys, canRead 
                     <div className="k8s-secret">
                       <pre className="mono">{value.text}</pre>
                       {value.encoding === "base64" && <p className="dim">{BASE64_NOTE}</p>}
-                      <button className="btn" onClick={() => hide(key)}>{HIDE_VALUE}</button>
+                      <button className="btn tone-secondary" onClick={() => hide(key)}>{HIDE_VALUE}</button>
                     </div>
                   ) : (
-                    <button className="btn" disabled={canRead === "no" || busy.has(key)} title={canRead === "no" ? NO_SECRET_PERMISSION : undefined} onClick={() => void reveal(key)}>
+                    <button className="btn tone-secondary" disabled={canRead === "no" || busy.has(key)} title={canRead === "no" ? NO_SECRET_PERMISSION : undefined} onClick={() => void reveal(key)}>
                       {SHOW_VALUE}
                     </button>
                   )}
