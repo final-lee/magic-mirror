@@ -54,6 +54,27 @@ const RESOURCES: Record<string, ReturnType<typeof res>[]> = {
   ],
 };
 
+// 백엔드의 리소스 색인(⌘K) 흉내: list_resources가 읽은 목록의 검색용 사본. 다른 리전의 오래된 목록 하나를 미리 넣어 둔다.
+type Indexed = { profile: string; region: string; service: string; typeId: string; fetchedAt: number; truncated: boolean; items: unknown[] };
+const INDEX = new Map<string, Indexed>();
+function recordIndex(profile: string, region: string, service: string, typeId: string, items: ReturnType<typeof res>[], fetchedAt = Date.now()) {
+  const key = (services as { id: string; global: boolean }[]).find((s) => s.id === service)?.global ? "global" : region;
+  INDEX.set(`${profile}|${key}|${service}|${typeId}`, {
+    profile,
+    region: key,
+    service,
+    typeId,
+    fetchedAt,
+    truncated: false,
+    items: items.map(({ id, name, arn, values, tags }) => ({ id, name, arn, values, tags })),
+  });
+}
+const WEST = [
+  res("i-0f9e8d7c6b5a40001", "web-west-1", { state: "running", type: "t3.medium", privateIp: "10.8.1.21", az: "us-west-2a" }),
+  res("i-0f9e8d7c6b5a40002", "orders-api-west", { state: "running", type: "m6i.large", privateIp: "10.8.1.40", az: "us-west-2b" }),
+];
+recordIndex("prod", "us-west-2", "ec2", "instances", WEST, Date.now() - 3 * 3_600_000);
+
 const HOME = "/Users/demo";
 const LOCAL: Record<string, { name: string; isDir: boolean; size: number | null }[]> = {
   [HOME]: [
@@ -233,8 +254,16 @@ mockIPC(
         };
       case "save_settings":
         return null;
-      case "list_resources":
-        return { items: RESOURCES[`${a.service}/${a.typeId}`] ?? [], truncated: false };
+      case "list_resources": {
+        const items = a.region === "us-west-2" && a.service === "ec2" && a.typeId === "instances" ? WEST : (RESOURCES[`${a.service}/${a.typeId}`] ?? []);
+        recordIndex(a.profile, a.region, a.service, a.typeId, items);
+        return { items, truncated: false };
+      }
+      case "resource_index":
+        return [...INDEX.values()].filter((l) => l.profile === a.profile);
+      case "clear_resource_index":
+        INDEX.clear();
+        return null;
       case "list_s3_objects":
         return {
           entries: (S3[a.prefix] ?? []).map((e) => ({

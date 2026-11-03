@@ -1,3 +1,4 @@
+import { scoreFields } from "../lib/fuzzy";
 import type { ArgoAppRow } from "./types";
 
 /** 레이블 필터 한 개. value가 null이면 "그 키가 있는 앱" */
@@ -23,11 +24,9 @@ export function labelMatch(picks: LabelPick[], r: ArgoAppRow): boolean {
   return [...byKey].every(([key, of]) => of.some((p) => (p.value === null ? key in r.labels : r.labels[key] === p.value)));
 }
 
-/** 검색어(소문자)가 이름, 레이블 값, 대상 네임스페이스 어디든 들어 있으면 맞다 */
-export const searchMatch = (q: string, r: ArgoAppRow): boolean =>
-  r.name.toLowerCase().includes(q) ||
-  (r.values.destNamespace ?? "").toLowerCase().includes(q) ||
-  Object.values(r.labels).some((v) => v.toLowerCase().includes(q));
+/** 검색어 토큰(tokenize)이 모두 이름, 대상 네임스페이스, 레이블 값 중 어딘가에 퍼지로 맞으면 맞다. 순서는 건드리지 않는다(묶음·심각도 순서가 화면의 뜻이다) */
+export const searchMatch = (tokens: readonly string[], r: ArgoAppRow): boolean =>
+  scoreFields(tokens, [r.name, r.values.destNamespace, ...Object.values(r.labels)]) !== null;
 
 export interface LabelOption {
   pick: LabelPick;

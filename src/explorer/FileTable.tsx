@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerE
 import type { Column, Resource } from "../api/types";
 import { Cell } from "../components/Cell";
 import { compareValues } from "../lib/format";
+import { fuzzyFilter, fuzzyKeep } from "../lib/fuzzy";
 import { nextSelection, type SelectionState } from "./selection";
 
 const DRAG_THRESHOLD = 5;
@@ -22,6 +23,7 @@ interface Props {
 
 export function FileTable({ columns, rows, filter, selection, onSelectionChange, onOpen, onBack, onDragStart, emptyText }: Props) {
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: columns[0]?.key ?? "", dir: 1 });
+  const [sortedByUser, setSortedByUser] = useState(false);
   const press = useRef<{ id: string; x: number; y: number; started: boolean } | null>(null);
 
   const justDragged = useRef(false);
@@ -41,11 +43,13 @@ export function FileTable({ columns, rows, filter, selection, onSelectionChange,
     return () => window.removeEventListener("pointerup", reset);
   }, []);
 
+  // 검색 중에는 헤더를 누르기 전까지 잘 맞는 순서로 보이고, 헤더를 누르면 그 열 정렬이 이긴다.
+  const scoreOrder = filter.trim() !== "" && !sortedByUser;
   const visible = useMemo(() => {
-    const f = filter.trim().toLowerCase();
-    const filtered = f ? rows.filter((r) => r.name.toLowerCase().includes(f)) : rows;
-    return [...filtered].sort((a, b) => compareValues(a.values[sort.key] ?? "", b.values[sort.key] ?? "") * sort.dir);
-  }, [rows, filter, sort]);
+    const sorted = [...rows].sort((a, b) => compareValues(a.values[sort.key] ?? "", b.values[sort.key] ?? "") * sort.dir);
+    // 점수가 같으면 열 정렬 순서가 남도록 먼저 정렬한다.
+    return scoreOrder ? fuzzyFilter(sorted, filter, (r) => [r.name]) : fuzzyKeep(sorted, filter, (r) => [r.name]);
+  }, [rows, filter, sort, scoreOrder]);
   const order = visible.map((r) => r.id);
 
   const onKeyDown = (e: KeyboardEvent) => {
@@ -111,9 +115,13 @@ export function FileTable({ columns, rows, filter, selection, onSelectionChange,
             {columns.map((c) => (
               <th
                 key={c.key}
-                onClick={() => setSort((s) => (s.key === c.key ? { key: c.key, dir: s.dir === 1 ? -1 : 1 } : { key: c.key, dir: 1 }))}
+                onClick={() => {
+                  setSortedByUser(true);
+                  // 점수 순서에서 처음 누르면 화살표가 없었으니 오름차순부터 시작한다.
+                  setSort((s) => (!scoreOrder && s.key === c.key ? { key: c.key, dir: s.dir === 1 ? -1 : 1 } : { key: c.key, dir: 1 }));
+                }}
               >
-                {c.label} {sort.key === c.key ? (sort.dir === 1 ? "▲" : "▼") : ""}
+                {c.label} {!scoreOrder && sort.key === c.key ? (sort.dir === 1 ? "▲" : "▼") : ""}
               </th>
             ))}
           </tr>

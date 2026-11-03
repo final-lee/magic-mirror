@@ -11,6 +11,7 @@ use crate::aws::context::{self, AwsContext, ProfileInfo};
 use crate::aws::sso::{self, SsoLogins};
 use crate::error::AppError;
 use crate::model::{ListResult, ServiceInfo};
+use crate::resource_index::{IndexedList, ResourceIndexState};
 use crate::settings::{self, Settings};
 
 pub struct AppState {
@@ -44,6 +45,7 @@ pub fn list_services(state: State<'_, AppState>) -> Vec<ServiceInfo> {
 #[tauri::command]
 pub async fn list_resources(
     state: State<'_, AppState>,
+    index: State<'_, ResourceIndexState>,
     profile: String,
     region: String,
     service: String,
@@ -51,7 +53,22 @@ pub async fn list_resources(
 ) -> Result<ListResult, AppError> {
     let adapter = find_adapter(&state.adapters, &service)?;
     let cfg = state.ctx.config(&profile, effective_region(adapter.as_ref(), &region)).await?;
-    adapter.list(&cfg, &type_id).await
+    let result = adapter.list(&cfg, &type_id).await?;
+    // 검색용 사본은 성공한 목록만 남긴다. 키의 리전은 프론트엔드 `resourcesKey`와 같은 규칙이다(전역 서비스는 "global").
+    let region_key = if adapter.is_global() { "global" } else { region.as_str() };
+    index.record(&profile, region_key, &service, &type_id, &result);
+    Ok(result)
+}
+
+/// ⌘K 검색용: 이 프로필로 받아 둔 모든 목록(7일 안). 디스크에 남은 것도 포함한다.
+#[tauri::command]
+pub async fn resource_index(index: State<'_, ResourceIndexState>, profile: String) -> Result<Vec<IndexedList>, AppError> {
+    Ok(index.lists_for(&profile))
+}
+
+#[tauri::command]
+pub async fn clear_resource_index(index: State<'_, ResourceIndexState>) -> Result<(), AppError> {
+    index.clear().map_err(|e| AppError::other(format!("리소스 색인을 지울 수 없어요: {e}")))
 }
 
 /// 이 프로필로 로그인할 때의 키와 `aws sso login`에 넘길 프로필. SSO 설정을 못 찾으면 그 프로필 자신이다(프론트엔드와 같은 규칙).

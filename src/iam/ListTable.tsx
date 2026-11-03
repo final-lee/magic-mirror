@@ -18,6 +18,8 @@ interface Props<T> {
   onSelect: (id: string) => void;
   onOpen: (id: string) => void;
   empty: string;
+  /** 행이 이미 검색 점수순이다: 사용자가 머리글을 누르기 전까지 다시 정렬하지 않는다 */
+  ranked?: boolean;
 }
 
 function compare(a: string | number, b: string | number): number {
@@ -26,8 +28,11 @@ function compare(a: string | number, b: string | number): number {
 }
 
 /** 사용자·그룹·역할·정책 목록이 함께 쓰는 정렬·선택 가능한 표. 첫 열을 기준으로 처음 정렬한다. */
-export function ListTable<T>({ label, rows, columns, rowKey, selectedId, onSelect, onOpen, empty }: Props<T>) {
+export function ListTable<T>({ label, rows, columns, rowKey, selectedId, onSelect, onOpen, empty, ranked }: Props<T>) {
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: columns[0].key, dir: 1 });
+  const [sortedByUser, setSortedByUser] = useState(false);
+  // 점수순으로 넘어온 행은 머리글을 누르기 전까지 그 순서 그대로 둔다(그동안 정렬 화살표는 숨긴다).
+  const scoreOrder = !!ranked && !sortedByUser;
   const box = useRef<HTMLDivElement>(null);
 
   // 상세를 보고 돌아왔을 때나 ↑↓로 옮길 때 고른 행이 화면 밖에 있으면 보이는 곳까지 스크롤한다
@@ -37,16 +42,20 @@ export function ListTable<T>({ label, rows, columns, rowKey, selectedId, onSelec
 
   const sorted = useMemo(() => {
     const get = columns.find((c) => c.key === sort.key)?.sort;
-    if (!get) return rows;
+    if (scoreOrder || !get) return rows;
     return [...rows].sort((a, b) => {
       const x = get(a);
       const y = get(b);
       if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
       return compare(x, y) * sort.dir;
     });
-  }, [rows, columns, sort]);
+  }, [rows, columns, sort, scoreOrder]);
 
-  const toggleSort = (key: string) => setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
+  const toggleSort = (key: string) => {
+    setSortedByUser(true);
+    // 점수 순서에서 처음 누르면 화살표가 없었으니 오름차순부터 시작한다.
+    setSort((s) => (!scoreOrder && s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
+  };
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Enter" && selectedId) {
@@ -71,10 +80,10 @@ export function ListTable<T>({ label, rows, columns, rowKey, selectedId, onSelec
                 key={c.key}
                 scope="col"
                 className={`${c.sort ? "" : "nosort"}${c.numeric ? " num" : ""}`}
-                aria-sort={sort.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
+                aria-sort={!scoreOrder && sort.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
                 onClick={c.sort ? () => toggleSort(c.key) : undefined}
               >
-                {c.label} {sort.key === c.key ? (sort.dir === 1 ? "▲" : "▼") : ""}
+                {c.label} {!scoreOrder && sort.key === c.key ? (sort.dir === 1 ? "▲" : "▼") : ""}
               </th>
             ))}
           </tr>

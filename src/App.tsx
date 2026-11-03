@@ -1,9 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { errorMessage } from "./api/errors";
-import { useAccount, useProfiles, useServices, useSettings } from "./api/queries";
+import { GLOBAL, hardResetResourceCache, resourceTtlMs, useAccount, useProfiles, useServices, useSettings } from "./api/queries";
 import type { Favorite } from "./api/types";
 import { MainArea } from "./components/MainArea";
+import type { ResourceFocus } from "./components/ResourceArea";
+import { ResourcePalette, type PalettePick } from "./components/ResourcePalette";
 import { NoProfiles } from "./components/NoProfiles";
 import { ServiceSettings } from "./components/ServiceSettings";
 import { Sidebar } from "./components/Sidebar";
@@ -51,6 +53,10 @@ export default function App() {
   const [filter, setFilter] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const filterRef = useRef<HTMLInputElement>(null);
+  // ⌘K 리소스 찾기. focus는 거기서 고른 리소스로, nonce가 바뀔 때마다 그 행을 고른다(같은 리소스를 다시 골라도).
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [focus, setFocus] = useState<ResourceFocus | null>(null);
+  const focusNonce = useRef(0);
   const account = useAccount(profile);
   const [activeTab, setActiveTab] = useState<string>("resources");
   const [explorerTabs, setExplorerTabs] = useState<{ id: string; location: S3Location }[]>([]);
@@ -111,6 +117,9 @@ export default function App() {
     if (k8s) void refreshK8s(qc, k8s.target, k8s.target.profile);
   }, [qc, profile, pgTabs, k8sTabs, activeTab]);
 
+  // 하드 리셋: 모든 프로필·리전의 리소스 목록 캐시(메모리·디스크)를 버리고 보이는 목록을 처음부터 다시 읽는다
+  const hardReset = useCallback(() => hardResetResourceCache(qc), [qc]);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!e.metaKey) return;
@@ -118,14 +127,20 @@ export default function App() {
       if (key === "f") {
         e.preventDefault();
         filterRef.current?.focus();
+      } else if (key === "r" && e.shiftKey) {
+        e.preventDefault();
+        hardReset().catch((err: unknown) => console.error("리소스 캐시를 비우지 못했어요", err));
       } else if (key === "r") {
         e.preventDefault();
         refresh();
+      } else if (key === "k") {
+        e.preventDefault();
+        if (profile) setPaletteOpen(true);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [refresh]);
+  }, [refresh, hardReset, profile]);
 
   if (profiles.data && profiles.data.length === 0) return <NoProfiles />;
   const failed = [
@@ -236,6 +251,8 @@ export default function App() {
     sso.rearm(name);
     setProfile(name);
     setRegion(nextRegion);
+    setFocus(null);
+    setPaletteOpen(false);
     // 버킷, IAM, 비용은 계정에 속하므로 버킷 탭, 비교 탭, IAM 탭, 비용 탭을 모두 닫는다. DB 연결은 그 프로필의 자격 증명으로 열었으니 PostgreSQL 탭도 닫는다.
     pgTabs.forEach((t) => void closePg(qc, t.target));
     setExplorerTabs([]);
@@ -252,12 +269,25 @@ export default function App() {
 
   const changeRegion = (r: string) => {
     setRegion(r);
+    setFocus(null);
     update({ lastRegion: r });
   };
 
   const select = (sel: Favorite) => {
     setSelection(sel);
+    setFocus(null);
     setFilter("");
+  };
+
+  // ⌘K에서 고른 리소스로 간다: 리소스 탭, 그 리전(전역 서비스는 그대로), 그 종류, 그 행
+  const pickResource = (p: PalettePick) => {
+    setPaletteOpen(false);
+    setActiveTab("resources");
+    setFilter("");
+    if (p.region !== GLOBAL && p.region !== region) changeRegion(p.region);
+    setSelection({ service: p.service, type: p.type });
+    focusNonce.current += 1;
+    setFocus({ id: p.id, nonce: focusNonce.current });
   };
 
   const toggleFavorite = (sel: Favorite) => {
@@ -281,6 +311,7 @@ export default function App() {
           filterRef={filterRef}
           onRefresh={refresh}
           onOpenSettings={() => setShowSettings(true)}
+          onOpenPalette={() => profile && setPaletteOpen(true)}
         />
         <UpdateBanner updater={updater} transfersActive={transfersActive} />
         <SsoBanner entries={sso.entries} onCancel={sso.cancel} onRetry={(p) => void sso.start(p, { manual: true })} onDismiss={sso.dismiss} />
@@ -313,6 +344,7 @@ export default function App() {
             onOpenK8s={openK8s}
             onRefresh={refresh}
             active={activeTab === "resources"}
+            focus={focus}
           />
         </div>
         {profile && iamTab && (
@@ -391,7 +423,13 @@ export default function App() {
             }}
             updater={updater}
             appVersion={appVersion}
+            cacheTtlMinutes={settings.resourceCacheTtlMinutes ?? null}
+            onCacheTtlChange={(minutes) => update({ resourceCacheTtlMinutes: minutes })}
+            onClearCache={hardReset}
           />
+        )}
+        {paletteOpen && profile && (
+          <ResourcePalette profile={profile} services={enabled} ttlMs={resourceTtlMs(settings.resourceCacheTtlMinutes)} onPick={pickResource} onClose={() => setPaletteOpen(false)} />
         )}
       </div>
     </SsoLoginContext.Provider>
