@@ -7,8 +7,10 @@ import { emit } from "@tauri-apps/api/event";
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import App from "../../src/App";
 import "../../src/styles.css";
+import { installOverlayScrollbars } from "../../src/lib/overlayScrollbars";
 import { iamMock } from "./iam";
 import { costMock } from "./cost";
+import { ARGOWF_DEMO_SERVER, argowfMock } from "./argowf";
 import services from "./services.json";
 
 const ACCOUNT = "123456789012";
@@ -251,6 +253,7 @@ mockIPC(
           lastRegion: REGION,
           explorerLocalPath: `${HOME}/Projects/web/dist`,
           diffTool: "filemerge",
+          argoWorkflowsServers: [ARGOWF_DEMO_SERVER],
         };
       case "save_settings":
         return null;
@@ -311,11 +314,14 @@ mockIPC(
         return "0.1.0";
       default:
         if (cmd.startsWith("cost_")) return costMock(cmd, a);
+        if (cmd.startsWith("argowf_")) return argowfMock(cmd, a);
         return cmd.startsWith("iam_") ? iamMock(cmd, a) ?? null : null;
     }
   },
   { shouldMockEvents: true },
 );
+
+installOverlayScrollbars();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
