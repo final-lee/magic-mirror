@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { DEPLOYMENTS, PODS } from "./kinds";
+import { DEPLOYMENTS, PODS, SECRETS } from "./kinds";
 import { ObjectList } from "./ObjectList";
-import { BAD_SELECTOR, COL_NAMESPACE, FILTER_PLACEHOLDER, LIST_EMPTY, LIST_NO_MATCH, LOADING, ONLY_PROBLEMS, PROBLEM_LABELS } from "./text";
-import type { K8sProblem, K8sRow } from "./types";
+import { BAD_SELECTOR, COL_CPU, COL_CPU_OF_LIMIT, COL_CPU_OF_REQUEST, COL_NAMESPACE, FILTER_PLACEHOLDER, LIST_EMPTY, LIST_NO_MATCH, LOADING, METRICS_UNAVAILABLE, ONLY_PROBLEMS, PROBLEM_LABELS } from "./text";
+import type { K8sMetrics, K8sProblem, K8sRow } from "./types";
+import { buildUsageIndex } from "./usage";
 
 const row = (name: string, labels: Record<string, string> = {}, problems: K8sProblem[] = []): K8sRow => ({
   uid: `u-${name}`, name, namespace: "web", resourceVersion: "1", createdAt: null, labels, values: { ready: "1/1", status: "Running" }, problems,
@@ -70,4 +71,27 @@ test("clicking a row selects it", () => {
   fireEvent.click(screen.getByText("worker"));
   expect(onSelect).toHaveBeenCalledWith(rows[1]);
   expect(screen.getByText("api").closest("tr")).toHaveAttribute("aria-selected", "true");
+});
+
+const usageIndex = (over: Partial<K8sMetrics> = {}) => buildUsageIndex({ podsUnavailable: null, nodesUnavailable: null, pods: [], nodes: [], ...over });
+
+test("usage columns appear with fake metrics", () => {
+  const usage = usageIndex({ pods: [{ namespace: "web", name: "api", cpuMilli: 120, memoryBytes: 2048, containers: [], owners: [] }] });
+  setup({ usage });
+  expect(screen.getByRole("columnheader", { name: new RegExp(`^${COL_CPU}`) })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: new RegExp(COL_CPU_OF_LIMIT) })).toBeInTheDocument();
+  expect(screen.getByText("120m")).toBeInTheDocument();
+  expect(screen.queryByText(METRICS_UNAVAILABLE.notInstalled)).toBeNull();
+});
+
+test("when metrics are unavailable one hint is shown and there are no usage columns", () => {
+  setup({ usage: usageIndex({ podsUnavailable: "notInstalled" }) });
+  expect(screen.getAllByText(METRICS_UNAVAILABLE.notInstalled)).toHaveLength(1);
+  expect(screen.queryByRole("columnheader", { name: new RegExp(`^${COL_CPU}`) })).toBeNull();
+  expect(screen.queryByRole("columnheader", { name: new RegExp(COL_CPU_OF_REQUEST) })).toBeNull();
+});
+
+test("kinds without usage columns never show the hint", () => {
+  setup({ kind: SECRETS, usage: usageIndex({ podsUnavailable: "forbidden" }) });
+  expect(screen.queryByText(METRICS_UNAVAILABLE.forbidden)).toBeNull();
 });

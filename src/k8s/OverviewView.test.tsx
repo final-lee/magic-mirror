@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { api } from "../api/client";
 import { onSsoExpired } from "../api/invoke";
 import { SsoLoginContext, useSsoLogin, type SsoLogin } from "../lib/useSsoLogin";
@@ -7,11 +7,11 @@ import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
 import { OverviewView } from "./OverviewView";
 import {
-  CORDONED, NO_METRICS, NO_SKEW, OFF, ON, REFRESH, REQUESTS_PARTIAL, SECTION_LABELS, SEC_NODEPOOLS, UP_TO_DATE, gapText, noRemoved, removedTitle, skewText,
+  CORDONED, METRICS_UNAVAILABLE, NO_METRICS, SEC_NAMESPACE_USAGE, SUB_TOP_CPU, SUB_TOP_MEMORY, NO_SKEW, OFF, ON, REFRESH, REQUESTS_PARTIAL, SECTION_LABELS, SEC_NODEPOOLS, UP_TO_DATE, gapText, noRemoved, removedTitle, skewText,
 } from "./text";
-import type { K8sNodeView, K8sOverview } from "./types";
+import type { K8sMetrics, K8sNodeView, K8sOverview, K8sPodUsage } from "./types";
 
-vi.mock("./api", () => ({ k8sApi: { overview: vi.fn() } }));
+vi.mock("./api", () => ({ k8sApi: { overview: vi.fn(), metrics: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 const m = vi.mocked(k8sApi);
 const T = { profile: "app", region: "r", cluster: "c" };
@@ -33,7 +33,11 @@ function setup() {
   return { onOpenNode };
 }
 
-beforeEach(() => vi.clearAllMocks());
+const noMetrics: K8sMetrics = { podsUnavailable: null, nodesUnavailable: null, pods: [], nodes: [] };
+beforeEach(() => {
+  vi.clearAllMocks();
+  m.metrics.mockResolvedValue(noMetrics);
+});
 
 test("cluster, nodes, add-ons and upgrade checks", async () => {
   m.overview.mockResolvedValue(overview({ skew: [{ node: "ip-1", kubeletVersion: "v1.29.0", minorsBehind: 2 }] }));
@@ -257,4 +261,57 @@ describe("SSO-expired gaps and the login manager", () => {
     await waitFor(() => expect(h.sso.current.entries[0]?.status).toMatchObject({ kind: "failed", afterSuccess: true }));
     expect(api.ssoLogin).toHaveBeenCalledTimes(1);
   });
+});
+
+const podUsage = (namespace: string, name: string, cpuMilli: number, memoryBytes: number): K8sPodUsage => ({ namespace, name, cpuMilli, memoryBytes, containers: [], owners: [] });
+
+test("namespace usage: top by cpu and by memory, summed over pods, read for all namespaces", async () => {
+  m.overview.mockResolvedValue(overview({ metrics: true }));
+  m.metrics.mockResolvedValue({ ...noMetrics, pods: [
+    podUsage("web", "a", 300, 100 * 1024 ** 2), podUsage("web", "b", 200, 100 * 1024 ** 2), podUsage("db", "c", 400, 2 * 1024 ** 3), podUsage("ops", "d", 50, 1024 ** 2),
+  ] });
+  setup();
+  const cpu = await screen.findByRole("table", { name: SUB_TOP_CPU });
+  expect(screen.getByText(SEC_NAMESPACE_USAGE)).toBeInTheDocument();
+  expect(m.metrics).toHaveBeenCalledWith(T, null, "exec");
+  const body = (t: HTMLElement) => within(t).getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell").map((c) => c.textContent));
+  // CPU 순: web 500m(Pod 2), db 400m, ops 50m
+  expect(body(cpu)).toEqual([["web", "500m", "200 MiB", "2"], ["db", "400m", "2 GiB", "1"], ["ops", "50m", "1 MiB", "1"]]);
+  // 메모리 순: db, web, ops
+  expect(body(screen.getByRole("table", { name: SUB_TOP_MEMORY })).map((r) => r[0])).toEqual(["db", "web", "ops"]);
+});
+
+test("namespace usage is limited to the top 10 namespaces", async () => {
+  m.overview.mockResolvedValue(overview({ metrics: true }));
+  m.metrics.mockResolvedValue({ ...noMetrics, pods: Array.from({ length: 12 }, (_, i) => podUsage(`ns${String(i).padStart(2, "0")}`, "p", 100 + i, 1024)) });
+  setup();
+  const cpu = await screen.findByRole("table", { name: SUB_TOP_CPU });
+  expect(within(cpu).getAllByRole("row")).toHaveLength(11);
+  expect(within(cpu).queryByText("ns00")).toBeNull();
+});
+
+test("without metrics-server there is one hint and no usage tables", async () => {
+  m.overview.mockResolvedValue(overview({ metrics: false }));
+  m.metrics.mockResolvedValue({ ...noMetrics, podsUnavailable: "notInstalled", nodesUnavailable: "notInstalled" });
+  setup();
+  expect(await screen.findByText(NO_METRICS)).toBeInTheDocument();
+  await vi.waitFor(() => expect(m.metrics).toHaveBeenCalled());
+  expect(screen.queryByText(SEC_NAMESPACE_USAGE)).toBeNull();
+  expect(screen.queryByText(METRICS_UNAVAILABLE.notInstalled)).toBeNull();
+  expect(screen.queryByRole("table", { name: SUB_TOP_CPU })).toBeNull();
+});
+
+test("forbidden pod metrics with readable node metrics explains itself in the usage section", async () => {
+  m.overview.mockResolvedValue(overview({ metrics: true }));
+  m.metrics.mockResolvedValue({ ...noMetrics, podsUnavailable: "forbidden" });
+  setup();
+  expect(await screen.findByText(METRICS_UNAVAILABLE.forbidden)).toBeInTheDocument();
+  expect(screen.queryByRole("table", { name: SUB_TOP_CPU })).toBeNull();
+});
+
+test("a tab that is not visible does not read usage", async () => {
+  m.overview.mockResolvedValue(overview({ metrics: true }));
+  render(withClientAndSso(<OverviewView target={T} context="ctx" ssoProfile="exec" live visible={false} onOpenNode={vi.fn()} />, newQueryClient(), ssoLoginStub()));
+  expect(await screen.findByText("eks.12")).toBeInTheDocument();
+  expect(m.metrics).not.toHaveBeenCalled();
 });

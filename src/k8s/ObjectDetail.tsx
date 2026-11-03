@@ -3,8 +3,8 @@ import { errorMessage } from "../api/errors";
 import { ErrorState } from "../components/ErrorState";
 import { ChangeActions } from "./ChangeActions";
 import { can } from "./can";
-import { Problems, valueKeys } from "./columns";
-import { age } from "./format";
+import { Percent, Problems, valueKeys } from "./columns";
+import { age, formatBytes, formatCpu } from "./format";
 import { NODES, hasWorkloadLogs, isPod, isSecret, isService, isServiceAccount, resolveLink } from "./kinds";
 import { ObjectForwards } from "./ForwardActions";
 import { ForwardPanel } from "./ForwardPanel";
@@ -21,9 +21,10 @@ import {
   H_REASON, H_RESTARTS, H_STATE, INIT_MARK, LOADING, NO_RECENT_EVENTS, OPEN_IN_IAM, SEC_ANNOTATIONS, SEC_CHILDREN, SEC_CONDITIONS,
   SEC_CONTAINERS, SEC_EVENTS, SEC_LABELS, SEC_OWNERS, TAB_LOGS, TAB_SHELL, TAB_SUMMARY, TAB_YAML, YAML_SECRET_NOTE, H_TIME, H_COUNT, openNode,
   ANNOTATION_FOLD_LABEL, annotationExpand,
-  CHANGE_DENIED, YAML_EDIT,
+  CHANGE_DENIED, YAML_EDIT, H_CPU_USAGE, H_MEMORY_USAGE, USAGE_LIMIT, USAGE_REQUEST,
 } from "./text";
-import type { K8sChange, K8sContainer, K8sKind, K8sLink, K8sObjectView, K8sTarget, ObjectRef } from "./types";
+import type { K8sChange, K8sContainer, K8sContainerUsage, K8sKind, K8sLink, K8sObjectView, K8sTarget, ObjectRef } from "./types";
+import { pct, podKey, type UsageIndex } from "./usage";
 
 interface Props {
   target: K8sTarget;
@@ -47,6 +48,30 @@ interface Props {
   shellNamespace?: string;
   /** 3열 목록 너비 중 덮는 비율(%). 없으면 DETAIL_PCT */
   widthPct?: number;
+  /** 사용량(metrics-server). Pod 상세의 컨테이너 표가 요청·제한과 견주어 보여 준다. 없으면 사용량 열이 없다 */
+  usageIndex?: UsageIndex | null;
+}
+
+/** 사용량 한 칸: 값 아래에 요청·제한과 그 대비 비율 */
+function UsageCell({ used, request, limit, format }: { used: number | undefined; request: number | null | undefined; limit: number | null | undefined; format: (n: number) => string }) {
+  if (used === undefined) return null;
+  const bases: [string, number][] = [];
+  if (request) bases.push([USAGE_REQUEST, request]);
+  if (limit) bases.push([USAGE_LIMIT, limit]);
+  return (
+    <>
+      {format(used)}
+      {bases.length > 0 && (
+        <div className="dim k8s-usage-sub">
+          {bases.map(([label, base]) => (
+            <span key={label}>
+              {label} {format(base)} (<Percent value={pct(used, base)} />)
+            </span>
+          ))}
+        </div>
+      )}
+    </>
+  );
 }
 
 function Links({ title, links, kinds, onOpen }: { title: string; links: K8sLink[]; kinds: K8sKind[]; onOpen: (ref: ObjectRef) => void }) {
@@ -77,7 +102,7 @@ function Links({ title, links, kinds, onOpen }: { title: string; links: K8sLink[
 
 const stateText = (c: K8sContainer) => (c.state === "template" ? "" : c.reason ? `${c.state}: ${c.reason}` : c.state);
 
-function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sObjectView; now: number; kinds: K8sKind[]; onOpen: (ref: ObjectRef) => void; onOpenIam?: (arn: string) => void; children?: ReactNode }) {
+function Summary({ view, now, kinds, onOpen, onOpenIam, containerUsage, children }: { view: K8sObjectView; now: number; kinds: K8sKind[]; onOpen: (ref: ObjectRef) => void; onOpenIam?: (arn: string) => void; containerUsage?: K8sContainerUsage[]; children?: ReactNode }) {
   const { row } = view;
   const node = isPod(view.kind) ? row.values.node : undefined;
   const role = isServiceAccount(view.kind) ? row.values.roleArn : undefined;
@@ -128,7 +153,7 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sO
           <h4>{SEC_CONTAINERS}</h4>
           <table className="k8s-table">
             <thead>
-              <tr><th>{COL_NAME}</th><th>{H_IMAGE}</th><th>{H_STATE}</th><th>{H_RESTARTS}</th><th>{H_LAST_TERMINATION}</th></tr>
+              <tr><th>{COL_NAME}</th><th>{H_IMAGE}</th><th>{H_STATE}</th><th>{H_RESTARTS}</th><th>{H_LAST_TERMINATION}</th>{containerUsage && <><th>{H_CPU_USAGE}</th><th>{H_MEMORY_USAGE}</th></>}</tr>
             </thead>
             <tbody>
               {view.containers.map((c) => (
@@ -138,6 +163,13 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sO
                   <td title={c.message ?? ""}>{stateText(c)}</td>
                   <td>{c.state === "template" ? "" : c.restarts}</td>
                   <td>{c.lastTermination ? `${c.lastTermination.reason ?? ""} (${c.lastTermination.exitCode})` : ""}</td>
+                  {containerUsage && (
+                    // init 컨테이너는 metrics-server가 재지 않는다
+                    <>
+                      <td><UsageCell used={c.init ? undefined : containerUsage.find((u) => u.name === c.name)?.cpuMilli} request={c.cpuRequest} limit={c.cpuLimit} format={formatCpu} /></td>
+                      <td><UsageCell used={c.init ? undefined : containerUsage.find((u) => u.name === c.name)?.memoryBytes} request={c.memoryRequest} limit={c.memoryLimit} format={formatBytes} /></td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -245,7 +277,7 @@ function prettyJson(value: string): string | null {
 
 /** 객체 하나의 상세(요약·YAML). 소유자·자식·노드 링크는 onOpen으로 상세 스택에 쌓는다. */
 export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose,
-  onOpenIam, now, widthPct = DETAIL_PCT, onChange, rolloutProgress, appliedChange, shellNamespace }: Props) {
+  onOpenIam, now, widthPct = DETAIL_PCT, onChange, rolloutProgress, appliedChange, shellNamespace, usageIndex }: Props) {
   const [tab, setTab] = useState<"summary" | "yaml" | "logs" | "shell">("summary");
   // 노드 셸: 변경 틀로 디버그 Pod를 만들고 나면 그 Pod에 들어가는 터미널을 연다
   const [nodeShell, setNodeShell] = useState<{ namespace: string; pod: string } | null>(null);
@@ -403,6 +435,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
             kinds={kinds}
             onOpen={onOpen}
             onOpenIam={onOpenIam}
+            containerUsage={pod && objectRef.namespace !== null ? usageIndex?.containers.get(podKey(objectRef.namespace, objectRef.name)) : undefined}
           >
             {q.data.secretKeys && objectRef.namespace && (
               <SecretKeys target={target} ssoProfile={ssoProfile} namespace={objectRef.namespace} name={objectRef.name} keys={q.data.secretKeys} canRead={canRead} />

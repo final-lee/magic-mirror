@@ -1,4 +1,4 @@
-import type { K8sGroupKind, K8sOverviewSection, K8sProblem } from "./types";
+import type { K8sGroupKind, K8sMetricsUnavailable, K8sOverviewSection, K8sProblem } from "./types";
 
 // 사용자에게 보이는 문구. 백엔드(k8s/failure.rs, k8s/kubeconfig.rs)의 상수와 같은 문장이어야 한다.
 
@@ -465,3 +465,27 @@ export const BATCH_CLOSE = "닫기";
 export const BATCH_DONE = "모두 적용했어요";
 export const CHANGE_WHOLE_OBJECT = "객체 전체";
 export const YAML_DOCUMENT_ERRORS = "문서 오류";
+
+// 사용량(metrics-server)
+export const COL_CPU = "CPU";
+export const COL_MEMORY = "메모리";
+export const COL_CPU_OF_REQUEST = "%CPU/R";
+export const COL_CPU_OF_LIMIT = "%CPU/L";
+export const COL_MEMORY_OF_REQUEST = "%MEM/R";
+export const COL_MEMORY_OF_LIMIT = "%MEM/L";
+/** 노드: 할당 가능량 대비 */
+export const COL_CPU_OF_ALLOCATABLE = "%CPU";
+export const COL_MEMORY_OF_ALLOCATABLE = "%MEM";
+export const METRICS_UNAVAILABLE: Record<K8sMetricsUnavailable, string> = {
+  notInstalled: "metrics-server가 없어 사용량을 보여 줄 수 없어요",
+  forbidden: "metrics.k8s.io를 읽을 권한이 없어 사용량을 보여 줄 수 없어요",
+  notReady: "metrics-server가 응답하지 않아 사용량을 보여 줄 수 없어요",
+};
+export const SEC_NAMESPACE_USAGE = "네임스페이스별 사용량";
+export const SUB_TOP_CPU = "CPU 상위";
+export const SUB_TOP_MEMORY = "메모리 상위";
+export const H_POD_COUNT = "Pod 수";
+export const H_CPU_USAGE = "CPU 사용";
+export const H_MEMORY_USAGE = "메모리 사용";
+export const USAGE_REQUEST = "요청";
+export const USAGE_LIMIT = "제한";

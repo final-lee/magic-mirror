@@ -5,9 +5,10 @@ import { CONFIGMAPS, CRONJOBS, DAEMONSETS, DEPLOYMENTS, JOBS, NODES, PODS, PVCS,
 import { ObjectDetail } from "./ObjectDetail";
 import {
   ANNOTATION_FOLD_LABEL, BACK, CHILDREN_TRUNCATED, CLOSE, LOG_ALL_CONTAINERS, LOG_CONTAINER, NO_RECENT_EVENTS, NO_SECRET_PERMISSION, OPEN_IN_IAM, SEC_CHILDREN, SEC_OWNERS, SHOW_VALUE,
-  CHANGE_NODE_SHELL, CHANGE_NODE_SHELL_IMAGE, FORWARD_OPEN, FORWARD_PORT, SHELL_OPEN, TAB_LOGS, TAB_SHELL, TAB_YAML, YAML_SECRET_NOTE, forwardPortLabel, noStreamPermission, openNode,
+  CHANGE_NODE_SHELL, CHANGE_NODE_SHELL_IMAGE, FORWARD_OPEN, FORWARD_PORT, SHELL_OPEN, TAB_LOGS, TAB_SHELL, TAB_YAML, YAML_SECRET_NOTE, H_CPU_USAGE, H_MEMORY_USAGE, USAGE_LIMIT, USAGE_REQUEST, forwardPortLabel, noStreamPermission, openNode,
 } from "./text";
-import type { K8sKind, K8sObjectView, K8sRow } from "./types";
+import type { K8sContainer, K8sKind, K8sObjectView, K8sRow } from "./types";
+import { buildUsageIndex } from "./usage";
 
 vi.mock("./api", () => ({ k8sApi: { get: vi.fn(), rules: vi.fn(), secretValue: vi.fn(), logs: vi.fn(), workloadLogs: vi.fn(), unwatch: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
@@ -309,4 +310,43 @@ test("after the node shell change is applied the node detail opens the terminal 
   r.rerender(view1({ ...applied }));
   expect(await screen.findByRole("tab", { name: TAB_SHELL })).toHaveAttribute("aria-selected", "true");
   expect(terminalProps[terminalProps.length - 1]).toMatchObject({ mode: "node", namespace: "dev", pod: "mm-node-shell-x" });
+});
+
+test("pod containers show usage against their request and limit, hot ones highlighted", async () => {
+  const container = (name: string, over: Partial<K8sContainer> = {}): K8sContainer => ({ name, image: "i", init: false, state: "running", ready: true, restarts: 0, reason: null, message: null, lastTermination: null, ...over });
+  m.get.mockResolvedValue(view({ containers: [
+    container("init", { init: true, cpuRequest: 100 }),
+    container("app", { cpuRequest: 500, cpuLimit: 1000, memoryRequest: 100 * 1024 * 1024, memoryLimit: 200 * 1024 * 1024 }),
+    container("side"),
+  ] }));
+  const usage = buildUsageIndex({ podsUnavailable: null, nodesUnavailable: null, nodes: [], pods: [{
+    namespace: "prod", name: "web-1", cpuMilli: 960, memoryBytes: 110 * 1024 * 1024, owners: [],
+    containers: [{ name: "app", cpuMilli: 450, memoryBytes: 190 * 1024 * 1024 }, { name: "side", cpuMilli: 10, memoryBytes: 1024 * 1024 }],
+  }] });
+  setup({ usageIndex: usage });
+  expect(await screen.findByRole("columnheader", { name: H_CPU_USAGE })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: H_MEMORY_USAGE })).toBeInTheDocument();
+  const rows = screen.getAllByRole("row");
+  const app = rows.find((r) => r.textContent?.startsWith("app"))!;
+  expect(app).toHaveTextContent("450m");
+  expect(app).toHaveTextContent(`${USAGE_REQUEST} 500m (90%)`);
+  expect(app).toHaveTextContent(`${USAGE_LIMIT} 1 (45%)`);
+  expect(app).toHaveTextContent("190 MiB");
+  expect(app).toHaveTextContent(`${USAGE_LIMIT} 200 MiB (95%)`);
+  expect(app).toHaveTextContent(`${USAGE_REQUEST} 100 MiB (190%)`);
+  // 90%는 넘지 않았고, 메모리의 190%(요청)와 95%(제한)만 눈에 띈다
+  expect([...app.querySelectorAll(".k8s-hot")].map((e) => e.textContent)).toEqual(["190%", "95%"]);
+  // 요청·제한이 없는 컨테이너는 사용량만, init 컨테이너는 비움
+  const side = rows.find((r) => r.textContent?.startsWith("side"))!;
+  expect(side).toHaveTextContent("10m");
+  expect(side).not.toHaveTextContent(USAGE_REQUEST);
+  const init = screen.getAllByRole("row").find((r) => r.textContent?.startsWith("init"))!;
+  expect(init).not.toHaveTextContent("100m");
+});
+
+test("no usage columns without metrics for the pod", async () => {
+  m.get.mockResolvedValue(view({ containers: [{ name: "app", image: "i", init: false, state: "running", ready: true, restarts: 0, reason: null, message: null, lastTermination: null }] }));
+  setup({ usageIndex: buildUsageIndex({ podsUnavailable: null, nodesUnavailable: null, pods: [], nodes: [] }) });
+  expect(await screen.findByText("app")).toBeInTheDocument();
+  expect(screen.queryByRole("columnheader", { name: H_CPU_USAGE })).toBeNull();
 });

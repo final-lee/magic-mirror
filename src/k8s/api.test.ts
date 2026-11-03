@@ -68,3 +68,11 @@ test("overview reports SSO expiry for the app profile", async () => {
   await k8sApi.overview(T);
   expect(invoke).toHaveBeenLastCalledWith("k8s_overview", { target: T, profile: "app" });
 });
+
+test("metrics are read per namespace (null for all) with the exec profile at the top level", async () => {
+  vi.mocked(invoke).mockResolvedValue({});
+  await k8sApi.metrics(T, "web", "prod-ro");
+  expect(invoke).toHaveBeenLastCalledWith("k8s_metrics", { target: T, namespace: "web", profile: "prod-ro" });
+  await k8sApi.metrics(T, null, "prod-ro");
+  expect(invoke).toHaveBeenLastCalledWith("k8s_metrics", { target: T, namespace: null, profile: "prod-ro" });
+});

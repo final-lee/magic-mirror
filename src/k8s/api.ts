@@ -2,7 +2,7 @@ import { Channel } from "@tauri-apps/api/core";
 import { invoke } from "../api/invoke";
 import type {
   K8sApplyResult, K8sChange, K8sChangeLogEntry, K8sChangeObject, K8sContextInfo, K8sDrainMessage, K8sForward, K8sForwardRequest, K8sKind, K8sKindRef, K8sLogMessage, K8sLogOptions,
-  K8sObjectView, K8sOverview, K8sPreview, K8sRevision, K8sSecretValue, K8sRules, K8sSession, K8sShellMessage, K8sShellOpened, K8sTarget, K8sUndo, K8sWatchMessage,
+  K8sMetrics, K8sObjectView, K8sOverview, K8sPreview, K8sRevision, K8sSecretValue, K8sRules, K8sSession, K8sShellMessage, K8sShellOpened, K8sTarget, K8sUndo, K8sWatchMessage,
 } from "./types";
 
 // 명령 이름과 인자 이름은 K1 계획의 Contract와 같아야 한다. target은 객체 하나로 넘긴다.
@@ -66,6 +66,8 @@ export const k8sApi = {
   kinds: (target: K8sTarget, ssoProfile: string) => invoke<K8sKind[]>("k8s_kinds", { target, profile: ssoProfile }),
   get: (target: K8sTarget, kind: K8sKindRef, namespace: string | null, name: string, ssoProfile: string) =>
     invoke<K8sObjectView>("k8s_get", { target, kind, namespace, name, profile: ssoProfile }),
+  /** Pod·노드 사용량(metrics-server). 서버가 없거나 권한이 없으면 오류가 아니라 응답의 unavailable 사유로 온다. namespace가 null이면 모든 네임스페이스 */
+  metrics: (target: K8sTarget, namespace: string | null, ssoProfile: string) => invoke<K8sMetrics>("k8s_metrics", { target, namespace, profile: ssoProfile }),
   /** Secret 키 하나의 값. 부른 쪽이 컴포넌트 상태에만 둔다(쿼리 캐시에 넣지 않는다) */
   secretValue: (target: K8sTarget, namespace: string, name: string, key: string, ssoProfile: string) =>
     invoke<K8sSecretValue>("k8s_secret_value", { target, namespace, name, key, profile: ssoProfile }),

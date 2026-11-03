@@ -1,14 +1,14 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
-import { DEPLOYMENTS, NODES, PODS } from "./kinds";
-import { BACK, CAT_CUSTOM, DETAIL_LABEL, KIND_TREE_LABEL, TAB_SUMMARY, TAB_YAML } from "./text";
-import type { K8sKind, K8sObjectView, K8sRow, K8sWatchMessage } from "./types";
+import { CONFIGMAPS, DEPLOYMENTS, NODES, PODS } from "./kinds";
+import { BACK, CAT_CUSTOM, COL_CPU, DETAIL_LABEL, KIND_TREE_LABEL, METRICS_UNAVAILABLE, TAB_SUMMARY, TAB_YAML } from "./text";
+import type { K8sKind, K8sMetrics, K8sObjectView, K8sRow, K8sWatchMessage } from "./types";
 import { WorkloadsView, type WorkloadsFocus } from "./WorkloadsView";
 
 // 터미널(xterm)은 PodTerminal.test에서 본다
 vi.mock("./PodTerminal", () => ({ PodTerminal: () => null }));
-vi.mock("./api", () => ({ k8sApi: { watch: vi.fn(), unwatch: vi.fn(), get: vi.fn(), rules: vi.fn(), secretValue: vi.fn() } }));
+vi.mock("./api", () => ({ k8sApi: { metrics: vi.fn(), watch: vi.fn(), unwatch: vi.fn(), get: vi.fn(), rules: vi.fn(), secretValue: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 const m = vi.mocked(k8sApi);
 let n = 0;
@@ -24,6 +24,7 @@ const emits = new Map<string, (msg: K8sWatchMessage) => void>();
 beforeEach(() => {
   vi.clearAllMocks();
   T = { ...T, cluster: `c${n++}` };
+  m.metrics.mockResolvedValue({ podsUnavailable: null, nodesUnavailable: null, pods: [], nodes: [] });
   m.unwatch.mockResolvedValue(null);
   // Pod 상세가 셸·port-forward 버튼의 권한을 읽는다
   m.rules.mockResolvedValue({ namespace: "prod", resourceRules: [], nonResourceRules: [], incomplete: false });
@@ -170,4 +171,34 @@ test("watched updates refetch the selected detail and switching objects resets i
   fireEvent.click(screen.getByText("second"));
   expect(screen.getByRole("tab", { name: TAB_SUMMARY })).toHaveAttribute("aria-selected", "true");
   await vi.waitFor(() => expect(m.get).toHaveBeenLastCalledWith(T, PODS, "prod", "second", "p"));
+});
+
+const metricsOf = (over: Partial<K8sMetrics> = {}): K8sMetrics => ({ podsUnavailable: null, nodesUnavailable: null, pods: [], nodes: [], ...over });
+
+test("pod list reads usage for the chosen namespace and shows usage columns", async () => {
+  m.metrics.mockResolvedValue(metricsOf({ pods: [{ namespace: "prod", name: "web", cpuMilli: 120, memoryBytes: 1024, containers: [], owners: [] }] }));
+  setup({ fixedKind: PODS });
+  await vi.waitFor(() => expect(m.watch).toHaveBeenCalled());
+  send("pods", { type: "reset", rows: [row("web")] });
+  expect(await screen.findByText("120m")).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: new RegExp(`^${COL_CPU}`) })).toBeInTheDocument();
+  expect(m.metrics).toHaveBeenCalledWith(T, "prod", "p");
+});
+
+test("usage of cluster-scoped nodes is read for all namespaces; unavailable shows one hint", async () => {
+  m.metrics.mockResolvedValue(metricsOf({ nodesUnavailable: "notInstalled" }));
+  setup({ fixedKind: NODES });
+  await vi.waitFor(() => expect(m.watch).toHaveBeenCalled());
+  send("nodes", { type: "reset", rows: [{ ...row("ip-1"), namespace: null }] });
+  expect(await screen.findByText(METRICS_UNAVAILABLE.notInstalled)).toBeInTheDocument();
+  expect(m.metrics).toHaveBeenCalledWith(T, null, "p");
+  expect(screen.queryByRole("columnheader", { name: new RegExp(`^${COL_CPU}`) })).toBeNull();
+});
+
+test("usage is not read for kinds without usage columns or while the tab is hidden", async () => {
+  setup({ fixedKind: CONFIGMAPS });
+  await vi.waitFor(() => expect(m.watch).toHaveBeenCalled());
+  setup({ fixedKind: PODS, visible: false });
+  await vi.waitFor(() => expect(m.watch).toHaveBeenCalledTimes(2));
+  expect(m.metrics).not.toHaveBeenCalled();
 });
