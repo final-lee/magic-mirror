@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { CodeEditor } from "../components/CodeEditor";
 import { argowfApi } from "./api";
 import { ActionDialog } from "./ActionDialog";
 import { useCatalogAction } from "./catalogHooks";
@@ -39,6 +40,8 @@ export function SubmitForm({ conn, template, namespaces, defaultNamespace, onClo
   const id = useId();
   const act = useCatalogAction(conn, onTokenError);
   const [values, setValues] = useState<string[]>(() => template.parameters.map(initial));
+  // 여러 줄 기본값은 편집기로 연다. 고치는 동안 줄바꿈을 지워도 칸 모양은 바뀌지 않는다
+  const [multiline] = useState(() => values.map((v) => v.includes("\n")));
   const [ns, setNs] = useState(defaultNamespace);
   const [problem, setProblem] = useState<string | null>(null);
   const [entryPoint, setEntryPoint] = useState(template.entrypoint ?? "");
@@ -149,15 +152,8 @@ export function SubmitForm({ conn, template, namespaces, defaultNamespace, onClo
                 </option>
               ))}
             </select>
-          ) : values[i].includes("\n") ? (
-            <textarea
-              id={`${id}-${i}`}
-              className="field-input mono"
-              rows={4}
-              spellCheck={false}
-              value={values[i]}
-              onChange={(e) => change(i, e.target.value)}
-            />
+          ) : multiline[i] ? (
+            <CodeEditor value={values[i]} onChange={(text) => change(i, text)} label={p.name} language="text" />
           ) : (
             <input
               id={`${id}-${i}`}
