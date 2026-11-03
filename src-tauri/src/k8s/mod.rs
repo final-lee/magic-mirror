@@ -14,6 +14,7 @@ pub mod logs;
 pub mod network;
 pub mod node_shell;
 pub mod path;
+pub mod rbac;
 pub mod read;
 pub mod review;
 pub mod rows;

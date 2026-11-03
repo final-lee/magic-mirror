@@ -13,6 +13,9 @@ import { ContextPicker } from "./ContextPicker";
 import { EventsView } from "./EventsView";
 import { ForwardsView } from "./ForwardsView";
 import { HelmView } from "./helm/HelmView";
+import { CartHost } from "./rbac/CartHost";
+import { isRbacChange } from "./rbac/changes";
+import { refreshAccess } from "./rbac/refresh";
 import { K8sError } from "./K8sError";
 import { K8sNav, type K8sView, type NavBookmark } from "./K8sNav";
 import { NODES, bookmarkKey, bookmarkOf } from "./kinds";
@@ -67,6 +70,7 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
       notices.announce(CHANGE_DONE, []);
       setAppliedChange(applied);
       void qc.invalidateQueries({ queryKey: ["k8s-change-log"] });
+      if (isRbacChange(applied)) void refreshAccess(qc, target, chosen);
     },
     () => void qc.invalidateQueries({ queryKey: ["k8s-change-log"] }),
   );
@@ -76,6 +80,12 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
     void qc.invalidateQueries({ queryKey: ["k8s-change-log"] });
   });
   const [creating, setCreating] = useState(false);
+  const onRbacApplied = (applied: K8sChange[]) => {
+    notices.announce(CHANGE_DONE, []);
+    setAppliedChange(applied[applied.length - 1]);
+    void qc.invalidateQueries({ queryKey: ["k8s-change-log"] });
+    void refreshAccess(qc, target, chosen);
+  };
   const namespaces = useK8sWatch(target, chosen ?? "", session.dataUpdatedAt, ssoProfile, NAMESPACES, null, live);
   const names = namespaces.rows.map((r) => r.name);
 
@@ -179,6 +189,7 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
         />
       )}
       {batch.batch && <BatchDialog batch={batch.batch} api={batch.api} />}
+      <CartHost target={target} ssoProfile={ssoProfile} onApplied={onRbacApplied} />
       <div className="pg-main">
         <K8sNav
           view={view}
@@ -234,7 +245,7 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
           ) : view === "forwards" ? (
             <ForwardsView target={target} ssoProfile={ssoProfile} />
           ) : view === "access" ? (
-            <AccessScreen target={target} context={chosen} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} onOpenIam={onOpenIam} onOpenMyRules={() => setView("myRules")} />
+            <AccessScreen target={target} context={chosen} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} onOpenIam={onOpenIam} onOpenMyRules={() => setView("myRules")} onChange={change.start} />
           ) : view === "helm" ? (
             <HelmView
               target={target}

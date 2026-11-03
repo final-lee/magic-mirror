@@ -3,7 +3,7 @@ import { useState } from "react";
 import { K8sError } from "../K8sError";
 import { can } from "../can";
 import { useK8sRules } from "../queries";
-import type { K8sTarget } from "../types";
+import type { K8sChange, K8sTarget } from "../types";
 import { IdentitiesTab } from "./IdentitiesTab";
 import { MatrixTab } from "./MatrixTab";
 import { WhoCanTab } from "./WhoCanTab";
@@ -33,10 +33,12 @@ interface Props {
   onOpenIam?: (arn: string) => void;
   /** 내 권한(MyRules) 화면으로 간다 */
   onOpenMyRules: () => void;
+  /** 변경 하나를 공통 미리보기로 연다(권한 변경 단추) */
+  onChange?: (change: K8sChange) => void;
 }
 
 /** 접근: 신원 / 권한 표 / 누가 할 수 있나 / 워크로드 신원. 읽기만 한다. */
-export function AccessScreen({ target, context, ssoProfile, live, namespace, onOpenIam, onOpenMyRules }: Props) {
+export function AccessScreen({ target, context, ssoProfile, live, namespace, onOpenIam, onOpenMyRules, onChange }: Props) {
   const qc = useQueryClient();
   const [tab, setTab] = useState<AccessTab>("identities");
   const [focus, setFocus] = useState("");
@@ -96,10 +98,10 @@ export function AccessScreen({ target, context, ssoProfile, live, namespace, onO
           <>
             {tab !== "identities" && !access.data.rbacAvailable && <p className="err">{RBAC_MISSING}</p>}
             {tab === "identities" && (
-              <IdentitiesTab target={target} ssoProfile={ssoProfile} view={access.data} onRetry={() => void refresh()} onOpenIam={onOpenIam} onOpenSubject={openSubject} />
+              <IdentitiesTab target={target} ssoProfile={ssoProfile} view={access.data} onRetry={() => void refresh()} onOpenIam={onOpenIam} onOpenSubject={openSubject} onChange={onChange} />
             )}
             {tab === "matrix" && (
-              <MatrixTab target={target} context={context} ssoProfile={ssoProfile} live={live} view={access.data} namespace={namespace} initialText={focus} onOpenIam={onOpenIam} />
+              <MatrixTab target={target} context={context} ssoProfile={ssoProfile} live={live} view={access.data} namespace={namespace} initialText={focus} onOpenIam={onOpenIam} onChange={onChange} />
             )}
             {tab === "whoCan" && (
               <WhoCanTab target={target} context={context} ssoProfile={ssoProfile} namespaces={access.data.namespaces} canReview={canReview} onOpenIam={onOpenIam} initial={{ verb: "get", resource: "secrets", namespace: namespace }} />

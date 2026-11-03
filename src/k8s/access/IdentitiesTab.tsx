@@ -1,6 +1,7 @@
 import { Fragment, useState } from "react";
 import { ErrorState } from "../../components/ErrorState";
-import type { K8sTarget } from "../types";
+import type { K8sChange, K8sTarget } from "../types";
+import { EntryActions, EntryCreateButton } from "../rbac/EntryActions";
 import {
   AWS_AUTH_NONE, AWS_AUTH_PRESENT, COLLAPSE, CELL_GLYPHS, CELL_LABELS, CELLS, DANGLING_TITLE, EFFECTIVE, EKS_SECTIONS, EXPAND, H_GROUPS, H_POLICIES, H_PRINCIPAL, H_SOURCE, H_STATE,
   H_SUMMARY, H_USERNAME, IDENTITIES_LABEL, INACTIVE, MODE_LABEL, MODE_NOTES, MODE_UNKNOWN, NONE, NOT_EVALUATED, NO_MAPPINGS, OPEN_IAM, RBAC_MISSING, SECTION_LABELS, SEE_MATRIX, SEE_MATRIX_TITLE,
@@ -16,6 +17,7 @@ interface Props {
   onOpenIam?: (arn: string) => void;
   /** 권한 표에서 이 주체를 본다 */
   onOpenSubject: (subject: Subject) => void;
+  onChange?: (change: K8sChange) => void;
 }
 
 /** 권한 요약: 클러스터 전체 열의 일곱 칸을 작은 표시로 */
@@ -31,7 +33,7 @@ function Summary({ levels, name }: { levels: number[]; name: string }) {
   );
 }
 
-function Row({ m, indent, onOpenIam, onOpenSubject }: { m: MappingRow; indent?: boolean } & Pick<Props, "onOpenIam" | "onOpenSubject">) {
+function Row({ m, indent, onOpenIam, onOpenSubject, onChange, mode }: { m: MappingRow; indent?: boolean; mode: AccessView["mode"] } & Pick<Props, "onOpenIam" | "onOpenSubject" | "onChange">) {
   return (
     <tr className={m.effective ? undefined : "acc-inactive"}>
       <td className={indent ? "acc-indent" : undefined}>
@@ -50,6 +52,7 @@ function Row({ m, indent, onOpenIam, onOpenSubject }: { m: MappingRow; indent?: 
               {SEE_MATRIX}
             </button>
           )}
+          {onChange && <EntryActions m={m} mode={mode} onChange={onChange} />}
         </div>
       </td>
       <td>
@@ -77,7 +80,7 @@ function Row({ m, indent, onOpenIam, onOpenSubject }: { m: MappingRow; indent?: 
 }
 
 /** 신원 연결: IAM 주체가 쿠버네티스에서 누가 되는지(access entry와 aws-auth), 어느 쪽이 유효한지, SSO 권한 세트별 묶음 */
-export function IdentitiesTab({ target, ssoProfile, view, onRetry, onOpenIam, onOpenSubject }: Props) {
+export function IdentitiesTab({ target, ssoProfile, view, onRetry, onOpenIam, onOpenSubject, onChange }: Props) {
   const [grouped, setGrouped] = useState(true);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const toggle = (set: string) =>
@@ -126,6 +129,7 @@ export function IdentitiesTab({ target, ssoProfile, view, onRetry, onOpenIam, on
           <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} />
           {SSO_GROUP_TITLE}
         </label>
+        {onChange && <EntryCreateButton mode={mode} onChange={onChange} />}
         <span className="dim acc-push">{fetchedAt(view.fetchedAt)}</span>
       </div>
       <div className="tbl acc-table">
@@ -153,12 +157,12 @@ export function IdentitiesTab({ target, ssoProfile, view, onRetry, onOpenIam, on
                       </button>
                     </td>
                   </tr>
-                  {expanded && rows.map((m) => <Row key={m.source + m.principalArn} m={m} indent onOpenIam={onOpenIam} onOpenSubject={onOpenSubject} />)}
+                  {expanded && rows.map((m) => <Row key={m.source + m.principalArn} m={m} indent mode={mode} onOpenIam={onOpenIam} onOpenSubject={onOpenSubject} onChange={onChange} />)}
                 </Fragment>
               );
             })}
             {plain.map((m) => (
-              <Row key={m.source + m.principalArn} m={m} onOpenIam={onOpenIam} onOpenSubject={onOpenSubject} />
+              <Row key={m.source + m.principalArn} m={m} mode={mode} onOpenIam={onOpenIam} onOpenSubject={onOpenSubject} onChange={onChange} />
             ))}
           </tbody>
         </table>

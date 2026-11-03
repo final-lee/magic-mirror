@@ -1,5 +1,6 @@
 import type { AppError } from "../api/types";
 import type { HelmChangeVariant } from "./helm/types";
+import type { RbacChangeVariant, RbacEffect } from "./rbac/types";
 
 // 백엔드 계약(camelCase)과 같은 모양이다. 필드는 이후 단계에서 추가만 된다.
 export type K8sTarget = { profile: string; region: string; cluster: string };
@@ -104,6 +105,8 @@ export type K8sChange = K8sChangeObject & (
   | { type: "apply"; object: Record<string, unknown>; force: boolean }
   /** Helm 릴리스 변경(대상은 릴리스). 같은 미리보기·적용·되돌리기 틀을 거친다 */
   | HelmChangeVariant
+  /** RBAC 바인딩·EKS access entry 변경 */
+  | RbacChangeVariant
 );
 
 export interface K8sRevision {
@@ -166,6 +169,8 @@ export interface K8sPreview {
   drain?: K8sDrainPlan | null;
   /** 비어 있지 않으면 강제 적용(force)으로 다시 미리보기 하기 전에는 적용할 수 없다 */
   conflicts: K8sFieldConflict[];
+  /** RBAC·access entry 변경에서만 온다: 실효 권한 계산이 보는 누가 무엇을 얻고 잃는지 */
+  effect?: RbacEffect | null;
 }
 
 /** terminating: Eviction은 받아들여졌고 Pod가 사라지기를 기다림. lingering: 유예와 여유가 지나도 남아 있음 */

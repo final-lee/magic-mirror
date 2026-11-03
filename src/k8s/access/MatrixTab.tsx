@@ -1,7 +1,7 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { K8sError } from "../K8sError";
 import { DETAIL_PCT } from "../lanes";
-import type { K8sTarget } from "../types";
+import type { K8sChange, K8sTarget } from "../types";
 import { CellDetailPane } from "./CellDetailPane";
 import { SubjectName } from "./paths";
 import { useAccessMatrix } from "./queries";
@@ -28,6 +28,7 @@ interface Props {
   /** 신원 화면에서 넘어올 때 채우는 이름 필터 */
   initialText?: string;
   onOpenIam?: (arn: string) => void;
+  onChange?: (change: K8sChange) => void;
 }
 
 const sameSubject = (a: Subject, b: Subject) => a.kind === b.kind && a.name === b.name && a.namespace === b.namespace;
@@ -85,7 +86,7 @@ function ColumnPicker({ all, columns, onChange }: { all: string[]; columns: (str
 }
 
 /** 주체 × 네임스페이스 권한 표. 칸 일곱 개는 모듈 문서(matrix.rs)와 CELL_RULES가 정의한다. 한 쪽(25행)씩 백엔드에서 계산해 읽는다. */
-export function MatrixTab({ target, context, ssoProfile, live, view, namespace, initialText = "", onOpenIam }: Props) {
+export function MatrixTab({ target, context, ssoProfile, live, view, namespace, initialText = "", onOpenIam, onChange }: Props) {
   const [kinds, setKinds] = useState<SubjectKind[]>([]);
   const [text, setText] = useState(initialText);
   useEffect(() => setText(initialText), [initialText]);
@@ -200,7 +201,7 @@ export function MatrixTab({ target, context, ssoProfile, live, view, namespace, 
           </button>
         </div>
       )}
-      {selected && <CellDetailPane target={target} context={context} ssoProfile={ssoProfile} selected={selected} mapping={mapping} widthPct={DETAIL_PCT} onClose={() => setSelected(null)} onOpenIam={onOpenIam} />}
+      {selected && <CellDetailPane target={target} context={context} ssoProfile={ssoProfile} selected={selected} mapping={mapping} widthPct={DETAIL_PCT} onClose={() => setSelected(null)} onOpenIam={onOpenIam} onChange={onChange} />}
     </div>
   );
 }

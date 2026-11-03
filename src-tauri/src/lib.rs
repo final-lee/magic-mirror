@@ -170,6 +170,8 @@ pub fn run() {
             k8s_helm_commands::k8s_helm_releases,
             k8s_helm_commands::k8s_helm_release,
             k8s_helm_commands::k8s_helm_show_values,
+            k8s_commands::rbac::k8s_preview_batch,
+            k8s_commands::rbac::k8s_apply_batch,
             argocd_commands::argocd_set_token,
             argocd_commands::argocd_forget_token,
             argocd_commands::argocd_session,

@@ -13,6 +13,7 @@ const WRITE_CALLS: &[&str] = &[
     ".patch_resize(", ".replace_resize(", ".patch_ephemeral_containers(", ".replace_ephemeral_containers(", ".create_token_request(",
     "Method::DELETE", "Request::post", "Request::put", "Request::patch", "Request::delete",
     "Command::new(",
+    ".create_access_entry(", ".delete_access_entry(", ".update_access_entry(", ".associate_access_policy(", ".disassociate_access_policy(",
 ];
 /// 클러스터를 바꾸는 helm 하위 명령 이름. 인자를 만드는 `k8s/helm/cli.rs`에서만 쓴다.
 const HELM_WRITE_VERBS: &[&str] = &["\"upgrade\"", "\"install\"", "\"uninstall\"", "\"rollback\""];
@@ -22,6 +23,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("k8s/review.rs", &[".create(", "::create("]),
     ("k8s/access/review.rs", &[".create("]),
     ("k8s/exec.rs", &[".create(", ".patch(", ".delete(", ".create_subresource::<"]),
+    ("k8s/exec/eks.rs", &[".create_access_entry(", ".delete_access_entry(", ".update_access_entry(", ".associate_access_policy(", ".disassociate_access_policy("]),
     ("k8s/shell.rs", &[".exec(", ".attach("]),
     ("k8s/forward.rs", &[".portforward("]),
     ("k8s/path.rs", &["Command::new("]),

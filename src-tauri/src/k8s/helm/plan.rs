@@ -108,6 +108,7 @@ fn assemble(
             reversible: undo.is_some(),
             drain: None,
             conflicts: Vec::new(),
+            effect: None,
         },
         inverse: undo,
         version: Some(version),

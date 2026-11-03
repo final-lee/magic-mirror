@@ -1690,3 +1690,16 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .helm-source { margin-top: 6px; }
 /* 고른 행(파란 바탕)에서는 배지를 흰 바탕으로 두어 글자가 읽히게 한다 */
 .iam-list tr.on .helm-status { background: rgba(0, 0, 0, 0.35); color: #fff; }
+
+/* rbac */
+.rbac-cart { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--surface-2); font-size: 12px; }
+.rbac-cart-items { flex: 1; min-width: 0; }
+.rbac-cart-items ul { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 160px; overflow: auto; }
+.rbac-cart-items li { display: flex; gap: 8px; align-items: baseline; }
+.rbac-cart-actions { display: inline-flex; gap: 6px; }
+.rbac-inline { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rbac-effect { margin: 10px 0; }
+.rbac-effect-row { border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 12px; list-style: none; }
+.rbac-cell-paths { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rbac-cell-actions { display: inline-flex; gap: 6px; margin-left: 8px; }
+.rbac-grant { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }

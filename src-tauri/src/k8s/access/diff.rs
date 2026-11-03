@@ -5,7 +5,7 @@
 //! 그리고 "그 밖의 것"을 뜻하는 대리값으로 펼치고, 대리값이 바뀌면 결과에 `*`로 적는다. 클러스터 전체 권한으로 이미 설명되는 네임스페이스 항목은 뺀다.
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::engine::{Evaluation, Grant, Names, Query};
 use super::rbac::Subject;
@@ -15,7 +15,7 @@ const STANDARD_VERBS: [&str; 8] = ["get", "list", "watch", "create", "update", "
 const OTHER: &str = "<other>";
 
 /// 한 범위·리소스에서 바뀐 동사들
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Capability {
     /// None이면 클러스터 전체
@@ -26,14 +26,14 @@ pub struct Capability {
     pub verbs: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UrlCapability {
     pub url: String,
     pub verbs: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubjectDiff {
     pub subject: Subject,

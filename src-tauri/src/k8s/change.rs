@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 
 use super::drain::DrainPlan;
 use super::helm::ChartSource;
+use super::rbac::{assess::Effect, PolicySpec, ScopeSpec, SubjectSpec};
 use super::rows::KindRef;
 use super::shell::ShellMode;
 use crate::error::AppError;
@@ -80,6 +81,29 @@ pub enum Operation {
     HelmUninstall { #[serde(rename = "keepHistory", default)] keep_history: bool },
     /// 차트 설치. 대상은 만들 릴리스(이름·네임스페이스).
     HelmInstall { chart: ChartSource, values: String, #[serde(rename = "createNamespace", default)] create_namespace: bool },
+    /// RoleBinding·ClusterRoleBinding 만들기. 대상은 만들 바인딩이고 `object`는 바인딩 전체(되돌리기에서는 지운 원본)다.
+    BindingCreate { object: Value },
+    /// 바인딩의 주체를 더하고 뺀다(대상은 있는 바인딩). 이미 있는 주체를 더하거나 없는 주체를 빼는 것은 건너뛴다.
+    BindingSubjects { add: Vec<SubjectSpec>, remove: Vec<SubjectSpec> },
+    /// EKS access entry 만들기(대상 이름은 IAM 주체 ARN). 정책은 만든 뒤 하나씩 연결한다.
+    AccessEntryCreate {
+        #[serde(default)]
+        username: Option<String>,
+        #[serde(default)]
+        groups: Vec<String>,
+        #[serde(default)]
+        policies: Vec<PolicySpec>,
+        #[serde(rename = "entryType", default)]
+        entry_type: Option<String>,
+    },
+    /// EKS access entry 삭제(연결된 정책도 함께 사라진다).
+    AccessEntryDelete,
+    /// access entry의 쿠버네티스 그룹을 통째로 바꾼다.
+    AccessEntryGroups { groups: Vec<String> },
+    /// access policy를 범위와 함께 연결한다. 이미 연결돼 있으면 범위를 바꾼다.
+    AccessPolicyAssociate { #[serde(rename = "policyArn")] policy_arn: String, scope: ScopeSpec },
+    /// access policy 연결을 푼다.
+    AccessPolicyDisassociate { #[serde(rename = "policyArn")] policy_arn: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -121,6 +145,9 @@ pub struct Preview {
     /// server-side apply에서 다른 manager와 겹친 필드. 비어 있지 않으면 강제 적용 없이는 적용되지 않는다.
     #[serde(default)]
     pub conflicts: Vec<apply::FieldConflict>,
+    /// RBAC·access entry 변경에서만 채운다: 실효 권한 계산이 보는 "누가 무엇을 얻고 잃는지"
+    #[serde(default)]
+    pub effect: Option<Effect>,
 }
 
 impl Preview {
@@ -249,7 +276,7 @@ fn recreatable(group: &str, kind: &str, object: &Value) -> Value {
 }
 
 /// `cluster-admin` ClusterRole을 가리키는 RoleBinding·ClusterRoleBinding인가
-fn binds_cluster_admin(object: &Value) -> bool {
+pub fn binds_cluster_admin(object: &Value) -> bool {
     let kind = object.get("kind").and_then(Value::as_str);
     let group = object.get("apiVersion").and_then(Value::as_str).is_some_and(|v| v.starts_with("rbac.authorization.k8s.io/"));
     group
@@ -514,6 +541,7 @@ pub fn plan(change: &Change, current: Option<&Value>, revision: Option<&Value>, 
             reversible: undo.is_some(),
             drain: None,
             conflicts: Vec::new(),
+            effect: None,
         },
         inverse: undo,
         version,
