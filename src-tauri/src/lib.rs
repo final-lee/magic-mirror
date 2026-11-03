@@ -17,6 +17,7 @@ mod model;
 mod mouse_nav;
 mod pg;
 mod pg_commands;
+mod resource_index;
 mod settings;
 mod topology;
 mod topology_commands;
@@ -48,6 +49,7 @@ pub fn run() {
             app.manage(argocd::ArgocdState::default());
             app.manage(pg_commands::PgState::new(dir.join("db-changes.jsonl")));
             app.manage(cost_commands::CostState::new(dir.join("cost-cache.json")));
+            app.manage(resource_index::ResourceIndexState::new(dir.join("resource-index.json")));
             pg_commands::spawn_sweeper(app.handle().clone());
             std::thread::spawn(explorer::external::sweep_stale);
             mouse_nav::install(app.handle().clone());
@@ -58,6 +60,8 @@ pub fn run() {
             commands::get_account,
             commands::list_services,
             commands::list_resources,
+            commands::resource_index,
+            commands::clear_resource_index,
             commands::sso_login,
             commands::sso_login_cancel,
             commands::get_settings,

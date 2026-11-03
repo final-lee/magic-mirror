@@ -80,6 +80,27 @@ test("empty text", () => {
   expect(screen.getByText("비어 있어요")).toBeInTheDocument();
 });
 
+describe("filter order", () => {
+  const files = [
+    makeResource("/p/aardvark.txt", { name: "📄 aardvark.txt", kind: "File", size: "1" }, { name: "aardvark.txt" }),
+    makeResource("/p/rd-notes.txt", { name: "📄 rd-notes.txt", kind: "File", size: "2" }, { name: "rd-notes.txt" }),
+  ];
+  const names = () => screen.getAllByRole("row").slice(1).map((r) => r.textContent);
+
+  test("검색 중에는 잘 맞는 순서로 보이고 화살표는 숨긴다", () => {
+    setup(undefined, { rows: files, filter: "rd" });
+    expect(names()[0]).toContain("rd-notes.txt");
+    expect(screen.getByText(/Name/).textContent).not.toMatch(/[▲▼]/);
+  });
+
+  test("헤더를 누르면 그 열 정렬이 이긴다", () => {
+    setup(undefined, { rows: files, filter: "rd" });
+    fireEvent.click(screen.getByText(/Name/));
+    expect(names()[0]).toContain("aardvark.txt");
+    expect(screen.getByText(/Name/).textContent).toContain("▲");
+  });
+});
+
 test("click following a drag does not change the selection", () => {
   const p = setup({ selected: ["/p/a.txt", "/p/b.txt"], anchor: "/p/b.txt" });
   fireEvent.pointerDown(row("📄 a.txt"), { clientX: 10, clientY: 10, button: 0 });

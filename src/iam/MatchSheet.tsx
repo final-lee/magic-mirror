@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { fuzzyFilter } from "../lib/fuzzy";
 import { matchPrincipal, policyName, type AssignmentTab } from "./assignments";
 import { KIND_LABEL } from "./labels";
 import { PickerSheet, type PickerOption } from "./PickerSheet";
@@ -46,10 +47,12 @@ export function MatchSheet({ overview, tab, target, candidates, onApply, onClose
 function SourcePicker({ tab, target, candidates, onPick, onClose }: Pick<Props, "tab" | "target" | "candidates" | "onClose"> & { onPick: (source: PrincipalSummary) => void }) {
   const [query, setQuery] = useState("");
   const options = useMemo<PickerOption[]>(() => {
-    const f = query.trim().toLowerCase();
-    return candidates
-      .filter((p) => p.arn !== target.arn && (!f || p.name.toLowerCase().includes(f)))
-      .map((p) => ({ id: p.arn, name: p.name, meta: tab === "policies" ? <span className="iam-chip">{KIND_LABEL[p.kind]}</span> : undefined }));
+    const others = candidates.filter((p) => p.arn !== target.arn);
+    return fuzzyFilter(others, query, (p) => [p.name]).map((p) => ({
+      id: p.arn,
+      name: p.name,
+      meta: tab === "policies" ? <span className="iam-chip">{KIND_LABEL[p.kind]}</span> : undefined,
+    }));
   }, [candidates, target.arn, query, tab]);
 
   return (

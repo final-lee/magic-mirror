@@ -10,6 +10,7 @@ import { pgKeys } from "./pg/queries";
 import { vpcApi } from "./vpcmap/api";
 import { sampleTopology } from "./vpcmap/fixtures";
 import { dbRow, eksService, makeResource, rdsService, renderWithClient, sampleServices } from "./test/utils";
+import { FOCUS_GONE } from "./components/ResourceArea";
 import { k8sApi } from "./k8s/api";
 import { tabTitle } from "./k8s/text";
 import { argocdApi } from "./argocd/api";
@@ -24,6 +25,8 @@ vi.mock("./api/client", () => ({
     getAccount: vi.fn(),
     listServices: vi.fn(),
     listResources: vi.fn(),
+    resourceIndex: vi.fn(),
+    clearResourceIndex: vi.fn(),
     listS3Objects: vi.fn(),
     ssoLogin: vi.fn(),
     ssoLoginCancel: vi.fn(),
@@ -980,5 +983,67 @@ describe("🐙 ArgoCD 탭", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "프로필" }), { target: { value: "dev" } });
     expect(argocdTabs()).toHaveLength(1);
     expect(screen.getByRole("tab", { name: ARGOCD_TITLE })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+describe("⌘K 리소스 찾기와 캐시 비우기", () => {
+  const cached = (region: string, id: string, name: string) => ({ region, service: "ec2", typeId: "instances", fetchedAt: Date.now(), truncated: false, items: [{ id, name, arn: null, values: { name, id }, tags: {} }] });
+
+  beforeEach(() => {
+    m.resourceIndex.mockResolvedValue([cached("ap-northeast-2", "i-1", "web-1"), cached("us-west-2", "i-9", "web-west")]);
+    m.clearResourceIndex.mockResolvedValue(undefined);
+    m.listResources.mockImplementation(async (_p, region) =>
+      region === "us-west-2"
+        ? { items: [makeResource("i-8", { name: "api-west", id: "i-8" }), makeResource("i-9", { name: "web-west", id: "i-9" })], truncated: false }
+        : { items: [makeResource("i-1", { name: "web-1", id: "i-1" })], truncated: false },
+    );
+  });
+
+  const openPalette = async () => {
+    renderWithClient(<App />);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "프로필" })).toHaveValue("prod"));
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    return screen.findByRole("searchbox", { name: "리소스 찾기" });
+  };
+
+  test("picking a cached resource from another region goes to that region and type and selects its row", async () => {
+    const box = await openPalette();
+    await screen.findByText(/읽어 둔 목록 2개/);
+    fireEvent.change(box, { target: { value: "west" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(screen.queryByRole("dialog", { name: "리소스 찾기" })).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "리전" })).toHaveValue("us-west-2");
+    await waitFor(() => expect(within(screen.getByTestId("resource-table")).getByText("web-west").closest("tr")).toHaveAttribute("aria-selected", "true"));
+    expect(m.listResources).toHaveBeenCalledWith("prod", "us-west-2", "ec2", "instances");
+  });
+
+  test("a picked resource that is gone after reading the list again is reported", async () => {
+    m.resourceIndex.mockResolvedValue([cached("ap-northeast-2", "i-gone", "old-box")]);
+    const box = await openPalette();
+    await screen.findByText(/읽어 둔 목록 1개/);
+    fireEvent.change(box, { target: { value: "old" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(await screen.findByText(FOCUS_GONE)).toBeInTheDocument();
+  });
+
+  test("cmd+shift+R clears every resource cache, on disk too, and reads the visible list again", async () => {
+    renderWithClient(<App />);
+    fireEvent.click(await screen.findByText("EC2"));
+    fireEvent.click(screen.getByText("Instances"));
+    await screen.findByText("web-1");
+    const before = m.listResources.mock.calls.length;
+    fireEvent.keyDown(window, { key: "R", metaKey: true, shiftKey: true });
+    await waitFor(() => expect(m.clearResourceIndex).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(m.listResources.mock.calls.length).toBeGreaterThan(before));
+    expect(await screen.findByText("web-1")).toBeInTheDocument();
+  });
+
+  test("the cache TTL is chosen in settings and saved", async () => {
+    renderWithClient(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "서비스 설정" }));
+    const ttl = screen.getByRole("combobox", { name: "리소스 캐시 TTL" });
+    expect(ttl).toHaveValue("15");
+    fireEvent.change(ttl, { target: { value: "0" } });
+    await waitFor(() => expect(m.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ resourceCacheTtlMinutes: 0 })));
   });
 });

@@ -55,6 +55,18 @@ test("filters by name or ARN, case-insensitively", () => {
   expect(screen.getByText("조건에 맞는 사용자가 없어요")).toBeInTheDocument();
 });
 
+test("검색 중에는 잘 맞는 순서로 보이고, 머리글을 누르면 그 열 정렬이 이긴다", () => {
+  const mid = { ...alice, name: "aaap", arn: "arn:aws:iam::123456789012:user/aaap" };
+  const start = { ...alice, name: "ap-svc", arn: "arn:aws:iam::123456789012:user/ap-svc" };
+  renderUsers({ items: [mid, start], filter: "ap" });
+  const names = () => bodyRows().map((r) => within(r).getAllByRole("cell")[0].textContent);
+  expect(names()).toEqual(["ap-svc", "aaap"]);
+  expect(screen.getByRole("columnheader", { name: /이름/ })).not.toHaveAttribute("aria-sort");
+  fireEvent.click(screen.getByRole("columnheader", { name: /이름/ }));
+  expect(names()).toEqual(["aaap", "ap-svc"]);
+  expect(screen.getByRole("columnheader", { name: /이름/ })).toHaveAttribute("aria-sort", "ascending");
+});
+
 test("shows an empty message when there are no items", () => {
   renderUsers({ items: [] });
   expect(screen.getByText("사용자가 없어요")).toBeInTheDocument();

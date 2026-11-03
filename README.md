@@ -15,7 +15,10 @@ A macOS desktop app for browsing AWS resources by service, without clicking thro
 - Turn on only the services you use, and pin resource types as favorites.
 - Choose a light or dark appearance in settings, or follow the system appearance (the default).
 - Detail panel with key fields, tags, raw JSON, a link to the AWS console, and ID copy (⌘C)
-- Filter by name or ID (⌘F), refresh (⌘R)
+- Fuzzy filter (⌘F): type letters in order, skipping any — `poa` finds `prod-orders-api`. Space-separated words must all match. In the resource list it looks at the name, ID, text columns, and tags (`team=pay`); matched letters are highlighted. While filtering, the best matches come first until you click a column header. The same filter works on the other tabs (IAM, PostgreSQL, ArgoCD, Kubernetes, S3 explorer).
+- **Find anything you've opened (⌘K)**: searches every list this profile has read, in every region, without calling AWS. Words can also match the service, type, or region (`west web`). Pick a result to jump to its region and type with the row selected. Results show how old the list is; lists past the cache TTL are marked and reload when opened.
+- Refresh (⌘R). Lists stay cached while the app runs and reload in the background when you reopen one older than the cache TTL (Settings → 리소스 캐시: 5 min to 6 h, or unlimited; default 15 min). **캐시 비우기** or ⌘⇧R drops every cached list for all profiles and regions, on disk too, and reloads what's on screen.
+- The ⌘K index is kept on disk for 7 days (`resource-index.json` in the app data folder, readable only by you). It holds only names, IDs, column values, and tags — never raw JSON or detail fields, which can contain secrets such as Lambda environment variables.
 - Read-only: it never calls APIs that change resources, and it never reads Secrets Manager secret values.
 
 ### VPC network diagram
@@ -166,7 +169,7 @@ The Rust toolchain is pinned in `rust-toolchain.toml` because of the AWS SDK's m
 ### Project layout
 ```
 src/                     React frontend
-  components/            resource browser, tab bar, settings, update banner
+  components/            resource browser, ⌘K palette, tab bar, settings, update banner
   explorer/              S3 explorer, transfer queue, diff tab
   vpcmap/                VPC network diagram
   iam/                   IAM workspace

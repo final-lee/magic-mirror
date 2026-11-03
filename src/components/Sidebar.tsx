@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useResources } from "../api/queries";
 import type { Favorite, ResourceType, ServiceInfo } from "../api/types";
 import { ARGOCD_TITLE } from "../argocd/text";
@@ -23,6 +23,12 @@ interface Props {
 
 export function Sidebar({ services, profile, region, selection, favorites, onSelect, onToggleFavorite, onOpenIam, onOpenCost, onOpenArgocd }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(selection ? [selection.service] : []));
+
+  // ⌘K처럼 사이드바 밖에서 고른 종류도 보이게 그 서비스를 편다
+  const selectedService = selection?.service;
+  useEffect(() => {
+    if (selectedService) setExpanded((prev) => (prev.has(selectedService) ? prev : new Set(prev).add(selectedService)));
+  }, [selectedService]);
 
   const toggle = (id: string) =>
     setExpanded((prev) => {
