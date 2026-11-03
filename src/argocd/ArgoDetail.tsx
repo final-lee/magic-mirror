@@ -275,10 +275,10 @@ function SyncSheet({ app, onCancel, onConfirm }: SheetProps) {
           <span className="dim">{ARGO_DRY_RUN_HINT}</span>
         </label>
         <div className="foot">
-          <button className="btn tone-ghost" onClick={onCancel}>
+          <button className="btn plain tone-ghost" onClick={onCancel}>
             {ARGO_CANCEL}
           </button>
-          <button className="btn tone-primary" onClick={() => onConfirm({ prune, dryRun })}>
+          <button className="btn plain tone-primary" onClick={() => onConfirm({ prune, dryRun })}>
             {ARGO_SYNC_CONFIRM}
           </button>
         </div>

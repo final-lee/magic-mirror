@@ -225,14 +225,14 @@ export function BatchDialog({ batch, api }: Props) {
           {batch.phase === "stopped" && <span className="cp-hint err">{t.BATCH_STOPPED}</span>}
           {batch.phase === "finished" && <span className="cp-hint">{t.BATCH_DONE}</span>}
           {batch.phase === "ready" && pending > run.length && run.length > 0 && <span className="cp-hint">{t.BATCH_PARTIAL(run.length)}</span>}
-          <button ref={cancelRef} className="btn tone-ghost" disabled={applying} onClick={api.cancel}>
+          <button ref={cancelRef} className="btn plain tone-ghost" disabled={applying} onClick={api.cancel}>
             {closed ? t.BATCH_CLOSE : t.CHANGE_CANCEL}
           </button>
           {closed && !batch.undo && anyApplied && (
             <button className="btn tone-warn" onClick={api.undoApplied}>{t.BATCH_UNDO_APPLIED}</button>
           )}
           {!closed && (
-            <button className="btn tone-primary" disabled={!ready || applying} onClick={api.apply}>
+            <button className="btn plain tone-primary" disabled={!ready || applying} onClick={api.apply}>
               {applying ? t.CHANGE_APPLYING : t.BATCH_APPLY(run.length)}
             </button>
           )}
