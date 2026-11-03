@@ -1142,6 +1142,18 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .k8s-tabs [aria-selected="true"] { color: inherit; border-bottom-color: var(--accent); }
 .k8s-detail-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; }
 .k8s-detail-body.flush { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+/* 사용량 그래프: 두 테마의 로그 출처 색과 공통 눈금 색을 쓴다. */
+.k8s-usage { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.k8s-usage-manual { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.k8s-usage-manual label { display: flex; flex-direction: column; }
+.k8s-usage-chart { width: 100%; min-width: 0; }
+.k8s-usage-plot { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; }
+.k8s-usage-y-axis { height: 150px; display: flex; flex-direction: column; justify-content: space-between; text-align: right; font-size: 11px; }
+.k8s-usage-plot svg { width: 100%; height: 150px; overflow: visible; }
+.k8s-usage-grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.k8s-usage-x-axis { grid-column: 2; display: flex; justify-content: space-between; font-size: 11px; }
+.k8s-usage-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; }
+.k8s-usage-swatch { display: inline-block; width: 10px; height: 10px; margin-right: 4px; }
 .k8s-kv { display: contents; }
 .k8s-links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
 .k8s-yaml { margin: 0; white-space: pre; font-size: 12px; user-select: text; }

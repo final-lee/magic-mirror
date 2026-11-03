@@ -4,6 +4,7 @@ import type { AppError } from "../api/types";
 import { k8sApi } from "./api";
 import { kindKey, targetKey } from "./targets";
 import type { K8sContextInfo, K8sKind, K8sMetrics, K8sObjectView, K8sOverview, K8sOverviewSection, K8sRules, K8sSession, K8sTarget, ObjectRef } from "./types";
+import type { PrometheusEndpoint, PrometheusGraphs } from "./types";
 import { METRICS_INTERVAL_MS } from "./usage";
 import { watchRegistry } from "./watchRegistry";
 
@@ -18,6 +19,9 @@ export const k8sKeys = {
     ["k8s", targetKey(t), "object", context, kindKey(ref.kind), ref.namespace, ref.name, resourceVersion] as const,
   overview: (t: K8sTarget, context: string | null) => ["k8s", targetKey(t), "overview", context] as const,
   metrics: (t: K8sTarget, context: string | null, namespace: string | null) => ["k8s", targetKey(t), "metrics", context, namespace] as const,
+  prometheusCandidates: (t: K8sTarget, context: string | null) => ["k8s", targetKey(t), "prometheus", context] as const,
+  prometheusGraphs: (t: K8sTarget, context: string | null, server: PrometheusEndpoint | undefined, ref: ObjectRef, hours: number) =>
+    ["k8s", targetKey(t), "prometheusGraphs", context, server, kindKey(ref.kind), ref.namespace, ref.name, hours] as const,
 };
 
 /** kubeconfig와 DescribeCluster를 읽는다. 인증 명령은 실행하지 않는다. */
@@ -118,6 +122,29 @@ export function useK8sMetrics(target: K8sTarget, context: string | null, namespa
     refetchInterval: METRICS_INTERVAL_MS,
     refetchIntervalInBackground: false,
     staleTime: METRICS_INTERVAL_MS / 2,
+    retry: false,
+  });
+}
+
+/** 현재 연결의 Prometheus 서비스 후보. 연결을 바꾸면 캐시를 비운다. */
+export function usePrometheusCandidates(target: K8sTarget, context: string, ssoProfile: string, enabled: boolean) {
+  return useQuery<PrometheusEndpoint[], AppError>({
+    queryKey: k8sKeys.prometheusCandidates(target, context),
+    queryFn: () => k8sApi.prometheusCandidates(target, ssoProfile),
+    enabled: enabled && context !== null,
+    retry: false,
+  });
+}
+
+/** 선택한 서비스에서 객체의 기간별 사용량을 읽는다. */
+export function usePrometheusGraphs(
+  target: K8sTarget, context: string, server: PrometheusEndpoint | undefined, ref: ObjectRef,
+  hours: number, ssoProfile: string, enabled: boolean,
+) {
+  return useQuery<PrometheusGraphs, AppError>({
+    queryKey: k8sKeys.prometheusGraphs(target, context, server, ref, hours),
+    queryFn: () => k8sApi.prometheusGraphs(target, server!, ref, hours, ssoProfile),
+    enabled: enabled && context !== null && !!server && !!ref.namespace,
     retry: false,
   });
 }
