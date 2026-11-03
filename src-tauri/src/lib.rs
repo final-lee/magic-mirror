@@ -131,6 +131,8 @@ pub fn run() {
             k8s_commands::k8s_get,
             k8s_commands::k8s_metrics,
             k8s_commands::k8s_overview,
+            k8s_commands::k8s_prometheus_candidates,
+            k8s_commands::k8s_prometheus_graphs,
             k8s_commands::k8s_secret_value,
             k8s_commands::k8s_logs,
             k8s_commands::k8s_workload_logs,

@@ -71,6 +71,8 @@ export interface Settings {
   pgLogins?: Record<string, string>;
   /** EKS 클러스터 ARN → 그 클러스터에 접속할 kubeconfig context 이름 */
   k8sContexts?: Record<string, string>;
+  /** 클러스터별 Prometheus 서비스 */
+  k8sPrometheus?: Record<string, { namespace: string; name: string; port: number }>;
   /** kubeconfig 파일 경로. 비우면 KUBECONFIG 또는 ~/.kube/config */
   kubeconfigPath?: string | null;
   /** EKS 탭 왼쪽 메뉴에 북마크한 리소스 종류. 북마크한 순서(드래그로 바꾼 순서)대로 둔다. */

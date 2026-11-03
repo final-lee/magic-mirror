@@ -16,6 +16,7 @@ pub mod kinds;
 pub mod metrics;
 pub mod nodes;
 pub mod overview;
+pub mod prometheus;
 pub mod quantity;
 pub mod removed;
 pub mod secret;
