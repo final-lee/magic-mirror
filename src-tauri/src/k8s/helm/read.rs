@@ -207,7 +207,7 @@ pub async fn list_stored(cluster: &Cluster, namespace: Option<&str>, release: Op
 /// 릴리스 하나의 저장소 객체들, 높은 리비전부터. 없으면 빈 목록.
 pub async fn locate(cluster: &Cluster, namespace: &str, name: &str) -> Result<Vec<Stored>, AppError> {
     let mut stored: Vec<Stored> = list_stored(cluster, Some(namespace), Some(name)).await?.into_iter().filter(|s| s.name == name).collect();
-    stored.sort_by(|a, b| b.revision.cmp(&a.revision));
+    stored.sort_by_key(|s| std::cmp::Reverse(s.revision));
     Ok(stored)
 }
 
