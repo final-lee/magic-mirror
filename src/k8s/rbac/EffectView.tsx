@@ -26,7 +26,7 @@ function UrlCapabilities({ items, sign, cls }: { items: { url: string; verbs: st
       {items.map((c) => (
         <li key={c.url}>
           <span className="cp-sign">{sign}</span>
-          <span className="mono">{`${c.verbs.join(", ")} ${c.url}`}</span>
+          <span className="mono">{`${c.verbs.includes("*") ? t.ALL_VERBS : c.verbs.join(", ")} ${c.url === "*" ? t.ALL_URLS : c.url}`}</span>
         </li>
       ))}
     </ul>
