@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
+import { CodeEditor } from "../components/CodeEditor";
 import { errorMessage } from "../api/errors";
 import { iamApi } from "./api";
 import type { ValidationResult } from "./types";
@@ -73,7 +74,6 @@ interface Props {
 export function PolicyEditor({ profile, mode, name: fixedName = "", existingNames = [], title, document: initial, onSubmit, onCancel }: Props) {
   const start = initial ?? (mode === "new" ? NEW_POLICY_TEMPLATE : "");
   const baseline = useRef(parseDocument(start).normalized);
-  const escaped = useRef(false);
   const results = useRef<HTMLDivElement>(null);
   const [text, setText] = useState(start);
   const [name, setName] = useState("");
@@ -103,26 +103,6 @@ export function PolicyEditor({ profile, mode, name: fixedName = "", existingName
     }
   };
 
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Escape") {
-      escaped.current = true; // 키보드로 이 칸을 빠져나가는 길: Esc 다음의 Tab은 초점을 옮긴다
-      return;
-    }
-    if (e.key !== "Tab") {
-      if (e.key !== "Shift") escaped.current = false;
-      return;
-    }
-    if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (escaped.current) {
-      escaped.current = false;
-      return;
-    }
-    e.preventDefault();
-    const el = e.currentTarget;
-    el.setRangeText("  ", el.selectionStart, el.selectionEnd, "end");
-    setText(el.value);
-  };
-
   return (
     <section className="pe" aria-label="정책 편집기">
       <h3>{title}</h3>
@@ -137,19 +117,10 @@ export function PolicyEditor({ profile, mode, name: fixedName = "", existingName
           <span className="dim">정책 이름</span> <b className="mono">{fixedName}</b>
         </div>
       )}
-      <label className="field">
+      <div className="field">
         <span>정책 JSON</span>
-        <textarea
-          aria-label="정책 JSON"
-          className="pe-text mono"
-          spellCheck={false}
-          autoCapitalize="off"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKeyDown}
-          onBlur={() => (escaped.current = false)}
-        />
-      </label>
+        <CodeEditor value={start} onChange={setText} label="정책 JSON" language="json" />
+      </div>
       {parsed.error ? (
         <div className="err pe-line" role="alert">
           {parsed.error}
@@ -157,7 +128,7 @@ export function PolicyEditor({ profile, mode, name: fixedName = "", existingName
       ) : (
         <div className="ok pe-line">JSON 형식이 맞아요{unchanged && <span className="dim"> · 바꾼 내용이 없어요</span>}</div>
       )}
-      <div className="dim pe-tip">Tab은 공백 2칸을 넣어요. 다른 칸으로 나가려면 Esc를 누른 뒤 Tab을 누르세요</div>
+      <div className="dim pe-tip">Tab·Shift+Tab은 들여쓰기·내어쓰기예요. 다른 칸으로 나가려면 Esc를 누른 뒤 Tab을 누르세요</div>
 
       <div className="pe-actions">
         <button className="btn small" disabled={!!parsed.error || shown?.state === "running"} onClick={() => void validate()}>

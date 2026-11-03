@@ -789,8 +789,6 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .pe h3 { margin: 0 0 4px; font-size: 14px; }
 .pe .field { margin-bottom: 4px; }
 .pe-name { font-size: 12px; margin-bottom: 4px; }
-.pe-text { min-height: 260px; resize: vertical; background: var(--code-bg); border: 1px solid var(--border-input); border-radius: 6px; padding: 8px 10px; color: var(--text); font-size: 12px; line-height: 1.5; tab-size: 2; white-space: pre; overflow: auto; user-select: text; }
-.pe-text:focus { border-color: var(--accent); outline: none; }
 .pe-line { font-size: 12px; word-break: break-all; }
 .pe-tip { font-size: 11px; }
 .pe-actions { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
@@ -1153,7 +1151,6 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .k8s-yaml-edit { display: flex; flex-direction: column; gap: 8px; }
 /* 여러 줄 편집기(CodeEditor, CodeMirror)는 앱 어디서나 같은 모양 */
 .code-editor .cm-editor { border: 1px solid var(--line); }
-.k8s-secret-input { width: 100%; min-height: 48px; font-size: 12px; }
 .k8s-secret pre { margin: 0 0 4px; padding: 6px 8px; background: var(--tone-00000040); border-radius: 6px; white-space: pre-wrap; word-break: break-all; user-select: text; }
 
 /* min-width 0: 목록 표가 넓어도 화면 밖으로 밀어내지 않고 목록 안에서 가로로 스크롤한다 */

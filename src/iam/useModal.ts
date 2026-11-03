@@ -1,6 +1,9 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 
-const FOCUSABLE = 'input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const FOCUSABLE = 'input:not([disabled]), select:not([disabled]), button:not([disabled]), [contenteditable="true"], [tabindex]:not([tabindex="-1"])';
+
+/** 코드 편집기(CodeEditor) 안의 키. Esc는 편집기가 Tab 탈출에 쓰고, 편집기가 이미 처리한 Tab(들여쓰기)은 창이 가로채지 않는다 */
+const inEditor = (target: EventTarget | null) => target instanceof Element && target.closest(".cm-editor") !== null;
 
 /**
  * 창이 겹쳐 있어도 Esc는 보이는 창 중 맨 위 창 하나에만 듣게 한다.
@@ -24,14 +27,14 @@ export function useModal(onEscape: () => void) {
 
   useEffect(() => {
     const onKeyDown = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape" && isTopmost(sheetRef.current)) latest.current();
+      if (e.key === "Escape" && !inEditor(e.target) && isTopmost(sheetRef.current)) latest.current();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
   const trapTab = (e: KeyboardEvent) => {
-    if (e.key !== "Tab") return;
+    if (e.key !== "Tab" || e.defaultPrevented) return;
     const nodes = Array.from(sheetRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []);
     if (nodes.length === 0) return;
     const first = nodes[0];

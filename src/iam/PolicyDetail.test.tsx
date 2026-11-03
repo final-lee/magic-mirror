@@ -1,5 +1,6 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { desktop } from "../api/desktop";
+import { editorView, typeYaml } from "../test/codemirror";
 import { renderWithClient } from "../test/utils";
 import { iamApi } from "./api";
 import { alice, appRole, BADGES, deployPolicy, deployPolicyView, devTeam, inlineId, scratchInline, scratchInlineView } from "./fixtures";
@@ -190,15 +191,16 @@ describe("attached principals", () => {
 });
 
 describe("editing", () => {
-  const editor = () => screen.findByRole("textbox", { name: "정책 JSON" }) as Promise<HTMLTextAreaElement>;
+  const editor = () => screen.findByRole("textbox", { name: "정책 JSON" });
+  const editorText = () => editorView("정책 JSON").state.doc.toString();
   const editButton = () => screen.findByRole("button", { name: "편집" });
 
   test("a customer managed policy can be edited: the editor starts from the current document", async () => {
     setup();
     fireEvent.click(await editButton());
-    const box = await editor();
+    await editor();
     expect(screen.getByRole("heading", { name: "정책 편집 · app-deploy" })).toBeInTheDocument();
-    expect(box.value).toBe(prettyJson());
+    expect(editorText()).toBe(prettyJson());
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "미리보기" })).toBeDisabled(); // 바꾼 게 없다
   });
@@ -206,9 +208,9 @@ describe("editing", () => {
   test("the preview hands updateManagedPolicy to the change flow; the editor closes once it is applied", async () => {
     const props = setup();
     fireEvent.click(await editButton());
-    const box = await editor();
-    const changed = box.value.replace("s3:GetObject", "s3:GetObjectVersion");
-    fireEvent.change(box, { target: { value: changed } });
+    await editor();
+    const changed = editorText().replace("s3:GetObject", "s3:GetObjectVersion");
+    typeYaml(changed, "정책 JSON");
     fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
     expect(props.onFix).toHaveBeenCalledTimes(1);
     expect(props.onFix).toHaveBeenCalledWith({ op: "updateManagedPolicy", policyArn: deployPolicy.arn, document: changed }, { onApplied: expect.any(Function) });
@@ -231,10 +233,10 @@ describe("editing", () => {
     m.policy.mockResolvedValue(scratchInlineView());
     const props = setup(scratchInline.id);
     fireEvent.click(await editButton());
-    const box = await editor();
+    await editor();
     expect(screen.getByRole("heading", { name: "인라인 정책 편집 · s3-scratch" })).toBeInTheDocument();
-    const changed = box.value.replace("s3:PutObject", "s3:PutObjectAcl");
-    fireEvent.change(box, { target: { value: changed } });
+    const changed = editorText().replace("s3:PutObject", "s3:PutObjectAcl");
+    typeYaml(changed, "정책 JSON");
     fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
     expect(props.onFix).toHaveBeenCalledWith({ op: "putInlinePolicy", target: alice.arn, name: "s3-scratch", document: changed }, { onApplied: expect.any(Function) });
   });
