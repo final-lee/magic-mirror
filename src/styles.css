@@ -1547,3 +1547,91 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
   border-radius: 5px;
   white-space: nowrap;
 }
+
+/* access */
+/* 접근 화면(EKS 탭): 신원 / 권한 표 / 누가 할 수 있나 / 워크로드 신원. 오른쪽 상세(.k8s-detail)는 .acc-body 위에 70%로 뜬다 */
+.acc { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.acc-head { display: flex; align-items: center; border-bottom: 1px solid var(--line); }
+.acc-head .k8s-tabs { flex: 1; border-bottom: 0; }
+.acc-head-actions { padding: 0 10px; align-items: center; }
+.acc-note { margin: 0; padding: 4px 12px; font-size: 12px; border-bottom: 1px solid var(--line); }
+.acc-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.acc-matrix-tab, .acc-who, .acc-workload, .acc-identities { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; padding: 8px 12px; gap: 8px; }
+.acc-matrix-tab { overflow: hidden; }
+.acc-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.acc-push { margin-left: auto; }
+.acc-filter { width: 16em; }
+.acc-chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 10px 1px 7px; border: 1px solid var(--line); border-radius: 11px; color: var(--dim); font-size: 12px; cursor: pointer; }
+.acc-chip.on { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
+.acc-chip input { margin: 0; accent-color: var(--accent); }
+.acc-check { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--dim); cursor: pointer; }
+.acc-check input { margin: 0; accent-color: var(--accent); }
+.acc-h { margin: 12px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }
+.acc-picker { position: relative; }
+.acc-pop { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; width: 260px; display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px var(--tone-00000073); }
+.acc-pop-list { max-height: 220px; overflow: auto; display: flex; flex-direction: column; gap: 3px; }
+.acc-pop-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; }
+.acc-legend { font-size: 12px; }
+.acc-legend summary { cursor: pointer; color: var(--dim); }
+.acc-legend ul { margin: 6px 0 0; padding-left: 18px; }
+.acc-grid-wrap { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+.acc-grid { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
+.acc-grid th, .acc-grid td { padding: 3px 8px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--neutral-alpha-0a); text-align: left; font-weight: 400; font-size: 12px; }
+.acc-grid thead th { position: sticky; top: 0; z-index: 2; background: var(--bg); color: var(--dim); font-weight: 600; white-space: nowrap; }
+.acc-grid .acc-corner, .acc-grid .acc-rowhead { position: sticky; left: 0; z-index: 3; background: var(--bg); width: 260px; min-width: 260px; max-width: 260px; overflow: hidden; }
+.acc-grid thead .acc-corner { z-index: 4; }
+.acc-grid tbody tr:hover td, .acc-grid tbody tr:hover .acc-rowhead { background: var(--hover); }
+.acc-grid tbody tr.acc-sel .acc-rowhead { box-shadow: inset 3px 0 0 var(--accent); }
+.acc-subject { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.acc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acc-kind { flex: none; padding: 0 6px; border-radius: 9px; font-size: 10px; line-height: 15px; border: 1px solid var(--line); color: var(--dim); }
+.acc-kind.k-iam { color: var(--accent); border-color: var(--accent); }
+.acc-cells { display: inline-flex; gap: 2px; }
+.acc-cell { width: 22px; height: 20px; padding: 0; border: 1px solid transparent; border-radius: 4px; background: none; font-size: 11px; line-height: 1; cursor: pointer; }
+.acc-cell.lv0 { color: var(--dim); opacity: .45; border-color: var(--line); }
+.acc-cell.lv1 { color: var(--yellow); background: var(--yellow-soft); }
+.acc-cell.lv2 { color: var(--green); background: var(--green-soft); }
+.acc-cell.esc.lv1 { color: var(--orange); background: var(--yellow-soft); }
+.acc-cell.esc.lv2 { color: var(--red); background: var(--red-soft); }
+.acc-cell:hover:not(.static) { border-color: var(--accent); }
+.acc-cell.on { outline: 2px solid var(--accent); outline-offset: 0; }
+.acc-cell.static { cursor: default; width: 18px; height: 16px; font-size: 10px; }
+.acc-glyph { display: inline-block; min-width: 18px; text-align: center; }
+.acc-swatch { display: inline-block; width: 12px; height: 12px; margin-left: 8px; border-radius: 3px; vertical-align: -2px; border: 1px solid var(--line); }
+.acc-swatch.lv2 { background: var(--green-soft); border-color: var(--green); }
+.acc-swatch.lv1 { background: var(--yellow-soft); border-color: var(--yellow); }
+.acc-pager { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.acc-badge { display: inline-block; margin-left: 4px; padding: 0 7px; border-radius: 9px; font-size: 11px; line-height: 16px; border: 1px solid var(--line); color: var(--dim); white-space: nowrap; }
+.acc-badge.ok { color: var(--green); border-color: var(--green); background: var(--green-soft); }
+.acc-badge.warn { color: var(--yellow); border-color: var(--yellow); background: var(--yellow-soft); }
+.acc-badge.bad { color: var(--red); border-color: var(--red); background: var(--red-soft); }
+.acc-level { font-weight: 600; }
+.acc-level.lv2 { color: var(--green); }
+.acc-level.lv1 { color: var(--yellow); }
+.acc-paths { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.acc-path { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
+.acc-via { padding: 0 6px; border-radius: 9px; background: var(--accent-soft); color: var(--text); font-size: 11px; }
+.acc-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
+.acc-form label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--dim); }
+.acc-form input, .acc-form select { min-width: 9em; }
+.acc-form input[aria-label="리소스"] { min-width: 16em; }
+.acc-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.acc-results { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.acc-results-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.acc-results-bar p { margin: 0; font-size: 12px; }
+.acc-table { overflow: auto; }
+.acc-table table { width: 100%; border-collapse: collapse; }
+.acc-table th { text-align: left; font-weight: 600; color: var(--dim); font-size: 12px; padding: 4px 8px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); }
+.acc-table td { padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 12px; }
+.acc-table tbody tr { cursor: pointer; }
+.acc-table tbody tr:hover { background: var(--hover); }
+.acc-identities .acc-table tbody tr { cursor: default; }
+.acc-inactive td { opacity: .6; }
+.acc-indent { padding-left: 24px !important; }
+.acc-principal { display: flex; flex-direction: column; min-width: 0; }
+.acc-row-actions { display: flex; gap: 10px; font-size: 11px; }
+.acc-group-row td { background: var(--neutral-alpha-05); font-weight: 600; }
+.acc-identities .acc-table { flex: none; }
+/* 목록에서 고른 줄(전역 규칙이 강조색으로 칠한다)의 글자와 배지가 읽히게 */
+tbody tr.on .acc-badge, tbody tr.on .acc-via, tbody tr.on .acc-kind { background: var(--neutral-alpha-26); color: var(--on-accent); border-color: var(--selection-border); }
+tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }

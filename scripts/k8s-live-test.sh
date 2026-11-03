@@ -74,6 +74,10 @@ metadata: { name: w1, namespace: mm-k2 }
 YAML
   kubectl --kubeconfig "$kc" -n mm-k2 rollout status deployment/web --timeout=120s
 
+  # K4 접근 시험 픽스처(RBAC·aws-auth)
+  source scripts/k8s-live/access.sh
+  access_fixture "$kc"
+
   # exec 플러그인 시험용: kind의 클라이언트 인증서를 ExecCredential로 내보내는 가짜 플러그인, SSO 만료를 흉내 내는 플러그인,
   # 평소엔 바로 답하다가 slow.armed 파일이 생기면 40초 멈추는 플러그인(watch가 멈춘 목록을 알리는지 보는 시험)
   cert=$(yq '.users[0].user.client-certificate-data' "$kc" | base64 -d)

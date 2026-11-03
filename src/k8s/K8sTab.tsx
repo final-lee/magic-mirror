@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ErrorState } from "../components/ErrorState";
 import { DoneNotice } from "../components/DoneNotice";
 import { useApplyNotices } from "../iam/useApplyFlow";
+import { AccessScreen } from "./access/AccessScreen";
 import { BatchDialog, useK8sBatch } from "./ChangeBatch";
 import { ChangeDialog, useK8sChange } from "./ChangeFlow";
 import { ChangeLog } from "./ChangeLog";
@@ -178,7 +179,7 @@ export function K8sTab({ target, active, onOpenIam }: Props) {
           width={lanes.width("nav")}
         />
         <LaneResizer lane="nav" onResize={lanes.resize} onCommit={lanes.commit} />
-        <div className={`k8s-body${listView ? " flush" : ""}`}>
+        <div className={`k8s-body${listView || view === "access" ? " flush" : ""}`}>
           {session.isError ? (
             <K8sError error={session.error} target={target} ssoProfile={ssoProfile} />
           ) : view === "overview" ? (
@@ -220,6 +221,8 @@ export function K8sTab({ target, active, onOpenIam }: Props) {
             <EventsView target={target} context={chosen} sessionEpoch={session.dataUpdatedAt} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} />
           ) : view === "forwards" ? (
             <ForwardsView target={target} ssoProfile={ssoProfile} />
+          ) : view === "access" ? (
+            <AccessScreen target={target} context={chosen} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} onOpenIam={onOpenIam} onOpenMyRules={() => setView("myRules")} />
           ) : view === "changeLog" ? (
             <ChangeLog target={target} onStart={change.start} />
           ) : rules.isError ? (

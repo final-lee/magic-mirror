@@ -14,6 +14,7 @@ const WRITE_CALLS: &[&str] = &[
 /// (파일, 허용하는 호출)
 const ALLOWED: &[(&str, &[&str])] = &[
     ("k8s/review.rs", &[".create(", "::create("]),
+    ("k8s/access/review.rs", &[".create("]),
     ("k8s/exec.rs", &[".create(", ".patch(", ".delete(", ".create_subresource::<"]),
     ("k8s/shell.rs", &[".exec(", ".attach("]),
     ("k8s/forward.rs", &[".portforward("]),
