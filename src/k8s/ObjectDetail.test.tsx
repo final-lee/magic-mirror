@@ -5,7 +5,7 @@ import { DEPLOYMENTS, NODES, PODS, SECRETS, SERVICES, SERVICE_ACCOUNTS } from ".
 import { ObjectDetail } from "./ObjectDetail";
 import {
   BACK, CHILDREN_TRUNCATED, CLOSE, NO_RECENT_EVENTS, NO_SECRET_PERMISSION, OPEN_IN_IAM, SEC_CHILDREN, SEC_OWNERS, SHOW_VALUE,
-  CHANGE_NODE_SHELL, CHANGE_NODE_SHELL_IMAGE, FORWARD_PORT, FORWARD_START, SHELL_OPEN, TAB_LOGS, TAB_SHELL, TAB_YAML, YAML_SECRET_NOTE, forwardPortLabel, noStreamPermission, openNode,
+  CHANGE_NODE_SHELL, CHANGE_NODE_SHELL_IMAGE, FORWARD_OPEN, FORWARD_PORT, SHELL_OPEN, TAB_LOGS, TAB_SHELL, TAB_YAML, YAML_SECRET_NOTE, forwardPortLabel, noStreamPermission, openNode,
 } from "./text";
 import type { K8sKind, K8sObjectView, K8sRow } from "./types";
 
@@ -197,7 +197,7 @@ test("a pod gets a shell tab with the container picker, gated by pods/exec", asy
   await screen.findByRole("tab", { name: TAB_SHELL });
   fireEvent.click(screen.getByRole("tab", { name: TAB_SHELL }));
   expect(await screen.findByRole("button", { name: SHELL_OPEN })).toBeEnabled();
-  expect(within(screen.getByRole("combobox")).getByRole("option", { name: "app" })).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "app" })).toBeInTheDocument();
 });
 
 test("without pods/exec the shell button is off with the reason", async () => {
@@ -214,10 +214,9 @@ test("a service has no shell tab but a port-forward picker over its service port
   m.get.mockResolvedValue(view({ kind: SERVICES, row: row({ name: "web" }), ports }));
   m.rules.mockResolvedValue(grant("pods/portforward"));
   setup({ objectRef: { kind: SERVICES, namespace: "prod", name: "web" }, onChange: vi.fn() });
-  const start = await screen.findByRole("button", { name: FORWARD_START });
+  const open = await screen.findByRole("button", { name: FORWARD_OPEN });
   expect(screen.queryByRole("tab", { name: TAB_SHELL })).not.toBeInTheDocument();
-  await waitFor(() => expect(start).toBeEnabled());
-  fireEvent.click(start);
+  await waitFor(() => expect(open).toBeEnabled());
   expect(within(screen.getByLabelText(FORWARD_PORT)).getByRole("option", { name: forwardPortLabel(ports[0]) })).toBeInTheDocument();
 });
 
@@ -225,18 +224,18 @@ test("port-forward is off on a pod when pods/portforward is missing", async () =
   m.get.mockResolvedValue(view());
   m.rules.mockResolvedValue(grant("pods/exec"));
   setup({ onChange: vi.fn() });
-  const start = await screen.findByRole("button", { name: FORWARD_START });
-  await waitFor(() => expect(start).toHaveAttribute("title", noStreamPermission("pods/portforward")));
-  expect(start).toBeDisabled();
+  const open = await screen.findByRole("button", { name: FORWARD_OPEN });
+  await waitFor(() => expect(open).toHaveAttribute("title", noStreamPermission("pods/portforward")));
+  expect(open).toBeDisabled();
 });
 
-test("shell and port-forward belong to the change mode: with it off a pod shows neither", async () => {
+test("a detail that cannot start changes shows neither the shell tab nor the port-forward line", async () => {
   m.get.mockResolvedValue(view({ containers: [running] }));
   m.rules.mockResolvedValue(grant("pods/exec", "pods/portforward"));
   setup();
   await screen.findByRole("tab", { name: TAB_LOGS });
   expect(screen.queryByRole("tab", { name: TAB_SHELL })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: FORWARD_START })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: FORWARD_OPEN })).not.toBeInTheDocument();
 });
 
 const nodeView = () => view({ kind: NODES, row: row({ name: "node-1", namespace: null, values: { status: "Ready" } }) });

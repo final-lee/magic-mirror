@@ -89,7 +89,16 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sO
           .map((k) => (
             <div key={k} className="k8s-kv">
               <dt>{COLUMN_LABELS[k] ?? k}</dt>
-              <dd>{row.values[k]}</dd>
+              <dd>
+                {k === "node" && node ? (
+                  // 노드는 소유자 링크처럼 이름을 눌러 연다
+                  <button className="link mono" aria-label={openNode(node)} title={openNode(node)} onClick={() => onOpen({ kind: NODES, namespace: null, name: node })}>
+                    {node}
+                  </button>
+                ) : (
+                  row.values[k]
+                )}
+              </dd>
             </div>
           ))}
         <div className="k8s-kv">
@@ -97,18 +106,13 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sO
           <dd title={row.createdAt ?? ""}>{age(row.createdAt, now)}</dd>
         </div>
       </dl>
-      <div className="k8s-actions">
-        {node && (
-          <button className="btn tone-nav" onClick={() => onOpen({ kind: NODES, namespace: null, name: node })}>
-            {openNode(node)}
-          </button>
-        )}
-        {role && onOpenIam && (
+      {role && onOpenIam && (
+        <div className="k8s-actions">
           <button className="btn tone-nav" onClick={() => onOpenIam(role)}>
             {OPEN_IN_IAM}
           </button>
-        )}
-      </div>
+        </div>
+      )}
       {view.owners.length > 0 && <Links title={SEC_OWNERS} links={view.owners} kinds={kinds} onOpen={onOpen} />}
       {(view.children.length > 0 || view.childrenError) && (
         <>
@@ -258,18 +262,6 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
       {rolloutProgress && <p role="status">{rolloutProgress}</p>}
       {onChange && q.data && (
         <div className="k8s-actions k8s-toolbar">
-          {(pod || service) && objectRef.namespace && (
-            <ForwardPanel
-              key={`${objectRef.namespace}/${objectRef.name}`}
-              target={target}
-              ssoProfile={ssoProfile}
-              namespace={objectRef.namespace}
-              kind={pod ? "pod" : "service"}
-              name={objectRef.name}
-              ports={q.data.ports ?? []}
-              rules={rules.data}
-            />
-          )}
           {editing ? (
             <span className="k8s-toolbar-slot" ref={setEditSlot} />
           ) : (
@@ -290,7 +282,20 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
         </div>
       )}
       {(pod || service) && objectRef.namespace && (
-        <ObjectForwards target={target} ssoProfile={ssoProfile} namespace={objectRef.namespace} kind={pod ? "pod" : "service"} name={objectRef.name} live={live} />
+        <ObjectForwards target={target} ssoProfile={ssoProfile} namespace={objectRef.namespace} kind={pod ? "pod" : "service"} name={objectRef.name} live={live}>
+          {changes && q.data && (
+            <ForwardPanel
+              key={`${objectRef.namespace}/${objectRef.name}`}
+              target={target}
+              ssoProfile={ssoProfile}
+              namespace={objectRef.namespace}
+              kind={pod ? "pod" : "service"}
+              name={objectRef.name}
+              ports={q.data.ports ?? []}
+              rules={rules.data}
+            />
+          )}
+        </ObjectForwards>
       )}
       <div role="tablist" className="k8s-tabs">
         <button role="tab" aria-selected={tab === "summary"} onClick={() => setTab("summary")}>{TAB_SUMMARY}</button>
