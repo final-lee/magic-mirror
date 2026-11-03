@@ -13,25 +13,38 @@ import { HISTORY_MS, splitAtGaps, type PodTrend } from "./usageHistory";
 /** 목록 줄의 Pod 사용량 기록. 앱이 아직 모으지 않았으면 null */
 export type TrendOf = (namespace: string, name: string) => PodTrend | null;
 
-const TREND_W = 56;
-const TREND_H = 18;
+/** 그래프 좌표계. 칸 크기에 맞춰 늘어난다(preserveAspectRatio none) */
+const TREND_W = 100;
+const TREND_H = 20;
+/** 세로 눈금: 10분마다 */
+const TREND_GRID = [1, 2, 3, 4, 5].map((i) => (i * TREND_W) / 6);
 
-/** 비율 칸의 작은 그래프: 최근 1시간의 비율(%) 추이. 세로축은 0~100%(넘으면 최대치까지), 점선이 100% */
+/**
+ * 비율 칸의 작은 그래프(작업 관리자처럼 테두리·눈금 안에 면과 선): 최근 1시간의 비율(%) 추이.
+ * 세로축은 0~100%이고 넘으면 최대치까지 늘리며 그때 100%를 점선으로 보인다.
+ */
 function TrendLine({ points, end, hot }: { points: [number, number][]; end: number; hot: boolean }) {
   const max = Math.max(100, ...points.map(([, value]) => value));
   const start = end - HISTORY_MS;
   const x = (at: number) => Math.max(0, ((at - start) / HISTORY_MS) * TREND_W);
-  const y = (value: number) => TREND_H - 1 - (value / max) * (TREND_H - 2);
+  const y = (value: number) => TREND_H - (value / max) * TREND_H;
   return (
-    <svg className={hot ? "k8s-trend hot" : "k8s-trend"} width={TREND_W} height={TREND_H} viewBox={`0 0 ${TREND_W} ${TREND_H}`} aria-hidden="true">
-      <line className="k8s-trend-guide" x1="0" x2={TREND_W} y1={y(100)} y2={y(100)} />
-      {splitAtGaps(points).map((part) => (
-        part.length === 1 ? (
-          <circle key={part[0][0]} cx={x(part[0][0])} cy={y(part[0][1])} r="1" />
-        ) : (
-          <polyline key={part[0][0]} points={part.map(([at, value]) => `${x(at)},${y(value)}`).join(" ")} />
-        )
-      ))}
+    <svg className={hot ? "k8s-trend hot" : "k8s-trend"} viewBox={`0 0 ${TREND_W} ${TREND_H}`} preserveAspectRatio="none" aria-hidden="true">
+      {TREND_GRID.map((gx) => <line key={gx} className="k8s-trend-grid" x1={gx} x2={gx} y1="0" y2={TREND_H} />)}
+      <line className="k8s-trend-grid" x1="0" x2={TREND_W} y1={TREND_H / 2} y2={TREND_H / 2} />
+      {max > 100 && <line className="k8s-trend-guide" x1="0" x2={TREND_W} y1={y(100)} y2={y(100)} />}
+      {splitAtGaps(points).map((part) => {
+        // 값이 하나뿐인 구간도 보이게 조금 앞에서 시작하는 짧은 선으로 그린다
+        const coords = part.map(([at, value]) => [x(at), y(value)] as const);
+        const line = coords.length === 1 ? [[Math.max(0, coords[0][0] - 1), coords[0][1]] as const, coords[0]] : coords;
+        const text = line.map(([px, py]) => `${px},${py}`).join(" ");
+        return (
+          <g key={part[0][0]}>
+            <polygon className="k8s-trend-area" points={`${line[0][0]},${TREND_H} ${text} ${line[line.length - 1][0]},${TREND_H}`} />
+            <polyline className="k8s-trend-line" points={text} />
+          </g>
+        );
+      })}
     </svg>
   );
 }
@@ -96,12 +109,15 @@ export function Problems({ problems }: { problems: K8sProblem[] }) {
   );
 }
 
-/** 비율 칸. 기준이 없으면 비우고, 90%를 넘으면 눈에 띄게 한다. 앱이 모은 기록이 있으면 숫자 앞에 작은 추이 그래프를 둔다 */
+/**
+ * 비율 칸. 기준이 없으면 비우고, 90%를 넘으면 눈에 띄게 한다.
+ * trend가 있으면 칸을 채우는 작은 추이 그래프 위에 숫자를 얹는다(아직 모은 값이 없으면 빈 그래프 틀만).
+ */
 export function Percent({ value, trend }: { value: number | null; trend?: { points: [number, number][]; end: number } | null }) {
   if (value === null) return null;
   const hot = isHot(value);
   const text = <span className={hot ? "k8s-hot" : undefined}>{`${Math.round(value)}%`}</span>;
-  if (!trend || trend.points.length === 0) return text;
+  if (!trend) return text;
   return (
     <span className="k8s-trend-cell">
       <TrendLine points={trend.points} end={trend.end} hot={hot} />
@@ -138,11 +154,12 @@ export function usageColumns(kind: K8sKindRef, usage: UsageIndex | null | undefi
   ];
   const ratio = (key: string, label: string, pick: (u: Usage) => number, base: string, pickTrend?: (t: PodTrend, i: number) => number): ListColumn<K8sRow> => {
     const value = (r: K8sRow) => { const u = used(r); return u ? pct(pick(u), numValue(r, base)) : null; };
-    // 지금의 요청·제한을 기준으로 모아 둔 사용량의 비율을 다시 셈한다
+    // 지금의 요청·제한을 기준으로 모아 둔 사용량의 비율을 다시 셈한다. 기록을 모으는 중인데 이 Pod의 값이 아직 없으면 빈 그래프
     const trend = (r: K8sRow) => {
-      const t = pickTrend && trendOf ? trendOf(r.namespace ?? "", r.name) : null;
       const b = numValue(r, base);
-      if (!t || !pickTrend || b === null || b <= 0) return null;
+      if (!pickTrend || !trendOf || b === null || b <= 0) return null;
+      const t = trendOf(r.namespace ?? "", r.name);
+      if (!t) return { points: [], end: 0 };
       return { points: t.at.map((at, i): [number, number] => [at, (pickTrend(t, i) * 100) / b]), end: t.end };
     };
     return { key, label, numeric: true, render: (r) => <Percent value={value(r)} trend={trend(r)} />, sort: value };

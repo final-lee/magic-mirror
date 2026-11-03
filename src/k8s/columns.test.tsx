@@ -84,22 +84,28 @@ test("pod percent cells draw the collected trend against today's request or limi
   expect(cpu).toHaveTextContent("200%");
   const svg = cpu.querySelector("svg.k8s-trend")!;
   expect(svg).toHaveClass("hot");
-  // 15초 간격의 두 값은 선으로, 한 시간 뒤의 값은 따로 점으로
-  expect(svg.querySelectorAll("polyline")).toHaveLength(1);
-  expect(svg.querySelectorAll("circle")).toHaveLength(1);
-  // 최고 200%라 세로축이 200%까지 늘어나고 100% 점선은 가운데쯤에 온다
-  expect(svg.querySelector("circle")!.getAttribute("cy")).toBe("1");
-  expect(svg.querySelector(".k8s-trend-guide")!.getAttribute("y1")).toBe("9");
+  // 15초 간격의 두 값은 한 선으로, 한 시간 뒤의 값은 끊어서 따로
+  const lines = [...svg.querySelectorAll(".k8s-trend-line")].map((l) => l.getAttribute("points"));
+  expect(lines).toHaveLength(2);
+  // 최고 200%라 세로축이 200%까지 늘어나 마지막 값이 맨 위에 닿고, 100% 점선은 가운데에 온다
+  expect(lines[1]).toMatch(/ 100,0$/);
+  expect(svg.querySelector(".k8s-trend-guide")!.getAttribute("y1")).toBe("10");
   const memory = render(<>{col(cols, COL_MEMORY_OF_REQUEST).render(api)}</>).container;
   expect(memory).toHaveTextContent("50%");
-  expect(memory.querySelector("svg.k8s-trend")).not.toHaveClass("hot");
+  const memorySvg = memory.querySelector("svg.k8s-trend")!;
+  expect(memorySvg).not.toHaveClass("hot");
+  // 100%를 넘은 적이 없으면 점선이 없다(위 테두리가 100%)
+  expect(memorySvg.querySelector(".k8s-trend-guide")).toBeNull();
   // 기준(제한)이 없으면 칸도 그래프도 비운다
   expect(render(<>{col(cols, COL_CPU_OF_LIMIT).render(api)}</>).container.querySelector("svg")).toBeNull();
-  // 아직 모으지 않은 Pod는 숫자만
+  // 아직 모은 값이 없는 Pod는 빈 그래프 틀에 숫자만
   const other = usageOf({ pods: [{ namespace: "web", name: "new", cpuMilli: 100, memoryBytes: 0, containers: [], owners: [] }] });
   const fresh = render(<>{col(columnsFor(PODS, false, 0, other, trendOf), COL_CPU_OF_REQUEST).render(podRow("new", { cpuRequest: "1000" }))}</>).container;
   expect(fresh).toHaveTextContent("10%");
-  expect(fresh.querySelector("svg")).toBeNull();
+  expect(fresh.querySelector(".k8s-trend-cell")).not.toBeNull();
+  expect(fresh.querySelector(".k8s-trend-line")).toBeNull();
+  // 기록을 모으지 않는 목록(trendOf 없음)은 숫자만
+  expect(render(<>{col(columnsFor(PODS, false, 0, other), COL_CPU_OF_REQUEST).render(podRow("new", { cpuRequest: "1000" }))}</>).container.querySelector("svg")).toBeNull();
 });
 
 test("usage columns sort by value and put missing values last", () => {
