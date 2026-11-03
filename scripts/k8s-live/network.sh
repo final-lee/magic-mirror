@@ -29,7 +29,7 @@ metadata: { name: lb-web, namespace: mm-net }
 spec:
   type: LoadBalancer
   selector: { app: web }
-  ports: [{ port: 80, protocol: TCP, targetPort: 80 }, { port: 443, protocol: TCP, targetPort: 443, name: https }]
+  ports: [{ port: 80, protocol: TCP, targetPort: 80, name: http }, { port: 443, protocol: TCP, targetPort: 443, name: https }]
 ---
 apiVersion: v1
 kind: Service
