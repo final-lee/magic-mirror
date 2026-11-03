@@ -1153,6 +1153,7 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .k8s-yaml .y-comment { color: var(--dim); font-style: italic; }
 .k8s-yaml .y-punct { color: var(--dim); }
 .k8s-yaml .y-mask { color: var(--yellow); }
+.k8s-yaml.k8s-code-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
 .k8s-logs { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .k8s-log-bar { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .k8s-log-bar .btn { width: auto; margin: 0; padding: 3px 10px; }

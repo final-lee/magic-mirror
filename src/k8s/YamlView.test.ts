@@ -1,4 +1,4 @@
-import { tokenizeYaml, type YamlToken } from "./YamlView";
+import { tokenizeJson, tokenizeYaml, type YamlToken } from "./YamlView";
 
 const kinds = (line: YamlToken[]) => line.filter((t) => t.kind !== "plain").map((t) => `${t.kind}:${t.text}`);
 
@@ -51,4 +51,14 @@ test("keys, scalars, comments, list markers, block strings and masked values get
   expect(kinds(l[22])).toEqual(["key:password", "punct::", "mask:••••"]);
   expect(kinds(l[23])).toEqual(["punct:---"]);
   expect(kinds(l[24])).toEqual(["comment:# 끝"]);
+});
+
+test("JSON lines keep every character and mark keys, strings, numbers, literals and punctuation", () => {
+  const text = '{\n  "name": "web \\"x\\"",\n  "replicas": -1.5e3,\n  "ok": true,\n  "list": [null, {}]\n}';
+  const lines = tokenizeJson(text);
+  expect(lines.map((l) => l.map((t) => t.text).join("")).join("\n")).toBe(text);
+  expect(kinds(lines[1])).toEqual(['key:"name"', "punct::", 'str:"web \\"x\\""', "punct:,"]);
+  expect(kinds(lines[2])).toEqual(['key:"replicas"', "punct::", "num:-1.5e3", "punct:,"]);
+  expect(kinds(lines[3])).toEqual(['key:"ok"', "punct::", "bool:true", "punct:,"]);
+  expect(kinds(lines[4])).toEqual(['key:"list"', "punct::", "punct:[", "bool:null", "punct:,", "punct:{", "punct:}", "punct:]"]);
 });

@@ -15,7 +15,7 @@ import { SecretKeys } from "./SecretKeys";
 import { NodeShellPane } from "./NodeShellPane";
 import { ShellTab } from "./ShellTab";
 import { YamlEdit } from "./YamlEdit";
-import { YamlView } from "./YamlView";
+import { JsonView, YamlView } from "./YamlView";
 import {
   BACK, CHILDREN_TRUNCATED, CLOSE, COL_NAME, COLUMN_LABELS, CREATED_AT, DETAIL_LABEL, H_IMAGE, H_KIND, H_LAST_TERMINATION, H_MESSAGE,
   H_REASON, H_RESTARTS, H_STATE, INIT_MARK, LOADING, NO_RECENT_EVENTS, OPEN_IN_IAM, SEC_ANNOTATIONS, SEC_CHILDREN, SEC_CONDITIONS,
@@ -203,15 +203,23 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sO
 /** 이보다 긴 어노테이션 값(또는 여러 줄·last-applied)은 접어 둔다 */
 const ANNOTATION_FOLD = 160;
 
-/** 어노테이션 한 줄: 키 아래에 값. 긴 값은 앞부분만 보이고 펼치면 JSON은 들여쓰기해 보인다 */
+/** 어노테이션 한 줄: 키 아래에 값. 긴 값은 앞부분만 보이고, 펼치면 JSON은 들여쓰고 색을 입혀 보인다 */
 function Annotation({ name, value }: { name: string; value: string }) {
   const long = value.length > ANNOTATION_FOLD || value.includes("\n") || name === LAST_APPLIED;
   const [open, setOpen] = useState(false);
-  const shown = open ? prettyJson(value) : long ? `${value.slice(0, ANNOTATION_FOLD).replace(/\s+/g, " ")}…` : value;
+  const json = open ? prettyJson(value) : null;
   return (
     <li>
       <div className="mono dim k8s-wrap">{name}</div>
-      <div className={`mono k8s-wrap${open ? " k8s-annotation-open" : ""}`}>{shown}</div>
+      {open && json !== null ? (
+        <div className="k8s-annotation-open">
+          <JsonView text={json} wrap />
+        </div>
+      ) : (
+        <div className={`mono k8s-wrap${open ? " k8s-annotation-open" : ""}`}>
+          {open || !long ? value : `${value.slice(0, ANNOTATION_FOLD).replace(/\s+/g, " ")}…`}
+        </div>
+      )}
       {long && (
         <button className="link" aria-expanded={open} onClick={() => setOpen(!open)}>
           {open ? ANNOTATION_FOLD_LABEL : annotationExpand(value.length)}
@@ -224,12 +232,14 @@ function Annotation({ name, value }: { name: string; value: string }) {
 /** kubectl apply가 남기는, 객체 전체를 담은 어노테이션 */
 const LAST_APPLIED = "kubectl.kubernetes.io/last-applied-configuration";
 
-/** JSON이면 들여쓰기, 아니면 그대로 */
-function prettyJson(value: string): string {
+/** JSON 객체·배열이면 들여쓴 글, 아니면 null */
+function prettyJson(value: string): string | null {
+  const t = value.trim();
+  if (!t.startsWith("{") && !t.startsWith("[")) return null;
   try {
-    return JSON.stringify(JSON.parse(value), null, 2);
+    return JSON.stringify(JSON.parse(t), null, 2);
   } catch {
-    return value;
+    return null;
   }
 }
 
