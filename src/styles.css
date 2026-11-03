@@ -344,6 +344,9 @@ tbody tr.on td { background: var(--accent) !important; color: var(--on-accent); 
 .detail-host { position: relative; }
 .detail { position: absolute; top: 0; right: 0; bottom: 0; z-index: 2; box-sizing: border-box; width: 70%; background: var(--panel); border-left: 1px solid var(--line); box-shadow: -10px 0 28px var(--tone-00000073); overflow: auto; padding: 14px; user-select: text; animation: k8s-pop 0.12s ease-out; }
 .detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.detail-head h3 { flex: 1; min-width: 0; }
+/* 오른쪽 상세의 단추는 모두 오른쪽 위 도구 모음에 모은다(EKS 상세의 도구 줄과 같은 크기) */
+.detail-tools { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; flex: none; max-width: 70%; }
 /* 탐색기 상세에 붙는 EKS 클러스터 사용량 요약 */
 .k8s-cluster-detail { margin: 0 0 14px; }
 .k8s-cluster-detail h4 { margin: 12px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }
@@ -1516,7 +1519,7 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .btn.tone-ghost-danger:hover:not(:disabled) { background: transparent; color: var(--text); }
 .btn.tone-primary:disabled, .btn.tone-warn:disabled, .btn.tone-danger:disabled { opacity: .4; }
 /* EKS·ArgoCD 탭의 버튼은 크기가 하나다(사용자 결정 2026-11-03): 높이 24px, 글자 12px, 내용만큼의 너비. 색은 tone-* 가 정한다 */
-:is(.k8s-pane, .argo-pane) .btn.btn {
+:is(.k8s-pane, .argo-pane, .detail-tools) .btn.btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
