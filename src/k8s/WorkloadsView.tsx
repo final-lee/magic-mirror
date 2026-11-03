@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { K8sError } from "./K8sError";
 import { KindTree } from "./KindTree";
 import { DETAIL_PCT, LaneResizer, type Lane } from "./lanes";
-import { CATEGORIES, PODS, customCategories, sameKind } from "./kinds";
+import { CATEGORIES, PODS, customCategories, sameKind, servedCategories } from "./kinds";
 import { ObjectDetail } from "./ObjectDetail";
 import { ObjectList } from "./ObjectList";
 import { kindKey } from "./targets";
@@ -25,6 +25,7 @@ interface Props {
   /** null이면 모든 네임스페이스 */
   namespace: string | null;
   kinds: K8sKind[];
+  discoveryAvailable?: boolean;
   focus: WorkloadsFocus | null;
   onOpenIam?: (arn: string) => void;
   onChange?: (change: K8sChange) => void;
@@ -45,7 +46,7 @@ interface Props {
 
 /** 종류 트리 + 감시 목록 + 상세 스택 */
 export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live, namespace, kinds, focus, onOpenIam, banner,
-  fixedKind, bookmarked, onToggleBookmark, lanes, onChange, appliedChange }: Props) {
+  fixedKind, bookmarked, onToggleBookmark, lanes, onChange, appliedChange, discoveryAvailable = false }: Props) {
   const [picked, setKind] = useState<K8sKindRef>(PODS);
   const kind = fixedKind ?? picked;
   const [stack, setStack] = useState<ObjectRef[]>([]);
@@ -62,7 +63,10 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
 
   const watch = useK8sWatch(target, context, sessionEpoch, ssoProfile, kind, kind.namespaced ? namespace : null, live);
   const custom = useMemo(() => customCategories(kinds), [kinds]);
-  const categories = useMemo(() => (custom.length === 0 ? CATEGORIES : [...CATEGORIES, { id: "custom", label: CAT_CUSTOM, kinds: [] }, ...custom]), [custom]);
+  const categories = useMemo(() => {
+    const builtin = discoveryAvailable ? servedCategories(kinds) : CATEGORIES;
+    return custom.length === 0 ? builtin : [...builtin, { id: "custom", label: CAT_CUSTOM, kinds: [] }, ...custom];
+  }, [custom, discoveryAvailable, kinds]);
   const top = stack.length > 0 ? stack[stack.length - 1] : null;
   const topRow = top && sameKind(top.kind, kind) ? watch.rows.find((r) => r.name === top.name && r.namespace === top.namespace) : undefined;
 

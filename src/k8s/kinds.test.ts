@@ -1,4 +1,4 @@
-import { BUILTIN, CATEGORIES, DEPLOYMENTS, NODES, SECRETS, customCategories, isSecret, resolveLink, sameKind } from "./kinds";
+import { BUILTIN, CATEGORIES, DEPLOYMENTS, NODES, SECRETS, customCategories, isSecret, resolveLink, sameKind, servedCategories } from "./kinds";
 import { CAT_CLUSTER, CAT_WORKLOADS } from "./text";
 import type { K8sKind } from "./types";
 
@@ -6,10 +6,18 @@ const kind = (group: string, k: string, plural: string, custom: boolean, version
 
 test("categories hold the spec's built-in kinds", () => {
   expect(CATEGORIES[0].label).toBe(CAT_WORKLOADS);
-  expect(CATEGORIES[0].kinds.map((k) => k.kind)).toEqual(["Pod", "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob"]);
+  expect(CATEGORIES[0].kinds.map((k) => k.kind)).toEqual(["Pod", "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob", "HorizontalPodAutoscaler", "PodDisruptionBudget"]);
   expect(CATEGORIES.find((c) => c.label === CAT_CLUSTER)!.kinds).toContainEqual(NODES);
   expect(BUILTIN).toContainEqual(SECRETS);
   expect(NODES.namespaced).toBe(false);
+});
+
+test("discovery hides absent kinds and uses the served version and scope", () => {
+  const hpa = kind("autoscaling", "HorizontalPodAutoscaler", "horizontalpodautoscalers", false, "v1");
+  const categories = servedCategories([hpa]);
+  expect(categories.flatMap((c) => c.kinds)).toEqual([{ group: "autoscaling", version: "v1", kind: hpa.kind, plural: hpa.plural, namespaced: true }]);
+  expect(servedCategories([])).toEqual([]);
+  expect(resolveLink({ group: "autoscaling", kind: hpa.kind }, [hpa])?.version).toBe("v1");
 });
 
 test("custom kinds are grouped by API group", () => {

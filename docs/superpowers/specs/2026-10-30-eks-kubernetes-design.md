@@ -37,7 +37,7 @@
 1. 클러스터를 바꾸는 조작: Pod 셸(exec)·port-forward(K9), scale·rollout restart·rollout undo·삭제(K7 A), cordon·uncordon·drain(K7 B), YAML 편집·적용·새로 만들기(K8 E). 컨테이너 attach와 노드 셸(디버그 Pod)은 C 절에 들어왔고(2026-11-02) 구현했다. CronJob 바로 실행은 K7 A의 Job 재실행에 포함, 일시정지는 K7 A.
 2. 로그: (2026-11-03 구현함) 워크로드 합친 로그(Pod별 색, 새 Pod 따라 붙기)·since(최근 N분)·파일 저장, 모든 컨테이너 한꺼번에, 서버 타임스탬프·줄바꿈 토글.
 3. 리소스 사용량: Pod·컨테이너 CPU/메모리 열(metrics-server, 지금은 개요의 노드 사용량만), request·limit 대비 %, Prometheus 그래프, 워크로드·네임스페이스 집계.
-4. 트리에 없는 내장 종류: HPA, PDB, ResourceQuota, LimitRange, PriorityClass, RuntimeClass, Lease, Mutating·ValidatingWebhookConfiguration, EndpointSlice, IngressClass, Role·ClusterRole·RoleBinding·ClusterRoleBinding, CustomResourceDefinition 자체.
+4. 내장 종류 트리: (2026-11-03 구현함) HPA, PDB, ResourceQuota, LimitRange, PriorityClass, RuntimeClass, Lease, Mutating·ValidatingWebhookConfiguration, EndpointSlice, IngressClass, Role·ClusterRole·RoleBinding·ClusterRoleBinding, CustomResourceDefinition 자체. API discovery로 제공 버전만 표시하고 목록·상세 요약과 북마크를 지원한다.
 5. 탐색: 키보드 중심 조작(명령 팔레트, `:종류` 이동), `kubectl describe` 형식 출력, xray식 관계 트리, 앱 안 터미널(kubectl), 플러그인.
 6. Helm: 릴리스 목록·values·이력, 업그레이드·롤백·삭제, 차트 설치(설계에 없음).
 7. 점검·권한: popeye식 위생 점검(K5), RBAC 역조회(K4).

@@ -69,6 +69,7 @@ export const CAT_WORKLOADS = "워크로드";
 export const CAT_NETWORK = "네트워크";
 export const CAT_CONFIG = "설정";
 export const CAT_STORAGE = "저장소";
+export const CAT_ACCESS = "접근 제어";
 export const CAT_CLUSTER = "클러스터";
 export const CAT_CUSTOM = "사용자 정의 리소스";
 export const KIND_TREE_LABEL = "리소스 종류";
@@ -93,6 +94,12 @@ export const COLUMN_LABELS: Record<string, string> = {
   roleArn: "IAM 역할", volume: "볼륨", capacity: "용량", accessModes: "접근 모드", storageClass: "스토리지 클래스",
   reclaimPolicy: "회수 정책", claim: "클레임", provisioner: "프로비저너", volumeBindingMode: "바인딩 모드", default: "기본",
   version: "kubelet", instanceType: "인스턴스 타입", zone: "AZ", group: "노드그룹",
+  target: "대상", min: "최소", max: "최대", metrics: "메트릭 상태", minAvailable: "최소 사용 가능", maxUnavailable: "최대 사용 불가",
+  disruptionsAllowed: "허용 중단", healthy: "정상 / 예상", quota: "사용량 / 한도", limits: "제한",
+  roleRef: "역할 참조", subjects: "대상", ruleCount: "규칙 수", aggregation: "집계", apiGroup: "API 그룹", versions: "버전", scope: "범위",
+  established: "설정 완료", webhookCount: "웹훅 수", failurePolicy: "실패 정책", holder: "보유자", renewTime: "갱신 시각",
+  addressType: "주소 타입", endpointReady: "준비 / 전체", controller: "컨트롤러", value: "값", globalDefault: "전역 기본",
+  preemption: "선점 정책", handler: "핸들러",
 };
 export const PROBLEM_LABELS: Record<K8sProblem, string> = {
   crashLoopBackOff: "CrashLoopBackOff",
@@ -100,6 +107,10 @@ export const PROBLEM_LABELS: Record<K8sProblem, string> = {
   pending: "Pending",
   oomKilled: "OOMKilled",
   notReady: "준비 안 됨",
+  scalingBlocked: "확장 불가",
+  noDisruptions: "중단 불가",
+  quotaExceeded: "할당량 도달",
+  notEstablished: "설정 안 됨",
 };
 
 export const TAB_SUMMARY = "요약";

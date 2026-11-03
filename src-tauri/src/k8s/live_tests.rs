@@ -301,6 +301,20 @@ async fn discovery_lists_builtin_and_custom_kinds() {
 
 #[tokio::test]
 #[ignore]
+async fn discovery_kinds_can_be_listed_in_the_watch() {
+    let client = admin().await;
+    let kinds = kinds_of(&discover(&client, PRIVATE).await.unwrap());
+    for (group, name) in [("coordination.k8s.io", "Lease"), ("rbac.authorization.k8s.io", "ClusterRole"), ("discovery.k8s.io", "EndpointSlice")] {
+        let kind = kinds.iter().find(|k| k.kind.group == group && k.kind.kind == name).expect("served kind").kind.clone();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let task = tokio::spawn(run(client.clone(), kind, None, PRIVATE, move |m| tx.send(m).is_ok()));
+        assert!(matches!(recv(&mut rx, Duration::from_secs(15)).await, Some(WatchMessage::Reset { .. })), "{name} list");
+        task.abort();
+    }
+}
+
+#[tokio::test]
+#[ignore]
 async fn deployment_owns_a_replicaset_that_owns_a_pod() {
     let client = admin().await;
     let d = get(&client, &kind_ref("apps", "v1", "Deployment", "deployments"), Some("mm-k2"), "web", PRIVATE).await.unwrap();
