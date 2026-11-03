@@ -1703,3 +1703,8 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .rbac-cell-paths { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .rbac-cell-actions { display: inline-flex; gap: 6px; margin-left: 8px; }
 .rbac-grant { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.rbac-cart .btn { white-space: nowrap; }
+.k8s-toolbar { flex-wrap: wrap; }
+.acc-row-actions { flex-wrap: wrap; row-gap: 4px; }
+.acc-row-actions .btn { white-space: nowrap; }
+.rbac-cell-actions { flex-wrap: wrap; }

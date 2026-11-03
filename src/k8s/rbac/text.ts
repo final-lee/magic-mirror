@@ -54,8 +54,13 @@ export const EFFECT_ESCALATED_BADGE = "권한 상승";
 export const EFFECT_OWN_BADGE = "내 신원";
 export const EFFECT_DETAIL = "자세히";
 export const CLUSTER_WIDE = "클러스터 전체";
-export const capabilityText = (verbs: string[], resource: string, group: string, namespace: string | null) =>
-  `${verbs.join(", ")} ${resource}${group ? `.${group}` : ""} · ${namespace ?? CLUSTER_WIDE}`;
+export const ALL_RESOURCES = "모든 리소스";
+export const ALL_VERBS = "모든 동작";
+export const ALL_URLS = "모든 비리소스 URL";
+export const capabilityText = (verbs: string[], resource: string, group: string, namespace: string | null) => {
+  const what = resource === "*" && group === "*" ? ALL_RESOURCES : `${resource}${group && group !== "*" ? `.${group}` : ""}`;
+  return `${verbs.includes("*") ? ALL_VERBS : verbs.join(", ")} ${what} · ${namespace ?? CLUSTER_WIDE}`;
+};
 
 // ── 바인딩 상세의 도구 ──
 export const BINDING_ADD_SUBJECT = "주체 추가";
