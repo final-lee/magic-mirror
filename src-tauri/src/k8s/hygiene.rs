@@ -1,5 +1,7 @@
 //! 클러스터에 쓰는 호출이 허용된 파일 밖에 없는지 글자로 확인한다(PG의 `pg::hygiene`과 같은 방식).
 //! K1에서 허용되는 것은 `review.rs`의 `create`(SelfSubjectReview, SelfSubjectRulesReview) 하나다. `shell.rs`는 exec·attach, `forward.rs`는 port-forward만 연다. 이후 단계가 `exec.rs`를 더한다.
+//! 프로세스를 띄우는 곳(`Command::new`)은 로그인 셸의 PATH를 읽는 `path.rs`와 helm을 실행하는 `helm/run.rs` 둘뿐이다.
+//! helm은 클러스터를 바꾸는 CLI라 kube 쓰기 호출과 같은 취급이다: 그 하위 명령(upgrade·install·uninstall·rollback)의 이름은 인자를 만드는 `helm/cli.rs`에만 있어야 한다.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,23 +12,29 @@ const WRITE_CALLS: &[&str] = &[
     ".patch_metadata(", ".patch_scale(", ".replace_scale(", ".patch_status(", ".replace_status(", ".patch_approval(",
     ".patch_resize(", ".replace_resize(", ".patch_ephemeral_containers(", ".replace_ephemeral_containers(", ".create_token_request(",
     "Method::DELETE", "Request::post", "Request::put", "Request::patch", "Request::delete",
+    "Command::new(",
 ];
+/// 클러스터를 바꾸는 helm 하위 명령 이름. 인자를 만드는 `k8s/helm/cli.rs`에서만 쓴다.
+const HELM_WRITE_VERBS: &[&str] = &["\"upgrade\"", "\"install\"", "\"uninstall\"", "\"rollback\""];
+const HELM_BUILDER: &str = "k8s/helm/cli.rs";
 /// (파일, 허용하는 호출)
 const ALLOWED: &[(&str, &[&str])] = &[
     ("k8s/review.rs", &[".create(", "::create("]),
     ("k8s/exec.rs", &[".create(", ".patch(", ".delete(", ".create_subresource::<"]),
     ("k8s/shell.rs", &[".exec(", ".attach("]),
     ("k8s/forward.rs", &[".portforward("]),
+    ("k8s/path.rs", &["Command::new("]),
+    ("k8s/helm/run.rs", &["Command::new("]),
 ];
 
-/// 시험일 때만 컴파일되는 파일은 스캔하지 않는다: `hygiene.rs`, `live_tests.rs`, 이름이 `tests.rs`인 파일
+/// 시험일 때만 컴파일되는 파일은 스캔하지 않는다: `hygiene.rs`, `live_tests.rs`와 `live_tests/` 아래 파일, 이름이 `tests.rs`인 파일
 fn is_test_only(path: &Path) -> bool {
-    path.file_name().is_some_and(|n| n == "hygiene.rs" || n == "live_tests.rs" || n == "tests.rs")
+    path.file_name().is_some_and(|n| n == "hygiene.rs" || n == "live_tests.rs" || n == "tests.rs") || path.components().any(|c| c.as_os_str() == "live_tests")
 }
 
 fn sources() -> Vec<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut out = vec![root.join("k8s_commands.rs")];
+    let mut out = vec![root.join("k8s_commands.rs"), root.join("k8s_helm_commands.rs")];
     let mut stack = vec![root.join("k8s")];
     while let Some(dir) = stack.pop() {
         for entry in fs::read_dir(dir).unwrap().flatten() {
@@ -117,6 +125,30 @@ fn the_terminal_and_forward_calls_live_in_their_own_files_and_the_scan_reads_the
     let allowed = |file: &str| ALLOWED.iter().find(|(f, _)| *f == file).map_or(&[][..], |(_, calls)| *calls);
     assert!(!allowed("k8s/shell.rs").contains(&".portforward("));
     assert!(!allowed("k8s/forward.rs").contains(&".exec(") && !allowed("k8s/forward.rs").contains(&".attach("));
+}
+
+#[test]
+fn helm_write_commands_are_named_only_in_the_command_builder() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut bad = Vec::new();
+    for path in sources() {
+        let rel = path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
+        let text = fs::read_to_string(&path).unwrap();
+        let code = production_part(&text).unwrap_or_else(|e| panic!("{rel}: {e}"));
+        for verb in HELM_WRITE_VERBS {
+            if rel != HELM_BUILDER && code.contains(verb) {
+                bad.push(format!("{rel}: {verb}"));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "helm 쓰기 하위 명령은 {HELM_BUILDER}에서만: {bad:?}");
+    // 허용 목록이 헛돌지 않게: 빌더에는 모든 이름이 있고, 실행 파일에는 Command::new가 있다
+    let builder = fs::read_to_string(root.join(HELM_BUILDER)).unwrap();
+    for verb in HELM_WRITE_VERBS {
+        assert!(production_part(&builder).unwrap().contains(verb), "{HELM_BUILDER}에 {verb}가 없어요");
+    }
+    assert!(sources().contains(&root.join("k8s/helm/run.rs")), "helm/run.rs를 스캔하지 않아요");
+    assert!(production_part(&fs::read_to_string(root.join("k8s/helm/run.rs")).unwrap()).unwrap().contains("Command::new("));
 }
 
 #[test]

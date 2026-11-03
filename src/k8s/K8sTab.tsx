@@ -11,6 +11,7 @@ import { CHANGE_DONE } from "./text";
 import { ContextPicker } from "./ContextPicker";
 import { EventsView } from "./EventsView";
 import { ForwardsView } from "./ForwardsView";
+import { HelmView } from "./helm/HelmView";
 import { K8sError } from "./K8sError";
 import { K8sNav, type K8sView, type NavBookmark } from "./K8sNav";
 import { NODES, bookmarkKey, bookmarkOf } from "./kinds";
@@ -26,7 +27,7 @@ import { YamlCreate } from "./YamlCreate";
 import { BOOKMARK_MISSING, savedMissing, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNECTING, updateCommand } from "./text";
 import { refreshK8s, useK8sKinds, useK8sRules, useUsageSampler } from "./queries";
 import { useK8sConnection } from "./useK8sConnection";
-import type { K8sChange, K8sKindRef, K8sTarget } from "./types";
+import type { K8sChange, K8sKindRef, K8sTarget, ObjectRef } from "./types";
 import { useK8sWatch } from "./useK8sWatch";
 
 interface Props {
@@ -83,6 +84,12 @@ export function K8sTab({ target, active, onOpenIam }: Props) {
   const nsOrAll = namespace === ALL ? null : namespace;
   const openNode = (name: string) => {
     setFocus((f) => ({ ref: { kind: NODES, namespace: null, name }, nonce: (f?.nonce ?? 0) + 1 }));
+    setView("workloads");
+  };
+
+  // Helm 릴리스의 리소스는 워크로드 화면에서 연다
+  const openObject = (ref: ObjectRef) => {
+    setFocus((f) => ({ ref, nonce: (f?.nonce ?? 0) + 1 }));
     setView("workloads");
   };
 
@@ -178,7 +185,7 @@ export function K8sTab({ target, active, onOpenIam }: Props) {
           width={lanes.width("nav")}
         />
         <LaneResizer lane="nav" onResize={lanes.resize} onCommit={lanes.commit} />
-        <div className={`k8s-body${listView ? " flush" : ""}`}>
+        <div className={`k8s-body${listView || view === "helm" ? " flush" : ""}`}>
           {session.isError ? (
             <K8sError error={session.error} target={target} ssoProfile={ssoProfile} />
           ) : view === "overview" ? (
@@ -220,6 +227,20 @@ export function K8sTab({ target, active, onOpenIam }: Props) {
             <EventsView target={target} context={chosen} sessionEpoch={session.dataUpdatedAt} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} />
           ) : view === "forwards" ? (
             <ForwardsView target={target} ssoProfile={ssoProfile} />
+          ) : view === "helm" ? (
+            <HelmView
+              target={target}
+              context={chosen}
+              ssoProfile={ssoProfile}
+              live={live}
+              visible={active}
+              namespace={nsOrAll}
+              kinds={kinds.data ?? []}
+              appliedChange={appliedChange}
+              onChange={change.start}
+              onOpenObject={openObject}
+              lanes={lanes}
+            />
           ) : view === "changeLog" ? (
             <ChangeLog target={target} onStart={change.start} />
           ) : rules.isError ? (
