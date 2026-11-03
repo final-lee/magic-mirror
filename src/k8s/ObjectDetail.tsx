@@ -75,7 +75,7 @@ function Links({ title, links, kinds, onOpen }: { title: string; links: K8sLink[
 
 const stateText = (c: K8sContainer) => (c.state === "template" ? "" : c.reason ? `${c.state}: ${c.reason}` : c.state);
 
-function Summary({ view, now, kinds, onOpen, onOpenIam, actions, children }: { view: K8sObjectView; now: number; kinds: K8sKind[]; onOpen: (ref: ObjectRef) => void; onOpenIam?: (arn: string) => void; actions?: ReactNode; children?: ReactNode }) {
+function Summary({ view, now, kinds, onOpen, onOpenIam, children }: { view: K8sObjectView; now: number; kinds: K8sKind[]; onOpen: (ref: ObjectRef) => void; onOpenIam?: (arn: string) => void; children?: ReactNode }) {
   const { row } = view;
   const node = isPod(view.kind) ? row.values.node : undefined;
   const role = isServiceAccount(view.kind) ? row.values.roleArn : undefined;
@@ -107,7 +107,6 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, actions, children }: { v
             {OPEN_IN_IAM}
           </button>
         )}
-        {actions}
       </div>
       {view.owners.length > 0 && <Links title={SEC_OWNERS} links={view.owners} kinds={kinds} onOpen={onOpen} />}
       {(view.children.length > 0 || view.childrenError) && (
@@ -227,7 +226,13 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
   const logContainers = pod && q.data ? q.data.containers.filter((c) => c.state !== "template") : podContainers;
   const shellTab = tab === "shell" && ((pod && changes) || nodeShell !== null);
   const [editing, setEditing] = useState(false);
-  useEffect(() => setEditing(false), [objectRef.kind, objectRef.namespace, objectRef.name, tab]);
+  // YAML 편집 중의 미리보기·편집 취소 버튼이 들어갈 도구 줄 자리
+  const [editSlot, setEditSlot] = useState<HTMLSpanElement | null>(null);
+  useEffect(() => setEditing(false), [objectRef.kind, objectRef.namespace, objectRef.name]);
+  // 도구 줄의 [편집]은 YAML 탭으로 옮기며 편집을 연다. 다른 탭으로 가면 편집을 닫는다
+  useEffect(() => {
+    if (tab !== "yaml") setEditing(false);
+  }, [tab]);
   // 적용이 끝나면 편집을 닫는다(편집하던 글은 더 이상 현재 객체가 아니다)
   useEffect(() => {
     if (appliedChange?.type === "apply") setEditing(false);
@@ -250,7 +255,39 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
         </button>
       </div>
       {rolloutProgress && <p role="status">{rolloutProgress}</p>}
-      {onChange && q.data && <ChangeActions target={target} ssoProfile={ssoProfile} objectRef={objectRef} view={q.data} rules={rules.data} shellNamespace={shellNamespace ?? "default"} onStart={onChange} />}
+      {onChange && q.data && (
+        <div className="k8s-actions k8s-toolbar">
+          {(pod || service) && objectRef.namespace && (
+            <ForwardPanel
+              key={`${objectRef.namespace}/${objectRef.name}`}
+              target={target}
+              ssoProfile={ssoProfile}
+              namespace={objectRef.namespace}
+              kind={pod ? "pod" : "service"}
+              name={objectRef.name}
+              ports={q.data.ports ?? []}
+              rules={rules.data}
+            />
+          )}
+          {editing ? (
+            <span className="k8s-toolbar-slot" ref={setEditSlot} />
+          ) : (
+            <button
+              className="btn small tone-primary"
+              disabled={!!editDenied}
+              title={editDenied}
+              aria-description={editDenied}
+              onClick={() => {
+                setTab("yaml");
+                setEditing(true);
+              }}
+            >
+              {YAML_EDIT}
+            </button>
+          )}
+          <ChangeActions target={target} ssoProfile={ssoProfile} objectRef={objectRef} view={q.data} rules={rules.data} shellNamespace={shellNamespace ?? "default"} onStart={onChange} />
+        </div>
+      )}
       <div role="tablist" className="k8s-tabs">
         <button role="tab" aria-selected={tab === "summary"} onClick={() => setTab("summary")}>{TAB_SUMMARY}</button>
         <button role="tab" aria-selected={tab === "yaml"} onClick={() => setTab("yaml")}>{TAB_YAML}</button>
@@ -303,36 +340,15 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
             kinds={kinds}
             onOpen={onOpen}
             onOpenIam={onOpenIam}
-            actions={
-              (pod || service) && objectRef.namespace && changes ? (
-                <ForwardPanel
-                  key={`${objectRef.namespace}/${objectRef.name}`}
-                  target={target}
-                  ssoProfile={ssoProfile}
-                  namespace={objectRef.namespace}
-                  kind={pod ? "pod" : "service"}
-                  name={objectRef.name}
-                  ports={q.data.ports ?? []}
-                  rules={rules.data}
-                />
-              ) : undefined
-            }
           >
             {q.data.secretKeys && objectRef.namespace && (
               <SecretKeys target={target} ssoProfile={ssoProfile} namespace={objectRef.namespace} name={objectRef.name} keys={q.data.secretKeys} canRead={canRead} />
             )}
           </Summary>
         ) : tab === "yaml" && editing && onChange ? (
-          <YamlEdit target={target} ssoProfile={ssoProfile} objectRef={objectRef} view={q.data} canRead={canRead} onPreview={onChange} onCancel={() => setEditing(false)} />
+          <YamlEdit target={target} ssoProfile={ssoProfile} objectRef={objectRef} view={q.data} canRead={canRead} onPreview={onChange} onCancel={() => setEditing(false)} actions={editSlot} />
         ) : (
           <>
-            {onChange && (
-              <div className="k8s-actions">
-                <button className="btn small" disabled={!!editDenied} title={editDenied} aria-description={editDenied} onClick={() => setEditing(true)}>
-                  {YAML_EDIT}
-                </button>
-              </div>
-            )}
             {secret && <p className="dim">{YAML_SECRET_NOTE}</p>}
             <YamlView text={q.data.yaml} />
           </>

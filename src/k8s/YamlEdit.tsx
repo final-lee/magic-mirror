@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { isSecret } from "./kinds";
 import { NO_SECRET_EDITS, SecretEdit, withSecretValues, type SecretEdits } from "./SecretEdit";
 import * as t from "./text";
@@ -14,6 +15,8 @@ interface Props {
   canRead: "yes" | "no" | "unknown";
   onPreview: (change: K8sChange) => void;
   onCancel: () => void;
+  /** 미리보기·편집 취소 버튼을 놓을 상세 도구 줄의 자리(없으면 그리지 않는다) */
+  actions: HTMLElement | null;
 }
 
 const asRecord = (value: unknown): YamlObject => (typeof value === "object" && value !== null && !Array.isArray(value) ? (value as YamlObject) : {});
@@ -26,7 +29,7 @@ function sameObject(object: YamlObject, { kind, namespace, name }: ObjectRef): b
 }
 
 /** 상세의 YAML 편집. 구문 오류가 있으면 미리보기를 막고, 미리보기는 변경 흐름(서버 dry-run)으로 넘긴다. */
-export function YamlEdit({ target, ssoProfile, objectRef, view, canRead, onPreview, onCancel }: Props) {
+export function YamlEdit({ target, ssoProfile, objectRef, view, canRead, onPreview, onCancel, actions }: Props) {
   const [text, setText] = useState(view.editYaml);
   const [secretEdits, setSecretEdits] = useState<SecretEdits>(NO_SECRET_EDITS);
   const [error, setError] = useState("");
@@ -74,14 +77,18 @@ export function YamlEdit({ target, ssoProfile, objectRef, view, canRead, onPrevi
         />
       )}
       {error && <p className="err">{error}</p>}
-      <div className="k8s-actions">
-        <button className="btn primary" disabled={problems.length > 0} onClick={preview}>
-          {t.YAML_PREVIEW}
-        </button>
-        <button className="btn plain" onClick={onCancel}>
-          {t.YAML_CANCEL_EDIT}
-        </button>
-      </div>
+      {actions &&
+        createPortal(
+          <>
+            <button className="btn small tone-primary" disabled={problems.length > 0} onClick={preview}>
+              {t.YAML_PREVIEW}
+            </button>
+            <button className="btn small" onClick={onCancel}>
+              {t.YAML_CANCEL_EDIT}
+            </button>
+          </>,
+          actions,
+        )}
     </div>
   );
 }
