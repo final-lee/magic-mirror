@@ -66,6 +66,10 @@ rand = "0.10"
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "aws_lc_rs"] }
 aws-sdk-costexplorer = "1"
 rust_decimal = "1"
+# Argo CronWorkflow의 다음 실행 시각(시간대 포함). chrono는 kube가 이미 쓰는 크레이트다
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+chrono-tz = "0.10"
+croner = "4"
 
 [dev-dependencies]
 tempfile = "3"

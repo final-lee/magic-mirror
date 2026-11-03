@@ -25,6 +25,8 @@ import { IamTab } from "./iam/IamTab";
 import { refreshIam, useIamOverview } from "./iam/queries";
 import { ArgocdTab } from "./argocd/ArgocdTab";
 import { ARGOCD_TITLE } from "./argocd/text";
+import { ArgoWfTab } from "./argowf/ArgoWfTab";
+import { ARGOWF_TITLE } from "./argowf/text";
 import { CostTab } from "./cost/CostTab";
 import { refreshCost } from "./cost/queries";
 import { COST_TITLE } from "./cost/text";
@@ -75,6 +77,7 @@ export default function App() {
   const [costTab, setCostTab] = useState(false);
   // ArgoCD 탭도 하나뿐이다(id "argocd"). AWS 프로필과 상관없어 프로필을 바꿔도 닫지 않는다.
   const [argocdTab, setArgocdTab] = useState(false);
+  const [argowfTab, setArgowfTab] = useState(false);
   const onTransferSettled = useCallback(
     (_req: TransferRequest) => {
       void qc.invalidateQueries({ queryKey: ["s3"] });
@@ -211,9 +214,15 @@ export default function App() {
     setActiveTab("argocd");
     setFilter("");
   };
+  const openArgoWorkflows = () => {
+    setArgowfTab(true);
+    setActiveTab("argowf");
+    setFilter("");
+  };
   const closeTab = (id: string) => {
     if (id === "iam") setIamTab(null);
     if (id === "argocd") setArgocdTab(false);
+    if (id === "argowf") setArgowfTab(false);
     if (id === "cost") setCostTab(false);
     const pg = pgTabs.find((t) => t.id === id);
     if (pg) void closePg(qc, pg.target);
@@ -239,6 +248,7 @@ export default function App() {
     ...(iamTab ? [{ id: "iam", title: iamOverview.data ? `🔐 IAM · ${iamOverview.data.accountId}` : "🔐 IAM", closable: true }] : []),
     ...(costTab ? [{ id: "cost", title: COST_TITLE, closable: true }] : []),
     ...(argocdTab ? [{ id: "argocd", title: ARGOCD_TITLE, closable: true }] : []),
+    ...(argowfTab ? [{ id: "argowf", title: ARGOWF_TITLE, closable: true }] : []),
     ...explorerTabs.map((t) => ({ id: t.id, title: `S3: ${t.location.bucket}`, closable: true })),
     ...vpcTabs.map((t) => ({ id: t.id, title: `🗺 ${t.name}`, closable: true })),
     ...pgTabs.map((t) => ({ id: t.id, title: t.title, closable: true })),
@@ -331,6 +341,7 @@ export default function App() {
             onOpenIam={() => openIam()}
             onOpenCost={openCost}
             onOpenArgocd={openArgocd}
+            onOpenArgoWorkflows={openArgoWorkflows}
           />
           <MainArea
             key={mainKey}
@@ -363,6 +374,11 @@ export default function App() {
         {argocdTab && (
           <div className="tabpane argo-pane" hidden={activeTab !== "argocd"}>
             <ArgocdTab active={activeTab === "argocd"} />
+          </div>
+        )}
+        {argowfTab && (
+          <div className="tabpane" hidden={activeTab !== "argowf"}>
+            <ArgoWfTab active={activeTab === "argowf"} />
           </div>
         )}
         {explorerTabs.map((t) => (

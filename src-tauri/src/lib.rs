@@ -1,6 +1,9 @@
 mod adapters;
 mod argocd;
 mod argocd_commands;
+mod argowf;
+mod argowf_commands;
+mod argowf_manifest_commands;
 mod aws;
 mod commands;
 mod cost;
@@ -47,6 +50,7 @@ pub fn run() {
             app.manage(iam_commands::IamState::new(dir.join("iam-changes.jsonl")));
             app.manage(k8s_commands::K8sState::new(dir.join("k8s-changes.jsonl")));
             app.manage(argocd::ArgocdState::default());
+            app.manage(argowf::client::State::new(dir.join("settings.json")));
             app.manage(pg_commands::PgState::new(dir.join("db-changes.jsonl")));
             app.manage(cost_commands::CostState::new(dir.join("cost-cache.json")));
             app.manage(resource_index::ResourceIndexState::new(dir.join("resource-index.json")));
@@ -164,6 +168,46 @@ pub fn run() {
             argocd_commands::argocd_tree,
             argocd_commands::argocd_refresh,
             argocd_commands::argocd_sync,
+            argowf_commands::argowf_contexts,
+            argowf_commands::argowf_set_token,
+            argowf_commands::argowf_forget_token,
+            argowf_commands::argowf_session,
+            argowf_commands::argowf_info,
+            argowf_commands::argowf_userinfo,
+            argowf_commands::argowf_copy_token,
+            argowf_commands::argowf_watch,
+            argowf_commands::argowf_watch_workflow,
+            argowf_commands::argowf_watch_stop,
+            argowf_commands::argowf_plugins,
+            argowf_commands::argowf_save_text,
+            argowf_commands::argowf_artifact_preview,
+            argowf_commands::argowf_save_artifact,
+            argowf_commands::argowf_resource_logs,
+            argowf_commands::argowf_batch_action,
+            argowf_commands::argowf_workflows,
+            argowf_commands::argowf_archived,
+            argowf_commands::argowf_workflow,
+            argowf_commands::argowf_archived_workflow,
+            argowf_commands::argowf_role_arn,
+            argowf_commands::argowf_events,
+            argowf_commands::argowf_logs,
+            argowf_commands::argowf_logs_stop,
+            argowf_commands::argowf_crons,
+            argowf_commands::argowf_cron,
+            argowf_commands::argowf_templates,
+            argowf_commands::argowf_template,
+            argowf_commands::argowf_workflow_action,
+            argowf_commands::argowf_archived_action,
+            argowf_commands::argowf_cron_action,
+            argowf_commands::argowf_submit_template,
+            argowf_manifest_commands::argowf_manifest,
+            argowf_manifest_commands::argowf_lint,
+            argowf_manifest_commands::argowf_create,
+            argowf_manifest_commands::argowf_update,
+            argowf_manifest_commands::argowf_delete,
+            argowf_manifest_commands::argowf_event_bindings,
+            argowf_manifest_commands::argowf_event_sources,
+            argowf_manifest_commands::argowf_sensors,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
