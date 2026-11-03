@@ -6,6 +6,7 @@ import { can } from "./can";
 import { Problems, valueKeys } from "./columns";
 import { age } from "./format";
 import { NODES, isPod, isSecret, isService, isServiceAccount, resolveLink } from "./kinds";
+import { ObjectForwards } from "./ForwardActions";
 import { ForwardPanel } from "./ForwardPanel";
 import { DETAIL_PCT } from "./lanes";
 import { PodLogs } from "./PodLogs";
@@ -287,6 +288,9 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
           )}
           <ChangeActions target={target} ssoProfile={ssoProfile} objectRef={objectRef} view={q.data} rules={rules.data} shellNamespace={shellNamespace ?? "default"} onStart={onChange} />
         </div>
+      )}
+      {(pod || service) && objectRef.namespace && (
+        <ObjectForwards target={target} ssoProfile={ssoProfile} namespace={objectRef.namespace} kind={pod ? "pod" : "service"} name={objectRef.name} live={live} />
       )}
       <div role="tablist" className="k8s-tabs">
         <button role="tab" aria-selected={tab === "summary"} onClick={() => setTab("summary")}>{TAB_SUMMARY}</button>

@@ -1,13 +1,11 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { desktop } from "../api/desktop";
 import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
 import { ForwardPanel } from "./ForwardPanel";
-import { FORWARD_BAD_PORT, FORWARD_CUSTOM, FORWARD_LOCAL, FORWARD_OPEN, FORWARD_OPEN_BROWSER, FORWARD_PORT, FORWARD_START, forwardOpened, noStreamPermission } from "./text";
+import { FORWARD_BAD_PORT, FORWARD_CUSTOM, FORWARD_LOCAL, FORWARD_OPEN, FORWARD_PORT, FORWARD_START, noStreamPermission } from "./text";
 import type { K8sForward, K8sPort, K8sRules } from "./types";
 
 vi.mock("./api", () => ({ k8sApi: { forwardOpen: vi.fn() } }));
-vi.mock("../api/desktop", () => ({ desktop: { openUrl: vi.fn(), copy: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 const m = vi.mocked(k8sApi);
 const T = { profile: "app", region: "r", cluster: "c" };
@@ -31,14 +29,14 @@ function setup(props: Partial<Parameters<typeof ForwardPanel>[0]> = {}) {
 
 beforeEach(() => vi.clearAllMocks());
 
-test("the first declared port is preselected and the local port is automatic by default", async () => {
+test("the first declared port is preselected, the local port is automatic, and the picker closes once opened", async () => {
   m.forwardOpen.mockResolvedValue(forward());
   setup();
   fireEvent.click(screen.getByRole("button", { name: FORWARD_START }));
   fireEvent.click(screen.getByRole("button", { name: FORWARD_OPEN }));
   await act(async () => {});
   expect(m.forwardOpen).toHaveBeenCalledWith(T, { namespace: "dev", kind: "pod", name: "web-1", remotePort: 8080, localPort: null }, "p");
-  expect(screen.getByText(forwardOpened("127.0.0.1:18080"))).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: FORWARD_OPEN })).not.toBeInTheDocument();
 });
 
 test("picks another declared port and a chosen local port", async () => {
@@ -69,16 +67,6 @@ test("a bad port is refused before anything is sent", async () => {
   fireEvent.click(screen.getByRole("button", { name: FORWARD_OPEN }));
   expect(screen.getByText(FORWARD_BAD_PORT)).toBeInTheDocument();
   expect(m.forwardOpen).not.toHaveBeenCalled();
-});
-
-test("the opened forward can be opened in the browser", async () => {
-  m.forwardOpen.mockResolvedValue(forward());
-  setup();
-  fireEvent.click(screen.getByRole("button", { name: FORWARD_START }));
-  fireEvent.click(screen.getByRole("button", { name: FORWARD_OPEN }));
-  await act(async () => {});
-  fireEvent.click(screen.getByRole("button", { name: FORWARD_OPEN_BROWSER }));
-  expect(desktop.openUrl).toHaveBeenCalledWith("http://127.0.0.1:18080");
 });
 
 test("a failed open shows the error", async () => {
