@@ -3,6 +3,25 @@ import type { AppError } from "../api/types";
 // 백엔드 계약(camelCase)과 같은 모양이다. 필드는 이후 단계에서 추가만 된다.
 export type K8sTarget = { profile: string; region: string; cluster: string };
 
+/** API 서버 서비스 프록시로 연결할 Prometheus. */
+export interface PrometheusEndpoint {
+  namespace: string;
+  name: string;
+  port: number;
+}
+
+/** 컨테이너 또는 Pod 하나의 시각(초)과 값. */
+export interface PrometheusSeries {
+  name: string;
+  values: [number, number][];
+}
+
+/** CPU는 코어, 메모리는 바이트. */
+export interface PrometheusGraphs {
+  cpu: PrometheusSeries[];
+  memory: PrometheusSeries[];
+}
+
 export interface K8sContextCandidate {
   /** context 이름 */
   name: string;
