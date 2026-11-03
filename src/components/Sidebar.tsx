@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useResources } from "../api/queries";
 import type { Favorite, ResourceType, ServiceInfo } from "../api/types";
 import { ARGOCD_TITLE } from "../argocd/text";
-import { COST_TITLE } from "../cost/text";
+import { COST_NAV, COST_TITLE } from "../cost/text";
 import { ServiceBadge } from "./ServiceBadge";
 
 interface Props {
@@ -68,8 +68,11 @@ export function Sidebar({ services, profile, region, selection, favorites, onSel
         </>
       )}
       {onOpenCost && (
-        <div className="typ cost-open" role="button" onClick={() => onOpenCost()}>
-          <span>{COST_TITLE}</span>
+        <div className="typ cost-open" role="button" aria-label={COST_TITLE} onClick={() => onOpenCost()}>
+          <span className="cost-open-label">
+            <ServiceBadge service={{ id: "cost", name: COST_NAV }} />
+            {COST_NAV}
+          </span>
         </div>
       )}
       <div className="grp">서비스</div>

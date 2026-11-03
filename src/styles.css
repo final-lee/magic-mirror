@@ -297,6 +297,9 @@ button { font: inherit; color: inherit; }
 .svc { padding: 4px 14px; display: flex; align-items: center; gap: 7px; cursor: pointer; }
 .svc .tw { width: 10px; color: var(--dim); font-size: 9px; }
 .badge { width: 18px; height: 18px; border-radius: 4px; display: inline-grid; place-items: center; font-size: 9px; font-weight: 700; color: var(--badge-text); flex: none; }
+/* AWS 공식 서비스 아이콘(그림 자체가 둥근 네모 배경을 가진다) */
+.badge-icon { display: inline-block; object-fit: contain; }
+.cost-open-label { display: inline-flex; align-items: center; gap: 7px; }
 .typ { padding: 4px 14px 4px 46px; cursor: pointer; color: var(--tone-cfcfd2); display: flex; justify-content: space-between; }
 .typ.fav { padding-left: 14px; }
 .typ .count { color: var(--dim); font-size: 11px; }
