@@ -339,8 +339,11 @@ tbody tr.on td { background: var(--accent) !important; color: var(--on-accent); 
 .dot.green { background: var(--green); } .dot.red { background: var(--red); } .dot.yellow { background: var(--yellow); }
 .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
 .status { padding: 5px 14px; border-top: 1px solid var(--line); color: var(--dim); font-size: 11px; display: flex; justify-content: space-between; }
-/* 오른쪽 상세는 늘 화면 비율로 연다(고정 px 너비를 쓰지 않는다). 탐색기·VPC 지도·IAM 작업 목록이 함께 쓴다 */
-.detail { flex: none; box-sizing: border-box; width: 35%; background: var(--panel); border-left: 1px solid var(--line); overflow: auto; padding: 14px; user-select: text; }
+/* 오른쪽 상세 팝업: 고른 것이 있을 때만 본문(.detail-host) 위에 떠서 오른쪽부터 70%를 덮는다.
+   EKS·ArgoCD 4열 상세(.k8s-detail, 기본 DETAIL_PCT 70%)와 같은 비율이고 최소 px 너비를 두지 않는다. 탐색기·VPC 지도·IAM 작업 목록이 함께 쓴다 */
+.detail-host { position: relative; }
+.detail { position: absolute; top: 0; right: 0; bottom: 0; z-index: 2; box-sizing: border-box; width: 70%; background: var(--panel); border-left: 1px solid var(--line); box-shadow: -10px 0 28px var(--tone-00000073); overflow: auto; padding: 14px; user-select: text; animation: k8s-pop 0.12s ease-out; }
+.detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 /* 탐색기 상세에 붙는 EKS 클러스터 사용량 요약 */
 .k8s-cluster-detail { margin: 0 0 14px; }
 .k8s-cluster-detail h4 { margin: 12px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }

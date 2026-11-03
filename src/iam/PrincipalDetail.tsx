@@ -100,7 +100,7 @@ export function PrincipalDetail({ profile, arn, overview, onOpen, initialTab, in
 
   return (
     <>
-      <section className="center iam-detail">
+      <section className="center iam-detail detail-host">
         {q.isError && <ErrorState compact error={q.error} profile={profile} onRetry={() => void q.refetch()} />}
         <PrincipalHeader summary={view.summary} tags={view.tags} />
         <div className="iam-tabs" role="tablist" aria-label="상세 항목">
@@ -136,17 +136,17 @@ export function PrincipalDetail({ profile, arn, overview, onOpen, initialTab, in
             />
           )}
         </div>
+        {active === "permissions" && cell && (
+          <ActionDrilldown
+            profile={profile}
+            arn={arn}
+            cell={cell}
+            onClose={() => commit({ cell: null })}
+            onOpenPolicy={(id) => onOpen(policyRoute(id))}
+            onOpenGroup={openGroup}
+          />
+        )}
       </section>
-      {active === "permissions" && cell && (
-        <ActionDrilldown
-          profile={profile}
-          arn={arn}
-          cell={cell}
-          onClose={() => commit({ cell: null })}
-          onOpenPolicy={(id) => onOpen(policyRoute(id))}
-          onOpenGroup={openGroup}
-        />
-      )}
     </>
   );
 }

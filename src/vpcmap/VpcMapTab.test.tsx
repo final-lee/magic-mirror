@@ -86,8 +86,9 @@ test("clicking the empty canvas clears the selection", async () => {
   renderWithClient(<VpcMapTab {...props} />);
   await screen.findByText("pub-a");
   fireEvent.click(tile("i-1"));
+  expect(screen.getByRole("complementary", { name: "상세" })).toBeInTheDocument();
   fireEvent.click(screen.getByTestId("vpc-canvas"));
-  expect(screen.getByText("리소스를 선택하세요")).toBeInTheDocument();
+  expect(screen.queryByRole("complementary", { name: "상세" })).toBeNull();
 });
 
 test("shows warnings", async () => {
