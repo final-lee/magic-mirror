@@ -85,13 +85,13 @@ async fn a_binding_is_created_edited_and_removed_and_each_step_is_undone() {
 async fn a_cart_batch_previews_gains_and_losses_applies_in_order_and_stops_at_a_failure() {
     let ctx = ctx().await;
     kubectl(&["-n", NS, "delete", "rolebinding", "cart", "base2", "--ignore-not-found"]);
-    kubectl(&["-n", NS, "create", "rolebinding", "base2", "--clusterrole=view", "--user=mm-rbac-alice"]);
+    kubectl(&["-n", NS, "create", "rolebinding", "base2", "--clusterrole=view", "--user=mm-rbac-frank"]);
     let make = Change { target: target("cart"), operation: Operation::BindingCreate { object: json!({
         "apiVersion": "rbac.authorization.k8s.io/v1", "kind": "RoleBinding", "metadata": {"name": "cart", "namespace": NS},
         "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": "view"},
         "subjects": [{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": "mm-rbac-dave"}],
     }) } };
-    let changes = vec![make, edit("cart", vec![user("mm-rbac-erin")], vec![]), edit("base2", vec![], vec![user("mm-rbac-alice")]), edit("base2", vec![user("mm-rbac-zed")], vec![])];
+    let changes = vec![make, edit("cart", vec![user("mm-rbac-erin")], vec![]), edit("base2", vec![], vec![user("mm-rbac-frank")]), edit("base2", vec![user("mm-rbac-zed")], vec![])];
     let planned = plan_batch(&ctx, &changes).await.unwrap();
     let seen: Vec<_> = planned.items.iter().map(|i| i.plan.clone().unwrap()).collect();
     // 누가 무엇을 얻고 잃는지: dave·erin·zed는 얻고 alice는 잃는다
@@ -102,7 +102,7 @@ async fn a_cart_batch_previews_gains_and_losses_applies_in_order_and_stops_at_a_
         names
     };
     assert_eq!(who(true), ["mm-rbac-dave", "mm-rbac-erin", "mm-rbac-zed"]);
-    assert_eq!(who(false), ["mm-rbac-alice"]);
+    assert_eq!(who(false), ["mm-rbac-frank"]);
     recheck_batch(&ctx, &changes, &seen).await.unwrap();
     // 셋째 항목을 보내기 전에 누군가 base를 지우면 그 항목에서 멈추고 넷째는 건너뛴다
     kubectl(&["-n", NS, "delete", "rolebinding", "base2"]);
