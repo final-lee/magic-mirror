@@ -298,3 +298,14 @@
 - [ ] 미리보기 뒤 다른 곳에서 바꾸면 "미리보기 이후 바뀌었어요"로 아무것도 적용되지 않는다
 - [ ] 신원 탭: access entry 만들기·그룹 변경·정책 연결·해제·삭제와 변경 기록의 되돌리기(실제 EKS)
 - [ ] AmazonEKSClusterAdminPolicy 연결과 내 access entry 변경은 이름 입력을 요구한다
+## EKS 쿠버네티스: 보안 점검 (읽기만 한다. 고치기는 테스트 클러스터에서만 확인한다)
+- [ ] 왼쪽 메뉴 "🔍 보안 점검"을 열면 심각도(높음·중간·낮음)와 분류(클러스터·권한·워크로드)별 개수 카드가 나오고, 카드를 누르면 그 조건으로 목록이 걸러지고 다시 누르면 풀린다
+- [ ] 클러스터 점검이 실제 EKS 설정과 맞는다: 퍼블릭 엔드포인트가 0.0.0.0/0이면 "높음", 꺼진 로그 유형(콘솔과 대조), KMS 암호화 유무, 표준 지원 종료 90일 이내(EKS 문서의 종료일과 대조), aws-auth 사용, 클러스터 생성 직후 만들어진 관리자 access entry("추정"으로 표시)
+- [ ] 권한 점검이 접근 화면의 "누가 할 수 있나"와 맞는다: cluster-admin·system:masters 주체, 익명·system:authenticated에 준 권한(system:public-info-viewer 같은 기본 설정은 안 나온다), bind·escalate·impersonate·nodes/proxy·모든 Secret 읽기, Pod 생성 + 강한 ServiceAccount, 쓰이지 않는 역할, 없는 역할·ServiceAccount를 가리키는 바인딩
+- [ ] 워크로드 점검: privileged, hostPath(노드 루트·런타임 소켓은 "높음"), hostNetwork, hostPID, root 실행, allowPrivilegeEscalation, request·limit·probe 없음, latest·태그 없는 이미지, default ServiceAccount 토큰 자동 마운트, NetworkPolicy 없는 네임스페이스, IMDS hop limit 2 이상 노드그룹(시작 템플릿과 인스턴스 설정)
+- [ ] 시스템 네임스페이스(`kube-system`, `kube-public`, `kube-node-lease`, `amazon-*`)의 문제는 처음에 숨겨지고 "N건은 숨겼어요"가 보인다. [시스템 네임스페이스 포함]을 켜면 보인다
+- [ ] [점검 항목]에서 항목을 끄면 목록과 개수에서 바로 빠지고, 앱을 다시 켜고 다른 클러스터를 열어도 그대로다(설정 `k8sSecurityChecks`). [모두 켜기]·[모두 끄기]가 분류 단위로 동작한다
+- [ ] [점검 항목별로 묶기]를 켜면 항목마다 접고 펼 수 있는 묶음이 나오고, 행을 다시 누르거나 빈 곳을 누르면 선택이 풀린다
+- [ ] 행을 누르면 70% 상세가 열려 증거, 왜 중요한지, 해결 방법이 보이고, 오른쪽 위 도구 모음의 [워크로드 화면에서 열기]·[IAM에서 열기]·[접근 화면에서 보기]가 대상으로 간다. AWS 리소스(클러스터·노드그룹)는 열기 단추 없이 AWS에서 고치라는 안내가 나온다
+- [ ] 고칠 수 있는 항목(allowPrivilegeEscalation 미지정, 권한 없는 default ServiceAccount 토큰 자동 마운트)은 도구 모음 오른쪽 끝의 [자동으로 고치기]가 변경 미리보기를 연다: 서버 dry-run, 바뀌는 필드만의 diff, 롤아웃 주의. 적용하면 점검이 다시 읽혀 그 항목이 사라지고 변경 기록 [되돌리기]가 된다. patch 권한이 없으면 이유와 함께 꺼진다. Helm·ArgoCD가 관리하는 객체는 주의 문구에 그 도구 이름이 나온다
+- [ ] AWS 읽기가 막힌 계정(예: eks:DescribeCluster 거부)에서도 화면이 뜨고, 읽지 못한 부분과 "점검하지 못한 항목"이 위에 남는다. SSO가 만료되면 로그인 버튼이 나온다
