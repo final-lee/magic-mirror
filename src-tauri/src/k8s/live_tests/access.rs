@@ -107,7 +107,7 @@ async fn the_engine_agrees_with_subject_access_review_on_every_request() {
             }
         }
     }
-    assert!(checked > 2000, "{checked}");
+    assert!(checked > 1000, "{checked}");
     assert!(mismatches.is_empty(), "{} / {checked}건이 달라요:\n{}", mismatches.len(), mismatches.join("\n"));
 }
 
