@@ -22,7 +22,7 @@ import {
   H_REASON, H_RESTARTS, H_STATE, INIT_MARK, LOADING, NO_RECENT_EVENTS, OPEN_IN_IAM, SEC_ANNOTATIONS, SEC_CHILDREN, SEC_CONDITIONS,
   SEC_CONTAINERS, SEC_EVENTS, SEC_LABELS, SEC_OWNERS, TAB_LOGS, TAB_SHELL, TAB_SUMMARY, TAB_YAML, YAML_SECRET_NOTE, H_TIME, H_COUNT, openNode,
   ANNOTATION_FOLD_LABEL, annotationExpand,
-  CHANGE_DENIED, YAML_EDIT, TAB_USAGE, H_CPU_USAGE, H_MEMORY_USAGE, USAGE_LIMIT, USAGE_REQUEST,
+  CHANGE_DENIED, YAML_EDIT, H_CPU_USAGE, H_MEMORY_USAGE, USAGE_LIMIT, USAGE_REQUEST,
 } from "./text";
 import type { K8sChange, K8sContainer, K8sContainerUsage, K8sKind, K8sLink, K8sObjectView, K8sTarget, ObjectRef } from "./types";
 import { pct, podKey, type UsageIndex } from "./usage";
@@ -103,7 +103,7 @@ function Links({ title, links, kinds, onOpen }: { title: string; links: K8sLink[
 
 const stateText = (c: K8sContainer) => (c.state === "template" ? "" : c.reason ? `${c.state}: ${c.reason}` : c.state);
 
-function Summary({ view, now, kinds, onOpen, onOpenIam, containerUsage, children }: { view: K8sObjectView; now: number; kinds: K8sKind[]; onOpen: (ref: ObjectRef) => void; onOpenIam?: (arn: string) => void; containerUsage?: K8sContainerUsage[]; children?: ReactNode }) {
+function Summary({ view, now, kinds, onOpen, onOpenIam, containerUsage, usage, children }: { view: K8sObjectView; now: number; kinds: K8sKind[]; onOpen: (ref: ObjectRef) => void; onOpenIam?: (arn: string) => void; containerUsage?: K8sContainerUsage[]; usage?: ReactNode; children?: ReactNode }) {
   const { row } = view;
   const node = isPod(view.kind) ? row.values.node : undefined;
   const role = isServiceAccount(view.kind) ? row.values.roleArn : undefined;
@@ -140,6 +140,8 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, containerUsage, children
           </button>
         </div>
       )}
+      {/* 사용량 그래프는 기본 정보 바로 아래, 관계·컨테이너보다 먼저 */}
+      {usage}
       {view.owners.length > 0 && <Links title={SEC_OWNERS} links={view.owners} kinds={kinds} onOpen={onOpen} />}
       {(view.children.length > 0 || view.childrenError) && (
         <>
@@ -279,7 +281,7 @@ function prettyJson(value: string): string | null {
 /** 객체 하나의 상세(요약·YAML). 소유자·자식·노드 링크는 onOpen으로 상세 스택에 쌓는다. */
 export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose,
   onOpenIam, now, widthPct = DETAIL_PCT, onChange, rolloutProgress, appliedChange, shellNamespace, usageIndex }: Props) {
-  const [tab, setTab] = useState<"summary" | "yaml" | "logs" | "shell" | "usage">("summary");
+  const [tab, setTab] = useState<"summary" | "yaml" | "logs" | "shell">("summary");
   // 노드 셸: 변경 틀로 디버그 Pod를 만들고 나면 그 Pod에 들어가는 터미널을 연다
   const [nodeShell, setNodeShell] = useState<{ namespace: string; pod: string } | null>(null);
   const seenChange = useRef(appliedChange);
@@ -387,7 +389,6 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
         <button role="tab" aria-selected={tab === "summary"} onClick={() => setTab("summary")}>{TAB_SUMMARY}</button>
         <button role="tab" aria-selected={tab === "yaml"} onClick={() => setTab("yaml")}>{TAB_YAML}</button>
         {(pod || workload) && <button role="tab" aria-selected={tab === "logs"} onClick={() => setTab("logs")}>{TAB_LOGS}</button>}
-        {usage && <button role="tab" aria-selected={tab === "usage"} onClick={() => setTab("usage")}>{TAB_USAGE}</button>}
         {((pod && changes) || nodeShell) && <button role="tab" aria-selected={tab === "shell"} onClick={() => setTab("shell")}>{TAB_SHELL}</button>}
       </div>
       <div className={`k8s-detail-body${tab === "logs" || shellTab ? " flush" : ""}`}>
@@ -431,8 +432,6 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
           <ErrorState error={q.error} profile={ssoProfile} compact onRetry={() => void q.refetch()} onLoggedIn={() => void q.refetch()} />
         ) : !q.data ? (
           <div className="empty">{LOADING}</div>
-        ) : tab === "usage" && usage ? (
-          <UsageGraphs key={objectKey} target={target} context={context} objectRef={objectRef} view={q.data} />
         ) : tab === "summary" ? (
           <Summary
             view={q.data}
@@ -441,6 +440,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
             onOpen={onOpen}
             onOpenIam={onOpenIam}
             containerUsage={pod && objectRef.namespace !== null ? usageIndex?.containers.get(podKey(objectRef.namespace, objectRef.name)) : undefined}
+            usage={usage && <UsageGraphs key={objectKey} target={target} context={context} objectRef={objectRef} view={q.data} />}
           >
             {q.data.secretKeys && objectRef.namespace && (
               <SecretKeys target={target} ssoProfile={ssoProfile} namespace={objectRef.namespace} name={objectRef.name} keys={q.data.secretKeys} canRead={canRead} />

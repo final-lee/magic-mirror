@@ -61,10 +61,10 @@ function Chart({ title, series, refs, end, cpu }: {
   const points = series.flatMap((s) => s.points);
   if (!points.length) {
     return (
-      <section>
-        <h4>{title}</h4>
+      <div className="k8s-usage-chart">
+        <h5>{title}</h5>
         <div className="empty small">{t.USAGE_GRAPH_EMPTY}</div>
-      </section>
+      </div>
     );
   }
   const start = end - HISTORY_MS;
@@ -72,8 +72,8 @@ function Chart({ title, series, refs, end, cpu }: {
   const x = (value: number) => Math.max(0, Math.min(600, (value - start) / (end - start) * 600));
   const y = (value: number) => 150 - Math.max(0, value) / max * 150;
   return (
-    <section className="k8s-usage-chart">
-      <h4>{title}</h4>
+    <div className="k8s-usage-chart">
+      <h5>{title}</h5>
       <div className="k8s-usage-plot">
         <div className="k8s-usage-y-axis dim">
           {[max, max / 2, 0].map((value, i) => <span key={i}>{axisValue(value, max, cpu)}</span>)}
@@ -136,11 +136,11 @@ function Chart({ title, series, refs, end, cpu }: {
           ).join(" · ")}
         </div>
       )}
-    </section>
+    </div>
   );
 }
 
-/** Pod·워크로드 상세에서 앱이 metrics-server로부터 모아 둔 최근 사용량을 본다 */
+/** Pod·워크로드 상세 요약의 사용량 절: 앱이 metrics-server로부터 모아 둔 최근 사용량 */
 export function UsageGraphs({ target, context, objectRef, view }: {
   target: K8sTarget; context: string; objectRef: ObjectRef; view: K8sObjectView;
 }) {
@@ -151,18 +151,19 @@ export function UsageGraphs({ target, context, objectRef, view }: {
   const pod = objectRef.kind.kind === "Pod" && objectRef.kind.group === "";
 
   return (
-    <div className="k8s-usage">
-      <p className="dim">{t.USAGE_GRAPH_NOTE}</p>
+    <section className="k8s-sect k8s-usage" aria-label={t.SEC_USAGE}>
+      <h4>{t.SEC_USAGE}</h4>
+      <p className="dim small">{t.USAGE_GRAPH_NOTE}</p>
       {usage.unavailable !== null ? (
-        <div className="empty">{t.METRICS_UNAVAILABLE[usage.unavailable]}</div>
+        <div className="empty small">{t.METRICS_UNAVAILABLE[usage.unavailable]}</div>
       ) : usage.lastAt === null ? (
-        <div className="empty">{t.USAGE_GRAPH_WAITING}</div>
+        <div className="empty small">{t.USAGE_GRAPH_WAITING}</div>
       ) : (
-        <>
+        <div className="k8s-usage-charts">
           <Chart title={t.COL_CPU} series={usage.cpu} refs={references(view.containers, pod, true)} end={usage.lastAt} cpu />
           <Chart title={t.COL_MEMORY} series={usage.memory} refs={references(view.containers, pod, false)} end={usage.lastAt} cpu={false} />
-        </>
+        </div>
       )}
-    </div>
+    </section>
   );
 }
