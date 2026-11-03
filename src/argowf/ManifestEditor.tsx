@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { CodeEditor } from "../components/CodeEditor";
 import { errorMessage } from "../api/errors";
 import { argowfApi } from "./api";
 import { workflowExamples } from "./examples";
@@ -22,7 +23,12 @@ export function ManifestEditor({ conn, kind, mode, namespace, name, initialYaml,
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(mode !== "edit");
-  const textarea = useRef<HTMLTextAreaElement>(null);
+  // 편집기는 처음 값만 받는다: 불러오기·예제처럼 글을 통째로 갈아 끼울 때는 key를 바꿔 다시 만든다
+  const [revision, setRevision] = useState(0);
+  const replace = (text: string) => {
+    setYaml(text);
+    setRevision((r) => r + 1);
+  };
   useEffect(() => {
     if (mode !== "edit" || !name) return;
     let active = true;
@@ -31,7 +37,7 @@ export function ManifestEditor({ conn, kind, mode, namespace, name, initialYaml,
       .manifest(conn, kind, namespace, name)
       .then((value) => {
         if (active) {
-          setYaml(value);
+          replace(value);
           setOriginal(value);
           setLoaded(true);
         }
@@ -91,7 +97,7 @@ export function ManifestEditor({ conn, kind, mode, namespace, name, initialYaml,
               <select
                 defaultValue=""
                 onChange={(e) => {
-                  if (e.target.value) setYaml(workflowExamples[e.target.value]);
+                  if (e.target.value) replace(workflowExamples[e.target.value]);
                 }}
               >
                 <option value="">직접 작성</option>
@@ -102,31 +108,11 @@ export function ManifestEditor({ conn, kind, mode, namespace, name, initialYaml,
             </label>
           )}
         </div>
-        {/* 줄 번호와 글이 함께 스크롤되게 textarea는 줄 수만큼 키우고 바깥 상자가 스크롤한다 */}
-        <div className="awc-manifest-editor">
-          <pre aria-hidden="true" className="awc-editor-lines">
-            {yaml
-              .split("\n")
-              .map((_, i) => i + 1)
-              .join("\n")}
-          </pre>
-          <textarea
-            ref={textarea}
-            aria-label="YAML"
-            className="mono awc-editor-text"
-            spellCheck={false}
-            rows={yaml.split("\n").length}
-            value={yaml}
-            onChange={(e) => setYaml(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key !== "Tab") return;
-              e.preventDefault();
-              const { selectionStart, selectionEnd } = e.currentTarget;
-              setYaml(yaml.slice(0, selectionStart) + "  " + yaml.slice(selectionEnd));
-              requestAnimationFrame(() => textarea.current?.setSelectionRange(selectionStart + 2, selectionStart + 2));
-            }}
-          />
-        </div>
+        {loaded ? (
+          <CodeEditor key={revision} value={yaml} onChange={setYaml} label="YAML" minHeight="420px" />
+        ) : (
+          <div className="empty small">{busy ? "불러오는 중…" : "YAML을 불러오지 못했어요"}</div>
+        )}
         {message && <p role="status">{message}</p>}
         <div className="foot">
           <button className="btn plain" onClick={close}>

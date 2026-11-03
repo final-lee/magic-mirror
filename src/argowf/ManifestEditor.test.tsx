@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { editorView, typeYaml } from "../test/codemirror";
 import { argowfApi } from "./api";
 import { CONN } from "./catalogFixtures";
 import { ManifestEditor } from "./ManifestEditor";
@@ -26,9 +27,9 @@ test("편집은 불러온 YAML을 저장하고 변경된 채 닫을 때 확인�
   const onClose = vi.fn();
   const onSaved = vi.fn();
   render(<ManifestEditor conn={CONN} kind="CronWorkflow" mode="edit" namespace="batch" name="cron" onClose={onClose} onSaved={onSaved} />);
-  const field = screen.getByLabelText("YAML");
-  await waitFor(() => expect(field).toHaveValue("kind: CronWorkflow\n"));
-  fireEvent.change(field, { target: { value: "kind: CronWorkflow\nmetadata: {}" } });
+  await waitFor(() => expect(editorView().state.doc.toString()).toBe("kind: CronWorkflow\n"));
+  expect(screen.getByLabelText("YAML")).toBeInTheDocument();
+  typeYaml("kind: CronWorkflow\nmetadata: {}");
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
   fireEvent.click(screen.getByRole("button", { name: "닫기" }));
   expect(onClose).not.toHaveBeenCalled();
