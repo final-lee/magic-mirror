@@ -4133,6 +4133,7 @@ dependencies = [
  "aws-smithy-types",
  "base64 0.22.1",
  "block2",
+ "flate2",
  "futures",
  "http 1.5.0",
  "k8s-openapi",

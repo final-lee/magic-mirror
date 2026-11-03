@@ -140,7 +140,7 @@ pub fn diff(target: &ChangeObject, current: Option<&Value>, result: &Value) -> V
 }
 
 /// 같은 값은 둘 다 `••••`, 다른 값은 앞은 `••••`, 뒤는 `•••• (바뀜)`으로 바꿔 값을 숨긴 채 바뀐 키만 남긴다.
-fn mask_pair(before: &mut Value, after: &mut Value) {
+pub(crate) fn mask_pair(before: &mut Value, after: &mut Value) {
     for field in ["data", "stringData"] {
         let keys: BTreeSet<String> = [&*before, &*after].iter().filter_map(|v| v.get(field).and_then(Value::as_object)).flat_map(|m| m.keys().cloned()).collect();
         for key in keys {
@@ -165,7 +165,7 @@ fn mask_entry(before: Option<&mut Value>, after: Option<&mut Value>) {
 }
 
 /// 필드 경로는 `spec.template.spec.containers[0].image` 꼴. 길이가 다른 배열은 통째로 비교한다.
-fn walk(path: &mut String, before: &Value, after: &Value, out: &mut Vec<FieldDiff>) {
+pub(crate) fn walk(path: &mut String, before: &Value, after: &Value, out: &mut Vec<FieldDiff>) {
     if before == after {
         return;
     }
@@ -193,12 +193,13 @@ fn walk(path: &mut String, before: &Value, after: &Value, out: &mut Vec<FieldDif
     }
 }
 
-/// 기록에 남길 변경. Secret이면 `data`·`stringData`의 값을 모두 가린다.
+/// 기록에 남길 변경. Secret이면 `data`·`stringData`의 값을 모두 가리고, Helm 변경이면 values를 뺀다.
 pub fn redact(change: &Change) -> Change {
     let mut change = change.clone();
     if let (true, Operation::Apply { object, .. }) = (is_secret(&change.target), &mut change.operation) {
         crate::k8s::read::secret::mask(object);
     }
+    crate::k8s::helm::redact(&mut change.operation);
     change
 }
 

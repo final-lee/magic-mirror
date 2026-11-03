@@ -13,7 +13,7 @@
 - EKS 밖의 쿠버네티스 클러스터(kubeconfig에 있어도 열지 않는다).
 - NetworkPolicy가 실제로 막는 트래픽 계산, 웹훅 authorizer 평가.
 - 클러스터·노드그룹·애드온 생성, 삭제, 업그레이드(AWS 쪽 인프라 변경).
-- Helm 릴리스 관리, 디버그용 ephemeral 컨테이너, 셸 입력 기록.
+- 디버그용 ephemeral 컨테이너, 셸 입력 기록. (Helm 릴리스 관리는 2026-11-03에 범위에 넣었다: 아래 "Helm")
 - 비용 분석.
 
 ## 단계
@@ -39,7 +39,7 @@
 3. 리소스 사용량: (2026-11-03 구현함) Pod·컨테이너 CPU/메모리 열(metrics-server), request·limit 대비 %, 워크로드·네임스페이스 집계, 사용량 그래프(Prometheus 없이 앱이 metrics-server 값을 모은다). 아래 "사용량(metrics-server)"과 "사용량 그래프" 참고.
 4. 내장 종류 트리: (2026-11-03 구현함) HPA, PDB, ResourceQuota, LimitRange, PriorityClass, RuntimeClass, Lease, Mutating·ValidatingWebhookConfiguration, EndpointSlice, IngressClass, Role·ClusterRole·RoleBinding·ClusterRoleBinding, CustomResourceDefinition 자체. API discovery로 제공 버전만 표시하고 목록·상세 요약과 북마크를 지원한다.
 5. 탐색: 키보드 중심 조작(명령 팔레트, `:종류` 이동), `kubectl describe` 형식 출력, xray식 관계 트리, 앱 안 터미널(kubectl), 플러그인.
-6. Helm: 릴리스 목록·values·이력, 업그레이드·롤백·삭제, 차트 설치(설계에 없음).
+6. Helm: (2026-11-03 구현함) 릴리스 목록·values·이력·manifest·리소스 연결, 업그레이드(values 편집, 다른 차트)·롤백·삭제, 차트 설치(로컬 경로·저장소·OCI). 아래 "Helm" 참고.
 7. 점검·권한: popeye식 위생 점검(K5), RBAC 역조회(K4).
 
 우선순위(매일 쓰는 빈도): ① 셸·port-forward·restart·scale·삭제 ② Pod CPU/메모리 열 ③ 트리에 내장 종류 추가 ④ 로그 K3 나머지 ⑤ Helm 읽기 전용.
@@ -48,7 +48,7 @@
 - **EKS → Clusters** 행을 더블클릭하면 `☸️ <클러스터 이름>` 탭이 열린다. 이것이 유일한 진입점이고, 사이드바에 별도 메뉴(클러스터 선택 화면)는 두지 않는다.
 - 대상은 `{ profile, region, cluster }`. 같은 대상의 탭은 하나만 열린다.
 - 탭을 닫으면 그 탭의 watch, 로그 스트림, 셸, port-forward, 연결을 모두 정리한다.
-- 하위 화면: 개요, 워크로드, 로그, 접근, 보안 점검, 네트워크, 셸, 포트포워딩, 변경 기록.
+- 하위 화면: 개요, 워크로드, 로그, 접근, 보안 점검, 네트워크, 셸, 포트포워딩, Helm, 변경 기록.
 - 상단 막대: kubeconfig context 이름, 클러스터에서 보이는 신원, 네임스페이스 선택(전체 포함), "YAML로 만들기".
 
 ## 접속
@@ -294,6 +294,29 @@
   - 상세 YAML 탭: 변경 모드에서 [편집]이 읽기 전용 YAML을 CodeMirror 6 편집기로 바꾼다(`@codemirror/*`, 구문 오류는 `yaml` 패키지로 찾아 줄 밑줄과 목록으로 보이고 미리보기를 막는다). 편집기에 들어가는 글은 백엔드가 만든 `editYaml`(서버 필드를 뺀 것). 종류·이름·네임스페이스를 바꾸거나 문서가 둘이면 미리보기 전에 거절한다. patch 권한이 없으면 이유와 함께 끈다.
   - Secret: 편집 글에는 `data`·`stringData`·last-applied가 없다. 키별 [값 보기](읽은 값은 컴포넌트 상태에만)로 읽어 고치거나 [새 값 입력]·키 추가로 `stringData`에 넣고, 건드리지 않은 키는 가린 값(••••)으로 보내 백엔드가 현재 값으로 되돌려 놓는다. 바이너리 값은 새 값 입력으로만 바꾼다. 미리보기의 본문·diff에는 값이 없고(바뀐 키만 `•••• (바뀜)`), 기록에는 `data`·`stringData`를 모두 가린 변경만 남으며, 되돌릴 수 없다는 경고를 보인다.
   - 상단 [YAML로 만들기](변경 모드): 붙여 넣은 글을 문서마다 `apply` 변경으로 바꾼다(종류는 클러스터가 내주는 종류에서 apiVersion·kind로 찾고, 네임스페이스가 없는 문서는 고른 네임스페이스로, 모든 네임스페이스면 그 문서의 오류). 최대 50개. 문서별 미리보기(호출·diff·경고·이름 입력)를 한 창에 보이고, 순서대로 적용하다 첫 실패에서 멈추고 나머지는 건너뛴 뒤 [적용한 것 되돌리기]로 거꾸로 되돌리기 미리보기를 연다. 미리보기가 되지 않는 문서(앞 문서가 만드는 네임스페이스 안의 객체 등) 앞까지만 먼저 적용하고 나머지를 다시 미리보기 한다. 별도 배치 명령(`k8s_preview_batch`/`k8s_apply_batch`) 없이 문서마다 `k8s_preview`/`k8s_apply`를 쓰므로 기록도 문서마다 하나이고 변경 기록 화면에서 하나씩 되돌릴 수도 있다.
+
+### Helm
+릴리스 읽기와 변경(2026-11-03). 왼쪽 메뉴 "⎈ Helm". 읽기는 helm CLI 없이 앱이 직접 하고, 변경만 helm CLI로 한다. 변경은 변경 공통 틀(미리보기 → 이름 입력 → 재확인 → 적용 → 기록 → 되돌리기)을 그대로 거친다.
+
+- **읽기(kube로, helm 불필요)**: helm은 릴리스를 Secret(`type: helm.sh/release.v1`, 라벨 `owner=helm`·`name`·`version`·`status`)으로 저장한다. `data.release`는 쿠버네티스 base64 → helm base64 → gzip → JSON 순(kind에서 helm v4로 확인)이고 앱이 그대로 푼다(`flate2`; 풀린 크기는 64MiB로 제한). ConfigMap 드라이버(`HELM_DRIVER=configmap`)도 함께 읽는다(같은 리비전이 둘 다 있으면 Secret). 한쪽을 읽을 권한이 없으면 다른 쪽만 쓰고, 둘 다 없으면 권한 오류다.
+  - 목록: 먼저 메타데이터만(`list_metadata`, 라벨로 이름·리비전·상태) 받아 릴리스마다 가장 높은 리비전을 고르고 그 데이터만 가져와 푼다(동시 8개). 푼 요약은 저장소 객체의 uid·resourceVersion을 키로 기억해 10초 폴링 때 다시 받지 않는다. 풀지 못하는 데이터는 오류가 아니라 라벨 값만 있는 줄(`unreadable`)이 된다. 선택한 네임스페이스만, 모두면 전체.
+  - 상세: 지금 보는 리비전(기본 최신)의 요약, 사용자 values(`config`, 있는 그대로), 계산된 values(차트 기본값 + 사용자 값, null은 키 삭제, 서브차트는 부모 값 아래 이름으로 합침: `helm get values --all`과 같음을 kind에서 확인), notes, manifest, manifest에서 뽑은 리소스(종류·이름·네임스페이스), 훅, 선언된 의존 차트, 모든 리비전의 이력(상태·갱신·차트·앱 버전·설명).
+  - manifest는 `---`로 나눠 객체로 읽고(`kind: List`는 펼침) 화면에는 Secret의 값을 가려 보인다(원문 주석은 유지). values는 사용자가 준 값이라 있는 그대로 보인다.
+  - 상태 배지: deployed(초록), superseded·uninstalled(흐림), failed·unknown(빨강), pending-*·uninstalling(노랑). 문제(failed·unknown·uninstalling·pending-*)는 목록 위 "문제 N" 칩과 "문제 있는 것만" 거르기로 바로 본다.
+- **화면**: 목록은 `ListTable`(이름·네임스페이스(전체일 때만)·상태·차트·앱 버전·리비전·갱신·설명), 이름·차트·네임스페이스·상태 거르기. 10초마다(탭이 보일 때만) 다시 읽고, Helm 변경을 적용하면 바로 다시 읽는다. 행을 누르면 목록 너비의 70%를 덮는 상세(`.k8s-detail`)가 열린다. 탭: 요약(릴리스·차트·리소스·훅·의존 차트), values(준 값 / 계산된 값), 매니페스트, 이력, notes. 리소스는 이 클러스터가 내주는 종류(discovery)면 이름을 눌러 워크로드 화면에서 연다(네임스페이스가 없으면 릴리스의 네임스페이스). 모르는 종류(CRD 없음)는 글로 둔다. 이력 줄은 [보기](옛 리비전을 읽기 전용으로, 위에 안내와 [최신으로])와 [이 리비전으로 롤백]. 위쪽 오른쪽 도구 모음: `[이력 남기기] [업그레이드] [롤백] [삭제]`(삭제가 맨 오른쪽), 목록 위에 [차트 설치]. 옛 리비전을 보는 동안은 변경 단추를 이유와 함께 끈다.
+- **helm 찾기**: 로그인 셸의 PATH(exec 플러그인과 같은 `k8s::path::login_path`)에서 실행 가능한 `helm`을 찾고 `helm version`으로 버전을 읽는다. 없거나 3.13 미만(서버 dry-run 없음)이면 변경 단추(업그레이드·롤백·삭제·설치)는 꺼지고 `title`·`aria-description`에 이유(설치 안내)를 보인다. 읽기는 helm이 없어도 된다. 권한은 릴리스 저장소(Secret, ConfigMap 드라이버면 ConfigMap)의 `create`(업그레이드·롤백)·`delete`(삭제)를 내 권한(`can`)으로 보고, 확실히 없을 때만 끈다.
+- **helm 실행(`k8s/helm/run.rs`가 프로세스를 띄우는 유일한 곳)**: 인자는 셸을 거치지 않는 배열이고 세션의 `--kube-context`와 `--kubeconfig`(읽은 kubeconfig가 하나일 때, 여럿이면 `KUBECONFIG` 환경 변수)를 넘긴다. `HELM_DRIVER`는 릴리스를 읽은 저장소로 늘 정해 주고, 사용자 셸에서 물려받은 `HELM_KUBE*`·`HELM_NAMESPACE`·`KUBECONFIG`·`HELM_DRIVER`는 치워 다른 클러스터로 새지 않게 한다. 릴리스 이름(DNS 소문자 53자)·네임스페이스·차트·저장소(http(s), 사용자 정보 없음)·버전은 `-`로 시작하거나 공백이 있으면 거절한다. 시간 제한: 미리보기 3분, 적용 10분. helm의 stderr는 SSO 만료는 앱의 SSO 오류로, 클러스터 연결 실패는 연결 안내로, 나머지는 첫 줄 몇 개(토큰은 가림, 400자)로 보인다.
+- **변경 종류**(`Operation`에 더함, 대상은 릴리스 `helm.sh/Release`): `helmUpgrade { values, chart }`, `helmRollback { revision }`, `helmUninstall { keepHistory }`, `helmInstall { chart, values, createNamespace }`. 차트는 `{ reference, repo, version }`: 로컬 경로(절대 경로, `~/`), `oci://…`, 저장소의 차트 이름(저장소 주소와 함께, 또는 이미 helm에 등록한 `repo/chart`). 상대 경로는 받지 않는다(helm의 작업 폴더가 정해져 있지 않다).
+  - 업그레이드: 저장된 릴리스 JSON에서 차트(Chart.yaml, values.yaml, values.schema.json, templates, files·crds, 서브차트는 `charts/<이름>/`)를 임시 폴더에 되살려 저장소 접속 없이 같은 차트로 `helm upgrade --reset-values -f values.yaml`을 한다(편집한 글이 사용자 values 전체가 되므로 키를 지우는 편집도 반영된다; 저장된 서브차트는 이미 조건·별칭이 적용된 것이라 Chart.yaml의 `dependencies`는 뺀다. 파일 이름이 폴더 밖을 가리키면 거절). "다른 차트로"는 위 차트 위치로 같은 명령을 한다.
+  - 미리보기: 업그레이드·설치는 `helm … --dry-run=server -o json`으로 렌더링한 새 manifest를 현재 manifest와 객체별로(그룹·종류·네임스페이스·이름으로 짝지음, apiVersion만 올라가면 한 객체의 변경) 견줘 `Deployment web · spec.replicas` 꼴 필드 항목(새 객체·지워지는 객체는 객체 전체 한 항목)과 `values · replicaCount` 꼴 values 차이를 보인다. Secret은 값 없이 바뀐 키만(`••••`, `•••• (바뀜)`). 롤백은 helm을 부르지 않고 현재 리비전과 그 리비전의 manifest·values를 견준다(삭제돼 이력만 남은 릴리스를 같은 리비전으로 되살리는 것도 롤백이고 모든 객체가 새로 생긴다). 삭제는 지워질 객체 전체를 보인다. 경고: 바뀌는 것 없음, 빠지는 객체 수, 훅(`pre/post-upgrade` 등) 개수, failed·pending 상태, `helm.sh/resource-policy: keep`으로 남는 객체, 삭제는 되돌릴 수 없음(이력을 지울 때).
+  - 이름 입력: 삭제는 늘 릴리스 이름. 그 밖에는 공통 규칙(`change::dangerous`: 네임스페이스가 `kube-system`이거나 네임스페이스·릴리스 이름에 `prod`).
+  - 재확인: 적용 직전에 같은 계획을 다시 만들어(서버 dry-run 포함) 미리보기를 본 릴리스와 같은지(리비전 번호와, 리비전·상태·manifest·사용자 values의 해시. 설치는 "릴리스 없음") 확인하고 다르면 "미리보기 이후 바뀌었어요"로 멈춘다. 이름 입력은 백엔드가 다시 확인한다. 렌더링 결과가 매번 달라지는 차트(`randAlphaNum` 등)를 위해 해시는 렌더링 결과가 아니라 현재 릴리스 상태만 쓴다.
+  - 되돌리기(기록의 역변경, 같은 미리보기를 거친다): 업그레이드·롤백 → 업그레이드 직전 리비전으로 롤백(롤백으로 되살린 경우는 다시 삭제(이력 유지)), 설치 → 삭제(만든 네임스페이스는 남는다는 경고), 삭제 → 이력을 남겼으면 롤백으로 되살리기, 남기지 않았으면 되돌릴 수 없음.
+  - 기록: `k8s-changes.jsonl`에 변경 한 줄(요약 = 미리보기의 영향 문장)을 남기되 **values는 기록하지 않는다**(`change::apply::redact`가 `helmUpgrade`·`helmInstall`의 values를 비운다). 되돌리기용 역변경에는 values가 없다. 오류 글에는 values 조각이 실릴 수 있는 YAML 해석 오류를 넣지 않고 고정 문구만 쓴다.
+- **hygiene 예외(의도적)**: 클러스터 쓰기가 kube 호출이 아니라 helm 프로세스로 나가므로 `k8s::hygiene`에 규칙을 더했다. ① `Command::new(`(프로세스 실행)는 로그인 셸의 PATH를 읽는 `k8s/path.rs`와 helm을 실행하는 `k8s/helm/run.rs`에만 있다. ② 클러스터를 바꾸는 helm 하위 명령 이름(`"upgrade"`·`"install"`·`"uninstall"`·`"rollback"`)은 인자를 만드는 `k8s/helm/cli.rs`에만 있다. 읽기 모듈(`read`·`release`·`detail`·`manifest`)과 `k8s_helm_commands.rs`는 kube 쓰기 호출을 쓰지 않으며 같은 스캔을 받는다(`live_tests/` 아래 파일은 시험 전용이라 스캔하지 않는다).
+- **명령**: `k8s_helm_tool()`, `k8s_helm_releases(target, namespace | null)`, `k8s_helm_release(target, namespace, name, revision | null)`, `k8s_helm_show_values(chart)`(설치 창의 "차트 기본값 불러오기", 클러스터에 닿지 않음). 변경은 `k8s_preview`/`k8s_apply`가 `Operation::Helm*`를 `k8s::helm::plan`으로 보낸다. `Session`에 읽은 kubeconfig 경로 목록(`kubeconfig_paths`)을 더했다. 프론트 `src/k8s/helm/`.
+- **시험**: 순수 부분은 단위 시험(릴리스 해석·계산된 값·압축 폭탄, manifest 나누기·객체별 차이·Secret 가리기, 명령 인자·차트 위치 검증, helm 찾기·버전·환경 변수·시간 제한·오류 분류, 차트 되살리기와 경로 탈출 거절, 계획·재확인·values 비기록, 가짜 API 서버로 목록·ConfigMap 드라이버·권한·쪽 넘기기·캐시). 화면은 `src/k8s/helm/*.test.tsx`(목록·거르기·문제·상세·도구 모음 권한·helm 없음·리소스 열기·이력·변경 틀 미리보기·이름 입력·기록 되돌리기). kind 실제 시험은 `k8s::live_tests::helm`(`scripts/k8s-live/helm.sh`가 로컬 차트로 `flow`(리비전 둘)·`broken`(failed)·`cmrel`(ConfigMap 드라이버)을 helm으로 설치하고 로컬 차트 저장소를 띄운다): 목록·상세·이력을 helm 출력과 대조, 업그레이드(미리보기 뒤 외부 변경이면 낡음) → 기록(values 없음) → 되돌리기 → 롤백 → 삭제(이름 확인)를 helm·kubectl로 확인, 이력 유지 삭제와 롤백 복구, 로컬 경로·저장소 ref 설치와 저장소 차트로 업그레이드.
+- 남은 것·알려진 한계: Chart.yaml의 의존성 조건(`condition`·`tags`)은 저장된 서브차트를 그대로 쓰므로 values 편집으로 켜고 끌 수 없다(다른 차트로 업그레이드하면 된다). 로컬 경로 설치에서 의존 차트를 받지 않은 차트는 helm이 거절한 이유가 미리보기 오류로 보인다. 앱이 직접 `--wait`·`--atomic`은 쓰지 않는다(적용은 helm이 리소스를 제출하면 끝나고, 롤아웃 진행은 워크로드 상세에서 본다).
 
 ## 계약 (Tauri 명령)
 ```ts

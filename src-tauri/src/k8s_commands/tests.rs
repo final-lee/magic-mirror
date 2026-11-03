@@ -13,7 +13,7 @@ fn target(profile: &str) -> K8sTarget {
 fn session(context: &str) -> Session {
     install_crypto_provider();
     let client = Client::try_from(Config::new("http://127.0.0.1:9".parse().unwrap())).unwrap();
-    Session { client, endpoint: Endpoint { public: true, private: false }, context: context.into(), kubeconfig: Default::default() }
+    Session { client, endpoint: Endpoint { public: true, private: false }, context: context.into(), kubeconfig: Default::default(), kubeconfig_paths: Vec::new() }
 }
 
 #[tokio::test]
