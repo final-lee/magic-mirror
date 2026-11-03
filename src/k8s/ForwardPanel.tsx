@@ -62,7 +62,7 @@ export function ForwardPanel({ target, ssoProfile, namespace, kind, name, ports,
 
   return (
     <>
-      <button className="btn" disabled={!perm.allowed} title={perm.reason ?? undefined} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+      <button className="btn small tone-primary" disabled={!perm.allowed} title={perm.reason ?? undefined} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         {FORWARD_START}
       </button>
       {open && perm.allowed && (
