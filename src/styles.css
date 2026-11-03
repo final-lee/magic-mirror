@@ -1547,3 +1547,34 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
   border-radius: 5px;
   white-space: nowrap;
 }
+
+/* network */
+.net-pane { min-width: 0; }
+.net-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding-right: 10px; }
+.net-top .k8s-tabs { border-bottom: 0; flex: 1; min-width: 0; overflow-x: auto; }
+.net-actions { display: flex; align-items: center; gap: 6px; padding-bottom: 4px; flex: none; }
+.net-gaps { padding: 4px 12px; border-bottom: 1px solid var(--line); }
+.net-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.net-content > .tbl { min-height: 120px; }
+.net-scroll { flex: 1; min-height: 0; overflow: auto; padding: 8px 14px; }
+.net-scroll .k8s-table td { white-space: nowrap; }
+.net-note { margin: 4px 14px; font-size: 12px; }
+.net-chip { display: inline-block; padding: 0 8px; border-radius: 9px; font-size: 11px; white-space: nowrap; background: var(--hover-strong); }
+.net-chip.ok { background: var(--green-soft); color: var(--green); }
+.net-chip.bad { background: var(--red-soft); color: var(--red); }
+.net-chip.warn { background: var(--yellow-soft); color: var(--yellow); }
+.net-unused { opacity: 0.55; }
+.net-unclaimed { max-height: 38%; overflow: auto; border-top: 1px solid var(--line); padding: 6px 14px; }
+.net-unclaimed h4, .net-without h4 { margin: 4px 0; font-size: 12px; color: var(--dim); font-weight: 600; }
+.net-unclaimed p { margin: 0 0 4px; font-size: 12px; }
+.net-without { padding: 6px 14px; border-bottom: 1px solid var(--line); }
+.net-ns-list { display: flex; flex-wrap: wrap; }
+.net-tg { margin: 0 0 14px; }
+.net-tg-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-bottom: 4px; }
+.net-rule td { padding-top: 0; white-space: normal; font-size: 12px; }
+.net-rules { margin: 0; padding-left: 18px; }
+.net-rules ul { margin: 2px 0 6px; padding-left: 16px; }
+.net-deny { color: var(--red); margin: 0; }
+.net-filter { width: 100%; max-width: 320px; margin-bottom: 6px; }
+/* VPC 다이어그램: EKS 탭이 노드·로드 밸런서를 강조해서 열었을 때 막대에 보이는 안내 */
+.vm-highlight { display: inline-flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 9px; font-size: 12px; border: 1px solid var(--badge-pink); }

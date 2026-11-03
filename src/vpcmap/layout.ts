@@ -103,7 +103,8 @@ function gatewayChip(g: GatewayInfo): Pick<ChipLayout, "badge" | "text"> {
   }
 }
 
-export function layoutTopology(t: VpcTopology): Layout {
+/** highlight에 든 리소스는 칸이 넘칠 때 "+N"에 묻히지 않도록 맨 앞에 놓는다 */
+export function layoutTopology(t: VpcTopology, highlight?: ReadonlySet<string> | null): Layout {
   const azs = t.azs;
   const colCount = Math.max(1, azs.length);
 
@@ -118,7 +119,7 @@ export function layoutTopology(t: VpcTopology): Layout {
   }
   const sortedRes = (id: string) =>
     [...(tilesBySubnet.get(id) ?? [])].sort(
-      (a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id),
+      (a, b) => Number(highlight?.has(b.id) ?? false) - Number(highlight?.has(a.id) ?? false) || KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id),
     );
   const subnetHeight = (s: SubnetInfo) => {
     const n = Math.min(tilesBySubnet.get(s.id)?.length ?? 0, MAX_TILES);

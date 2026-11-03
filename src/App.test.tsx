@@ -13,6 +13,8 @@ import { dbRow, eksService, makeResource, rdsService, renderWithClient, sampleSe
 import { FOCUS_GONE } from "./components/ResourceArea";
 import { k8sApi } from "./k8s/api";
 import { tabTitle } from "./k8s/text";
+import { networkApi } from "./k8s/network/api";
+import { loadBalancer, network as sampleNetwork, row as networkRow } from "./k8s/network/fixtures";
 import { argocdApi } from "./argocd/api";
 import { ARGOCD_TITLE, SERVER_HELP } from "./argocd/text";
 import { costApi } from "./cost/api";
@@ -64,6 +66,7 @@ vi.mock("./k8s/PodTerminal", () => ({ PodTerminal: () => null }));
 vi.mock("./k8s/api", () => ({
   k8sApi: { context: vi.fn(), open: vi.fn(), close: vi.fn(async () => null), rules: vi.fn(), watch: vi.fn(), unwatch: vi.fn() },
 }));
+vi.mock("./k8s/network/api", () => ({ networkApi: { network: vi.fn() } }));
 vi.mock("./iam/api", () => ({
   iamApi: { overview: vi.fn(), principal: vi.fn(), principalActions: vi.fn(), policy: vi.fn(), accessKeys: vi.fn(), findings: vi.fn() },
 }));
@@ -931,6 +934,45 @@ describe("EKS 탭", () => {
     await waitFor(() => expect(k8sApi.close).toHaveBeenCalledTimes(2));
     expect(k8sApi.close).toHaveBeenCalledWith(target("prod"), "prod");
     expect(k8sApi.close).toHaveBeenCalledWith(target("staging"), "prod");
+  });
+  describe("네트워크 화면에서 VPC 구조도 열기", () => {
+    const tile = (id: string) => document.querySelector(`.vm-tile[data-id="${id}"]`);
+    const openNetwork = async () => {
+      connectable();
+      vi.mocked(vpcApi.topology).mockResolvedValue(sampleTopology());
+      // 구조도의 로드 밸런서 타일 ID(alb-1)와 EC2 타일 ID(i-1)를 쓴다
+      vi.mocked(networkApi.network).mockResolvedValue(
+        sampleNetwork({ highlight: ["i-1", "alb-1"], loadBalancers: [networkRow({ loadBalancer: loadBalancer({ arn: "alb-1" }) })] }),
+      );
+      await showClusters();
+      await open("prod");
+      fireEvent.click(await screen.findByRole("button", { name: "네트워크" }));
+    };
+
+    test("the cluster's VPC opens as a map tab with its nodes and load balancers highlighted", async () => {
+      await openNetwork();
+      fireEvent.click(await screen.findByRole("button", { name: "VPC 다이어그램 열기" }));
+      expect(await screen.findByRole("tab", { name: /🗺 prod VPC/ })).toHaveAttribute("aria-selected", "true");
+      expect(vpcApi.topology).toHaveBeenCalledWith("prod", "ap-northeast-2", "vpc-1");
+      await screen.findByText("pub-a");
+      expect(tile("i-1")).toHaveClass("highlighted");
+      expect(tile("alb-1")).toHaveClass("highlighted");
+      expect(tile("nat-1")).not.toHaveClass("highlighted");
+      expect(screen.getByTestId("vpc-highlight")).toHaveTextContent("prod 강조 2개");
+    });
+
+    test("opening again from a load balancer replaces the highlight in the same tab", async () => {
+      await openNetwork();
+      fireEvent.click(await screen.findByRole("button", { name: "VPC 다이어그램 열기" }));
+      await screen.findByText("pub-a");
+      expect(tile("i-1")).toHaveClass("highlighted");
+      fireEvent.click(screen.getByRole("tab", { name: tabTitle("prod") }));
+      fireEvent.click((await screen.findByText("shop/web")).closest("tr")!);
+      fireEvent.click(await screen.findByRole("button", { name: "VPC 다이어그램에서 보기" }));
+      expect(screen.getAllByRole("tab", { name: /🗺/ })).toHaveLength(1);
+      await waitFor(() => expect(tile("i-1")).not.toHaveClass("highlighted"));
+      expect(tile("alb-1")).toHaveClass("highlighted");
+    });
   });
 });
 
