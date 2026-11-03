@@ -35,7 +35,7 @@
 ### 진행 예정: Lens·k9s 대비 빈 기능 (2026-11-02 정리)
 지금 된 것은 K1·K2와 K3 일부(Pod 로그)다. Lens·k9s의 주요 기능 중 없는 것:
 1. 클러스터를 바꾸는 조작: Pod 셸(exec)·port-forward(K9), scale·rollout restart·rollout undo·삭제(K7 A), cordon·uncordon·drain(K7 B), YAML 편집·적용·새로 만들기(K8 E). 컨테이너 attach와 노드 셸(디버그 Pod)은 C 절에 들어왔고(2026-11-02) 구현했다. CronJob 바로 실행은 K7 A의 Job 재실행에 포함, 일시정지는 K7 A.
-2. 로그: 워크로드 합친 로그(Pod별 색, 새 Pod 따라 붙기)·since(최근 N분)·파일 저장(K3 남은 것), 모든 컨테이너 한꺼번에, 서버 타임스탬프·줄바꿈 토글.
+2. 로그: (2026-11-03 구현함) 워크로드 합친 로그(Pod별 색, 새 Pod 따라 붙기)·since(최근 N분)·파일 저장, 모든 컨테이너 한꺼번에, 서버 타임스탬프·줄바꿈 토글.
 3. 리소스 사용량: Pod·컨테이너 CPU/메모리 열(metrics-server, 지금은 개요의 노드 사용량만), request·limit 대비 %, Prometheus 그래프, 워크로드·네임스페이스 집계.
 4. 트리에 없는 내장 종류: HPA, PDB, ResourceQuota, LimitRange, PriorityClass, RuntimeClass, Lease, Mutating·ValidatingWebhookConfiguration, EndpointSlice, IngressClass, Role·ClusterRole·RoleBinding·ClusterRoleBinding, CustomResourceDefinition 자체.
 5. 탐색: 키보드 중심 조작(명령 팔레트, `:종류` 이동), `kubectl describe` 형식 출력, xray식 관계 트리, 앱 안 터미널(kubectl), 플러그인.
@@ -88,7 +88,7 @@
 - 3열에서 행을 누르면 4열이 열리고, 열린 행을 다시 누르면 닫힌다(더블클릭·Enter는 늘 연다).
 - 4열은 3열 위에 떠서 오른쪽부터 3열 너비의 70%를 덮는다. 왼쪽 경계를 끌어 30~95%로 바꾸고 `k8sLaneWidths.detailPct`에 저장한다.
 - 목록: 종류별 핵심 열, 이상 표시(CrashLoopBackOff, ImagePullBackOff, Pending, OOMKilled, 준비 안 됨), 이름·레이블 셀렉터 필터, "문제 있는 것만".
-- 상세: 요약, 소유 관계(ownerReferences 위아래 이동), 컨테이너별 상태와 마지막 종료 이유, 관련 이벤트, YAML 탭(테마 색으로 구문 강조), Pod는 로그 탭. 머리의 뒤로(‹)·닫기(✕)는 아이콘 버튼.
+- 상세: 요약, 소유 관계(ownerReferences 위아래 이동), 컨테이너별 상태와 마지막 종료 이유, 관련 이벤트, YAML 탭(테마 색으로 구문 강조), Pod·Deployment·StatefulSet·DaemonSet·ReplicaSet·Job·Service는 로그 탭. 머리의 뒤로(‹)·닫기(✕)는 아이콘 버튼.
 - 앱 안 연결: 노드 → 노드 상세, ServiceAccount → 접근 화면, IAM 역할 → IAM 워크스페이스.
 - 이벤트 화면: 네임스페이스·클러스터 전체를 시간순으로, Warning만 보기.
 
@@ -102,11 +102,17 @@
 - follow, 시작 시점(최근 N줄, 최근 N분), 직전 컨테이너(`previous`).
 - 검색과 하이라이트, 일시정지와 자동 스크롤, 파일로 저장(보관 중인 줄).
 - 화면 보관은 최근 5만 줄. 백엔드는 줄을 묶어(100ms 또는 500줄) Tauri 채널로 보낸다.
-- 지금 된 것(2026-11-02, K3 일부 먼저): 4열 상세의 Pod "로그" 탭. 컨테이너(init 포함) 고르기, 이전 컨테이너, 따라가기, 처음 받을 줄 수(100~50,000). 명령 `k8s_logs`(채널, `k8s_unwatch`로 멈춤, 탭을 닫으면 같이 멈춤). 남은 것: 워크로드 단위 합친 로그(Pod별 색, 새 Pod 따라 붙기), 최근 N분, 파일로 저장.
+- 백엔드는 Pod spec의 일반 컨테이너 각각에 로그 스트림을 연다(`container: null`은 전체, init 컨테이너는 명시적으로 고른 경우). 워크로드는 Deployment·StatefulSet·DaemonSet·ReplicaSet·Job의 label selector(표현식 포함), Service의 selector로 Pod를 watch한다. 새 Pod는 시작 시각부터 읽고 삭제된 Pod의 스트림은 닫는다. 동시 스트림은 40개로 제한하고 안내한다.
+- 모든 요청은 서버 타임스탬프를 받아 RFC3339 접두사를 `ts`와 `text`로 분리한다. 소스별 `lines`·`source`·오류와 전체 `notice`·`end`를 채널로 보낸다. 줄은 소스별 100ms 또는 500줄마다 묶고, 닫기와 `k8s_unwatch`는 자식 스트림까지 멈춘다.
+- 저장 명령은 파일명을 안전하게 바꾸고 `~/Downloads`에 새 파일로 쓴다. 같은 이름이 있으면 숫자 접미사를 붙이며 기존 파일은 덮어쓰지 않는다.
+- 지금 된 것(2026-11-03): Pod와 Deployment·StatefulSet·DaemonSet·ReplicaSet·Job·Service 상세의 "로그" 탭(CronJob 등 나머지 종류에는 탭이 없다). 명령 `k8s_logs`(Pod, 컨테이너 여럿 가능), `k8s_workload_logs`(워크로드), 둘 다 채널이고 `k8s_unwatch`로 멈추며 탭을 닫으면 같이 멈춘다. 화면 코드는 `LogView`(흐름·칩·보기), `PodLogs`/`WorkloadLogs`(막대), `logSources`(이름표·색·저장 이름).
 - 보기 방식(사용자 결정, 2026-11-02): lnav로 보던 방식은 버리고(설치된 lnav를 PTY로 띄웠으나 서비스 JSON 로그를 제대로 읽지 못했다) 앱 안에서 그린다. 기본은 **JSON 정리**, 원하면 **원문**.
   - JSON 정리: `{`로 시작하는 줄을 JSON 객체로 읽어 ▸ 시각(로컬 `MM-DD HH:mm:ss.SSS`, 원래 값은 툴팁) · 레벨(색) · 메시지를 한 줄로 보인다. 흔한 로거의 이름을 읽는다: 시각 `timestamp`·`@timestamp`·`time`·`ts`(ISO 또는 epoch 초·밀리초·마이크로초·나노초), 레벨 `log.level`·`level`·`severity`(pino 숫자 레벨 포함), 메시지 `message`·`msg`. 나머지 필드는 접어 두고, 오류 필드(`error*`, `err*`, `exception`, `stack*`)와 찾는 말이 든 필드는 메시지 옆에 `key=value`로 붙인다. ▸를 누르면 필드 전체(값의 종류별 색)와 JSON 복사. JSON이 아닌 줄은 원문 그대로.
   - 레벨 거르기: 오류·경고·정보·디버그·기타(레벨을 알 수 없는 줄) 칩을 여러 개 함께 고른다. 아무것도 고르지 않으면 모든 줄. 칩마다 줄 수. JSON이 아닌 줄은 맨 앞의 레벨 낱말(`[WARNING] …`, `ERROR: …`)이나 logfmt `level=`로 레벨을 정한다. 찾기의 일치 줄 수와 복사는 보이는 줄만.
-  - 공통: 찾기(대소문자 무시, 일치 줄 수), 일시정지(대기 줄 수), 맨 아래 따라가기, 복사(보이는 줄의 원문), 최근 5만 줄 보관.
+  - 공통: 찾기(대소문자 무시, 일치 줄 수), 일시정지(대기 줄 수), 맨 아래 따라가기, 복사(화면에 보이는 그대로), 최근 5만 줄 보관.
+  - 합친 로그(워크로드 탭, 또는 Pod의 "모든 컨테이너"): 출처가 둘 이상이면 줄마다 앞에 짧은 Pod 이름(워크로드 이름을 떼고 ReplicaSet 해시도 뗀 끝 5글자, StatefulSet 순번은 온전한 이름)과, 컨테이너가 여럿이면 컨테이너 이름을 `Pod/컨테이너`로 붙인다. 한 Pod의 컨테이너들만이면 컨테이너 이름만. 색은 테마별 팔레트 `--log-c1`~`--log-c8`에서 Pod 이름(한 Pod이면 컨테이너 이름)의 해시로 골라 다시 열어도 같다. 출처 칩(줄 수 포함)을 눌러 출처마다 보이거나 감춘다(레벨 칩의 줄 수도 보이는 출처만 센다). `source ended`인 출처의 칩은 흐리게, `notice`는 힌트로, `error`에 Pod가 있으면 그 출처의 오류만 줄 위에 보이고 나머지는 계속 받는다(다시 붙으면 지운다). Pod가 나중에 붙으면 칩과 이름표가 그때 생긴다(출처가 하나일 때는 이름표 없음).
+  - 막대: 컨테이너(**모든 컨테이너** 포함, Pod 탭의 처음 값은 첫 앱 컨테이너, 워크로드 탭은 모든 컨테이너이며 Pod 템플릿의 컨테이너 이름을 고를 수 있다. Service는 템플릿이 없어 선택이 없다), 이전 컨테이너, 따라가기, **기간**(전체·최근 5분·15분·1시간·6시간·24시간 → `sinceSeconds`, 다른 옵션처럼 흐름을 다시 연다), 처음 받을 줄 수(컨테이너마다). **시각**(서버 시각을 로컬 `MM-DD HH:mm:ss.SSS`로 줄 앞에 붙임)과 **줄바꿈**은 화면만 바꾸고 흐름을 다시 열지 않으며, 탭을 열어 둔 동안만 기억한다(기본: 시각 끔, 줄바꿈 켬).
+  - **저장**: 보이는 줄(감춘 출처·고른 레벨 밖의 줄은 뺀다)을 화면에 보이는 그대로(이름표와 시각이 보이면 함께) `k8s_logs_save`로 보낸다. 파일 이름은 프런트가 `<Pod 또는 워크로드 이름>-<YYYYMMDD-HHMMSS>.log`(로컬 시각)로 만들어 넘기고, 백엔드가 `~/Downloads`에 쓴 절대 경로를 "저장했어요: <경로>"로 보이며 [Finder에서 보기]는 opener의 `revealItemInDir`를 쓴다. 실패하면 이유를 보인다.
 
 ### ArgoCD (사용자 결정, 2026-11-02)
 - 위치: 클러스터 탭 안이 아니라 **사이드바 EKS 밑 "🐙 ArgoCD"** 항목. 누르면 단일 탭이 열리고 AWS 프로필과 무관하다(프로필을 바꿔도 닫히지 않는다).
@@ -258,8 +264,10 @@ k8s_unwatch(watchId): void
 k8s_get(target, kind, namespace, name): K8sObjectView           // 상세, 소유 관계, 이벤트, 정리된 YAML(Secret 값 가림)
 k8s_secret_value(target, namespace, name, key): string
 k8s_events(target, namespace | null): K8sEvent[]
-k8s_logs(target, K8sLogRequest, channel): StreamId
-k8s_stop(streamId): void
+k8s_logs(target, namespace, pod, options, onEvent): StreamId
+k8s_workload_logs(target, kind, namespace, name, options, onEvent): StreamId
+k8s_logs_save(fileName, text): string                          // 저장된 절대 경로
+k8s_unwatch(watchId): void
 k8s_access(target, force: boolean): K8sAccessView               // 신원 매핑, 실효 권한, 권한 표
 k8s_who_can(target, K8sWhoCanQuery): K8sWhoCan
 k8s_review(target, K8sWhoCanQuery, subject): boolean           // SubjectAccessReview 대조

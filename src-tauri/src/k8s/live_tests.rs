@@ -406,9 +406,16 @@ async fn logs_read_the_last_lines_then_end() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let opts = LogOptions { tail_lines: Some(3), ..Default::default() };
     logs::run(client, "kube-system".into(), pod, opts, PRIVATE, move |m| tx.send(m).is_ok()).await;
-    let Some(LogMessage::Lines { lines }) = recv_log(&mut rx, Duration::from_secs(5)).await else { panic!("no lines") };
-    assert!(!lines.is_empty() && lines.len() <= 3, "{lines:?}");
-    assert_eq!(recv_log(&mut rx, Duration::from_secs(5)).await, Some(LogMessage::End));
+    let mut count = 0;
+    while let Some(message) = recv_log(&mut rx, Duration::from_secs(5)).await {
+        match message {
+            LogMessage::Lines { lines, .. } => { count += lines.len(); assert!(lines.iter().all(|l| l.ts.is_some())); }
+            LogMessage::End => break,
+            LogMessage::Error { error, .. } => panic!("{error:?}"),
+            _ => {}
+        }
+    }
+    assert!((1..=3).contains(&count));
 }
 
 #[tokio::test]
@@ -419,7 +426,14 @@ async fn following_logs_stays_open() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let opts = LogOptions { tail_lines: Some(2), follow: true, ..Default::default() };
     let task = tokio::spawn(logs::run(client, "kube-system".into(), pod, opts, PRIVATE, move |m| tx.send(m).is_ok()));
-    assert!(matches!(recv_log(&mut rx, Duration::from_secs(5)).await, Some(LogMessage::Lines { .. })));
+    loop {
+        match recv_log(&mut rx, Duration::from_secs(5)).await {
+            Some(LogMessage::Lines { .. }) => break,
+            Some(LogMessage::Error { error, .. }) => panic!("{error:?}"),
+            None => panic!("no lines"),
+            _ => {}
+        }
+    }
     // 따라가는 동안은 끝나지 않는다
     assert_eq!(recv_log(&mut rx, Duration::from_secs(3)).await, None);
     assert!(!task.is_finished());
@@ -432,9 +446,77 @@ async fn logs_of_a_container_that_never_started_are_an_error() {
     let client = admin().await;
     let (tx, mut rx) = mpsc::unbounded_channel();
     logs::run(client, "mm-k2".into(), "broken".into(), LogOptions::default(), PRIVATE, move |m| tx.send(m).is_ok()).await;
-    let Some(LogMessage::Error { error }) = recv_log(&mut rx, Duration::from_secs(5)).await else { panic!("no error") };
+    let Some(LogMessage::Error { error, .. }) = recv_log(&mut rx, Duration::from_secs(5)).await else { panic!("no error") };
     // 서버가 400과 함께 "is waiting to start"류의 설명을 준다. 연결 문제로 잘못 가르지 않는다.
     assert!(!matches!(error, AppError::Network { .. }), "{error:?}");
+}
+
+#[tokio::test]
+#[ignore]
+async fn workload_follows_new_pods_and_all_containers_with_since() {
+    use std::collections::HashSet;
+    use std::io::Write;
+    use std::process::Stdio;
+    let manifest = r#"apiVersion: apps/v1
+kind: Deployment
+metadata: { name: log-streams, namespace: mm-k2 }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: log-streams } }
+  template:
+    metadata: { labels: { app: log-streams } }
+    spec:
+      containers:
+      - { name: first, image: busybox:1.36, command: [sh, -c, 'while true; do echo first; sleep 1; done'] }
+      - { name: second, image: busybox:1.36, command: [sh, -c, 'while true; do echo second; sleep 1; done'] }
+"#;
+    let mut apply = Command::new("kubectl").arg("--kubeconfig").arg(kubeconfig_path()).args(["apply", "-f", "-"]).stdin(Stdio::piped()).spawn().unwrap();
+    apply.stdin.take().unwrap().write_all(manifest.as_bytes()).unwrap();
+    assert!(apply.wait().unwrap().success());
+    kubectl(&["-n", "mm-k2", "rollout", "status", "deployment/log-streams", "--timeout=120s"]);
+    let client = admin().await;
+    let pods: kube::Api<k8s_openapi::api::core::v1::Pod> = kube::Api::namespaced(client.clone(), "mm-k2");
+    let pod = pods.list(&kube::api::ListParams::default().labels("app=log-streams")).await.unwrap().items[0].metadata.name.clone().unwrap();
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    let earliest = k8s_openapi::jiff::Timestamp::now().as_second() - 3;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    logs::run(client.clone(), "mm-k2".into(), pod, LogOptions { since_seconds: Some(1), ..Default::default() }, PRIVATE, move |m| tx.send(m).is_ok()).await;
+    let mut names = HashSet::new();
+    while let Some(m) = rx.recv().await {
+        match m {
+            LogMessage::Lines { container, lines, .. } => {
+                assert!(lines.iter().all(|l| l.ts.as_ref().and_then(|ts| ts.parse::<k8s_openapi::jiff::Timestamp>().ok()).is_some_and(|ts| ts.as_second() >= earliest)));
+                names.insert(container);
+            }
+            LogMessage::End => break,
+            LogMessage::Error { error, .. } => panic!("{error:?}"),
+            _ => {}
+        }
+    }
+    assert_eq!(names.len(), 2);
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let kind = KindRef { group: "apps".into(), version: "v1".into(), kind: "Deployment".into(), plural: "deployments".into(), namespaced: true };
+    let task = tokio::spawn(logs::workload(client, kind, "mm-k2".into(), "log-streams".into(), LogOptions { follow: true, since_seconds: Some(60), ..Default::default() }, PRIVATE, move |m| tx.send(m).is_ok()));
+    let mut sources = HashSet::new();
+    while sources.len() < 4 {
+        match recv_log(&mut rx, Duration::from_secs(30)).await {
+            Some(LogMessage::Lines { pod, container, .. }) => { sources.insert((pod, container)); }
+            Some(LogMessage::Error { error, .. }) => panic!("{error:?}"),
+            None => panic!("초기 Pod 로그가 없어요: {sources:?}"),
+            _ => {}
+        }
+    }
+    kubectl(&["-n", "mm-k2", "scale", "deployment/log-streams", "--replicas=3"]);
+    while sources.len() < 6 {
+        match recv_log(&mut rx, Duration::from_secs(60)).await {
+            Some(LogMessage::Lines { pod, container, .. }) => { sources.insert((pod, container)); }
+            Some(LogMessage::Error { error, .. }) => panic!("{error:?}"),
+            None => panic!("새 Pod 로그가 없어요: {sources:?}"),
+            _ => {}
+        }
+    }
+    task.abort();
+    kubectl(&["-n", "mm-k2", "delete", "deployment/log-streams"]);
 }
 
 

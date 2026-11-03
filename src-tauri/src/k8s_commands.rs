@@ -375,6 +375,36 @@ pub fn k8s_logs(
     .ok_or_else(|| AppError::other(NOT_OPENED))
 }
 
+/// 워크로드가 선택한 Pod의 로그를 지켜본다.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub fn k8s_workload_logs(
+    app: tauri::AppHandle,
+    k8s: State<'_, K8sState>,
+    target: K8sTarget,
+    kind: KindRef,
+    namespace: String,
+    name: String,
+    options: LogOptions,
+    on_event: tauri::ipc::Channel<LogMessage>,
+) -> Result<u64, AppError> {
+    let started = k8s.epoch(&target);
+    let session = k8s.session(&target)?;
+    let (client, endpoint) = (session.client.clone(), session.endpoint);
+    k8s.register_watch(&target, started, |id| {
+        let task = tauri::async_runtime::spawn(async move {
+            let _forget = ForgetWatch { app, id };
+            logs::workload(client, kind, namespace, name, options, endpoint, move |m| on_event.send(m).is_ok()).await;
+        });
+        task.inner().abort_handle()
+    }).ok_or_else(|| AppError::other(NOT_OPENED))
+}
+
+#[tauri::command]
+pub async fn k8s_logs_save(file_name: String, text: String) -> Result<String, AppError> {
+    logs::save(file_name, text).await
+}
+
 /// 셸(exec) 세션을 연다. 터미널 출력은 채널로 흐르고 반환값의 번호로 입력·크기·닫기를 한다.
 /// 위험한 네임스페이스·Pod(`change::dangerous`)는 `confirm_text`가 Pod 이름과 같아야 한다. 열고 닫은 시각은 변경 기록에 남는다.
 #[tauri::command]
