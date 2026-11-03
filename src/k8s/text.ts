@@ -470,6 +470,17 @@ export const SEC_USAGE = "사용량";
 export const USAGE_GRAPH_NOTE = "최근 1시간 · 연결된 동안 고른 네임스페이스를 metrics-server에서 15초마다 모은 값이에요. 탭을 닫거나 앱을 끄면 지워져요.";
 export const USAGE_GRAPH_WAITING = "아직 모은 사용량이 없어요. 15초쯤 뒤에 나타나요.";
 export const USAGE_GRAPH_EMPTY = "이 객체의 사용량을 아직 모으지 못했어요";
+// 개요: 클러스터 사용량(Lens 개요처럼)
+export const SEC_CLUSTER_USAGE = "클러스터 사용량";
+export const SEC_WARNINGS = "최근 경고";
+export const CLUSTER = "클러스터";
+export const USAGE_CAPACITY = "용량";
+export const PODS_RUNNING = "실행 중";
+export const NODE_PRESSURE = "압박";
+export const nodeCount = (n: number) => `노드 ${n}`;
+export const CLUSTER_GRAPH_NOTE = "모든 노드 사용량의 합 · 최근 1시간 · 연결된 동안 15초마다 모은 값이에요.";
+export const NO_WARNINGS = "최근 Warning 이벤트가 없어요";
+export const warningsMore = (n: number) => (n > 0 ? `이벤트 화면에서 모두 보기 (Warning ${n}개)` : "이벤트 화면 열기");
 
 // 사용량(metrics-server)
 export const COL_CPU = "CPU";
