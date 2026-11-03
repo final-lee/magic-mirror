@@ -20,6 +20,7 @@ A macOS desktop app for browsing AWS resources by service, without clicking thro
 - Refresh (⌘R). Lists stay cached while the app runs and reload in the background when you reopen one older than the cache TTL (Settings → 리소스 캐시: 5 min to 6 h, or unlimited; default 15 min). **캐시 비우기** or ⌘⇧R drops every cached list for all profiles and regions, on disk too, and reloads what's on screen.
 - The ⌘K index is kept on disk for 7 days (`resource-index.json` in the app data folder, readable only by you). It holds only names, IDs, column values, and tags — never raw JSON or detail fields, which can contain secrets such as Lambda environment variables.
 - Read-only: it never calls APIs that change resources, and it never reads Secrets Manager secret values.
+- Scrollbars take no room: a thin bar appears over the content only while you scroll (drag it to scroll), even when macOS is set to always show scroll bars.
 
 ### VPC network diagram
 ![VPC network diagram](docs/screenshots/vpc-map.png)
@@ -59,6 +60,21 @@ Click **💰 비용** at the top of the sidebar to open one tab with the costs o
 - **Breakdown**: by service, region, usage type, or an active cost allocation tag, with this period, the compare period, the change, and the share. Click a row to drill down (service → usage type, region or tag value → service); the filter applies to the whole screen, and the path above the table goes back up. Items under half a cent fold into one row.
 - **Requests cost money**: Cost Explorer charges $0.01 per request. Answers are cached on disk for 6 hours, so reopening the same view is free. ⌘R (or **새로고침**) on the cost tab skips the cache for what's on screen; ⌘R on other tabs doesn't touch cost data. The bottom line shows how many requests the app sent this month and what they cost.
 - Read-only, single account. Opened with an Organizations management account, the numbers are the whole organization's, and the tab says so.
+
+### Argo Workflows
+Open **EKS → ⚙️ Argo Workflows** in the sidebar for a single tab that doesn't depend on the AWS profile. It talks to a running Argo Server API.
+
+- **Connecting**: add the server URL, then pick how to sign in. With a **kubeconfig context**, the app uses that context's credentials as the bearer token — for EKS, the `aws eks get-token` exec plugin, so you act as the same identity as `kubectl`. This needs the server to run with `--auth-mode=client`. If the context's SSO session has expired, the usual SSO sign-in starts. Or paste an **API token**; it's kept in the macOS keychain. `http://` servers get a plaintext warning.
+- **Namespace**: the top-bar dropdown lists only namespaces that hold Argo resources (workflows, CronWorkflows, templates, event bindings), not every Kubernetes namespace. Pick one when your identity can't list every namespace (the app asks when the server says so); identities that can't see any get a field to type the name. A server running with a managed namespace locks it.
+- **Workflows**: live updates over the server's watch stream (falls back to polling if it drops). Running and pending first, then recent failures. A summary band, phase chips, label filter, name filter (exact, prefix, contains), created-after and finished-before dates, namespace and source filters, **내 것만**, and fuzzy search; more pages load on demand. Extra columns from the server's `columns` setting or label columns you pick, a progress bar from the estimated duration, and links from the server's `links` setting. Select several rows to stop, terminate, suspend, resume, retry, resubmit, or delete them at once. **새 Workflow** opens a YAML editor with examples.
+- **Workflow detail**: overview (parameters, global outputs, where it came from, mutex and semaphore waits, ServiceAccount and its IRSA role, deadline, pod GC, TTL, resource usage), a **graph** (zoom, horizontal or vertical, phase and type filters, artifact nodes), steps as a tree with timeline bars, logs (one pod or all, previous container, since, timestamps, save to file; logs of deleted pods from the archived `main-logs` artifact), Kubernetes events, and YAML. Node details show containers, host node, memoization, artifacts (preview text, JSON, or images; download), and node actions: retry just this node (with changed parameters), resume, stop, and for a suspend step, fill in its output values and continue. **실패 단계로** jumps to the step that actually failed. **Argo UI에서 열기**, link copy, status-badge and graph widget addresses, and **YAML로 고쳐 다시 제출**.
+- **CronWorkflows** and **templates** (namespaced and cluster): schedules in words with the next 5 runs (time zones, `CRON_TZ=`, `@every`), the last 10 runs, missed runs; create, edit, and delete in the YAML editor (with server-side lint); run a template with parameters, entrypoint, labels, generate name, ServiceAccount, or a dry run. **보관함** lists archived workflows with the same filters.
+- **Reports**: pick a label (a cron or template) to chart the latest 50 runs' duration, CPU, and memory, colored by result.
+- **Argo Events**: **Event Flow** (event source → event → sensor → trigger → workflows it started), **Event Sources** and **Sensors** (details, YAML, logs, create, edit, delete), and **Event Bindings**. Without Argo Events on the cluster the screens say so.
+- **점검**: crons failing 3 times in a row, missed runs, workflows running over an hour without a deadline or pending over 10 minutes, crons and templates without a deadline or on the `default` ServiceAccount.
+- **Actions** ask first, and anything with `prod` in its name or namespace needs the name typed for stop, terminate, and delete. The Argo Server checks permissions.
+- **User Info** (who you are to the server, and a token for the `argo` CLI copied to the clipboard), **Plugins** (executor plugin ConfigMaps), and **API Docs** and **Help** in the browser.
+- Events, IRSA roles, and plugins need a kubeconfig context connection; they're read with the same identity through the Kubernetes API.
 
 ### PostgreSQL users (RDS)
 
@@ -144,6 +160,7 @@ The app checks for a new version at launch and every 6 hours, and shows an **Upd
   - A network path to the database endpoint, such as a VPN. The app connects directly and checks the server certificate against the bundled RDS CA.
   - IAM database authentication turned on for the cluster or instance
   - A DB user that is a member of `rds_iam`. Reading works with any such user, though other users' session details also need `pg_read_all_stats`. Changing roles and privileges also needs `rds_superuser` or CREATEROLE (see *Changing roles and privileges* above), and the app says when the user you signed in as has neither.
+- The Argo Workflows tab needs network access to the Argo Server (for example over Tailscale). To sign in with a kubeconfig context, the server must run with `--auth-mode=client` and that identity needs RBAC on the Argo resources it reads or changes; events and IRSA roles also need `list events` and `get serviceaccounts` in those namespaces.
 
 ## Development
 
@@ -175,6 +192,7 @@ src/                     React frontend
   iam/                   IAM workspace
   pg/                    PostgreSQL users tab
   cost/                  cost dashboard tab
+  argowf/                Argo Workflows tab
 src-tauri/src/
   adapters/              per-service read-only adapters
   explorer/              local files, S3 writes and transfers, diff engine
@@ -183,6 +201,7 @@ src-tauri/src/
   iam/write.rs           the only place that calls IAM write APIs
   pg/                    PostgreSQL connection, read-only catalog snapshot, privilege evaluation, security checks
   cost/                  Cost Explorer client, on-disk answer cache and request counter, overview and breakdown shaping (read-only)
+  argowf/                Argo Server client, kubeconfig-context and keychain auth, response shaping, cron next runs, log streams
   mouse_nav.rs           macOS mouse back/forward buttons
 scripts/release.sh       universal build and GitHub release
 ```
