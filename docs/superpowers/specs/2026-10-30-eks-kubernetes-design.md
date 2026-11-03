@@ -159,14 +159,41 @@
 ### 실효 권한 (순수 함수)
 - 입력: Role, ClusterRole, RoleBinding, ClusterRoleBinding, 신원 매핑, access policy. 출력: 주체(사용자, 그룹, ServiceAccount, IAM 주체)별 규칙과 출처 경로.
 - 처리: `aggregationRule`, `*`, `resourceNames`, 하위 리소스, `nonResourceURLs`, 기본 그룹(`system:authenticated`, `system:serviceaccounts`, `system:serviceaccounts:<ns>`).
-- RBAC만 계산한다. 화면에 "RBAC과 EKS access policy만 계산해요"를 적는다.
-- 권한 표: 주체 × 네임스페이스. 칸은 읽기, 쓰기, 삭제, exec·attach·port-forward, Secret 읽기, RBAC 변경, 권한 상승 가능. 칸을 누르면 동작과 바인딩 경로.
-- 누가 할 수 있나: 동사 + 리소스(+ 하위 리소스) + 네임스페이스(+ 이름) → 주체와 경로. 결과는 `SubjectAccessReview`로 대조할 수 있다(대조 결과가 다르면 표시).
+- RBAC과 EKS access policy만 계산한다. 화면에 "RBAC과 EKS access policy만 계산해요"를 적는다.
+- **엔진 API**(`k8s/access/engine.rs`, 순수. K5 보안 점검과 K8 D의 RBAC 변경 미리보기가 부른다):
+  - `evaluate(rbac, principals) -> Evaluation`: `Rbac`(Role·ClusterRole(`aggregationRule` 포함)·RoleBinding·ClusterRoleBinding)과 유효한 신원 매핑(`Principal`: IAM 주체의 쿠버네티스 사용자 이름·그룹·access policy)을 받아 주체별 `SubjectRules`를 만든다. 규칙마다 `Grant`(범위 + 규칙 + 출처 `Source`: 방법(직접·매핑이 준 그룹·기본 그룹·access policy·`system:masters` 내장) → 바인딩 → 역할 → 합쳐 준 ClusterRole).
+  - `Evaluation::can(subject, Query { verb, group, resource, subresource, namespace, name }) -> Decision { allowed, grants }`와 `can_non_resource(subject, verb, path)`. 목록에 없는 주체(바인딩에 이름이 없는 ServiceAccount 등)는 그 자리에서 계산한다.
+  - `Evaluation::who_can(&Query) -> Vec<WhoCan>`: 할 수 있는 주체와 경로. 기본 그룹(`system:authenticated` 등)에서 물려받은 권한은 그 그룹 항목에만 두고 사용자·ServiceAccount 줄마다 되풀이하지 않는다.
+  - `diff::diff(before, after) -> Vec<SubjectDiff>`: 두 RBAC 시점에서 누가 무엇을 얻고 잃는지. 달라진 규칙에서 대표 요청을 만들어 양쪽을 평가하고 결과가 바뀐 것만 낸다(`*`는 두 시점의 규칙에 나온 (그룹, 리소스)와 표준 동사로 펼치고 나머지는 `*`로 적는다).
+  - `Evaluation::dangling()`: 없는 역할을 가리키는 바인딩. `Evaluation::identity_of(subject)`: SubjectAccessReview 대조에 쓸 사용자·그룹.
+- **의미**(API 서버의 RBAC 인가와 같다): `*`는 모든 동사·그룹·리소스(하위 리소스 포함)에 맞고, `pods`는 `pods/exec`에 맞지 않으며 `*/exec`만 하위 리소스에 맞는다(`pods/*`는 맞지 않는다). `resourceNames`는 이름을 지정한 요청에만 맞는다. RoleBinding은 그 네임스페이스에만(ClusterRole을 가리켜도, `nonResourceURLs`는 무시), ClusterRoleBinding은 모든 네임스페이스·클러스터 범위·비리소스 URL에 적용한다. 네임스페이스 없는 요청(`kubectl get pods -A` 포함)은 ClusterRoleBinding으로 받은 권한만 맞는다. `aggregationRule`은 선택자에 맞는 다른 ClusterRole의 규칙을 이름 순서로 합치고(여러 단계, 순환은 끊는다) 그 ClusterRole에 적어 둔 `rules`는 쓰지 않는다. 모든 주체는 `system:authenticated`(`system:anonymous`는 `system:unauthenticated`), ServiceAccount는 `system:serviceaccounts`와 `system:serviceaccounts:<ns>`도 가진다. `system:masters`는 API 서버가 모두 허용한다. User 바인딩의 이름이 `system:serviceaccount:<ns>:<name>`이면 그 ServiceAccount에 적용된다. IAM 사용자 이름이 `{{SessionName}}` 템플릿이면 그 템플릿에 맞는 이름의 User 바인딩을 "특정 세션 이름일 때만"으로 표시해 적용한다.
+- **권한 표**: 주체 × 네임스페이스(열: 클러스터 전체 + 고른 네임스페이스 최대 8). 주체는 바인딩에 이름이 나온 사용자·그룹·ServiceAccount와 유효한 IAM 주체다(바인딩에 이름이 없는 ServiceAccount는 `system:serviceaccounts*` 그룹 행으로 본다). 칸 일곱은 대표 요청 몇 개가 이름 지정 없이 허용되는지로 정한다. 단계는 전부(모두 허용)·일부(일부만 허용되거나 `resourceNames`로 정해진 이름만)·없음. 네임스페이스 열은 그 네임스페이스의 요청(ClusterRoleBinding 권한 포함), 클러스터 전체 열은 클러스터 범위 요청(ClusterRoleBinding 권한만)으로 계산한다.
+
+  | 칸 | 대표 요청 | 전부 | 일부 |
+  |---|---|---|---|
+  | 읽기 | pods, services, configmaps, persistentvolumeclaims, deployments, statefulsets, daemonsets, jobs, cronjobs, ingresses 10종 × get·list·watch | 30개 모두 | 하나라도 |
+  | 쓰기 | 같은 10종 × create·update·patch | 30개 모두 | 하나라도 |
+  | 삭제 | 같은 10종 × delete·deletecollection | 20개 모두 | 하나라도 |
+  | exec·attach·port-forward | pods/exec, pods/attach, pods/portforward의 create | 셋 모두 | 하나라도 |
+  | Secret 읽기 | secrets × get·list·watch | 셋 모두 | 하나라도 |
+  | RBAC 변경 | roles·rolebindings(클러스터 전체 열은 clusterroles·clusterrolebindings도) × create·update·patch·delete | 모두 | 하나라도 |
+  | 권한 상승 가능 | 직접: roles·clusterroles의 escalate·bind, users·groups·serviceaccounts의 impersonate, serviceaccounts/token create, nodes/proxy get·create. 간접: pods·deployments·statefulsets·daemonsets·jobs·cronjobs create(Pod를 만들어 다른 ServiceAccount 토큰을 쓴다), secrets get·list(토큰 읽기) | 직접 경로 하나라도 | 간접 경로 하나라도(직접은 이름 한정만) |
+
+  칸을 누르면 오른쪽 상세(70%)에 단계, 확인한 동작별 허용 여부, 바인딩 경로가 보인다. 큰 클러스터를 위해 한 쪽(25행)씩 백엔드가 계산해 보내고, 종류 칩·이름 필터·네임스페이스 고르기(검색)가 있다. 계산 결과(`Evaluation`)는 대상마다 캐시하고 연결이 바뀌면 버린다([다시 읽기]는 새로 읽는다).
+- **누가 할 수 있나**: 동사 + 리소스(kubectl 식 `pods`, `deployments.apps`, `pods/exec`) + 네임스페이스(+ 이름) → 주체와 경로(1000명까지). [클러스터에 대조]는 `SubjectAccessReview`를 주체마다 보내고(최대 100명, 동시 4개) 계산은 허용인데 클러스터가 거부한 줄에 "다름"을 붙인다. 이 신원이 `create subjectaccessreviews`를 할 수 없으면(내 권한의 규칙 목록으로 확인) 이유와 함께 꺼 둔다. 세션 이름 템플릿에만 기대는 권한은 클러스터에 같은 신원이 없어 대조하지 않는다.
 
 ### 워크로드 신원
 - ServiceAccount마다 IRSA 어노테이션, Pod Identity 연결(`ListPodIdentityAssociations`), 쓰는 Pod.
 - IRSA 확인: 역할의 신뢰 정책에 이 클러스터의 OIDC 공급자와 `sub` = `system:serviceaccount:<ns>:<sa>`(또는 맞는 와일드카드), `aud` = `sts.amazonaws.com` 조건이 있는지. 없으면 "연결돼 있지만 동작하지 않음".
-- 역할을 누르면 IAM 워크스페이스에서 그 역할을 연다.
+- Pod Identity는 연결의 역할 신뢰 정책이 `pods.eks.amazonaws.com`에 `sts:AssumeRole`과 `sts:TagSession`을 허용하는지 같은 방식으로 확인한다.
+- ServiceAccount의 `eks.amazonaws.com/audience` 어노테이션이 있으면 그 값을 `aud`로 확인한다(기본 `sts.amazonaws.com`). `sub`·`aud` 조건은 `StringEquals`·`StringLike`(와일드카드)·`StringEqualsIgnoreCase`만 풀고, 다른 연산자(`StringNotEquals` 등)에 기대면 "확인하지 못함"이다. 여러 문장 중 하나라도 맞으면 동작한다.
+- 역할을 읽지 못하면(IAM 권한 없음 등) 그 연결만 "확인하지 못함"이고 나머지는 그대로 보인다. 역할을 누르면 IAM 워크스페이스에서 그 역할을 연다.
+- IRSA와 Pod Identity가 모두 있으면 "보통 IRSA가 먼저 쓰여요"를 적는다. Pod는 끝나지 않은 것만 읽고, ServiceAccount·Pod 목록은 쪽 한도(40쪽)에서 잘리면 알린다.
+
+### 지금 된 것 (2026-11-03)
+- K4 전부: 위의 엔진·권한 표·누가 할 수 있나·신원 연결·워크로드 신원과 왼쪽 메뉴 "🛡 접근"(내 권한 아래). 읽기 전용이고 EKS API는 모의 응답으로만 시험했다(`k8s/access/read/tests.rs`). 실제 클러스터 대조는 kind(`k8s::live_tests::access`, 픽스처 `scripts/k8s-live/access.sh`)에서 `SubjectAccessReview`와 `kubectl auth can-i --as`에 요청마다 맞춘다.
+- 신원 연결 읽기: 인증 모드가 `CONFIG_MAP`이면 access entry API를 부르지 않고(그 모드에서는 오류가 난다), 인증 모드를 읽지 못하면 두 출처를 모두 유효하다고 본다. access entry는 목록 → 항목마다 `DescribeAccessEntry`·`ListAssociatedAccessPolicies`를 동시에 8개씩 읽고 한 항목이 실패하면 그 항목만 "자세히 읽지 못했어요"로 남긴다. aws-auth가 없으면 오류가 아니다. 출처마다 실패는 응답의 `gaps`로 오고 화면에 "이 부분을 읽지 못했어요: …"로 보인다.
+- aws-auth 이름을 비우면 인증기처럼 ARN을 사용자 이름으로 보고, `{{AccountID}}`는 채우며 `{{SessionName}}` 등은 그대로 둔다. aws-auth의 `rolearn`은 경로 없이, access entry의 주체는 경로를 포함하니 같은 주체인지는 (계정, 종류, 이름)으로 비교한다.
 
 ## 보안 점검
 - 클러스터: 퍼블릭 엔드포인트가 `0.0.0.0/0`, 컨트롤 플레인 로깅 꺼짐, Secret 암호화 꺼짐, 표준 지원 종료 90일 이내 버전, aws-auth 사용, 생성자 관리자 권한 남음.
@@ -278,10 +305,12 @@ k8s_logs(target, namespace, pod, options, onEvent): StreamId
 k8s_workload_logs(target, kind, namespace, name, options, onEvent): StreamId
 k8s_logs_save(fileName, text): string                          // 저장된 절대 경로
 k8s_unwatch(watchId): void
-k8s_access(target, force: boolean): K8sAccessView               // 신원 매핑, 실효 권한, 권한 표
-k8s_who_can(target, K8sWhoCanQuery): K8sWhoCan
-k8s_review(target, K8sWhoCanQuery, subject): boolean           // SubjectAccessReview 대조
-k8s_workload_identity(target): K8sWorkloadIdentity[]
+k8s_access(target, force: boolean): AccessView                 // 신원 매핑(access entry·aws-auth), 인증 모드, 주체 수, 읽지 못한 부분(gaps). 계산 결과는 대상별 캐시
+k8s_access_matrix(target, MatrixQuery): MatrixPage             // 권한 표 한 쪽: 종류·이름 필터, 열(네임스페이스), offset·limit. 칸은 주체마다 열당 7개(0·1·2)
+k8s_access_cell(target, subject, cell, namespace | null): CellDetail  // 칸의 확인한 동작별 허용 여부와 바인딩 경로
+k8s_who_can(target, Query): WhoCanView                         // { entries: { subject, grants }[], total }
+k8s_review(target, Query, subject): ReviewResult               // SubjectAccessReview 대조 { allowed, denied, reason }
+k8s_workload_identity(target): WorkloadView                    // ServiceAccount별 IRSA·Pod Identity·Pod와 신뢰 정책 확인, gaps
 k8s_findings(target, force: boolean): K8sFindings
 k8s_network(target): K8sNetworkView
 k8s_preview(target, K8sChange): K8sPreview
@@ -313,8 +342,8 @@ k8s_undo_batch(batchId): K8sUndo
   - `connect.rs`: kubeconfig 읽기, context 찾기, PATH, `kube::Client`, 오류 분류, SSO 재시도. 탭별 연결 관리.
   - `read/`: 목록, 상세, 소유 관계, 이벤트, discovery, Secret 가리기.
   - `stream/`: watch, 로그, drain 진행.
-  - `access/`: 신원 매핑(access entry, aws-auth), access policy 대응표, 실효 권한, 권한 표, who-can — 순수 함수.
-  - `identity.rs`: IRSA 신뢰 정책 확인(IAM 모듈의 정책 파서 재사용), Pod Identity.
+  - `access/`: `rbac`(RBAC 모델·aggregation), `engine`(실효 권한·can·who-can), `matrix`(권한 표 칸), `diff`(두 시점 비교), `identity`(access entry·aws-auth·인증 모드·access policy 대응표·SSO 묶기), `workload`(IRSA·Pod Identity 신뢰 정책 확인, IAM 모듈의 정책 파서 재사용) — 모두 순수 함수. `read`(읽기 호출과 부분 실패 모으기), `review`(SubjectAccessReview), `view`(화면 응답). 명령은 `k8s_access_commands.rs`.
+  - (옛 계획의 `identity.rs`는 `access/workload.rs`가 맡는다.)
   - `checks/`: 보안 점검 — 순수 함수.
   - `network.rs`: 로드밸런서 짝 찾기, 서브넷.
   - `change/`: 변경 종류, 요청 만들기, 역변경, 미리보기·경고 — 순수 함수.

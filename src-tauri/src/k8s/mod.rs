@@ -1,4 +1,5 @@
 //! EKS 탭. 조회와 변경을 분리하며 클러스터 쓰기는 `exec`에서만 보낸다.
+pub mod access;
 pub mod change;
 pub mod commit;
 pub mod drain;

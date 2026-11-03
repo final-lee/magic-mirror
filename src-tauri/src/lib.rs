@@ -12,6 +12,7 @@ mod iam;
 mod iam_commands;
 mod jsonl;
 pub mod k8s;
+mod k8s_access_commands;
 mod k8s_commands;
 mod model;
 mod mouse_nav;
@@ -46,6 +47,7 @@ pub fn run() {
             app.manage(explorer_commands::ExplorerState::default());
             app.manage(iam_commands::IamState::new(dir.join("iam-changes.jsonl")));
             app.manage(k8s_commands::K8sState::new(dir.join("k8s-changes.jsonl")));
+            app.manage(k8s_access_commands::AccessState::default());
             app.manage(argocd::ArgocdState::default());
             app.manage(pg_commands::PgState::new(dir.join("db-changes.jsonl")));
             app.manage(cost_commands::CostState::new(dir.join("cost-cache.json")));
@@ -125,6 +127,12 @@ pub fn run() {
             pg_commands::pg_preset,
             pg_commands::pg_drop_plan,
             pg_commands::pg_apply_drop,
+            k8s_access_commands::k8s_access,
+            k8s_access_commands::k8s_access_matrix,
+            k8s_access_commands::k8s_access_cell,
+            k8s_access_commands::k8s_who_can,
+            k8s_access_commands::k8s_review,
+            k8s_access_commands::k8s_workload_identity,
             k8s_commands::k8s_context,
             k8s_commands::k8s_open,
             k8s_commands::k8s_close,

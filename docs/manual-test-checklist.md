@@ -257,3 +257,16 @@
 - [ ] 셸·attach: Pod 상세 "셸" 탭에서 컨테이너를 골라 열면 bash(없으면 sh)가 뜨고 창 크기를 바꾸면 `stty size`가 따라간다. 다른 탭에 갔다 와도 세션이 살아 있다. attach는 stdin·tty가 켜진 컨테이너에서만 입력이 되고 "입력·Ctrl-C가 주 프로세스로 가요" 경고가 보인다. 변경 기록에는 열고 닫은 시각만 있고 입출력은 없다
 - [ ] 노드 셸: Node 상세 [노드 셸]은 이미지(기본 busybox)를 고칠 수 있는 디버그 Pod 미리보기를 열고 노드 이름 입력을 요구한다. 열리면 `hostname`이 노드 이름이고, 닫으면 디버그 Pod가 지워진다(변경 기록에 만들기와 지우기가 남는다). 노드 이미지 레지스트리에 닿지 않는 노드면 Pod가 Ready가 안 돼 60초 뒤 실패하고 Pod는 지워진다
 - [ ] port-forward: Pod·Service 상세에서 포트를 골라 열면 왼쪽 메뉴 "포트포워딩"에 `127.0.0.1:<포트>`가 보이고 브라우저로 열린다. Service 포워드는 쓰던 Pod를 지워도 다른 준비된 Pod로 다시 붙는다. [닫기]로 닫히고, 클러스터 탭을 닫거나 앱을 끄면 모두 닫힌다
+
+## EKS 쿠버네티스: 접근 (읽기만 한다. 실제 EKS와 SSO로 확인한다)
+준비: access entry와 aws-auth를 모두 쓰는 `API_AND_CONFIG_MAP` 클러스터(가능하면 `API`·`CONFIG_MAP` 클러스터도 하나씩), SSO 권한 세트로 만든 `AWSReservedSSO_*` 역할 둘 이상, IRSA ServiceAccount와 Pod Identity 연결이 있는 워크로드, 클러스터 관리자 신원과 읽기만 되는 신원.
+
+- [ ] 신원: [접근] → [신원]에 인증 모드와 그 설명이 보인다. 같은 주체가 access entry와 aws-auth에 모두 있으면 aws-auth 쪽이 "쓰이지 않아요 · 같은 주체의 access entry가 먼저 쓰여요"로 흐리게 보이고, `API`·`CONFIG_MAP` 클러스터에서는 안 쓰는 쪽 전체가 그렇게 보인다. `{{SessionName}}` 템플릿 사용자 이름이 그대로 보인다
+- [ ] SSO 묶음: `AWSReservedSSO_<권한 세트>_<해시>` 역할이 권한 세트 이름의 한 줄로 묶이고(펼치면 역할 ARN별 줄), [SSO 권한 세트로 묶기]를 끄면 모두 따로 보인다. [IAM에서 열기]가 IAM 작업 공간에서 그 역할을 연다
+- [ ] access policy: AmazonEKSClusterAdmin·Admin·Edit·View 정책은 범위(클러스터 또는 네임스페이스 목록)와 함께 보이고 클러스터 전체 열의 칸이 정책에 맞게 칠해진다. 다른 정책(예: AmazonEKSAdminViewPolicy)은 "평가하지 못함"이 붙는다
+- [ ] 읽지 못한 출처: access entry 목록 권한을 뺀 신원으로 열면 "이 부분을 읽지 못했어요: EKS access entry"가 보이고 나머지(aws-auth, 권한 표)는 그대로 보인다. aws-auth ConfigMap을 읽을 수 없어도 같다
+- [ ] 권한 표: 위에 "RBAC과 EKS access policy만 계산해요"가 있다. 열은 클러스터 전체와 고른 네임스페이스(네임스페이스 고르기에서 찾기·추가·빼기, 최대 8열), 행은 주체(IAM·사용자·그룹·ServiceAccount)다. 종류 칩과 이름 필터가 되고 25행씩 [이전]·[다음]이다. 칸 일곱(읽기·쓰기·삭제·exec·Secret 읽기·RBAC 변경·권한 상승)은 [칸 설명]의 정의대로 칠해진다
+- [ ] `kubectl auth can-i`와 대조: 권한 표의 칸 몇 개(예: 어떤 사용자의 dev 네임스페이스 읽기, Secret 읽기, exec)를 눌러 상세를 열고, 같은 신원으로 `kubectl auth can-i get secrets -n dev --as <사용자> --as-group <그룹>`을 실행해 허용 여부가 상세의 "확인한 동작"과 같은지 본다. 상세의 "바인딩 경로"가 `kubectl get rolebinding,clusterrolebinding -o wide`와 맞는다
+- [ ] aggregation: `aggregate-to-view` 라벨을 단 ClusterRole을 만들면 `view`에 묶인 주체의 상세 경로에 "(그 ClusterRole에서 합쳐짐)"이 보인다(다시 읽기 후)
+- [ ] 누가 할 수 있나: `get secrets`를 네임스페이스와 함께 찾으면 직접·그룹 경유·access policy로 받은 주체가 경로와 함께 나오고, `system:authenticated` 같은 기본 그룹에서 받은 권한은 그 그룹 한 줄뿐이다. [클러스터에 대조(SubjectAccessReview)]는 SubjectAccessReview를 만들 수 없는 신원에서는 꺼지고 이유가 보인다. 만들 수 있는 신원에서는 "일치 N명, 다름 M명"이 나오고 다른 줄에는 "계산은 허용, 클러스터는 거부"가 붙는다
+- [ ] 워크로드 신원: IRSA 어노테이션이 있는 ServiceAccount와 Pod Identity 연결이 표에 보이고 쓰는 Pod 수가 맞다. 역할 신뢰 정책에 이 클러스터의 OIDC 공급자와 맞는 `sub`·`aud` 조건이 있으면 "동작해요", `sub`를 다른 ServiceAccount로 바꾸면 "연결돼 있지만 동작하지 않음"과 이유가, IAM 권한이 없으면 "확인하지 못함"이 보인다. 역할 이름을 누르면 IAM 작업 공간에서 열린다
