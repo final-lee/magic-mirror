@@ -1,4 +1,5 @@
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { json, jsonParseLinter } from "@codemirror/lang-json";
 import { yaml } from "@codemirror/lang-yaml";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { linter, lintGutter, type Diagnostic } from "@codemirror/lint";
@@ -8,7 +9,7 @@ import { tags } from "@lezer/highlight";
 import { useEffect, useRef } from "react";
 import { yamlProblems } from "../k8s/yamlDocs";
 
-// 읽기용 YAML 색(.y-*)과 같은 색을 쓴다
+// 읽기용 YAML 색(.y-*)과 같은 색을 쓴다. JSON도 같은 색(키·문자열·숫자·키워드)
 const highlight = HighlightStyle.define([
   { tag: [tags.definition(tags.propertyName), tags.propertyName], color: "var(--syntax-property)" },
   { tag: [tags.string, tags.content], color: "var(--syntax-string)" },
@@ -45,26 +46,31 @@ interface Props {
   onChange: (text: string) => void;
   /** 보조 기기에 알리는 편집기 이름 */
   label: string;
-  /** yaml: 줄 번호·구문 색·구문 오류 밑줄. text: 여러 줄 글(파라미터 값 등) */
-  language?: "yaml" | "text";
-  /** 비었을 때의 높이. 기본은 YAML 문서용 240px */
+  /** yaml·json: 줄 번호·구문 색·구문 오류 밑줄. text: 여러 줄 글(파라미터·Secret 값 등) */
+  language?: "yaml" | "json" | "text";
+  /** 비었을 때의 높이. 기본은 문서용 240px, 글은 60px */
   minHeight?: string;
 }
 
 /**
  * 앱의 하나뿐인 여러 줄 편집기(CodeMirror 6). textarea는 쓰지 않는다.
+ * yaml·json에서는 Tab·Shift+Tab이 들여쓰기·내어쓰기이고, 다음 칸으로 나가려면 Esc를 누른 뒤 Tab(CodeMirror의 Tab 탈출).
+ * text에서는 Tab이 평소처럼 다음 칸으로 간다.
  * 글은 처음 값으로만 채우고 이후에는 편집기가 쥔다: 바깥에서 글을 갈아 끼우려면 key를 바꿔 다시 만든다.
  */
-export function CodeEditor({ value, onChange, label, language = "yaml", minHeight = language === "yaml" ? "240px" : "60px" }: Props) {
+export function CodeEditor({ value, onChange, label, language = "yaml", minHeight = language === "text" ? "60px" : "240px" }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const changed = useRef(onChange);
   changed.current = onChange;
 
   useEffect(() => {
+    const document = [lineNumbers(), syntaxHighlighting(highlight), lintGutter(), keymap.of([indentWithTab])];
     const languageExtensions: Extension[] =
       language === "yaml"
-        ? [lineNumbers(), yaml(), syntaxHighlighting(highlight), linter(yamlDiagnostics, { delay: 200 }), lintGutter()]
-        : [EditorView.lineWrapping];
+        ? [...document, yaml(), linter(yamlDiagnostics, { delay: 200 })]
+        : language === "json"
+          ? [...document, json(), linter(jsonParseLinter(), { delay: 200 })]
+          : [EditorView.lineWrapping];
     const view = new EditorView({
       parent: host.current!,
       state: EditorState.create({
