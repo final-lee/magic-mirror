@@ -7,12 +7,18 @@ import { k8sApi } from "./api";
 import { ATTACH_OUTPUT_ONLY, SHELL_OPENING, SHELL_REOPEN, SHELL_LABEL, shellExited } from "./text";
 import type { K8sShellMessage, K8sShellMode, K8sTarget } from "./types";
 
-/** 앱의 어두운 테마에 맞춘 터미널 색 */
-const TERM_THEME = {
-  background: "#1a1a1c", foreground: "#e6e6e8", cursor: "#e6e6e8", selectionBackground: "#0a84ff55",
-  black: "#1e1e20", red: "#ff453a", green: "#30d158", yellow: "#ffd60a", blue: "#0a84ff", magenta: "#bf5af2", cyan: "#64d2ff", white: "#e6e6e8",
-  brightBlack: "#6e6e73", brightRed: "#ff6961", brightGreen: "#4ae08a", brightYellow: "#ffe45c", brightBlue: "#409cff", brightMagenta: "#da8fff", brightCyan: "#8de3ff", brightWhite: "#ffffff",
-};
+/** xterm은 CSS 변수를 해석하지 않으므로 현재 테마의 실제 색을 읽는다. */
+function terminalTheme() {
+  const style = getComputedStyle(document.documentElement);
+  const color = (name: string) => style.getPropertyValue(name).trim();
+  return {
+    background: color("--terminal-bg"), foreground: color("--text"), cursor: color("--text"), selectionBackground: color("--accent-soft"),
+    black: color("--surface-3"), red: color("--red"), green: color("--green"), yellow: color("--yellow"),
+    blue: color("--accent"), magenta: color("--chart-purple"), cyan: color("--syntax-property"), white: color("--text"),
+    brightBlack: color("--dim"), brightRed: color("--red"), brightGreen: color("--green"), brightYellow: color("--yellow"),
+    brightBlue: color("--accent"), brightMagenta: color("--chart-purple"), brightCyan: color("--syntax-property"), brightWhite: color("--text"),
+  };
+}
 
 type State = { phase: "opening" } | { phase: "running"; input: boolean } | { phase: "ended"; code: number | null; reason: string | null } | { phase: "error"; error: unknown };
 
@@ -46,7 +52,9 @@ export function PodTerminal({ target, ssoProfile, namespace, pod, container, mod
     setState({ phase: "opening" });
     const el = host.current;
     if (!el) return;
-    const term = new Terminal({ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, theme: TERM_THEME, cursorBlink: true, scrollback: 5000 });
+    const term = new Terminal({ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, theme: terminalTheme(), cursorBlink: true, scrollback: 5000 });
+    const themeObserver = new MutationObserver(() => { term.options.theme = terminalTheme(); });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(el);
@@ -94,6 +102,7 @@ export function PodTerminal({ target, ssoProfile, namespace, pod, container, mod
     resize?.observe(el);
     return () => {
       gone = true;
+      themeObserver.disconnect();
       resize?.disconnect();
       data.dispose();
       term.dispose();

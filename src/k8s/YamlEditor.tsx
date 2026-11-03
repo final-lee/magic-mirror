@@ -11,23 +11,23 @@ import { yamlProblems } from "./yamlDocs";
 
 // 읽기용 YAML 색(.y-*)과 같은 색을 쓴다
 const highlight = HighlightStyle.define([
-  { tag: [tags.definition(tags.propertyName), tags.propertyName], color: "#64d2ff" },
-  { tag: [tags.string, tags.content], color: "#ffb36b" },
-  { tag: [tags.number], color: "#bf8cff" },
-  { tag: [tags.bool, tags.null, tags.keyword], color: "#ff6b8b" },
-  { tag: [tags.comment, tags.lineComment], color: "#8a8f98", fontStyle: "italic" },
-  { tag: [tags.separator, tags.punctuation, tags.meta], color: "#8a8f98" },
+  { tag: [tags.definition(tags.propertyName), tags.propertyName], color: "var(--syntax-property)" },
+  { tag: [tags.string, tags.content], color: "var(--syntax-string)" },
+  { tag: [tags.number], color: "var(--syntax-number)" },
+  { tag: [tags.bool, tags.null, tags.keyword], color: "var(--syntax-keyword)" },
+  { tag: [tags.comment, tags.lineComment], color: "var(--syntax-comment)", fontStyle: "italic" },
+  { tag: [tags.separator, tags.punctuation, tags.meta], color: "var(--syntax-comment)" },
 ]);
 
 const theme = EditorView.theme(
   {
-    "&": { fontSize: "12px", backgroundColor: "#00000040", borderRadius: "6px", minHeight: "240px", maxHeight: "60vh" },
+    "&": { fontSize: "12px", backgroundColor: "var(--code-bg)", color: "var(--text)", borderRadius: "6px", minHeight: "240px", maxHeight: "60vh" },
     ".cm-scroller": { fontFamily: "var(--mono, ui-monospace, monospace)", overflow: "auto" },
-    ".cm-gutters": { backgroundColor: "transparent", border: "none", color: "#8a8f98" },
-    ".cm-content": { caretColor: "#fff" },
-    "&.cm-focused": { outline: "1px solid #64d2ff" },
+    ".cm-gutters": { backgroundColor: "transparent", border: "none", color: "var(--syntax-comment)" },
+    ".cm-content": { caretColor: "var(--text)" },
+    "&.cm-focused": { outline: "1px solid var(--accent)" },
   },
-  { dark: true },
+  { dark: false },
 );
 
 interface Props {

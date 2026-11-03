@@ -3,13 +3,23 @@ import type { Updater } from "../lib/useUpdater";
 import type { ServiceInfo } from "../api/types";
 import type { DiffTool } from "../explorer/types";
 import { SETTINGS_KUBECONFIG_LABEL, SETTINGS_KUBECONFIG_PLACEHOLDER } from "../k8s/text";
+import type { Theme } from "../lib/theme";
 import { ServiceBadge } from "./ServiceBadge";
+
+const THEME_LABEL = "화면 테마";
+const THEME_CHOICES: { id: Theme; label: string }[] = [
+  { id: "system", label: "시스템 설정 따르기" },
+  { id: "light", label: "밝게" },
+  { id: "dark", label: "어둡게" },
+];
 
 interface Props {
   services: ServiceInfo[];
   enabled: string[];
   onChange: (ids: string[]) => void;
   onClose: () => void;
+  theme?: Theme;
+  onThemeChange?: (theme: Theme) => void;
   diffTool?: DiffTool;
   diffToolCommand?: string | null;
   onDiffToolChange?: (tool: DiffTool, command: string | null) => void;
@@ -47,6 +57,8 @@ export function ServiceSettings({
   enabled,
   onChange,
   onClose,
+  theme,
+  onThemeChange,
   diffTool,
   diffToolCommand,
   onDiffToolChange,
@@ -76,6 +88,19 @@ export function ServiceSettings({
             </label>
           ))}
         </div>
+        {onThemeChange && (
+          <>
+            <h4>{THEME_LABEL}</h4>
+            <div className="tools" role="group" aria-label={THEME_LABEL}>
+              {THEME_CHOICES.map((choice) => (
+                <label key={choice.id}>
+                  <input type="radio" name="theme" checked={(theme ?? "system") === choice.id} onChange={() => onThemeChange(choice.id)} />
+                  {choice.label}
+                </label>
+              ))}
+            </div>
+          </>
+        )}
         {onDiffToolChange && (
           <>
             <h4>비교 도구</h4>

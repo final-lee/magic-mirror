@@ -53,6 +53,8 @@ pub struct Settings {
     pub explorer_local_path: Option<String>,
     pub diff_tool: Option<String>,
     pub diff_tool_command: Option<String>,
+    /// 화면 테마. 비어 있으면 시스템 설정을 따른다.
+    pub theme: Option<String>,
     /// PostgreSQL 탭의 로그인 사용자: 대상(클러스터·인스턴스) ARN → DB 사용자 이름
     pub pg_logins: BTreeMap<String, String>,
     /// EKS 탭이 접속할 kubeconfig context: 클러스터 ARN → context 이름
@@ -78,6 +80,7 @@ struct RawSettings {
     explorer_local_path: Option<String>,
     diff_tool: Option<String>,
     diff_tool_command: Option<String>,
+    theme: Option<String>,
     pg_logins: BTreeMap<String, String>,
     k8s_contexts: BTreeMap<String, String>,
     kubeconfig_path: Option<String>,
@@ -109,6 +112,7 @@ pub fn load(path: &Path, all_services: &[&str]) -> Settings {
                 explorer_local_path: raw.explorer_local_path,
                 diff_tool: raw.diff_tool,
                 diff_tool_command: raw.diff_tool_command,
+                theme: raw.theme,
                 pg_logins: raw.pg_logins,
                 k8s_contexts: raw.k8s_contexts,
                 kubeconfig_path: raw.kubeconfig_path,
@@ -199,6 +203,21 @@ mod tests {
         assert_eq!(json["argocdViews"]["https://a.test"]["thenBy"], "label:type");
     }
 
+
+    #[test]
+    fn theme_roundtrip_and_default() {
+        assert_eq!(load_text("{}").theme, None);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        for theme in ["system", "light", "dark"] {
+            let settings = Settings {
+                theme: Some(theme.into()),
+                ..Default::default()
+            };
+            save(&path, &settings).unwrap();
+            assert_eq!(load(&path, &[]).theme.as_deref(), Some(theme));
+        }
+    }
 
     #[test]
     fn k8s_fields_roundtrip_and_default() {
