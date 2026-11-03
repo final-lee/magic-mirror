@@ -131,6 +131,26 @@ export const LOG_LEVELS = "레벨 거르기";
 export const LOG_LEVEL_NAMES = { error: "오류", warn: "경고", info: "정보", debug: "디버그", other: "기타" } as const;
 export const LOG_LEVEL_OTHER_TITLE = "레벨을 알 수 없는 줄";
 export const LOG_LEVEL_NONE = "고른 레벨의 줄이 없어요";
+export const LOG_ALL_CONTAINERS = "모든 컨테이너";
+export const LOG_SINCE = "기간";
+export const LOG_SINCE_CHOICES: { seconds: number | null; label: string }[] = [
+  { seconds: null, label: "전체" },
+  { seconds: 300, label: "최근 5분" },
+  { seconds: 900, label: "최근 15분" },
+  { seconds: 3_600, label: "최근 1시간" },
+  { seconds: 21_600, label: "최근 6시간" },
+  { seconds: 86_400, label: "최근 24시간" },
+];
+export const LOG_TIME = "시각";
+export const LOG_TIME_TITLE = "서버가 줄에 붙인 시각을 보여요";
+export const LOG_WRAP = "줄바꿈";
+export const LOG_SAVE = "저장";
+export const logSaved = (path: string) => `저장했어요: ${path}`;
+export const logSaveFailed = (why: string) => `저장하지 못했어요: ${why}`;
+export const LOG_REVEAL = "Finder에서 보기";
+export const LOG_SOURCES = "로그 출처";
+export const logSourceTitle = (full: string, ended: boolean) => (ended ? `${full} (끝났어요)` : full);
+export const logSourceError = (label: string, why: string) => `${label}: ${why}`;
 export const SEC_OWNERS = "소유자";
 export const SEC_CHILDREN = "소유한 리소스";
 export const SEC_CONTAINERS = "컨테이너";
@@ -138,6 +158,8 @@ export const SEC_CONDITIONS = "상태 조건";
 export const SEC_EVENTS = "이벤트";
 export const SEC_LABELS = "레이블";
 export const SEC_ANNOTATIONS = "어노테이션";
+export const annotationExpand = (chars: number) => `펼치기 (${chars.toLocaleString("ko-KR")}자)`;
+export const ANNOTATION_FOLD_LABEL = "접기";
 export const SEC_SECRET_KEYS = "Secret 키";
 export const BACK = "뒤로";
 export const CLOSE = "닫기";
@@ -230,3 +252,205 @@ export const SECTION_LABELS: Record<K8sOverviewSection, string> = {
   cluster: "클러스터", nodes: "노드", metrics: "사용량", nodegroups: "노드그룹", fargate: "Fargate 프로필",
   nodePools: "Karpenter NodePool", addons: "애드온", insights: "Upgrade Insights", removedApis: "제거되는 API",
 };
+
+// ── 셸·attach·port-forward(K9) ──
+export const TAB_SHELL = "셸";
+export const SHELL_LABEL = "터미널";
+export const SHELL_MODE_LABEL = "연결 방식";
+export const SHELL_MODE_EXEC = "셸 (새 프로세스)";
+export const SHELL_MODE_ATTACH = "attach (주 프로세스)";
+export const SHELL_OPEN = "열기";
+export const SHELL_CANCEL = "취소";
+export const SHELL_CONFIRM = "확인";
+export const SHELL_OPENING = "여는 중…";
+export const SHELL_CLOSE = "세션 닫기";
+export const SHELL_REOPEN = "다시 열기";
+export const SHELL_NO_CONTAINER = "열 수 있는 컨테이너가 없어요";
+export const SHELL_DISCONNECTED = "연결이 끊겼어요";
+export const ATTACH_WARNING = "입력과 Ctrl-C가 컨테이너의 주 프로세스로 가요. 잘못 누르면 서비스가 멈출 수 있어요";
+export const ATTACH_OUTPUT_ONLY = "이 컨테이너는 stdin과 tty가 켜져 있지 않아 출력만 볼 수 있어요";
+export const shellConfirmTitle = (pod: string, container: string) => `${pod}의 ${container} 컨테이너에 열까요?`;
+export const shellTypedHint = (pod: string) => `위험한 네임스페이스예요. 계속하려면 Pod 이름 ${pod}을 그대로 입력하세요`;
+export const SHELL_TYPED_LABEL = "Pod 이름 확인";
+export const shellExited = (code: number | null, reason: string | null) =>
+  code !== null ? `세션이 끝났어요 (종료 코드 ${code})` : reason ? `세션이 끝났어요: ${reason}` : `세션이 끝났어요. ${SHELL_DISCONNECTED}`;
+export const SHELL_PERMISSION_CHECKING = "권한을 확인하는 중이에요";
+export const noStreamPermission = (resource: string) => `이 네임스페이스에서 ${resource} 만들기 권한이 없어요`;
+
+export const NAV_FORWARDS = "포트포워딩";
+export const FORWARD_START = "포트포워딩";
+export const FORWARD_PORT = "대상 포트";
+export const FORWARD_CUSTOM = "직접 입력";
+export const FORWARD_LOCAL = "로컬 포트";
+export const FORWARD_LOCAL_AUTO = "자동";
+/** 포트포워딩 열기 버튼의 이름(화면 글은 FORWARD_OPEN_SHORT). 셸 탭의 [열기]와 구분된다 */
+export const FORWARD_OPEN = "포트포워딩 열기";
+export const FORWARD_OPEN_SHORT = "열기";
+export const FORWARD_BAD_PORT = "포트는 1~65535 숫자로 입력해 주세요";
+export const FORWARD_NO_PORTS = "컨테이너가 포트를 선언하지 않았어요. 직접 입력할 수 있어요";
+export const forwardPortLabel = (p: { port: number; name: string | null; container: string | null; target: string | null }) =>
+  `${p.port}${p.name ? ` (${p.name})` : ""}${p.container ? ` · ${p.container}` : ""}${p.target ? ` → ${p.target}` : ""}`;
+export const FORWARDS_EMPTY = "열린 포트포워딩이 없어요";
+export const H_FORWARD_TARGET = "대상";
+export const H_FORWARD_LOCAL = "로컬 주소";
+export const H_FORWARD_POD = "연결된 Pod";
+export const H_FORWARD_STATE = "상태";
+export const FORWARD_OPEN_BROWSER = "브라우저로 열기";
+export const FORWARD_COPY_URL = "주소 복사";
+export const FORWARD_CLOSE = "종료";
+export const FORWARDS_HERE = "이 객체의 포트포워딩";
+export const forwardPod = (pod: string) => `Pod ${pod}`;
+export const FORWARD_NO_POD = "준비된 Pod가 없어요";
+export const FORWARD_HEALTHY = "연결돼요";
+export const forwardTarget = (f: { kind: "pod" | "service"; namespace: string; name: string; remotePort: number }) =>
+  `${f.kind === "pod" ? "Pod" : "Service"} ${f.namespace}/${f.name}:${f.remotePort}`;
+export const CHANGE_LOG = "변경 기록";
+export const CHANGE_DONE = "변경을 적용했어요";
+export const CHANGE_PREVIEW = "변경 미리보기";
+export const CHANGE_UNDO_PREVIEW = "되돌리기 미리보기";
+export const CHANGE_LOADING = "미리보기를 불러오는 중이에요…";
+export const CHANGE_STALE = "미리보기 이후 바뀌었어요. 미리보기를 다시 받아 주세요.";
+export const CHANGE_RETRY = "미리보기 다시 받기";
+export const CHANGE_CANCEL = "취소";
+export const CHANGE_APPLY = "적용";
+export const CHANGE_APPLYING = "적용 중…";
+export const CHANGE_CALLS = "API 호출";
+export const CHANGE_BODY = "본문";
+export const CHANGE_DIFF = "필드 변경";
+export const CHANGE_IMPACT = "영향";
+export const CHANGE_WARNINGS = "경고";
+export const CHANGE_CONFIRM = "확인할 이름";
+export const CHANGE_SCALE = "크기 조절";
+export const CHANGE_REPLICAS = "복제본 수";
+export const CHANGE_RESTART = "롤아웃 재시작";
+export const CHANGE_ROLLOUT_UNDO = "롤아웃 되돌리기";
+export const CHANGE_REVISION = "리비전";
+export const CHANGE_DELETE = "삭제";
+export const CHANGE_RERUN = "재실행";
+export const CHANGE_RUN_NOW = "바로 실행";
+export const CHANGE_JOB_NAME = "새 Job 이름";
+export const CHANGE_SUSPEND = "일시정지";
+export const CHANGE_RESUME = "재개";
+export const CHANGE_CORDON = "스케줄 중지";
+export const CHANGE_UNCORDON = "스케줄 재개";
+export const CHANGE_DRAIN = "drain";
+export const CHANGE_UNDO = "되돌리기";
+export const CHANGE_SUCCESS = "성공";
+export const CHANGE_FAILED = "실패";
+export const CHANGE_NO_LOG = "변경 기록이 없어요";
+export const CHANGE_DENIED = (verb: string, resource: string) => `${resource}에 ${verb} 권한이 없어요`;
+export const CHANGE_PATH = "경로";
+export const CHANGE_BEFORE = "이전";
+export const CHANGE_AFTER = "이후";
+export const ROLLOUT_PROGRESS = (ready: number, desired: number) => `새 Pod ${ready}/${desired} 준비`;
+export const ROLLOUT_WAITING = "롤아웃 상태를 기다리는 중이에요";
+
+export const DRAIN_TITLE = (node: string) => `노드 drain: ${node}`;
+export const DRAIN_PLAN_EVICT = "옮길 Pod";
+export const DRAIN_PLAN_SKIPPED = "건너뛸 Pod";
+export const DRAIN_POD = "Pod";
+export const DRAIN_STATE = "상태";
+export const DRAIN_NOTE = "비고";
+export const DRAIN_FLAG_EMPTY_DIR = "emptyDir 데이터 손실";
+export const DRAIN_FLAG_UNMANAGED = "컨트롤러 없음";
+export const DRAIN_FLAG_BLOCKED = (budget: string) => `PDB ${budget}이(가) 막음`;
+export const DRAIN_SKIP_REASON = { daemonSet: "DaemonSet", mirror: "미러(static) Pod", terminating: "이미 종료 중" } as const;
+export const DRAIN_POD_STATE = {
+  pending: "대기",
+  evicting: "옮기는 중",
+  evicted: "옮김",
+  blocked: "막힘, 다시 시도 중",
+  terminating: "종료 중",
+  lingering: "종료 지연",
+  failed: "실패",
+} as const;
+export const DRAIN_PHASE_CORDON = "노드를 스케줄 중지하는 중…";
+export const DRAIN_PHASE_EVICT = "Pod를 하나씩 옮기는 중…";
+export const DRAIN_PHASE_STOPPING = "중단하는 중… 지금 하는 Eviction을 마치고 멈춰요";
+export const DRAIN_OUTCOME = {
+  completed: "drain을 마쳤어요",
+  stopped: "중단했어요. 이미 옮긴 Pod는 그대로예요",
+  timedOut: "PodDisruptionBudget이 5분 넘게 막아 멈췄어요. 이미 옮긴 Pod는 그대로예요",
+  failed: "옮기지 못한 Pod가 있어요",
+  lingering: "Eviction은 받아들여졌지만 종료가 늦은 Pod가 있어요",
+} as const;
+export const DRAIN_COUNTS = (c: {
+  total: number;
+  evicted: number;
+  blocked: number;
+  failed: number;
+  pending: number;
+  evicting: number;
+  terminating: number;
+  lingering: number;
+}) =>
+  `전체 ${c.total} · 옮김 ${c.evicted} · 옮기는 중 ${c.evicting} · 종료 중 ${c.terminating} · 종료 지연 ${c.lingering} · 대기 ${c.pending} · 막힘 ${c.blocked} · 실패 ${c.failed}`;
+export const DRAIN_STOP = "중단";
+export const DRAIN_CLOSE = "닫기";
+export const DRAIN_UNDO_HINT = "스케줄 중지는 변경 기록에서 되돌릴 수 있어요";
+export const DRAIN_NO_PODS = "옮길 Pod가 없어요";
+export const DRAIN_ERROR = "오류";
+// ── 노드 셸·세션 기록 ──
+export const CHANGE_NODE_SHELL = "노드 셸";
+export const CHANGE_NODE_SHELL_IMAGE = "이미지";
+export const SHELL_CLOSED_AT = (at: string) => `닫음 ${at}`;
+export const NODE_SHELL_BAR = (node: string) => `노드 ${node}`;
+export const NODE_SHELL_CLOSE_NOTE = "닫으면 디버그 Pod를 지워요";
+export const SHELL_CHECKING_NAME = "확인할 이름을 읽는 중이에요…";
+export const CHANGE_CONFLICTS = "필드 충돌";
+export const CHANGE_CONFLICT_FIELD = "필드";
+export const CHANGE_CONFLICT_MANAGER = "소유 manager";
+export const CHANGE_CONFLICT_BLOCK = "다른 manager와 충돌해서 적용할 수 없어요. 강제 적용으로 다시 미리보기 해 주세요";
+export const CHANGE_FORCE = "강제 적용으로 다시 미리보기";
+export const CHANGE_FORCE_NOTE = "강제 적용은 다른 manager가 가진 필드를 가져와요. 적용하려면 이름을 입력해야 해요";
+
+export const YAML_EDIT = "편집";
+export const YAML_EDITOR_LABEL = "YAML 편집기";
+export const YAML_PREVIEW = "미리보기";
+export const YAML_CANCEL_EDIT = "편집 취소";
+export const YAML_EDIT_NOTE = "서버가 채우는 필드(status, managedFields, uid, resourceVersion, creationTimestamp, generation)는 빼고 보여 줘요. 미리보기는 서버에서 먼저 적용해 보고(dry-run) 현재 객체와의 차이를 보여 줘요.";
+export const YAML_SYNTAX_ERROR = "YAML 문법 오류가 있어요";
+export const YAML_PROBLEMS = "YAML 문법 오류";
+export const yamlProblem = (line: number, column: number, message: string) => `${line}줄 ${column}칸: ${message}`;
+export const YAML_NOT_OBJECT = "객체가 아닌 문서예요";
+export const YAML_NO_KIND = "apiVersion과 kind가 필요해요";
+export const YAML_NO_NAME = "metadata.name이 필요해요";
+export const YAML_NO_NAMESPACE = "네임스페이스를 정해 주세요. metadata.namespace를 적거나 위에서 네임스페이스를 골라 주세요";
+export const yamlKindUnknown = (apiVersion: string, kind: string) => `이 클러스터에 없는 종류예요: ${apiVersion} ${kind}`;
+export const yamlNotNamespaced = (kind: string) => `${kind}는 네임스페이스가 없는 종류예요. metadata.namespace를 빼 주세요`;
+export const YAML_IDENTITY_CHANGED = "종류, 이름, 네임스페이스는 바꿀 수 없어요. 새 객체는 'YAML로 만들기'를 써 주세요";
+export const YAML_ONE_DOCUMENT = "편집에서는 문서를 하나만 쓸 수 있어요";
+
+export const SECRET_EDIT_NOTE = "값은 가려져 있어요. 키마다 '값 보기'로 읽어서 고치거나 '새 값 입력'으로 바꿀 수 있어요. 고치지 않은 키는 그대로 둬요. 값은 기록하지 않아서 Secret 변경은 되돌릴 수 없어요.";
+export const SECRET_NEW_VALUE = "새 값 입력";
+export const SECRET_VALUE_LABEL = (key: string) => `${key} 값`;
+export const SECRET_KEEP = "그대로 두기";
+export const SECRET_BINARY_NOTE = "바이너리 값은 여기서 고칠 수 없어요(새 값 입력으로는 바꿀 수 있어요)";
+export const SECRET_ADD_KEY = "키 추가";
+export const SECRET_NEW_KEY_NAME = "새 키 이름";
+export const SECRET_NEW_KEY_VALUE = "새 키의 값";
+export const SECRET_ADD = "추가";
+
+export const YAML_CREATE = "YAML로 만들기";
+export const YAML_CREATE_HINT = "YAML을 붙여 넣어 주세요. 문서 여러 개는 ---로 나눠요. 네임스페이스가 없는 문서는 위에서 고른 네임스페이스로 만들어요.";
+export const YAML_CREATE_EMPTY = "만들 문서가 없어요";
+export const yamlTooMany = (max: number) => `한 번에 ${max}개까지만 만들 수 있어요`;
+export const yamlDocumentError = (index: number, message: string) => `${index}번째 문서: ${message}`;
+
+export const BATCH_TITLE = "문서별 미리보기";
+export const BATCH_UNDO_TITLE = "되돌리기 미리보기(문서별)";
+export const batchItem = (index: number, kind: string, name: string) => `${index}. ${kind} ${name}`;
+export const BATCH_APPLIED = "적용함";
+export const BATCH_FAILED = "실패";
+export const BATCH_SKIPPED = "건너뜀";
+export const BATCH_LOADING = "미리보기 중…";
+export const BATCH_PREVIEW_FAILED = "미리보기에 실패했어요";
+export const BATCH_APPLY = (count: number) => `${count}개 적용`;
+export const BATCH_PARTIAL = (count: number) => `미리보기가 되지 않은 문서 앞의 ${count}개만 먼저 적용해요. 적용한 뒤 나머지를 다시 미리보기 해요`;
+export const BATCH_STOPPED = "적용하다 멈췄어요. 이미 적용한 문서는 그대로 남아 있어요";
+export const BATCH_UNDO_APPLIED = "적용한 것 되돌리기";
+export const BATCH_UNDO_UNAVAILABLE = "되돌릴 수 없는 문서가 있어요";
+export const BATCH_CLOSE = "닫기";
+export const BATCH_DONE = "모두 적용했어요";
+export const CHANGE_WHOLE_OBJECT = "객체 전체";
+export const YAML_DOCUMENT_ERRORS = "문서 오류";

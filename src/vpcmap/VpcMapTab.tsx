@@ -302,7 +302,7 @@ function Diagram({ topo, layout, selection, focusId, routeTargets, onSelect, onH
 
       {layout.band && (
         <g>
-          <rect x={layout.band.x} y={layout.band.y} width={layout.band.w} height={layout.band.h} rx={8} fill="#ffffff06" stroke={C.tileLine} strokeDasharray="4 4" strokeOpacity={0.6} />
+          <rect x={layout.band.x} y={layout.band.y} width={layout.band.w} height={layout.band.h} rx={8} fill="var(--hover)" stroke={C.tileLine} strokeDasharray="4 4" strokeOpacity={0.6} />
           <text x={layout.band.x + 14} y={layout.band.y + 19} fontSize={12} fontWeight={700} fill={C.dim}>
             외부 연결
           </text>
@@ -394,7 +394,7 @@ const Tile = memo(function Tile({ t, selected, focused, routeTarget, onSelect, o
   const badge = KIND_BADGE[r.kind];
   const select = () => onSelect({ kind: "resource", id: r.id });
   const label = r.name || r.id;
-  const stroke = routeTarget ? C.route : selected ? C.accent : focused ? "#ffffff" : C.tileLine;
+  const stroke = routeTarget ? C.route : selected ? C.accent : focused ? "var(--text)" : C.tileLine;
   return (
     <g
       className={`vm-tile${selected ? " selected" : ""}${focused ? " focused" : ""}${routeTarget ? " route-target" : ""}`}
@@ -416,7 +416,7 @@ const Tile = memo(function Tile({ t, selected, focused, routeTarget, onSelect, o
       {routeTarget && <rect x={t.x - 3} y={t.y - 3} width={t.w + 6} height={t.h + 6} rx={9} fill="none" stroke={C.route} strokeOpacity={0.35} strokeWidth={4} />}
       <rect x={t.x} y={t.y} width={t.w} height={t.h} rx={6} fill={C.tile} stroke={stroke} strokeWidth={routeTarget || selected || focused ? 2 : 1} />
       <rect x={t.x + 10} y={t.y + 8} width={t.w - 20} height={24} rx={5} fill={badge.color} />
-      <text x={t.x + t.w / 2} y={t.y + 24} fontSize={r.kind === "lambda" ? 15 : 10.5} fontWeight={700} textAnchor="middle" fill="#fff">
+      <text x={t.x + t.w / 2} y={t.y + 24} fontSize={r.kind === "lambda" ? 15 : 10.5} fontWeight={700} textAnchor="middle" fill="var(--badge-text)">
         {badge.label}
       </text>
       <circle cx={t.x + t.w - 8} cy={t.y + 8} r={3.5} fill={stateColor(r.state)} />
@@ -429,7 +429,7 @@ const Tile = memo(function Tile({ t, selected, focused, routeTarget, onSelect, o
 
 function Chip({ c, selected, routeTarget, onSelect }: { c: ChipLayout; selected: boolean; routeTarget: boolean; onSelect: (s: Selection) => void }) {
   const select = () => onSelect({ kind: "chip", id: c.id });
-  const color = CHIP_BADGE_COLOR[c.badge] ?? "#666";
+  const color = CHIP_BADGE_COLOR[c.badge] ?? "var(--badge-gray)";
   const bw = c.badge.length * 7 + 12;
   return (
     <g
@@ -450,7 +450,7 @@ function Chip({ c, selected, routeTarget, onSelect }: { c: ChipLayout; selected:
       {routeTarget && <rect x={c.x - 3} y={c.y - 3} width={c.w + 6} height={c.h + 6} rx={c.h / 2 + 3} fill="none" stroke={C.route} strokeOpacity={0.35} strokeWidth={4} />}
       <rect x={c.x} y={c.y} width={c.w} height={c.h} rx={c.h / 2} fill={C.tile} stroke={routeTarget ? C.route : selected ? C.accent : color} strokeWidth={routeTarget || selected ? 2 : 1.25} />
       <rect x={c.x + 5} y={c.y + 5} width={bw} height={c.h - 10} rx={(c.h - 10) / 2} fill={color} />
-      <text x={c.x + 5 + bw / 2} y={c.y + 19} fontSize={9.5} fontWeight={700} textAnchor="middle" fill="#fff">
+      <text x={c.x + 5 + bw / 2} y={c.y + 19} fontSize={9.5} fontWeight={700} textAnchor="middle" fill="var(--badge-text)">
         {c.badge}
       </text>
       <text x={c.x + 5 + bw + 6} y={c.y + 19} fontSize={11} fill={C.text}>

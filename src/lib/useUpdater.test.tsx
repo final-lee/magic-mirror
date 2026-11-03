@@ -67,3 +67,16 @@ test("re-checks every 6 hours", async () => {
   });
   expect(check).toHaveBeenCalledTimes(2);
 });
+
+test("a dev build never asks for updates, neither on start, on the timer nor on a manual check", async () => {
+  vi.useFakeTimers();
+  vi.mocked(check).mockResolvedValue(fakeUpdate("9.9.9") as never);
+  const { result } = renderHook(() => useUpdater({ devBuild: true }));
+  await act(async () => {
+    vi.advanceTimersByTime(CHECK_INTERVAL_MS);
+  });
+  await act(() => result.current.checkNow());
+  expect(check).not.toHaveBeenCalled();
+  expect(result.current.state.kind).toBe("devBuild");
+  expect(result.current.showBanner).toBe(false);
+});

@@ -110,7 +110,7 @@ export function ArgocdTab({ active }: { active: boolean }) {
     body = (
       <div className="error-banner">
         <p className="err">{errorMessage(session.error)}</p>
-        <button className="btn" onClick={() => void session.refetch()}>
+        <button className="btn tone-secondary" onClick={() => void session.refetch()}>
           {RETRY}
         </button>
       </div>
@@ -147,15 +147,15 @@ export function ArgocdTab({ active }: { active: boolean }) {
           {session.data && !needsToken && <span className="argo-session mono">{sessionLine(session.data.username, session.data.version)}</span>}
           {session.data && !needsToken && (
             <>
-              <button className="btn small" onClick={() => setForced({ url, message: null })}>
+              <button className="btn small tone-warn" onClick={() => setForced({ url, message: null })}>
                 {TOKEN_CHANGE}
               </button>
-              <button className="btn small" disabled={busy} onClick={() => void forget()}>
+              <button className="btn small tone-danger" disabled={busy} onClick={() => void forget()}>
                 {TOKEN_FORGET}
               </button>
             </>
           )}
-          <button className="btn small k8s-push" aria-expanded={editing} onClick={() => setEditing(!editing)}>
+          <button className="btn small k8s-push tone-secondary" aria-expanded={editing} onClick={() => setEditing(!editing)}>
             {SERVER_EDIT}
           </button>
         </div>

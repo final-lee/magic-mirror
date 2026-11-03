@@ -59,6 +59,8 @@ vi.mock("./pg/api", () => ({
     close: vi.fn(async () => null),
   },
 }));
+// 터미널(xterm)은 k8s/PodTerminal.test에서 본다
+vi.mock("./k8s/PodTerminal", () => ({ PodTerminal: () => null }));
 vi.mock("./k8s/api", () => ({
   k8sApi: { context: vi.fn(), open: vi.fn(), close: vi.fn(async () => null), rules: vi.fn(), watch: vi.fn(), unwatch: vi.fn() },
 }));
@@ -126,6 +128,17 @@ test("service settings toggles sidebar services", async () => {
   // 서비스 이름과 배지 약어가 모두 "S3"라 getAllByText를 쓴다
   expect(screen.getAllByText("S3").length).toBeGreaterThan(0);
   expect(m.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ enabledServices: ["ec2", "iam", "s3"] }));
+});
+
+test("loads and saves the selected theme", async () => {
+  m.getSettings.mockResolvedValue({ enabledServices: ["ec2"], favorites: [], lastProfile: "prod", lastRegion: null, theme: "dark" });
+  renderWithClient(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "서비스 설정" }));
+  expect(screen.getByLabelText("어둡게")).toBeChecked();
+  expect(document.documentElement.dataset.theme).toBe("dark");
+  fireEvent.click(screen.getByLabelText("밝게"));
+  expect(m.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ theme: "light" }));
+  await waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
 });
 
 test("cmd+F focuses the filter", async () => {
@@ -506,7 +519,7 @@ describe("💰 비용 탭", () => {
   const openCost = async () => {
     renderWithClient(<App />);
     await waitFor(() => expect(screen.getByRole("combobox", { name: "프로필" })).toHaveValue("prod"));
-    fireEvent.click(await screen.findByText(COST_TITLE));
+    fireEvent.click(await screen.findByRole("button", { name: COST_TITLE }));
     await screen.findByRole("table", { name: BREAKDOWN_LABEL });
   };
 
@@ -515,7 +528,7 @@ describe("💰 비용 탭", () => {
     expect(screen.getByRole("tab", { name: COST_TITLE })).toHaveAttribute("aria-selected", "true");
     expect(cost.overview).toHaveBeenCalledWith("prod", expect.objectContaining({ period: "thisMonth" }), false);
     fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
-    fireEvent.click(screen.getByText(COST_TITLE, { selector: ".side span" }));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "서비스" })).getByRole("button", { name: COST_TITLE }));
     expect(screen.getAllByRole("tab", { name: COST_TITLE })).toHaveLength(1);
   });
 

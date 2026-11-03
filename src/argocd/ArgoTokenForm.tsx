@@ -44,11 +44,11 @@ export function ArgoTokenForm({ server, message, busy, onSubmit, onCancel }: Pro
         <input type="password" autoComplete="off" spellCheck={false} value={token} onChange={(e) => setToken(e.target.value)} />
       </label>
       <div className="argo-token-acts">
-        <button className="btn primary" type="submit" disabled={busy || token.trim() === ""}>
+        <button className="btn plain tone-primary" type="submit" disabled={busy || token.trim() === ""}>
           {TOKEN_SUBMIT}
         </button>
         {onCancel && (
-          <button className="btn plain" type="button" onClick={onCancel}>
+          <button className="btn plain tone-ghost" type="button" onClick={onCancel}>
             {TOKEN_CANCEL}
           </button>
         )}

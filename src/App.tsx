@@ -39,6 +39,7 @@ import { UpdateBanner } from "./components/UpdateBanner";
 import { useUpdater } from "./lib/useUpdater";
 import { SsoBanner } from "./components/SsoBanner";
 import { SsoLoginContext, useSsoLogin } from "./lib/useSsoLogin";
+import { useTheme } from "./lib/theme";
 
 const sameFav = (a: Favorite, b: Favorite) => a.service === b.service && a.type === b.type;
 
@@ -47,6 +48,7 @@ export default function App() {
   const services = useServices();
   const profiles = useProfiles();
   const { settings, update, ...settingsQuery } = useSettings();
+  useTheme(settings?.theme, !!settings);
   const [profile, setProfile] = useState<string | null>(null);
   const [region, setRegion] = useState("us-east-1");
   const [selection, setSelection] = useState<Favorite | null>(null);
@@ -82,7 +84,8 @@ export default function App() {
     [qc],
   );
   const transfers = useTransfers(profile, onTransferSettled);
-  const updater = useUpdater();
+  // vite 개발 서버로 뜬 개발 빌드(npm run tauri:dev)는 릴리스 업데이트를 확인하지 않는다
+  const updater = useUpdater({ devBuild: import.meta.env.DEV });
   const sso = useSsoLogin(profiles.data, profile);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   useEffect(() => {
@@ -358,7 +361,7 @@ export default function App() {
           </div>
         )}
         {argocdTab && (
-          <div className="tabpane" hidden={activeTab !== "argocd"}>
+          <div className="tabpane argo-pane" hidden={activeTab !== "argocd"}>
             <ArgocdTab active={activeTab === "argocd"} />
           </div>
         )}
@@ -391,7 +394,7 @@ export default function App() {
           </div>
         ))}
         {k8sTabs.map((t) => (
-          <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
+          <div key={t.id} className="tabpane k8s-pane" hidden={activeTab !== t.id}>
             <K8sTab target={t.target} active={activeTab === t.id} onOpenIam={openIam} />
           </div>
         ))}
@@ -412,6 +415,8 @@ export default function App() {
             enabled={settings.enabledServices}
             onChange={(ids) => update({ enabledServices: ids })}
             onClose={() => setShowSettings(false)}
+            theme={settings.theme}
+            onThemeChange={(theme) => update({ theme })}
             diffTool={diffTool}
             diffToolCommand={settings.diffToolCommand ?? null}
             onDiffToolChange={(tool, command) => update({ diffTool: tool, diffToolCommand: command })}

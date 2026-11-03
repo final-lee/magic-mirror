@@ -34,14 +34,15 @@ function setup(containers = [c("init-db", true), c("app"), c("sidecar")]) {
   return render(withClientAndSso(<PodLogs target={T} ssoProfile="p" live namespace="prod" pod="web-1" containers={containers} />, newQueryClient(), ssoLoginStub()));
 }
 const send = (i: number, msg: K8sLogMessage) => act(() => emit[i](msg));
+const chunk = (lines: string[], pod = "web-1", container = "app", ts: string | null = null): K8sLogMessage => ({ type: "lines", pod, container, lines: lines.map((text) => ({ ts, text })) });
 const logText = () => (screen.getByLabelText("web-1") as HTMLElement).textContent;
 const lastOptions = (): K8sLogOptions => m.logs.mock.lastCall![3];
 
 test("opens the first app container, following the last 500 lines, and shows the lines", async () => {
   setup();
-  await vi.waitFor(() => expect(m.logs).toHaveBeenCalledWith(T, "prod", "web-1", { container: "app", follow: true, tailLines: 500, previous: false }, "p", expect.any(Function)));
-  send(0, { type: "lines", lines: ["one", "two"] });
-  send(0, { type: "lines", lines: ["three"] });
+  await vi.waitFor(() => expect(m.logs).toHaveBeenCalledWith(T, "prod", "web-1", { container: "app", follow: true, tailLines: 500, previous: false, sinceSeconds: null }, "p", expect.any(Function)));
+  send(0, chunk(["one", "two"]));
+  send(0, chunk(["three"]));
   expect(logText()).toBe("one\ntwo\nthree\n");
   send(0, { type: "end" });
   expect(screen.getByText(LOG_ENDED)).toBeInTheDocument();
@@ -57,14 +58,14 @@ test("an empty finished log says so", async () => {
 test("changing the container or previous reopens; the old stream is stopped and its late lines are ignored", async () => {
   setup();
   await vi.waitFor(() => expect(emit).toHaveLength(1));
-  send(0, { type: "lines", lines: ["from app"] });
+  send(0, chunk(["from app"]));
   fireEvent.change(screen.getByLabelText(LOG_CONTAINER), { target: { value: "sidecar" } });
   await vi.waitFor(() => expect(emit).toHaveLength(2));
   expect(m.unwatch).toHaveBeenCalledWith(1);
   expect(lastOptions()).toMatchObject({ container: "sidecar", previous: false });
   expect(logText()).toBe("");
-  send(0, { type: "lines", lines: ["late"] });
-  send(1, { type: "lines", lines: ["from sidecar"] });
+  send(0, chunk(["late"]));
+  send(1, chunk(["from sidecar"]));
   expect(logText()).toBe("from sidecar\n");
   fireEvent.click(screen.getByLabelText(LOG_PREVIOUS));
   await vi.waitFor(() => expect(emit).toHaveLength(3));
@@ -92,7 +93,7 @@ test("leaving stops the stream, also when its id arrives after leaving", async (
 test("search marks the matches and counts the matching lines", async () => {
   setup();
   await vi.waitFor(() => expect(emit).toHaveLength(1));
-  send(0, { type: "lines", lines: ["GET /a 200", "POST /b 500", "get /c 200"] });
+  send(0, chunk(["GET /a 200", "POST /b 500", "get /c 200"]));
   fireEvent.change(screen.getByLabelText(LOG_SEARCH), { target: { value: "get" } });
   expect(screen.getByText(logMatches(2))).toBeInTheDocument();
   expect(Array.from(document.querySelectorAll(".k8s-log mark")).map((e) => e.textContent)).toEqual(["GET", "get"]);
@@ -109,18 +110,18 @@ test("the match count follows new lines while following", async () => {
   setup();
   await vi.waitFor(() => expect(emit).toHaveLength(1));
   fireEvent.change(screen.getByLabelText(LOG_SEARCH), { target: { value: "err" } });
-  send(0, { type: "lines", lines: Array.from({ length: 1500 }, (_, i) => (i % 500 === 0 ? `ERR ${i}` : `ok ${i}`)) });
+  send(0, chunk(Array.from({ length: 1500 }, (_, i) => (i % 500 === 0 ? `ERR ${i}` : `ok ${i}`))));
   expect(screen.getByText(logMatches(3))).toBeInTheDocument();
-  send(0, { type: "lines", lines: ["err again"] });
+  send(0, chunk(["err again"]));
   expect(screen.getByText(logMatches(4))).toBeInTheDocument();
 });
 
 test("pause holds the view and counts what is waiting; resume shows it", async () => {
   setup();
   await vi.waitFor(() => expect(emit).toHaveLength(1));
-  send(0, { type: "lines", lines: ["a"] });
+  send(0, chunk(["a"]));
   fireEvent.click(screen.getByRole("button", { name: LOG_PAUSE }));
-  send(0, { type: "lines", lines: ["b", "c"] });
+  send(0, chunk(["b", "c"]));
   expect(logText()).toBe("a\n");
   expect(screen.getByText(logPending(2))).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: LOG_RESUME }));
@@ -131,14 +132,14 @@ test("an expired SSO session in the stream is reported for the exec profile", as
   const report = vi.spyOn(invokeModule, "reportSsoExpired");
   setup();
   await vi.waitFor(() => expect(emit).toHaveLength(1));
-  send(0, { type: "error", error: { kind: "ssoExpired", profile: "p" } as never });
+  send(0, { type: "error", error: { kind: "ssoExpired", profile: "p" } as never, pod: null, container: null });
   expect(report).toHaveBeenCalledWith("p", expect.any(Number));
 });
 
 test("a broken stream shows the error and retry reopens it", async () => {
   setup();
   await vi.waitFor(() => expect(emit).toHaveLength(1));
-  send(0, { type: "error", error: { kind: "other", message: "끊겼어요" } });
+  send(0, { type: "error", error: { kind: "other", message: "끊겼어요" }, pod: null, container: null });
   expect(screen.getByText("끊겼어요")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
   await vi.waitFor(() => expect(emit).toHaveLength(2));
@@ -154,7 +155,7 @@ describe("JSON view", () => {
     setup();
     await vi.waitFor(() => expect(emit).toHaveLength(1));
     expect(screen.getByRole("button", { name: LOG_VIEW_PRETTY })).toHaveAttribute("aria-pressed", "true");
-    send(0, { type: "lines", lines: [ok, "plain text", failed] });
+    send(0, chunk([ok, "plain text", failed]));
     const [first, second] = rows();
     expect(first).toHaveClass("lj-info");
     expect(within(first).getByText("GET /health/readiness 200")).toBeInTheDocument();
@@ -176,7 +177,7 @@ describe("JSON view", () => {
   test("search finds a folded field: the line counts and the field shows beside the message, marked", async () => {
     setup();
     await vi.waitFor(() => expect(emit).toHaveLength(1));
-    send(0, { type: "lines", lines: [ok, failed] });
+    send(0, chunk([ok, failed]));
     fireEvent.change(screen.getByLabelText(LOG_SEARCH), { target: { value: "r-9" } });
     expect(screen.getByText(logMatches(1))).toBeInTheDocument();
     expect(rows()[1].textContent).toContain("request.id=r-9");
@@ -188,7 +189,7 @@ describe("JSON view", () => {
     setup();
     await vi.waitFor(() => expect(emit).toHaveLength(1));
     const debug = JSON.stringify({ level: "debug", msg: "cache hit" });
-    send(0, { type: "lines", lines: [ok, failed, debug, "[WARNING] plugin/health: slow", "GET /plain 200"] });
+    send(0, chunk([ok, failed, debug, "[WARNING] plugin/health: slow", "GET /plain 200"]));
     const chip = (name: RegExp) => screen.getByRole("button", { name });
     expect(chip(/^경고 2$/)).toHaveAttribute("aria-pressed", "false");
     expect(chip(/^기타 1$/)).toBeInTheDocument();
@@ -210,7 +211,7 @@ describe("JSON view", () => {
   test("a filter that hides every line says so", async () => {
     setup();
     await vi.waitFor(() => expect(emit).toHaveLength(1));
-    send(0, { type: "lines", lines: [ok] });
+    send(0, chunk([ok]));
     fireEvent.click(screen.getByRole("button", { name: /^오류/ }));
     expect(screen.getByText(LOG_LEVEL_NONE)).toBeInTheDocument();
     expect(logText()).toBe("");

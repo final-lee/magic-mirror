@@ -45,7 +45,7 @@ pub fn run() {
             });
             app.manage(explorer_commands::ExplorerState::default());
             app.manage(iam_commands::IamState::new(dir.join("iam-changes.jsonl")));
-            app.manage(k8s_commands::K8sState::default());
+            app.manage(k8s_commands::K8sState::new(dir.join("k8s-changes.jsonl")));
             app.manage(argocd::ArgocdState::default());
             app.manage(pg_commands::PgState::new(dir.join("db-changes.jsonl")));
             app.manage(cost_commands::CostState::new(dir.join("cost-cache.json")));
@@ -136,6 +136,24 @@ pub fn run() {
             k8s_commands::k8s_overview,
             k8s_commands::k8s_secret_value,
             k8s_commands::k8s_logs,
+            k8s_commands::k8s_workload_logs,
+            k8s_commands::k8s_logs_save,
+            k8s_commands::k8s_shell_open,
+            k8s_commands::k8s_shell_confirm_name,
+            k8s_commands::k8s_node_shell_open,
+            k8s_commands::k8s_attach_open,
+            k8s_commands::k8s_shell_input,
+            k8s_commands::k8s_shell_resize,
+            k8s_commands::k8s_shell_close,
+            k8s_commands::k8s_forward_open,
+            k8s_commands::k8s_forward_list,
+            k8s_commands::k8s_forward_close,
+            k8s_commands::k8s_revisions,
+            k8s_commands::k8s_preview,
+            k8s_commands::k8s_apply,
+            k8s_commands::k8s_drain,
+            k8s_commands::k8s_change_log,
+            k8s_commands::k8s_undo,
             argocd_commands::argocd_set_token,
             argocd_commands::argocd_forget_token,
             argocd_commands::argocd_session,
@@ -146,6 +164,12 @@ pub fn run() {
             argocd_commands::argocd_refresh,
             argocd_commands::argocd_sync,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // 앱을 끄면 열린 셸과 port-forward를 닫는다
+            if let tauri::RunEvent::Exit = event {
+                tauri::async_runtime::block_on(app.state::<k8s_commands::K8sState>().close_streams());
+            }
+        });
 }

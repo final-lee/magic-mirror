@@ -4,6 +4,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { api } from "../api/client";
 import { onSsoExpired } from "../api/invoke";
 import type { Settings } from "../api/types";
+import { typeYaml } from "../test/codemirror";
 import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
 import { K8sTab } from "./K8sTab";
@@ -33,14 +34,21 @@ import {
   STATE_CONNECTED,
   STATE_CONNECTING,
   WILDCARD,
+  BATCH_APPLY,
+  BATCH_DONE,
+  CHANGE_DONE,
+  YAML_CREATE,
+  YAML_PREVIEW,
   profileMismatch,
   savedMissing,
 } from "./text";
 import { DEPLOYMENTS, EVENTS, NODES, PODS } from "./kinds";
 import type { K8sContextCandidate, K8sContextInfo, K8sRow, K8sRules, K8sSession, K8sTarget, K8sWatchMessage } from "./types";
 
+// 터미널(xterm)은 PodTerminal.test에서 본다
+vi.mock("./PodTerminal", () => ({ PodTerminal: () => null }));
 vi.mock("./api", () => ({
-  k8sApi: { context: vi.fn(), open: vi.fn(), close: vi.fn(), rules: vi.fn(), watch: vi.fn(), unwatch: vi.fn(), kinds: vi.fn(), get: vi.fn(), secretValue: vi.fn(), overview: vi.fn() },
+  k8sApi: { context: vi.fn(), open: vi.fn(), close: vi.fn(), rules: vi.fn(), watch: vi.fn(), unwatch: vi.fn(), kinds: vi.fn(), get: vi.fn(), secretValue: vi.fn(), overview: vi.fn(), preview: vi.fn(), apply: vi.fn() },
 }));
 vi.mock("../api/client", () => ({ api: { getSettings: vi.fn(), saveSettings: vi.fn(), ssoLogin: vi.fn() } }));
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText: vi.fn(async () => {}) }));
@@ -366,7 +374,7 @@ test("a node name in the overview opens its detail in workloads", async () => {
     name: "ip-1", ready: true, unschedulable: false, pressures: [], instanceType: null, zone: null, groupKind: "self", group: null, kubeletVersion: "v1.31.0",
     allocatable: { cpuMilli: 1000, memoryBytes: 1, pods: 1 }, requested: { cpuMilli: 0, memoryBytes: 0, pods: 0 }, usage: null,
   }] });
-  m.get.mockResolvedValue({ kind: NODES, row: ns("ip-1"), annotations: {}, owners: [], children: [], childrenTruncated: false, childrenError: null, containers: [], conditions: [], events: [], eventsError: null, yaml: "", secretKeys: null });
+  m.get.mockResolvedValue({ kind: NODES, row: ns("ip-1"), annotations: {}, owners: [], children: [], childrenTruncated: false, childrenError: null, containers: [], conditions: [], events: [], eventsError: null, yaml: "", editYaml: "", secretKeys: null });
   setup();
   fireEvent.click(await screen.findByRole("button", { name: "ip-1" }));
   await waitFor(() => expect(m.get).toHaveBeenCalledWith(target, NODES, null, "ip-1", target.profile));
@@ -453,4 +461,21 @@ test("dragging the handle beside the menu resizes it and saves the width when re
   fireEvent.mouseUp(window, { clientX: 250 });
   expect(api.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ k8sLaneWidths: { nav: 250 } }));
   expect(nav.style.width).toBe("250px");
+});
+
+test("create from YAML: the selected namespace fills in, and the document is previewed then applied", async () => {
+  m.context.mockResolvedValue(info([cand("ctx", { namespace: "team" })]));
+  m.preview.mockResolvedValue({ calls: [], diff: [], impact: ["ConfigMap c: 새 객체를 만듭니다"], warnings: [], confirmName: null, reversible: true, conflicts: [] });
+  m.apply.mockResolvedValue({ logId: "log-1" });
+  setup();
+  await screen.findByText(STATE_CONNECTED);
+  fireEvent.click(screen.getByRole("button", { name: YAML_CREATE }));
+  typeYaml("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\n");
+  fireEvent.click(screen.getByRole("button", { name: YAML_PREVIEW }));
+  await screen.findByText("ConfigMap c: 새 객체를 만듭니다");
+  expect(m.preview).toHaveBeenCalledWith(target, expect.objectContaining({ type: "apply", name: "c", namespace: "team", force: false }), target.profile);
+  fireEvent.click(screen.getByRole("button", { name: BATCH_APPLY(1) }));
+  await screen.findByText(BATCH_DONE);
+  expect(m.apply).toHaveBeenCalledWith(target, expect.objectContaining({ name: "c", namespace: "team" }), null, null, target.profile);
+  expect(await screen.findByText(CHANGE_DONE)).toBeInTheDocument();
 });
