@@ -4,7 +4,7 @@ import { k8sApi } from "./api";
 import { CONFIGMAPS, CRONJOBS, DAEMONSETS, DEPLOYMENTS, JOBS, NODES, PODS, PVCS, REPLICASETS, SECRETS, SERVICES, SERVICE_ACCOUNTS, STATEFULSETS } from "./kinds";
 import { ObjectDetail } from "./ObjectDetail";
 import {
-  ANNOTATION_FOLD_LABEL, BACK, CHILDREN_TRUNCATED, CLOSE, LOG_ALL_CONTAINERS, LOG_CONTAINER, NO_RECENT_EVENTS, NO_SECRET_PERMISSION, OPEN_IN_IAM, SEC_CHILDREN, SEC_OWNERS, SHOW_VALUE,
+  ANNOTATION_FOLD_LABEL, BACK, CHILDREN_TRUNCATED, CLOSE, LOG_ALL_CONTAINERS, LOG_CONTAINER, NO_RECENT_EVENTS, NO_SECRET_PERMISSION, OPEN_IN_IAM, SEC_CHILDREN, SEC_OWNERS, SEC_USAGE, SHOW_VALUE,
   CHANGE_NODE_SHELL, CHANGE_NODE_SHELL_IMAGE, FORWARD_OPEN, FORWARD_PORT, SHELL_OPEN, TAB_LOGS, TAB_SHELL, TAB_YAML, YAML_SECRET_NOTE, H_CPU_USAGE, H_MEMORY_USAGE, USAGE_LIMIT, USAGE_REQUEST, forwardPortLabel, noStreamPermission, openNode,
 } from "./text";
 import type { K8sContainer, K8sKind, K8sObjectView, K8sRow } from "./types";
@@ -105,6 +105,29 @@ test("summary: values, owners, children, containers, conditions, events", async 
   expect(screen.getByText("OOMKilled (137)")).toBeInTheDocument();
   expect(screen.getByText("ContainersNotReady")).toBeInTheDocument();
   expect(screen.getByText("Back-off restarting")).toBeInTheDocument();
+});
+
+test("a pod shows usage graphs in the summary right below the basics, not in a tab", async () => {
+  const rs = { group: "apps", version: "v1", kind: "ReplicaSet", name: "web-5d", namespace: "prod", uid: "rs1", controller: true, problems: [] };
+  m.get.mockResolvedValue(view({ owners: [rs] }));
+  setup();
+  const usage = await screen.findByRole("region", { name: SEC_USAGE });
+  const owners = screen.getByRole("region", { name: SEC_OWNERS });
+  expect(usage.compareDocumentPosition(owners) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.queryByRole("tab", { name: SEC_USAGE })).not.toBeInTheDocument();
+});
+
+test("a deployment summary has the usage graphs and a service summary does not", async () => {
+  m.get.mockResolvedValue(view({ kind: DEPLOYMENTS }));
+  setup({ objectRef: { kind: DEPLOYMENTS, namespace: "prod", name: "web" } });
+  expect(await screen.findByRole("region", { name: SEC_USAGE })).toBeInTheDocument();
+});
+
+test("a service summary has no usage graphs", async () => {
+  m.get.mockResolvedValue(view({ kind: SERVICES }));
+  setup({ objectRef: { kind: SERVICES, namespace: "prod", name: "web" } });
+  expect(await screen.findByText(NO_RECENT_EVENTS)).toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: SEC_USAGE })).not.toBeInTheDocument();
 });
 
 test("pod node link and back/close", async () => {

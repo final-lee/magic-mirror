@@ -466,8 +466,8 @@ export const BATCH_DONE = "모두 적용했어요";
 export const CHANGE_WHOLE_OBJECT = "객체 전체";
 export const YAML_DOCUMENT_ERRORS = "문서 오류";
 
-export const TAB_USAGE = "사용량";
-export const USAGE_GRAPH_NOTE = "연결돼 있는 동안 고른 네임스페이스의 사용량을 metrics-server에서 15초마다 모아 최근 1시간을 보여 줘요. 탭을 닫거나 앱을 끄면 지워져요.";
+export const SEC_USAGE = "사용량";
+export const USAGE_GRAPH_NOTE = "최근 1시간 · 연결된 동안 고른 네임스페이스를 metrics-server에서 15초마다 모은 값이에요. 탭을 닫거나 앱을 끄면 지워져요.";
 export const USAGE_GRAPH_WAITING = "아직 모은 사용량이 없어요. 15초쯤 뒤에 나타나요.";
 export const USAGE_GRAPH_EMPTY = "이 객체의 사용량을 아직 모으지 못했어요";
 
