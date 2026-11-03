@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { api } from "../api/client";
 import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
 import { ClusterDetailSummary } from "./ClusterDetailSummary";
-import { CLUSTER_DETAIL_NO_CONTEXT, OPEN_EKS_TAB, SEC_WARNINGS } from "./text";
+import { CLUSTER_DETAIL_NO_CONTEXT, SEC_WARNINGS } from "./text";
 import type { K8sContextCandidate, K8sContextInfo, K8sNodeView } from "./types";
 
 vi.mock("./api", () => ({
@@ -26,10 +26,9 @@ const node: K8sNodeView = {
 
 function setup() {
   vi.mocked(api.getSettings).mockResolvedValue({ enabledServices: [], favorites: [], lastProfile: "app", lastRegion: null });
-  const onOpen = vi.fn();
   const target = { profile: "app", region: "ap-northeast-2", cluster: `prod${n++}` };
-  render(withClientAndSso(<ClusterDetailSummary target={target} onOpen={onOpen} />, newQueryClient(), ssoLoginStub()));
-  return { onOpen, target };
+  render(withClientAndSso(<ClusterDetailSummary target={target} />, newQueryClient(), ssoLoginStub()));
+  return { target };
 }
 
 beforeEach(() => {
@@ -44,22 +43,20 @@ beforeEach(() => {
   });
 });
 
-test("a selected cluster shows the overview's usage rings and warnings, and opens the EKS tab", async () => {
+test("a selected cluster shows the overview's usage rings and warnings, with no buttons in the body", async () => {
   m.context.mockResolvedValue(info([cand("ctx")]));
-  const { onOpen, target } = setup();
+  const { target } = setup();
   const cpu = await screen.findByRole("region", { name: "CPU" });
   expect(await within(cpu).findByRole("img", { name: "CPU 사용량 50%" })).toBeInTheDocument();
   expect(m.overview).toHaveBeenCalledWith(target);
   expect(screen.getByText(SEC_WARNINGS)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: OPEN_EKS_TAB }));
-  expect(onOpen).toHaveBeenCalled();
+  // 단추는 상세의 오른쪽 위 도구 모음이 갖는다
+  expect(screen.queryByRole("button")).toBeNull();
 });
 
 test("without a chosen context it points to the EKS tab and does not connect", async () => {
   m.context.mockResolvedValue(info([cand("a"), cand("b")]));
-  const { onOpen } = setup();
+  setup();
   expect(await screen.findByText(CLUSTER_DETAIL_NO_CONTEXT)).toBeInTheDocument();
   expect(m.open).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: OPEN_EKS_TAB }));
-  expect(onOpen).toHaveBeenCalled();
 });
