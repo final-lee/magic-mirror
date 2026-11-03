@@ -25,7 +25,7 @@ import { ALL, TopBar, type K8sConnection } from "./TopBar";
 import { WorkloadsView, type WorkloadsFocus } from "./WorkloadsView";
 import { YamlCreate } from "./YamlCreate";
 import { BOOKMARK_MISSING, savedMissing, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNECTING, updateCommand } from "./text";
-import { refreshK8s, useK8sContext, useK8sKinds, useK8sRules, useK8sSession } from "./queries";
+import { refreshK8s, useK8sContext, useK8sKinds, useK8sRules, useK8sSession, useUsageSampler } from "./queries";
 import type { K8sChange, K8sKindRef, K8sTarget } from "./types";
 import { useK8sWatch } from "./useK8sWatch";
 
@@ -35,6 +35,14 @@ interface Props {
   active: boolean;
   /** 서비스 어카운트의 IAM 역할 ARN을 IAM 작업 공간에서 연다 */
   onOpenIam?: (arn: string) => void;
+}
+
+/** 사용량 그래프의 기록을 모은다. 읽을 때마다 다시 그려지는 것이 이 빈 컴포넌트뿐이도록 탭과 떼어 둔다. */
+function UsageSampler({ target, context, namespace, ssoProfile, live }: {
+  target: K8sTarget; context: string; namespace: string | null; ssoProfile: string; live: boolean;
+}) {
+  useUsageSampler(target, context, namespace, ssoProfile, live);
+  return null;
 }
 
 export function K8sTab({ target, active, onOpenIam }: Props) {
@@ -145,6 +153,8 @@ export function K8sTab({ target, active, onOpenIam }: Props) {
   const connection: K8sConnection = session.isError ? "failed" : session.isSuccess && !session.isFetching ? "connected" : "connecting";
   return (
     <div className="pg">
+      {/* 연결돼 있는 동안 고른 네임스페이스(전체면 모두)의 사용량을 계속 모은다 */}
+      <UsageSampler target={target} context={chosen} namespace={nsOrAll} ssoProfile={ssoProfile} live={live} />
       <TopBar
         context={chosen}
         identity={session.data?.identity ?? null}

@@ -1,76 +1,83 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { invoke } from "../api/invoke";
-import { newQueryClient, withClientAndSso, ssoLoginStub } from "../test/utils";
+import { act, render, screen } from "@testing-library/react";
 import { UsageGraphs } from "./UsageGraphs";
-import { PROM_EMPTY, PROM_MANUAL, PROM_NAME, PROM_NAMESPACE, PROM_NONE, PROM_PORT, PROM_SELECT, PROM_SERVER } from "./text";
-import type { K8sObjectView, ObjectRef } from "./types";
+import { METRICS_UNAVAILABLE, USAGE_GRAPH_EMPTY, USAGE_GRAPH_WAITING } from "./text";
+import type { K8sMetrics, K8sObjectView, K8sPodUsage, ObjectRef } from "./types";
+import { historyKey, recordUsage, resetUsageHistory } from "./usageHistory";
 
-const update = vi.hoisted(() => vi.fn());
-vi.mock("../api/invoke", () => ({ invoke: vi.fn(), onSsoExpired: vi.fn(() => () => {}) }));
-vi.mock("../api/queries", () => ({ useSettings: () => ({ settings: {}, update }) }));
 const target = { profile: "p", region: "r", cluster: "c" };
+const key = historyKey(target, "ctx");
 const objectRef: ObjectRef = { kind: { group: "", version: "v1", kind: "Pod", plural: "pods", namespaced: true }, namespace: "app", name: "web" };
+const deployment: ObjectRef = { ...objectRef, kind: { group: "apps", version: "v1", kind: "Deployment", plural: "deployments", namespaced: true } };
 const view = { containers: [{ name: "web", init: false, state: "running", cpuRequest: 500, memoryLimit: 1073741824 }] } as K8sObjectView;
+const T0 = new Date(2026, 10, 3, 10, 0).getTime();
 
-beforeEach(() => vi.clearAllMocks());
-function setup(ref = objectRef, objectView = view) {
-  render(withClientAndSso(
-    <UsageGraphs target={target} context="ctx" objectRef={ref} view={objectView} live ssoProfile="p" />,
-    newQueryClient(),
-    ssoLoginStub(),
-  ));
+function pod(name: string, cpuMilli: number, memoryBytes: number, owner = "web"): K8sPodUsage {
+  return {
+    namespace: "app", name, cpuMilli, memoryBytes,
+    containers: [{ name: "web", cpuMilli, memoryBytes }],
+    owners: [{ kind: "ReplicaSet", name: `${owner}-1` }, { kind: "Deployment", name: owner }],
+  };
 }
 
-test("explains no candidate and permits a manual service", async () => {
-  vi.mocked(invoke).mockResolvedValue([]);
+const metrics = (...pods: K8sPodUsage[]): K8sMetrics => ({ podsUnavailable: null, nodesUnavailable: null, pods, nodes: [] });
+
+beforeEach(() => resetUsageHistory());
+
+function setup(ref = objectRef, objectView = view) {
+  return render(<UsageGraphs target={target} context="ctx" objectRef={ref} view={objectView} />);
+}
+
+test("before the first sample it says values are still being collected", () => {
   setup();
-  expect(await screen.findByText(PROM_NONE)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: PROM_MANUAL }));
-  fireEvent.change(screen.getByLabelText(PROM_NAMESPACE), { target: { value: "monitoring" } });
-  fireEvent.change(screen.getByLabelText(PROM_NAME), { target: { value: "metrics" } });
-  fireEvent.change(screen.getByLabelText(PROM_PORT), { target: { value: "9090" } });
-  expect(screen.getByRole("button", { name: PROM_SELECT })).toBeEnabled();
-  fireEvent.click(screen.getByRole("button", { name: PROM_SELECT }));
-  expect(update).toHaveBeenCalledWith({ k8sPrometheus: { [JSON.stringify(["p", "r", "c"])]: { namespace: "monitoring", name: "metrics", port: 9090 } } });
+  expect(screen.getByText(USAGE_GRAPH_WAITING)).toBeInTheDocument();
 });
 
-test("one candidate loads graphs and shows empty data", async () => {
-  vi.mocked(invoke).mockImplementation(async (command) => command === "k8s_prometheus_candidates" ? [{ namespace: "monitoring", name: "prometheus", port: 9090 }] : { cpu: [], memory: [] });
+test("explains why usage cannot be collected", () => {
+  recordUsage(key, T0, { ...metrics(), podsUnavailable: "notInstalled" });
   setup();
-  await waitFor(() => expect(screen.getAllByText(PROM_EMPTY)).toHaveLength(2));
-  expect(invoke).toHaveBeenCalledWith("k8s_prometheus_graphs", expect.objectContaining({ namespace: "app", name: "web", hours: 1 }));
+  expect(screen.getByText(METRICS_UNAVAILABLE.notInstalled)).toBeInTheDocument();
 });
 
-test("several candidates require a selection", async () => {
-  vi.mocked(invoke).mockResolvedValue([{ namespace: "monitoring", name: "prometheus", port: 9090 }, { namespace: "other", name: "prometheus", port: 9090 }]);
+test("a pod shows its containers with request and limit lines and follows new samples", () => {
+  recordUsage(key, T0, metrics(pod("web", 250, 536870912)));
   setup();
-  const selector = await screen.findByLabelText(PROM_SERVER);
-  expect(invoke).not.toHaveBeenCalledWith("k8s_prometheus_graphs", expect.anything());
-  fireEvent.change(selector, { target: { value: "other/prometheus:9090" } });
-  expect(update).toHaveBeenCalledWith({ k8sPrometheus: { [JSON.stringify(["p", "r", "c"])]: { namespace: "other", name: "prometheus", port: 9090 } } });
-});
-
-test("shows formatted axes and references from container resources", async () => {
-  vi.mocked(invoke).mockImplementation(async (command) => command === "k8s_prometheus_candidates"
-    ? [{ namespace: "monitoring", name: "prometheus", port: 9090 }]
-    : { cpu: [{ name: "web", values: [[3600, 0.25], [7200, 0.4]] }], memory: [{ name: "web", values: [[7200, 536870912]] }] });
-  setup();
-  expect(await screen.findAllByText("web 요청: 500m")).toHaveLength(2);
+  expect(screen.getAllByText("web 요청: 500m")).toHaveLength(2);
   expect(screen.getAllByText("web 제한: 1 GiB")).toHaveLength(2);
-  expect(screen.getByText("250m")).toBeInTheDocument();
   expect(screen.getByText("0.5 GiB")).toBeInTheDocument();
+  // 축 끝은 마지막으로 모은 시각, 시작은 한 시간 전
+  expect(screen.getAllByText("10:00")).toHaveLength(2);
+  expect(screen.getAllByText("09:00")).toHaveLength(2);
+
+  act(() => recordUsage(key, T0 + 60_000, metrics(pod("web", 2000, 536870912))));
+  expect(screen.getAllByText("10:01")).toHaveLength(2);
+  expect(screen.getByText("2 코어")).toBeInTheDocument();
 });
 
-test("workload reference lines sum only complete template resource values", async () => {
-  vi.mocked(invoke).mockImplementation(async (command) => command === "k8s_prometheus_candidates"
-    ? [{ namespace: "monitoring", name: "prometheus", port: 9090 }]
-    : { cpu: [{ name: "web-1", values: [[7200, 0.4]] }], memory: [{ name: "web-1", values: [[7200, 100]] }] });
-  const workload = { ...objectRef, kind: { group: "apps", version: "v1", kind: "Deployment", plural: "deployments", namespaced: true } };
+test("a pod with nothing collected yet says so per chart", () => {
+  recordUsage(key, T0, metrics(pod("other", 100, 100)));
+  setup();
+  expect(screen.getAllByText(USAGE_GRAPH_EMPTY)).toHaveLength(2);
+});
+
+test("lines break where sampling stopped", () => {
+  recordUsage(key, T0, metrics(pod("web", 100, 100)));
+  recordUsage(key, T0 + 15_000, metrics(pod("web", 100, 100)));
+  recordUsage(key, T0 + 10 * 60_000, metrics(pod("web", 100, 100)));
+  recordUsage(key, T0 + 10 * 60_000 + 15_000, metrics(pod("web", 100, 100)));
+  const { container } = setup();
+  const cpu = container.querySelector("svg[aria-label='CPU']")!;
+  expect(cpu.querySelectorAll("polyline")).toHaveLength(2);
+});
+
+test("a workload draws one line per pod it controls and sums only complete template values", () => {
+  recordUsage(key, T0, metrics(pod("web-a", 100, 100), pod("web-b", 200, 200), pod("api-a", 300, 300, "api")));
   const template = { containers: [
     { name: "one", state: "template", init: false, cpuRequest: 250, memoryLimit: 512 },
     { name: "two", state: "template", init: false, cpuRequest: 500, memoryLimit: null },
   ] } as K8sObjectView;
-  setup(workload, template);
-  expect(await screen.findAllByText("Pod 요청: 750m")).toHaveLength(2);
+  const { container } = setup(deployment, template);
+  const legend = [...container.querySelectorAll(".k8s-usage-legend")[0].querySelectorAll("span")].map((s) => s.textContent);
+  expect(legend).toEqual(["web-a", "web-b"]);
+  expect(screen.getAllByText("Pod 요청: 750m")).toHaveLength(2);
   expect(screen.queryByText(/Pod 제한/)).not.toBeInTheDocument();
 });

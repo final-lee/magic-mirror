@@ -467,20 +467,9 @@ export const CHANGE_WHOLE_OBJECT = "객체 전체";
 export const YAML_DOCUMENT_ERRORS = "문서 오류";
 
 export const TAB_USAGE = "사용량";
-export const PROM_SERVER = "Prometheus 서비스";
-export const PROM_NONE = "Prometheus 서비스를 찾지 못했어요. 네임스페이스, 서비스 이름과 포트를 직접 입력할 수 있어요.";
-export const PROM_MANUAL = "직접 선택";
-export const PROM_NAMESPACE = "네임스페이스";
-export const PROM_NAME = "서비스 이름";
-export const PROM_PORT = "서비스 포트";
-export const PROM_SELECT = "선택";
-export const PROM_PERIOD = "조회 기간";
-export const PROM_EMPTY = "이 기간에 사용량 데이터가 없어요";
-export const PROM_CPU = "CPU (코어)";
-export const PROM_MEMORY = "메모리 (바이트)";
-export const PROM_REQUEST = "요청";
-export const PROM_LIMIT = "제한";
-export const PROM_AMP = "Amazon Managed Prometheus는 지원하지 않아요.";
+export const USAGE_GRAPH_NOTE = "연결돼 있는 동안 고른 네임스페이스의 사용량을 metrics-server에서 15초마다 모아 최근 1시간을 보여 줘요. 탭을 닫거나 앱을 끄면 지워져요.";
+export const USAGE_GRAPH_WAITING = "아직 모은 사용량이 없어요. 15초쯤 뒤에 나타나요.";
+export const USAGE_GRAPH_EMPTY = "이 객체의 사용량을 아직 모으지 못했어요";
 
 // 사용량(metrics-server)
 export const COL_CPU = "CPU";

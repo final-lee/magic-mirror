@@ -1,17 +1,13 @@
-import { useState } from "react";
-import { useSettings } from "../api/queries";
-import { ErrorState } from "../components/ErrorState";
-import { usePrometheusCandidates, usePrometheusGraphs } from "./queries";
+import { useSyncExternalStore } from "react";
 import * as t from "./text";
-import type { K8sContainer, K8sObjectView, K8sTarget, ObjectRef, PrometheusEndpoint, PrometheusSeries } from "./types";
+import type { K8sContainer, K8sObjectView, K8sTarget, ObjectRef } from "./types";
+import { METRICS_INTERVAL_MS } from "./usage";
+import { HISTORY_MS, historyKey, subscribeUsage, usageOf, usageVersion, type UsageSeries } from "./usageHistory";
 
 type Reference = { name: string; value: number; limit: boolean };
 const COLORS = Array.from({ length: 8 }, (_, i) => `var(--log-c${i + 1})`);
-
-/** 서비스 선택지와 저장된 서비스의 식별자. */
-function endpointKey(endpoint: PrometheusEndpoint): string {
-  return `${endpoint.namespace}/${endpoint.name}:${endpoint.port}`;
-}
+/** 이보다 오래 값이 비면(연결이 끊겼던 동안) 선을 잇지 않는다 */
+const GAP_MS = METRICS_INTERVAL_MS * 3;
 
 /** 상세가 읽은 요청·제한을 그래프 단위로 바꾼다. 워크로드는 Pod 템플릿 합계다. */
 function references(containers: K8sContainer[], pod: boolean, cpu: boolean): Reference[] {
@@ -41,29 +37,37 @@ function axisValue(value: number, max: number, cpu: boolean): string {
   return `${(value * scale).toLocaleString(undefined, { maximumFractionDigits: 2 })}${unit}`;
 }
 
-/** 기간이 하루면 날짜도 넣고 그 밖에는 시각만 짧게 표시한다. */
-function timeLabel(seconds: number, hours: number): string {
-  const date = new Date(seconds * 1000);
-  const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-  if (hours !== 24) return time;
-  return `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${time}`;
+/** 시:분 */
+function timeLabel(ms: number): string {
+  const date = new Date(ms);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
-/** 시계열과 요청·제한을 같은 축 위에 그리고 범례와 눈금을 붙인다. */
-function Chart({ title, series, refs, hours, cpu }: {
-  title: string; series: PrometheusSeries[]; refs: Reference[]; hours: number; cpu: boolean;
+/** 값이 GAP_MS보다 오래 빈 곳에서 선을 끊는다 */
+function segments(points: [number, number][]): [number, number][][] {
+  const out: [number, number][][] = [];
+  for (const point of points) {
+    const last = out[out.length - 1];
+    if (last && point[0] - last[last.length - 1][0] <= GAP_MS) last.push(point);
+    else out.push([point]);
+  }
+  return out;
+}
+
+/** 모은 값과 요청·제한을 최근 HISTORY_MS 축 위에 그리고 범례와 눈금을 붙인다 */
+function Chart({ title, series, refs, end, cpu }: {
+  title: string; series: UsageSeries[]; refs: Reference[]; end: number; cpu: boolean;
 }) {
-  const points = series.flatMap((s) => s.values);
+  const points = series.flatMap((s) => s.points);
   if (!points.length) {
     return (
       <section>
         <h4>{title}</h4>
-        <div className="empty small">{t.PROM_EMPTY}</div>
+        <div className="empty small">{t.USAGE_GRAPH_EMPTY}</div>
       </section>
     );
   }
-  const end = Math.max(...points.map(([x]) => x));
-  const start = end - hours * 3600;
+  const start = end - HISTORY_MS;
   const max = Math.max(1e-12, ...points.map(([, value]) => value), ...refs.map((r) => r.value));
   const x = (value: number) => Math.max(0, Math.min(600, (value - start) / (end - start) * 600));
   const y = (value: number) => 150 - Math.max(0, value) / max * 150;
@@ -88,23 +92,33 @@ function Chart({ title, series, refs, hours, cpu }: {
                 stroke={color} strokeDasharray={ref.limit ? "6 3" : "2 3"}
                 vectorEffect="non-scaling-stroke"
               >
-                <title>{`${ref.name} ${ref.limit ? t.PROM_LIMIT : t.PROM_REQUEST}: ${axisValue(ref.value, max, cpu)}`}</title>
+                <title>{`${ref.name} ${ref.limit ? t.USAGE_LIMIT : t.USAGE_REQUEST}: ${axisValue(ref.value, max, cpu)}`}</title>
               </line>
             );
           })}
-          {series.map((item, i) => (
-            <polyline
-              key={item.name}
-              points={item.values.map(([time, value]) => `${x(time)},${y(value)}`).join(" ")}
-              fill="none" stroke={COLORS[i % COLORS.length]} strokeWidth="2" vectorEffect="non-scaling-stroke"
-            >
-              <title>{item.name}</title>
-            </polyline>
-          ))}
+          {series.map((item, i) => segments(item.points).map((part, j) => (
+            part.length === 1 ? (
+              <circle
+                key={`${item.name}-${j}`}
+                cx={x(part[0][0])} cy={y(part[0][1])} r="2"
+                fill={COLORS[i % COLORS.length]}
+              >
+                <title>{item.name}</title>
+              </circle>
+            ) : (
+              <polyline
+                key={`${item.name}-${j}`}
+                points={part.map(([time, value]) => `${x(time)},${y(value)}`).join(" ")}
+                fill="none" stroke={COLORS[i % COLORS.length]} strokeWidth="2" vectorEffect="non-scaling-stroke"
+              >
+                <title>{item.name}</title>
+              </polyline>
+            )
+          )))}
         </svg>
         <div className="k8s-usage-x-axis dim">
-          <span>{timeLabel(start, hours)}</span>
-          <span>{timeLabel(end, hours)}</span>
+          <span>{timeLabel(start)}</span>
+          <span>{timeLabel(end)}</span>
         </div>
       </div>
       <div className="k8s-usage-legend">
@@ -118,7 +132,7 @@ function Chart({ title, series, refs, hours, cpu }: {
       {refs.length > 0 && (
         <div className="dim">
           {refs.map((ref) =>
-            `${ref.name} ${ref.limit ? t.PROM_LIMIT : t.PROM_REQUEST}: ${axisValue(ref.value, max, cpu)}`,
+            `${ref.name} ${ref.limit ? t.USAGE_LIMIT : t.USAGE_REQUEST}: ${axisValue(ref.value, max, cpu)}`,
           ).join(" · ")}
         </div>
       )}
@@ -126,95 +140,27 @@ function Chart({ title, series, refs, hours, cpu }: {
   );
 }
 
-/** Pod·워크로드 상세에서 Prometheus 서비스와 기간을 골라 사용량을 본다. */
-export function UsageGraphs({ target, context, objectRef, view, live, ssoProfile }: {
-  target: K8sTarget; context: string; objectRef: ObjectRef; view: K8sObjectView; live: boolean; ssoProfile: string;
+/** Pod·워크로드 상세에서 앱이 metrics-server로부터 모아 둔 최근 사용량을 본다 */
+export function UsageGraphs({ target, context, objectRef, view }: {
+  target: K8sTarget; context: string; objectRef: ObjectRef; view: K8sObjectView;
 }) {
-  const { settings, update } = useSettings();
-  const clusterKey = JSON.stringify([target.profile, target.region, target.cluster]);
-  const saved = settings?.k8sPrometheus?.[clusterKey];
-  const [hours, setHours] = useState(1);
-  const [manual, setManual] = useState(false);
-  const [namespace, setNamespace] = useState("");
-  const [name, setName] = useState("");
-  const [port, setPort] = useState("9090");
-  const candidates = usePrometheusCandidates(target, context, ssoProfile, live);
-  const server = saved ?? (candidates.data?.length === 1 ? candidates.data[0] : undefined);
-  const graphs = usePrometheusGraphs(target, context, server, objectRef, hours, ssoProfile, live);
+  const key = historyKey(target, context);
+  // 새 값을 모을 때마다 다시 그린다
+  useSyncExternalStore((listener) => subscribeUsage(key, listener), () => usageVersion(key));
+  const usage = usageOf(key, objectRef);
   const pod = objectRef.kind.kind === "Pod" && objectRef.kind.group === "";
-  const validPort = Number.isInteger(Number(port)) && Number(port) >= 1 && Number(port) <= 65535;
-
-  /** 선택을 대상별 설정에 기억한다. */
-  function choose(endpoint: PrometheusEndpoint) {
-    update({ k8sPrometheus: { ...settings?.k8sPrometheus, [clusterKey]: endpoint } });
-    setManual(false);
-  }
 
   return (
     <div className="k8s-usage">
-      <p className="dim">{t.PROM_AMP}</p>
-      {candidates.isError && (
-        <ErrorState error={candidates.error} profile={ssoProfile} compact
-          onRetry={() => void candidates.refetch()} onLoggedIn={() => void candidates.refetch()} />
-      )}
-      {candidates.isLoading && <div className="empty">{t.LOADING}</div>}
-      {candidates.data?.length === 0 && !saved && <p>{t.PROM_NONE}</p>}
-      {(candidates.data || saved) && (
-        <label>
-          {t.PROM_SERVER}{" "}
-          <select
-            value={server ? endpointKey(server) : ""}
-            onChange={(event) => {
-              const found = candidates.data?.find((candidate) => endpointKey(candidate) === event.target.value);
-              if (found) choose(found);
-            }}
-          >
-            <option value="">{t.PROM_SELECT}</option>
-            {saved && !candidates.data?.some((candidate) => endpointKey(candidate) === endpointKey(saved)) && (
-              <option value={endpointKey(saved)}>{endpointKey(saved)}</option>
-            )}
-            {candidates.data?.map((candidate) => (
-              <option key={endpointKey(candidate)} value={endpointKey(candidate)}>{endpointKey(candidate)}</option>
-            ))}
-          </select>
-        </label>
-      )}
-      <button className="btn tone-secondary" onClick={() => setManual(!manual)}>{t.PROM_MANUAL}</button>
-      {manual && (
-        <div className="k8s-usage-manual">
-          <label>{t.PROM_NAMESPACE}<input value={namespace} onChange={(event) => setNamespace(event.target.value)} /></label>
-          <label>{t.PROM_NAME}<input value={name} onChange={(event) => setName(event.target.value)} /></label>
-          <label>
-            {t.PROM_PORT}
-            <input type="number" min="1" max="65535" value={port} onChange={(event) => setPort(event.target.value)} />
-          </label>
-          <button
-            className="btn tone-primary" disabled={!namespace || !name || !validPort}
-            onClick={() => choose({ namespace, name, port: Number(port) })}
-          >
-            {t.PROM_SELECT}
-          </button>
-        </div>
-      )}
-      {server && (
-        <label>
-          {t.PROM_PERIOD}{" "}
-          <select value={hours} onChange={(event) => setHours(Number(event.target.value))}>
-            <option value={1}>1h</option>
-            <option value={6}>6h</option>
-            <option value={24}>24h</option>
-          </select>
-        </label>
-      )}
-      {graphs.isError && (
-        <ErrorState error={graphs.error} profile={ssoProfile} compact
-          onRetry={() => void graphs.refetch()} onLoggedIn={() => void graphs.refetch()} />
-      )}
-      {server && graphs.isLoading && <div className="empty">{t.LOADING}</div>}
-      {graphs.data && (
+      <p className="dim">{t.USAGE_GRAPH_NOTE}</p>
+      {usage.unavailable !== null ? (
+        <div className="empty">{t.METRICS_UNAVAILABLE[usage.unavailable]}</div>
+      ) : usage.lastAt === null ? (
+        <div className="empty">{t.USAGE_GRAPH_WAITING}</div>
+      ) : (
         <>
-          <Chart title={t.PROM_CPU} series={graphs.data.cpu} refs={references(view.containers, pod, true)} hours={hours} cpu />
-          <Chart title={t.PROM_MEMORY} series={graphs.data.memory} refs={references(view.containers, pod, false)} hours={hours} cpu={false} />
+          <Chart title={t.COL_CPU} series={usage.cpu} refs={references(view.containers, pod, true)} end={usage.lastAt} cpu />
+          <Chart title={t.COL_MEMORY} series={usage.memory} refs={references(view.containers, pod, false)} end={usage.lastAt} cpu={false} />
         </>
       )}
     </div>

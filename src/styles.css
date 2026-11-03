@@ -1145,8 +1145,6 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .k8s-detail-body.flush { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
 /* 사용량 그래프: 두 테마의 로그 출처 색과 공통 눈금 색을 쓴다. */
 .k8s-usage { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-.k8s-usage-manual { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
-.k8s-usage-manual label { display: flex; flex-direction: column; }
 .k8s-usage-chart { width: 100%; min-width: 0; }
 .k8s-usage-plot { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; }
 .k8s-usage-y-axis { height: 150px; display: flex; flex-direction: column; justify-content: space-between; text-align: right; font-size: 11px; }

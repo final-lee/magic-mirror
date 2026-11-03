@@ -349,17 +349,14 @@ test("the context is not read until the settings have loaded", async () => {
   await waitFor(() => expect(m.context).toHaveBeenCalledWith(target, "/kc", null));
 });
 
-test("usage is read for the overview only while the tab is the visible one", async () => {
+test("a hidden tab keeps collecting usage for the graphs", async () => {
   m.context.mockResolvedValue(info([cand("ctx")]));
   const qc = newQueryClient();
   qc.setQueryData(["settings"], { enabledServices: [], favorites: [], lastProfile: "app", lastRegion: null });
   vi.mocked(api.getSettings).mockResolvedValue({ enabledServices: [], favorites: [], lastProfile: "app", lastRegion: null });
-  const ui = (active: boolean) => withClientAndSso(<K8sTab target={target} active={active} />, qc, ssoLoginStub());
-  const r = render(ui(false));
+  render(withClientAndSso(<K8sTab target={target} active={false} />, qc, ssoLoginStub()));
   await screen.findByText(STATE_CONNECTED);
-  await waitFor(() => expect(m.overview).toHaveBeenCalled());
-  expect(m.metrics).not.toHaveBeenCalled();
-  r.rerender(ui(true));
+  // 고른 네임스페이스(여기서는 전체)를 읽는다
   await waitFor(() => expect(m.metrics).toHaveBeenCalledWith(target, null, target.profile));
 });
 
