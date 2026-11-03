@@ -7,6 +7,7 @@ pub mod log;
 pub mod connect;
 pub mod failure;
 pub mod forward;
+pub mod helm;
 pub mod kubeconfig;
 pub mod logs;
 pub mod node_shell;

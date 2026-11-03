@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use super::drain::DrainPlan;
+use super::helm::ChartSource;
 use super::rows::KindRef;
 use super::shell::ShellMode;
 use crate::error::AppError;
@@ -71,6 +72,14 @@ pub enum Operation {
     NodeShell { node: String, image: String },
     /// YAML 객체 하나를 server-side apply한다. 없는 객체면 만들고, `force`면 다른 manager의 필드도 가져온다.
     Apply { object: Value, #[serde(default)] force: bool },
+    /// Helm 릴리스 업그레이드(대상은 릴리스, `helm::release_kind`). `chart`가 없으면 저장된 릴리스에서 차트를 되살려 쓰고, `values`는 사용자 values 전체(YAML)다.
+    HelmUpgrade { values: String, #[serde(default)] chart: Option<ChartSource> },
+    /// Helm 릴리스를 그 리비전으로 되돌린다.
+    HelmRollback { revision: u32 },
+    /// Helm 릴리스 삭제. 이력을 남기면 롤백으로 되살릴 수 있다.
+    HelmUninstall { #[serde(rename = "keepHistory", default)] keep_history: bool },
+    /// 차트 설치. 대상은 만들 릴리스(이름·네임스페이스).
+    HelmInstall { chart: ChartSource, values: String, #[serde(rename = "createNamespace", default)] create_namespace: bool },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

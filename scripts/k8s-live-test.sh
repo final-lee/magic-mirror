@@ -2,15 +2,16 @@
 # kind 클러스터(컨트롤 플레인 + 워커) 두 버전을 띄우고 EKS 탭의 #[ignore] 시험(k8s::live_tests)을 돌린다. 평소 cargo test에서는 건너뛴다.
 #   scripts/k8s-live-test.sh            # 기본 이미지 둘
 #   KIND_IMAGES="kindest/node:v1.33.1" scripts/k8s-live-test.sh
-# 필요: docker, kind, kubectl, yq, jq (brew install kind kubernetes-cli yq jq)
+# 필요: docker, kind, kubectl, yq, jq, helm (brew install kind kubernetes-cli yq jq helm)
 set -euo pipefail
 cd "$(dirname "$0")/.."
-for tool in docker kind kubectl yq jq; do
+for tool in docker kind kubectl yq jq helm; do
   command -v "$tool" >/dev/null || { echo "$tool이 없어요: brew install $tool" >&2; exit 1; }
 done
 IMAGES=${KIND_IMAGES:-"kindest/node:v1.33.1 kindest/node:v1.35.0"}
 WORK=$(mktemp -d)
-cleanup() { for c in $(kind get clusters 2>/dev/null | grep '^mm-live-' || true); do kind delete cluster --name "$c" >/dev/null 2>&1 || true; done; rm -rf "$WORK"; }
+source scripts/k8s-live/helm.sh
+cleanup() { helm_fixture_stop; for c in $(kind get clusters 2>/dev/null | grep '^mm-live-' || true); do kind delete cluster --name "$c" >/dev/null 2>&1 || true; done; rm -rf "$WORK"; }
 trap cleanup EXIT
 for image in $IMAGES; do
   name="mm-live-$(echo "${image##*:}" | tr '.' '-')"
@@ -86,8 +87,13 @@ YAML
   printf '#!/bin/sh\nif [ -f %q ]; then sleep 40; fi\ncat %q\n' "$WORK/slow.armed" "$WORK/slow-cred.json" > "$WORK/bin/slow-get-token"
   chmod +x "$WORK/bin/"*
 
+  # Helm 픽스처: 로컬 차트로 helm이 설치한 릴리스와 로컬 차트 저장소(scripts/k8s-live/helm.sh)
+  helm_fixture "$kc" "$WORK"
+
   K8S_LIVE_KUBECONFIG="$kc" K8S_LIVE_BIN="$WORK/bin" K8S_LIVE_SLOW_ARM="$WORK/slow.armed" K8S_LIVE_READER_TOKEN="$reader_token" \
+    K8S_LIVE_HELM_CHART="$HELM_CHART_DIR" K8S_LIVE_HELM_REPO="$HELM_REPO_URL" \
     cargo test --manifest-path src-tauri/Cargo.toml --lib k8s::live_tests -- --ignored --test-threads=1
+  helm_fixture_stop
 
   # 사용량 시험: metrics-server를 설치해(kind의 kubelet 인증서는 자체 서명이라 --kubelet-insecure-tls) 사용량을 읽는 시험만 다시 돌린다.
   # 설치하지 못하면(오프라인 등) 이 부분만 건너뛴다. 첫 판의 metrics_without_server 시험은 설치 전 클러스터에서 이미 돌았다.

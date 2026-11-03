@@ -25,6 +25,8 @@ use super::tls::install_crypto_provider;
 use super::watch::{run, WatchMessage};
 use crate::error::AppError;
 
+mod helm;
+
 const PRIVATE: Endpoint = Endpoint { public: false, private: true };
 
 fn env(name: &str) -> String {

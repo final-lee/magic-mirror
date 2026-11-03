@@ -1,4 +1,5 @@
 import type { AppError } from "../api/types";
+import type { HelmChangeVariant } from "./helm/types";
 
 // 백엔드 계약(camelCase)과 같은 모양이다. 필드는 이후 단계에서 추가만 된다.
 export type K8sTarget = { profile: string; region: string; cluster: string };
@@ -101,6 +102,8 @@ export type K8sChange = K8sChangeObject & (
   | { type: "nodeShell"; node: string; image: string }
   /** YAML 객체 하나를 server-side apply(field manager magic-mirror). force는 다른 manager의 필드까지 가져온다 */
   | { type: "apply"; object: Record<string, unknown>; force: boolean }
+  /** Helm 릴리스 변경(대상은 릴리스). 같은 미리보기·적용·되돌리기 틀을 거친다 */
+  | HelmChangeVariant
 );
 
 export interface K8sRevision {
