@@ -80,15 +80,25 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus?.nonce]);
 
+  // 이동한 종류의 목록이 처음 그려지면 커서를 그 목록에 둔다(바로 j·k로 움직일 수 있다)
+  const focusAfterGoto = useRef(false);
   useEffect(() => {
     if (!goto) return;
     setKind(goto.kind);
     setStack([]);
+    focusAfterGoto.current = true;
     // nonce가 바뀔 때만 간다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [goto?.nonce]);
 
   const watch = useK8sWatch(target, context, sessionEpoch, ssoProfile, kind, kind.namespaced ? namespace : null, live);
+  useEffect(() => {
+    if (!focusAfterGoto.current || watch.status === "loading") return;
+    const table = pane.current?.querySelector<HTMLElement>('.tbl[tabindex="0"]');
+    if (!table) return;
+    focusAfterGoto.current = false;
+    table.focus();
+  }, [watch.status, kind]);
   const custom = useMemo(() => customCategories(kinds), [kinds]);
   const categories = useMemo(() => {
     const builtin = discoveryAvailable ? servedCategories(kinds) : CATEGORIES;
