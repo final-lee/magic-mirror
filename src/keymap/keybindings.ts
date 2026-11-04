@@ -52,7 +52,26 @@ export const COMMANDS: Record<string, CommandInfo> = {
   "explorer.switchPane": { title: "로컬·S3 칸 바꾸기", scope: "explorer" },
   "diff.next": { title: "다음 차이", scope: "diff" },
   "diff.prev": { title: "이전 차이", scope: "diff" },
+  "k8s.goto": { title: "종류·메뉴로 이동(명령 줄)", scope: "k8s" },
+  "list.first": { title: "맨 위 행", scope: "k8s" },
+  "list.last": { title: "맨 아래 행", scope: "k8s" },
+  "k8s.describe": { title: "describe 보기", scope: "k8s" },
+  "k8s.yaml": { title: "YAML 보기", scope: "k8s" },
+  "k8s.edit": { title: "YAML 편집", scope: "k8s" },
+  "k8s.logs": { title: "로그 보기", scope: "k8s" },
+  "k8s.shell": { title: "셸 열기 · scale 미리보기", scope: "k8s" },
+  "k8s.attach": { title: "attach 열기", scope: "k8s" },
+  "k8s.forward": { title: "포트포워딩 줄로 이동", scope: "k8s" },
+  "k8s.restart": { title: "rollout restart 미리보기", scope: "k8s" },
+  "k8s.cordon": { title: "cordon 미리보기", scope: "k8s" },
+  "k8s.uncordon": { title: "uncordon 미리보기", scope: "k8s" },
+  "k8s.delete": { title: "삭제 미리보기", scope: "k8s" },
+  "k8s.allNamespaces": { title: "모든 네임스페이스 보기", scope: "k8s" },
 };
+
+/** EKS 목록에 커서가 있고 입력칸·터미널·대화상자가 아닐 때(한 글자 키의 조건) */
+const K8S_LIST = "k8sListFocus && !dialogOpen && !inputFocus && !terminalFocus";
+const K8S_BODY = "k8sFocus && !dialogOpen && !inputFocus && !terminalFocus";
 
 export const KEYBINDINGS: Keybinding[] = [
   { key: "cmd+k", command: "app.findResource", when: "!dialogOpen", scope: "app", handler: "registry" },
@@ -77,6 +96,25 @@ export const KEYBINDINGS: Keybinding[] = [
   { key: "tab", command: "explorer.switchPane", when: "!dialogOpen && !inputFocus", scope: "explorer", handler: "registry" },
   { key: "f7", command: "diff.next", scope: "diff", handler: "registry" },
   { key: "shift+f7", command: "diff.prev", scope: "diff", handler: "registry" },
+  // EKS 탭: k9s식 명령 줄과 한 글자 키(설계: 키맵 설계 "EKS 목록의 k9s식 한 글자 키")
+  { key: ":", command: "k8s.goto", when: "!dialogOpen && !inputFocus && !terminalFocus", scope: "k8s", handler: "registry" },
+  { key: "/", command: "list.find", when: K8S_BODY, scope: "k8s", handler: "registry" },
+  { key: "j", command: "list.move", scope: "k8s", handler: "component" },
+  { key: "k", command: "list.move", scope: "k8s", handler: "component" },
+  { key: "g", command: "list.first", scope: "k8s", handler: "component" },
+  { key: "shift+g", command: "list.last", scope: "k8s", handler: "component" },
+  { key: "d", command: "k8s.describe", when: K8S_LIST, scope: "k8s", handler: "registry" },
+  { key: "y", command: "k8s.yaml", when: K8S_LIST, scope: "k8s", handler: "registry" },
+  { key: "e", command: "k8s.edit", when: K8S_LIST, scope: "k8s", handler: "registry" },
+  { key: "l", command: "k8s.logs", when: K8S_LIST, scope: "k8s", handler: "registry" },
+  { key: "s", command: "k8s.shell", when: K8S_LIST, scope: "k8s", handler: "registry" },
+  { key: "a", command: "k8s.attach", when: K8S_LIST, scope: "k8s", handler: "registry" },
+  { key: "shift+f", command: "k8s.forward", when: K8S_LIST, scope: "k8s", handler: "registry" },
+  { key: "r", command: "k8s.restart", when: K8S_LIST, scope: "k8s", handler: "registry" },
+  { key: "c", command: "k8s.cordon", when: K8S_LIST, scope: "k8s", handler: "registry" },
+  { key: "u", command: "k8s.uncordon", when: K8S_LIST, scope: "k8s", handler: "registry" },
+  { key: "ctrl+d", command: "k8s.delete", when: K8S_LIST, scope: "k8s", handler: "registry" },
+  { key: "0", command: "k8s.allNamespaces", when: K8S_LIST, scope: "k8s", handler: "registry" },
 ];
 
 /** 버튼 title: 명령에 키가 묶여 있으면 `이름 (⌘R)` */

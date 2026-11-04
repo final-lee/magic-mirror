@@ -72,7 +72,7 @@ export function Policies({ policies, namespaces, namespace, selected, onSelect, 
       {namespaces && <WithoutPolicy namespaces={namespaces} />}
       <p className="dim net-note">{POLICY_NOTE}</p>
       <ListFind find={find} placeholder={POLICY_FILTER_PLACEHOLDER} count={rows.length} />
-      <ListTable label={POLICY_TABLE_LABEL} rows={rows} columns={cols} rowKey={keyOf} selectedId={selected} onSelect={onSelect} onClear={onClear} onOpen={onSelect} empty={scoped.length === 0 ? POLICY_EMPTY : NET_NO_MATCH} />
+      <ListTable label={POLICY_TABLE_LABEL} rows={rows} columns={cols} rowKey={keyOf} selectedId={selected} onSelect={onSelect} onClear={onClear} onOpen={onSelect} empty={scoped.length === 0 ? POLICY_EMPTY : NET_NO_MATCH} vimKeys />
     </div>
   );
 }

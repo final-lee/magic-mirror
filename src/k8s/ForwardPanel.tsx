@@ -60,7 +60,7 @@ export function ForwardPanel({ target, ssoProfile, namespace, kind, name, ports,
         <span className="k8s-forward-title">{FORWARD_START}</span>
         <label>
           {FORWARD_PORT}
-          <select value={selected} onChange={(e) => setSelected(e.target.value)}>
+          <select data-k8s-action="forward" value={selected} onChange={(e) => setSelected(e.target.value)}>
             {ports.map((p) => (
               <option key={`${p.container ?? ""}/${p.port}`} value={String(p.port)}>
                 {forwardPortLabel(p)}
