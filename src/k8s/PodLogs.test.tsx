@@ -1,9 +1,12 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { useRef } from "react";
+import { useListFind } from "../components/ListFind";
 import * as invokeModule from "../api/invoke";
 import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
 import { matchRanges, searchPattern } from "./logSearch";
 import { PodLogs } from "./PodLogs";
+import { findFor, findInput, findInputs, pressFind } from "./testFind";
 import {
   LOG_CONTAINER, LOG_EMPTY, LOG_ENDED, LOG_FIELDS_HIDE, LOG_FIELDS_SHOW, LOG_LEVEL_NONE, LOG_PAUSE, LOG_PREVIOUS, LOG_RESUME, LOG_SEARCH, LOG_VIEW_PRETTY,
   LOG_VIEW_RAW, logMatches, logPending,
@@ -90,11 +93,48 @@ test("leaving stops the stream, also when its id arrives after leaving", async (
   expect(m.unwatch).toHaveBeenCalledWith(7);
 });
 
+test("there is no search box until ⌘F opens the find line inside the log; Esc clears the marks and closes it", async () => {
+  setup();
+  await vi.waitFor(() => expect(emit).toHaveLength(1));
+  send(0, chunk(["GET /a 200", "POST /b 500"]));
+  expect(findInputs()).toHaveLength(0);
+  expect(screen.queryByLabelText(LOG_SEARCH)).toBeNull();
+  screen.getByRole("checkbox", { name: LOG_PREVIOUS }).focus();
+  expect(pressFind()).toBe(true);
+  expect(findInput()).toHaveFocus();
+  expect(findInput()).toHaveAttribute("placeholder", LOG_SEARCH);
+  fireEvent.change(findInput(), { target: { value: "post" } });
+  expect(Array.from(document.querySelectorAll(".k8s-log mark")).map((e) => e.textContent)).toEqual(["POST"]);
+  fireEvent.keyDown(findInput(), { key: "Escape" });
+  expect(findInputs()).toHaveLength(0);
+  expect(document.querySelectorAll(".k8s-log mark")).toHaveLength(0);
+});
+
+function InsideList() {
+  const outer = useRef<HTMLDivElement>(null);
+  const find = useListFind(outer);
+  return (
+    <div ref={outer}>
+      <span data-testid="outer-find">{find.open ? "open" : "closed"}</span>
+      <PodLogs target={T} ssoProfile="p" live namespace="prod" pod="web-1" containers={[c("app")]} />
+    </div>
+  );
+}
+
+test("⌘F with the cursor in a log opens the log's find line, not the find line of the list the detail covers", async () => {
+  render(withClientAndSso(<InsideList />, newQueryClient(), ssoLoginStub()));
+  await vi.waitFor(() => expect(emit).toHaveLength(1));
+  screen.getByRole("checkbox", { name: LOG_PREVIOUS }).focus();
+  pressFind();
+  expect(findInputs()).toHaveLength(1);
+  expect(screen.getByTestId("outer-find")).toHaveTextContent("closed");
+});
+
 test("search marks the matches and counts the matching lines", async () => {
   setup();
   await vi.waitFor(() => expect(emit).toHaveLength(1));
   send(0, chunk(["GET /a 200", "POST /b 500", "get /c 200"]));
-  fireEvent.change(screen.getByLabelText(LOG_SEARCH), { target: { value: "get" } });
+  findFor("get");
   expect(screen.getByText(logMatches(2))).toBeInTheDocument();
   expect(Array.from(document.querySelectorAll(".k8s-log mark")).map((e) => e.textContent)).toEqual(["GET", "get"]);
   expect(logText()).toBe("GET /a 200\nPOST /b 500\nget /c 200\n");
@@ -109,7 +149,7 @@ test("highlights stay on the matched text when case folding changes the length (
 test("the match count follows new lines while following", async () => {
   setup();
   await vi.waitFor(() => expect(emit).toHaveLength(1));
-  fireEvent.change(screen.getByLabelText(LOG_SEARCH), { target: { value: "err" } });
+  findFor("err");
   send(0, chunk(Array.from({ length: 1500 }, (_, i) => (i % 500 === 0 ? `ERR ${i}` : `ok ${i}`))));
   expect(screen.getByText(logMatches(3))).toBeInTheDocument();
   send(0, chunk(["err again"]));
@@ -178,7 +218,7 @@ describe("JSON view", () => {
     setup();
     await vi.waitFor(() => expect(emit).toHaveLength(1));
     send(0, chunk([ok, failed]));
-    fireEvent.change(screen.getByLabelText(LOG_SEARCH), { target: { value: "r-9" } });
+    findFor("r-9");
     expect(screen.getByText(logMatches(1))).toBeInTheDocument();
     expect(rows()[1].textContent).toContain("request.id=r-9");
     expect(Array.from(document.querySelectorAll(".k8s-log mark")).map((e) => e.textContent)).toEqual(["r-9"]);
@@ -200,7 +240,7 @@ describe("JSON view", () => {
     expect(logText()).toContain("cache hit");
     expect(logText()).not.toContain("GET /health/readiness 200");
     expect(logText()).not.toContain("GET /plain 200");
-    fireEvent.change(screen.getByLabelText(LOG_SEARCH), { target: { value: "GET" } });
+    findFor("GET");
     expect(screen.getByText(logMatches(0))).toBeInTheDocument();
     // 다 끄면 모든 줄
     fireEvent.click(chip(/^경고/));

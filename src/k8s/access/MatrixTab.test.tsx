@@ -5,6 +5,7 @@ import { accessView, grant, iam, mapping, sa, user } from "./fixtures";
 import { MatrixTab, PAGE_SIZE } from "./MatrixTab";
 import { CELL_LABELS, CLUSTER_WIDE, COLUMNS_LIMIT, NAMESPACES_LABEL, NEXT, NO_ROWS, PREV, cellLabel } from "./text";
 import type { CellDetail, MatrixPage, MatrixQuery } from "./types";
+import { findFor, findInputs } from "../testFind";
 
 vi.mock("./api", () => ({ accessApi: { matrix: vi.fn(), cell: vi.fn() } }));
 vi.mock("../../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
@@ -61,7 +62,7 @@ test("with all namespaces chosen the columns start from the first few namespaces
   expect(lastQuery().namespaces).toEqual([null, "default", "dev", "prod"]);
 });
 
-test("subject kind chips and the name filter narrow the query and go back to the first page", async () => {
+test("subject kind chips and the ⌘F name find narrow the query and go back to the first page", async () => {
   m.matrix.mockResolvedValue(page([{ subject: user("alice"), label: null, levels: [[0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0]] }], 60));
   setup();
   await screen.findByRole("table");
@@ -69,7 +70,8 @@ test("subject kind chips and the name filter narrow the query and go back to the
   await waitFor(() => expect(lastQuery().offset).toBe(PAGE_SIZE));
   fireEvent.click(screen.getByLabelText("ServiceAccount"));
   await waitFor(() => expect(lastQuery()).toMatchObject({ kinds: ["serviceAccount"], offset: 0 }));
-  fireEvent.change(screen.getByLabelText("주체 이름 필터"), { target: { value: " ops " } });
+  expect(findInputs()).toHaveLength(0);
+  findFor(" ops ");
   await waitFor(() => expect(lastQuery().text).toBe("ops"));
 });
 

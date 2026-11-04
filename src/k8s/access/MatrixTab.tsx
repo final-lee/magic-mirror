@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { ListFind, useListFind } from "../../components/ListFind";
 import { K8sError } from "../K8sError";
 import { DETAIL_PCT } from "../lanes";
 import type { K8sChange, K8sTarget } from "../types";
@@ -6,7 +7,7 @@ import { CellDetailPane } from "./CellDetailPane";
 import { SubjectName } from "./paths";
 import { useAccessMatrix } from "./queries";
 import {
-  CELLS, CELL_GLYPHS, CELL_LABELS, CELL_RULES, CLUSTER_WIDE, CLUSTER_WIDE_TITLE, COLUMNS_LIMIT, FILTER_LABEL, FILTER_PLACEHOLDER, KINDS_LABEL, KIND_LABELS, LEGEND_FULL,
+  CELLS, CELL_GLYPHS, CELL_LABELS, CELL_RULES, CLUSTER_WIDE, CLUSTER_WIDE_TITLE, COLUMNS_LIMIT, FILTER_PLACEHOLDER, KINDS_LABEL, KIND_LABELS, LEGEND_FULL,
   LEGEND_NONE, LEGEND_PARTIAL, LEGEND_TITLE, LOADING, MATRIX_LABEL, NAMESPACES_BUTTON, NAMESPACES_CLEAR, NAMESPACES_FIRST, NAMESPACES_LABEL, NAMESPACES_NONE, NAMESPACES_SEARCH, NEXT,
   NO_ROWS, PAGER_LABEL, PREV, SUBJECT_COLUMN, cellLabel, columnsLimited, pageText,
 } from "./text";
@@ -88,9 +89,16 @@ function ColumnPicker({ all, columns, onChange }: { all: string[]; columns: (str
 /** 주체 × 네임스페이스 권한 표. 칸 일곱 개는 모듈 문서(matrix.rs)와 CELL_RULES가 정의한다. 한 쪽(25행)씩 백엔드에서 계산해 읽는다. */
 export function MatrixTab({ target, context, ssoProfile, live, view, namespace, initialText = "", onOpenIam, onChange }: Props) {
   const [kinds, setKinds] = useState<SubjectKind[]>([]);
-  const [text, setText] = useState(initialText);
-  useEffect(() => setText(initialText), [initialText]);
-  const deferred = useDeferredValue(text);
+  // ⌘F: 이 표(과 열린 상세) 안에서만 찾는다. 신원 화면에서 넘어오면 그 이름으로 찾기 줄을 연다
+  const tab = useRef<HTMLDivElement>(null);
+  const find = useListFind(tab);
+  const { setQuery, openFind } = find;
+  useEffect(() => {
+    if (!initialText) return;
+    setQuery(initialText);
+    openFind();
+  }, [initialText, setQuery, openFind]);
+  const deferred = useDeferredValue(find.query);
   const [columns, setColumns] = useState<(string | null)[]>(() => [null, ...(namespace ? [namespace] : view.namespaces.slice(0, INITIAL_NAMESPACES))]);
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<{ subject: Subject; cell: Cell; namespace: string | null } | null>(null);
@@ -114,7 +122,8 @@ export function MatrixTab({ target, context, ssoProfile, live, view, namespace, 
   };
 
   return (
-    <div className="acc-matrix-tab">
+    <div className="acc-matrix-tab" ref={tab}>
+      <ListFind find={find} placeholder={FILTER_PLACEHOLDER} count={data?.total} />
       <div className="acc-bar">
         <div className="asg-chips" role="group" aria-label={KINDS_LABEL}>
           {KINDS.map((k) => (
@@ -124,7 +133,6 @@ export function MatrixTab({ target, context, ssoProfile, live, view, namespace, 
             </label>
           ))}
         </div>
-        <input className="acc-filter" aria-label={FILTER_LABEL} placeholder={FILTER_PLACEHOLDER} value={text} onChange={(e) => setText(e.target.value)} />
         <ColumnPicker all={view.namespaces} columns={columns} onChange={setColumns} />
         <details className="acc-legend">
           <summary>{LEGEND_TITLE}</summary>

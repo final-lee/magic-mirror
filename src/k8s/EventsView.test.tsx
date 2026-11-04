@@ -3,7 +3,8 @@ import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
 import { EventsView } from "./EventsView";
 import { EVENTS } from "./kinds";
-import { LOADING, NO_EVENTS, WARNINGS_ONLY } from "./text";
+import { LIST_NO_MATCH, LOADING, NO_EVENTS, WARNINGS_ONLY } from "./text";
+import { findFor, findInputs } from "./testFind";
 import type { K8sRow, K8sWatchMessage } from "./types";
 
 vi.mock("./api", () => ({ k8sApi: { watch: vi.fn(), unwatch: vi.fn() } }));
@@ -70,4 +71,17 @@ test("a watch error is shown", async () => {
   await vi.waitFor(() => expect(m.watch).toHaveBeenCalled());
   act(() => emit({ type: "error", error: { kind: "accessDenied", action: "list events" }, fatal: true }));
   expect(screen.getByText("권한 없음 (list events)")).toBeInTheDocument();
+});
+
+test("⌘F opens a find line above the events (none before), filters by reason, object or message, and Esc brings every event back", async () => {
+  setup();
+  await vi.waitFor(() => expect(m.watch).toHaveBeenCalled());
+  act(() => emit({ type: "reset", rows: [ev("a", "Normal", "2026-10-30T11:00:00Z"), ev("b", "Warning", "2026-10-30T11:58:00Z")] }));
+  expect(findInputs()).toHaveLength(0);
+  findFor("R-a");
+  expect(messages()).toEqual(["m-a"]);
+  findFor("nothing-like-this");
+  expect(screen.getByText(LIST_NO_MATCH)).toBeInTheDocument();
+  fireEvent.keyDown(findInputs()[0], { key: "Escape" });
+  expect(messages()).toEqual(["m-b", "m-a"]);
 });

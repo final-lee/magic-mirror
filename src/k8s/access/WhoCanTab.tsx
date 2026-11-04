@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { ListFind, useListFind } from "../../components/ListFind";
+import { fuzzyKeep } from "../../lib/fuzzy";
 import { K8sError } from "../K8sError";
 import { DETAIL_PCT } from "../lanes";
 import type { K8sTarget } from "../types";
@@ -7,7 +9,7 @@ import { PathLine, PathList, SubjectName, uniquePaths } from "./paths";
 import { buildQuery } from "./parse";
 import { useWhoCan } from "./queries";
 import {
-  CHECK_BUTTON, CHECK_DENIED_TITLE, MISMATCH_TEXT, CHECK_LIMIT, CHECK_MATCH, CHECK_MISMATCH, CHECK_RUNNING, CHECK_SKIPPED, CLOSE, DETAIL_LABEL, FIND, F_NAME, F_NAMESPACE, F_RESOURCE, F_RESOURCE_HINT, F_VERB,
+  CHECK_BUTTON, CHECK_DENIED_TITLE, NO_IDENTITY_MATCH, WHO_FILTER, MISMATCH_TEXT, CHECK_LIMIT, CHECK_MATCH, CHECK_MISMATCH, CHECK_RUNNING, CHECK_SKIPPED, CLOSE, DETAIL_LABEL, FIND, F_NAME, F_NAMESPACE, F_RESOURCE, F_RESOURCE_HINT, F_VERB,
   H_CHECK, H_KIND, H_PATH, H_SUBJECT, LOADING, NO_RESULT, NS_CLUSTER, OPEN_IAM, PATHS_TITLE, PRESETS, PRESETS_LABEL, REQUEST_INVALID, REVIEW_FAILED, WHO_INHERITED_NOTE, WHO_LABEL,
   checkLimited, checkSummary, morePaths, resultsTruncated, subjectKindText,
 } from "./text";
@@ -66,6 +68,10 @@ export function WhoCanTab({ target, context, ssoProfile, namespaces, canReview, 
   };
 
   const entries = q.data?.entries ?? [];
+  // ⌘F: 결과 표 안에서만 찾는다(대조·상세는 모든 결과 기준). 위 질문 칸은 찾기가 아니라 요청이다
+  const tab = useRef<HTMLDivElement>(null);
+  const find = useListFind(tab, { enabled: q.data !== undefined });
+  const listed = fuzzyKeep(entries, find.query, (e) => [e.label, e.subject.name, e.subject.namespace, subjectKindText(e.subject)]);
   const checkOne = async (entry: WhoCan, query: AccessQuery): Promise<[string, Check]> => {
     const key = keyOf(entry.subject);
     // 세션 이름 템플릿에만 기대는 권한은 클러스터에 같은 신원이 없어서 대조하지 않는다
@@ -106,7 +112,7 @@ export function WhoCanTab({ target, context, ssoProfile, namespaces, canReview, 
   const reviewDenied = canReview === "no" ? CHECK_DENIED_TITLE : undefined;
 
   return (
-    <div className="acc-who">
+    <div className="acc-who" ref={tab}>
       <form
         className="acc-form"
         aria-label={WHO_LABEL}
@@ -169,6 +175,7 @@ export function WhoCanTab({ target, context, ssoProfile, namespaces, canReview, 
             </button>
           </div>
           {checks && !checking && <p role="status">{checkSummary(match, mismatch, failed)}</p>}
+          <ListFind find={find} placeholder={WHO_FILTER} count={listed.length} />
           <div className="tbl acc-table">
             <table aria-label={WHO_LABEL}>
               <thead>
@@ -180,7 +187,7 @@ export function WhoCanTab({ target, context, ssoProfile, namespaces, canReview, 
                 </tr>
               </thead>
               <tbody>
-                {entries.map((e) => {
+                {listed.map((e) => {
                   const k = keyOf(e.subject);
                   const paths = uniquePaths(e.grants);
                   const c = checks?.get(k);
@@ -207,7 +214,7 @@ export function WhoCanTab({ target, context, ssoProfile, namespaces, canReview, 
                 })}
               </tbody>
             </table>
-            {entries.length === 0 && <div className="empty small">{NO_RESULT}</div>}
+            {listed.length === 0 && <div className="empty small">{entries.length === 0 ? NO_RESULT : NO_IDENTITY_MATCH}</div>}
           </div>
         </div>
       )}
