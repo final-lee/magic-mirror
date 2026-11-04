@@ -82,11 +82,11 @@ export function ShellTab({ target, ssoProfile, namespace, pod, containers, rules
               <div role="radiogroup" aria-label={SHELL_MODE_LABEL} className="k8s-field">
                 {SHELL_MODE_LABEL}
                 <label className="k8s-check">
-                  <input type="radio" name="shell-mode" checked={mode === "exec"} onChange={() => setMode("exec")} />
+                  <input type="radio" name="shell-mode" data-k8s-action="mode-exec" checked={mode === "exec"} onChange={() => setMode("exec")} />
                   {SHELL_MODE_EXEC}
                 </label>
                 <label className="k8s-check">
-                  <input type="radio" name="shell-mode" checked={mode === "attach"} onChange={() => setMode("attach")} />
+                  <input type="radio" name="shell-mode" data-k8s-action="mode-attach" checked={mode === "attach"} onChange={() => setMode("attach")} />
                   {SHELL_MODE_ATTACH}
                 </label>
               </div>

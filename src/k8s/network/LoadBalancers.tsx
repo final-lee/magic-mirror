@@ -127,6 +127,7 @@ export function LoadBalancers({ network, namespace, selected, onSelect, onClear,
         onClear={onClear}
         onOpen={onSelect}
         empty={scoped.length === 0 ? LB_EMPTY : NET_NO_MATCH}
+        vimKeys
       />
       {network.unclaimed.length > 0 && <UnclaimedTable items={network.unclaimed} />}
     </div>

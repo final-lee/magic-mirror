@@ -81,15 +81,27 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, shel
       {scalable && (
         <>
           <label>
-            {t.CHANGE_REPLICAS} <input type="number" min="0" step="1" value={replicas} onChange={(e) => setReplicas(e.target.value)} />
+            {t.CHANGE_REPLICAS}{" "}
+            <input
+              type="number"
+              min="0"
+              step="1"
+              data-k8s-action="replicas"
+              value={replicas}
+              onChange={(e) => setReplicas(e.target.value)}
+              onKeyDown={(e) => {
+                // s로 이 칸에 와서 숫자를 고친 뒤 Enter로 미리보기를 연다(버튼을 누른 것과 같다)
+                if (e.key === "Enter" && validReplicas && !patch) onStart({ ...objectRef, type: "scale", replicas: Number(replicas) });
+              }}
+            />
           </label>
-          <ActionButton label={t.CHANGE_SCALE} tone="primary" reason={patch} invalid={!validReplicas}
+          <ActionButton action="scale" label={t.CHANGE_SCALE} tone="primary" reason={patch} invalid={!validReplicas}
             onClick={() => onStart({ ...objectRef, type: "scale", replicas: Number(replicas) })} />
         </>
       )}
       {workload && (
         <>
-          <ActionButton label={t.CHANGE_RESTART} tone="warn" reason={patch} onClick={() => onStart({ ...objectRef, type: "restart" })} />
+          <ActionButton action="restart" label={t.CHANGE_RESTART} tone="warn" reason={patch} onClick={() => onStart({ ...objectRef, type: "restart" })} />
           <ActionButton label={t.CHANGE_ROLLOUT_UNDO} tone="warn" reason={revisionDenied} onClick={() => setPicking(true)} />
           {picking && (
             <>
@@ -119,6 +131,7 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, shel
       {node && (
         <>
           <ActionButton
+            action={cordoned ? "uncordon" : "cordon"}
             label={cordoned ? t.CHANGE_UNCORDON : t.CHANGE_CORDON}
             tone="warn"
             reason={patch}
@@ -142,7 +155,7 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, shel
           />
         </>
       )}
-      <ActionButton label={t.CHANGE_DELETE} tone="danger" reason={denied("delete")} onClick={() => onStart({ ...objectRef, type: "delete" })} />
+      <ActionButton action="delete" label={t.CHANGE_DELETE} tone="danger" reason={denied("delete")} onClick={() => onStart({ ...objectRef, type: "delete" })} />
     </>
   );
 }
@@ -151,11 +164,12 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, shel
 type ActionTone = "primary" | "warn" | "danger";
 
 /** 권한이 없으면 이유를 함께 보여 주는 변경 버튼이다. */
-function ActionButton({ label, tone, reason, invalid, onClick }: {
-  label: string; tone: ActionTone; reason?: string; invalid?: boolean; onClick: () => void;
+function ActionButton({ action, label, tone, reason, invalid, onClick }: {
+  /** 한 글자 키(nav/rowKeys.ts)가 이 버튼을 찾는 이름 */
+  action?: string; label: string; tone: ActionTone; reason?: string; invalid?: boolean; onClick: () => void;
 }) {
   return (
-    <button className={`btn small tone-${tone}`} disabled={!!reason || invalid} title={reason} aria-description={reason} onClick={onClick}>
+    <button className={`btn small tone-${tone}`} data-k8s-action={action} disabled={!!reason || invalid} title={reason} aria-description={reason} onClick={onClick}>
       {label}
     </button>
   );

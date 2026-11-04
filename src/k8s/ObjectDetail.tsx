@@ -358,6 +358,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
           ) : (
             <button
               className="btn small tone-primary"
+              data-k8s-action="edit"
               disabled={!!editDenied}
               title={editDenied}
               aria-description={editDenied}
@@ -390,10 +391,10 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
         </ObjectForwards>
       )}
       <div role="tablist" className="k8s-tabs">
-        <button role="tab" aria-selected={tab === "summary"} onClick={() => setTab("summary")}>{TAB_SUMMARY}</button>
-        <button role="tab" aria-selected={tab === "yaml"} onClick={() => setTab("yaml")}>{TAB_YAML}</button>
-        {(pod || workload) && <button role="tab" aria-selected={tab === "logs"} onClick={() => setTab("logs")}>{TAB_LOGS}</button>}
-        {((pod && changes) || nodeShell) && <button role="tab" aria-selected={tab === "shell"} onClick={() => setTab("shell")}>{TAB_SHELL}</button>}
+        <button role="tab" data-tab="summary" aria-selected={tab === "summary"} onClick={() => setTab("summary")}>{TAB_SUMMARY}</button>
+        <button role="tab" data-tab="yaml" aria-selected={tab === "yaml"} onClick={() => setTab("yaml")}>{TAB_YAML}</button>
+        {(pod || workload) && <button role="tab" data-tab="logs" aria-selected={tab === "logs"} onClick={() => setTab("logs")}>{TAB_LOGS}</button>}
+        {((pod && changes) || nodeShell) && <button role="tab" data-tab="shell" aria-selected={tab === "shell"} onClick={() => setTab("shell")}>{TAB_SHELL}</button>}
       </div>
       <div className={`k8s-detail-body${tab === "logs" || shellTab ? " flush" : ""}`}>
         {/* 셸 세션은 다른 탭을 보는 동안에도 유지한다: 숨기기만 한다 */}
