@@ -3,6 +3,9 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef, useState } from "react";
 import { ErrorState } from "../components/ErrorState";
+import { KEYBINDINGS } from "../keymap/keybindings";
+import { eventKey, normalizeKey } from "../keymap/keys";
+import { useCommand } from "../keymap/registry";
 import { k8sApi } from "./api";
 import { ATTACH_OUTPUT_ONLY, SHELL_OPENING, SHELL_REOPEN, SHELL_LABEL, shellExited } from "./text";
 import type { K8sShellMessage, K8sShellMode, K8sTarget } from "./types";
@@ -19,6 +22,9 @@ function terminalTheme() {
     brightBlue: color("--accent"), brightMagenta: color("--chart-purple"), brightCyan: color("--syntax-property"), brightWhite: color("--text"),
   };
 }
+
+/** 터미널에서 빠져나오는 키(⌘⎋). xterm이 삼키지 않고 앱의 키 처리기까지 올라가야 한다 */
+const LEAVE_KEY = normalizeKey(KEYBINDINGS.find((b) => b.command === "terminal.leave")?.key ?? "");
 
 type State = { phase: "opening" } | { phase: "running"; input: boolean } | { phase: "ended"; code: number | null; reason: string | null } | { phase: "error"; error: unknown };
 
@@ -40,6 +46,7 @@ interface Props {
  * 키 입력과 크기 변경은 백엔드로 보내고, 출력은 채널로 받아 그린다. 입력·출력은 어디에도 남기지 않는다.
  */
 export function PodTerminal({ target, ssoProfile, namespace, pod, container, mode, confirmText, visible }: Props) {
+  const wrap = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -47,6 +54,15 @@ export function PodTerminal({ target, ssoProfile, namespace, pod, container, mod
   const [state, setState] = useState<State>({ phase: "opening" });
   const [nonce, setNonce] = useState(0);
   const restart = () => setNonce((n) => n + 1);
+  // ⌘⎋: 터미널에서 빠져나와 커서를 앱 탭으로 돌린다(그 밖의 키는 모두 터미널로 간다)
+  useCommand(
+    "terminal.leave",
+    () => {
+      termRef.current?.blur();
+      document.querySelector<HTMLElement>('.tabbar .tab-title[aria-selected="true"]')?.focus();
+    },
+    { host: wrap, enabled: visible },
+  );
 
   useEffect(() => {
     setState({ phase: "opening" });
@@ -57,6 +73,8 @@ export function PodTerminal({ target, ssoProfile, namespace, pod, container, mod
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    // 빠져나오는 키만 xterm이 처리하지 않게 해서 창의 키 처리기로 올려 보낸다
+    term.attachCustomKeyEventHandler((e) => eventKey(e) !== LEAVE_KEY);
     term.open(el);
     fit.fit();
     termRef.current = term;
@@ -125,7 +143,7 @@ export function PodTerminal({ target, ssoProfile, namespace, pod, container, mod
   }, [visible]);
 
   return (
-    <div className="k8s-shell-wrap" aria-label={SHELL_LABEL}>
+    <div ref={wrap} className="k8s-shell-wrap" aria-label={SHELL_LABEL}>
       {state.phase === "error" && <ErrorState error={state.error} profile={ssoProfile} compact onRetry={restart} onLoggedIn={restart} />}
       {state.phase === "running" && mode === "attach" && !state.input && <p className="dim k8s-hint">{ATTACH_OUTPUT_ONLY}</p>}
       <div className="k8s-term-box">

@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { useRef } from "react";
 import { DEPLOYMENTS, PODS, SECRETS } from "./kinds";
 import { ObjectList } from "./ObjectList";
-import { BAD_SELECTOR, COL_CPU, COL_CPU_OF_LIMIT, COL_CPU_OF_REQUEST, COL_NAMESPACE, FILTER_PLACEHOLDER, LIST_EMPTY, LIST_NO_MATCH, LOADING, METRICS_UNAVAILABLE, ONLY_PROBLEMS, PROBLEM_LABELS } from "./text";
+import { findFor, findInputs, pressFind } from "./testFind";
+import { BAD_SELECTOR, COL_CPU, COL_CPU_OF_LIMIT, COL_CPU_OF_REQUEST, COL_NAMESPACE, LIST_EMPTY, LIST_NO_MATCH, LOADING, METRICS_UNAVAILABLE, ONLY_PROBLEMS, PROBLEM_LABELS } from "./text";
 import type { K8sMetrics, K8sProblem, K8sRow } from "./types";
 import { buildUsageIndex } from "./usage";
 
@@ -10,13 +12,26 @@ const row = (name: string, labels: Record<string, string> = {}, problems: K8sPro
 });
 const rows = [row("api", { app: "api" }), row("worker", { app: "worker" }, ["crashLoopBackOff"])];
 
-function setup(over: Partial<Parameters<typeof ObjectList>[0]> = {}) {
+/** 목록과 상세 자리를 함께 감싼 상자(⌘F host). 상세에 커서가 있어도 ⌘F는 이 목록으로 온다 */
+function Host(props: Omit<Parameters<typeof ObjectList>[0], "host">) {
+  const host = useRef<HTMLDivElement>(null);
+  return (
+    <div ref={host}>
+      <ObjectList {...props} host={host} />
+      <aside>
+        <button>상세 단추</button>
+      </aside>
+    </div>
+  );
+}
+
+function setup(over: Partial<Omit<Parameters<typeof ObjectList>[0], "host">> = {}) {
   const onSelect = vi.fn();
-  render(<ObjectList kind={PODS} rows={rows} status="ready" showNamespace={false} selectedUid={null} onSelect={onSelect} onClear={() => {}} now={0} {...over} />);
+  render(<Host kind={PODS} rows={rows} status="ready" showNamespace={false} selectedUid={null} onSelect={onSelect} onClear={() => {}} now={0} {...over} />);
   return { onSelect };
 }
 const names = () => screen.queryAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell")[0].textContent);
-const filter = (text: string) => fireEvent.change(screen.getByRole("searchbox", { name: FILTER_PLACEHOLDER }), { target: { value: text } });
+const filter = findFor;
 
 test("lists rows with the kind's columns and problem badges", () => {
   setup();
@@ -29,6 +44,24 @@ test("lists rows with the kind's columns and problem badges", () => {
 test("namespace column only when all namespaces are shown", () => {
   setup({ showNamespace: true, kind: DEPLOYMENTS });
   expect(screen.getByRole("columnheader", { name: new RegExp(COL_NAMESPACE) })).toBeInTheDocument();
+});
+
+test("there is no search box until ⌘F opens the find line; Esc clears the query, closes the line and shows every row again", () => {
+  setup();
+  expect(findInputs()).toHaveLength(0);
+  expect(screen.queryByRole("searchbox")).toBeNull();
+  filter("WORK");
+  expect(names()).toEqual(["worker"]);
+  fireEvent.keyDown(findInputs()[0], { key: "Escape" });
+  expect(findInputs()).toHaveLength(0);
+  expect(names()).toEqual(["api", "worker"]);
+});
+
+test("⌘F with the cursor in the detail beside the list still opens the find line of the list it covers", () => {
+  setup();
+  screen.getByRole("button", { name: "상세 단추" }).focus();
+  expect(pressFind()).toBe(true);
+  expect(findInputs()).toHaveLength(1);
 });
 
 test("filters by name, by label selector, and by problems", () => {

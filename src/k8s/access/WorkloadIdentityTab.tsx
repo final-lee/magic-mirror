@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ErrorState } from "../../components/ErrorState";
+import { ListFind, useListFind } from "../../components/ListFind";
 import { K8sError } from "../K8sError";
 import { DETAIL_PCT } from "../lanes";
 import type { K8sTarget } from "../types";
@@ -50,13 +51,15 @@ function RoleLink({ arn, onOpenIam }: { arn: string; onOpenIam?: (arn: string) =
 /** ServiceAccount의 IRSA·Pod Identity 연결과 쓰는 Pod. 역할의 신뢰 정책을 확인한 결과를 보인다. */
 export function WorkloadIdentityTab({ target, context, ssoProfile, live, onOpenIam }: Props) {
   const q = useWorkloadIdentity(target, context, ssoProfile, live);
-  const [text, setText] = useState("");
+  // ⌘F: 이 표(과 열린 상세) 안에서만 찾는다. 평소에는 찾기 줄이 없다
+  const tab = useRef<HTMLDivElement>(null);
+  const find = useListFind(tab, { enabled: q.data !== undefined });
   const [onlyBroken, setOnlyBroken] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   if (q.isError) return <K8sError error={q.error} target={target} ssoProfile={ssoProfile} />;
   if (!q.data) return <div className="empty">{LOADING}</div>;
   const v = q.data;
-  const needle = text.trim().toLowerCase();
+  const needle = find.query.trim().toLowerCase();
   const rows = v.items.filter(
     (w) =>
       (!onlyBroken || isBroken(w)) &&
@@ -64,7 +67,8 @@ export function WorkloadIdentityTab({ target, context, ssoProfile, live, onOpenI
   );
   const chosen = v.items.find((w) => key(w) === selected);
   return (
-    <div className="acc-workload">
+    <div className="acc-workload" ref={tab}>
+      <ListFind find={find} placeholder={WORKLOAD_FILTER} count={rows.length} />
       {v.gaps.map((g, i) => (
         <div key={`${g.section}-${i}`} className="k8s-gap">
           <p className="dim">{gapText(SECTION_LABELS[g.section])}</p>
@@ -73,7 +77,6 @@ export function WorkloadIdentityTab({ target, context, ssoProfile, live, onOpenI
       ))}
       {v.truncated && <p className="dim">{WORKLOAD_TRUNCATED}</p>}
       <div className="acc-bar">
-        <input className="acc-filter" aria-label={WORKLOAD_FILTER} placeholder={WORKLOAD_FILTER} value={text} onChange={(e) => setText(e.target.value)} />
         <label className="acc-check">
           <input type="checkbox" checked={onlyBroken} onChange={(e) => setOnlyBroken(e.target.checked)} />
           {ONLY_BROKEN}

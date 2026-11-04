@@ -9,6 +9,7 @@ import { HelmView } from "./HelmView";
 import * as t from "./text";
 import { ALLOWED, detail, KINDS, READ_ONLY, release, revision, TARGET } from "./testData";
 import type { HelmTool } from "./types";
+import { findFor, findInput, findInputs } from "../testFind";
 
 vi.mock("./api", () => ({ helmApi: { tool: vi.fn(), releases: vi.fn(), release: vi.fn(), showValues: vi.fn() } }));
 vi.mock("../api", () => ({ k8sApi: { rules: vi.fn() } }));
@@ -85,18 +86,19 @@ test("all namespaces shows the namespace column", async () => {
   expect(h.releases).toHaveBeenCalledWith(TARGET, null, "p");
 });
 
-test("the filter matches name, chart, namespace and status, and only-problems keeps failed and pending releases", async () => {
+test("⌘F finds by name, chart, namespace and status, and only-problems keeps failed and pending releases", async () => {
   setup();
   await screen.findByText("web");
-  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "pg-2" } });
+  expect(findInputs()).toHaveLength(0);
+  findFor("pg-2");
   expect(screen.getByText("db")).toBeInTheDocument();
   expect(screen.queryByText("web")).not.toBeInTheDocument();
-  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "zeta" } });
+  findFor("zeta");
   expect(screen.getByText("api")).toBeInTheDocument();
   expect(screen.queryByText("db")).not.toBeInTheDocument();
-  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "nothing-matches" } });
+  findFor("nothing-matches");
   expect(screen.getByText(t.LIST_NO_MATCH)).toBeInTheDocument();
-  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "" } });
+  fireEvent.keyDown(findInput(), { key: "Escape" });
   fireEvent.click(screen.getByLabelText(t.ONLY_PROBLEMS));
   expect(screen.getByText("api")).toBeInTheDocument();
   expect(screen.getByText("db")).toBeInTheDocument();

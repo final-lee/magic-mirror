@@ -3,8 +3,9 @@ import { newQueryClient, ssoLoginStub, withClientAndSso } from "../../test/utils
 import { accessApi } from "./api";
 import { grant, group, iam, user } from "./fixtures";
 import { WhoCanTab } from "./WhoCanTab";
-import { CHECK_BUTTON, CHECK_DENIED_TITLE, CHECK_SKIPPED, FIND, MISMATCH_TEXT, NO_RESULT, REQUEST_INVALID, checkSummary, resultsTruncated } from "./text";
+import { CHECK_BUTTON, CHECK_DENIED_TITLE, CHECK_SKIPPED, FIND, MISMATCH_TEXT, NO_IDENTITY_MATCH, NO_RESULT, REQUEST_INVALID, checkSummary, resultsTruncated } from "./text";
 import type { WhoCan } from "./types";
+import { findFor, findInputs } from "../testFind";
 
 vi.mock("./api", () => ({ accessApi: { whoCan: vi.fn(), review: vi.fn() } }));
 vi.mock("../../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
@@ -139,4 +140,18 @@ test("an IAM subject's detail opens its role in IAM", async () => {
   fireEvent.click((await screen.findByText("ops")).closest("tr")!);
   fireEvent.click(within(screen.getByRole("complementary", { name: "권한 상세" })).getByRole("button", { name: "IAM에서 열기" }));
   expect(onOpenIam).toHaveBeenCalledWith("arn:aws:iam::1:role/ops");
+});
+
+test("⌘F narrows the result table by subject (the question form is untouched); nothing is visible before it", async () => {
+  setup();
+  fill("리소스", "pods");
+  fireEvent.click(screen.getByRole("button", { name: FIND }));
+  await screen.findByText("devs");
+  expect(findInputs()).toHaveLength(0);
+  findFor("alice");
+  expect(screen.getByText("alice")).toBeInTheDocument();
+  expect(screen.queryByText("devs")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("리소스")).toHaveValue("pods");
+  findFor("nothing-like-this");
+  expect(screen.getByText(NO_IDENTITY_MATCH)).toBeInTheDocument();
 });
