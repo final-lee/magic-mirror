@@ -230,6 +230,50 @@
     ]
   },
   {
+    "id": "elasticache",
+    "name": "ElastiCache",
+    "global": false,
+    "types": [
+      {
+        "id": "replication-groups",
+        "name": "Replication Groups",
+        "columns": [
+          { "key": "name", "label": "Identifier", "kind": "text" },
+          { "key": "engine", "label": "Engine", "kind": "text" },
+          { "key": "status", "label": "Status", "kind": "state" },
+          { "key": "nodeType", "label": "Node type", "kind": "text" },
+          { "key": "shards", "label": "Shards", "kind": "text" },
+          { "key": "nodes", "label": "Nodes", "kind": "text" },
+          { "key": "endpoint", "label": "Endpoint", "kind": "mono" }
+        ]
+      },
+      {
+        "id": "cache-clusters",
+        "name": "Cache Clusters",
+        "columns": [
+          { "key": "name", "label": "Identifier", "kind": "text" },
+          { "key": "engine", "label": "Engine", "kind": "text" },
+          { "key": "version", "label": "Version", "kind": "text" },
+          { "key": "status", "label": "Status", "kind": "state" },
+          { "key": "nodeType", "label": "Node type", "kind": "text" },
+          { "key": "nodes", "label": "Nodes", "kind": "text" },
+          { "key": "group", "label": "Replication group", "kind": "text" }
+        ]
+      },
+      {
+        "id": "serverless-caches",
+        "name": "Serverless Caches",
+        "columns": [
+          { "key": "name", "label": "Name", "kind": "text" },
+          { "key": "engine", "label": "Engine", "kind": "text" },
+          { "key": "version", "label": "Version", "kind": "text" },
+          { "key": "status", "label": "Status", "kind": "state" },
+          { "key": "endpoint", "label": "Endpoint", "kind": "mono" }
+        ]
+      }
+    ]
+  },
+  {
     "id": "ecs",
     "name": "ECS",
     "global": false,

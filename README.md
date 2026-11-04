@@ -4,7 +4,7 @@
 
 A macOS desktop app for working with AWS and the Kubernetes, ArgoCD, Argo Workflows, and PostgreSQL that run on it, without clicking through the console or typing long CLI commands.
 
-- **Browse** 16 AWS services by profile and region, with fuzzy search over everything you've opened.
+- **Browse** 17 AWS services by profile and region, with fuzzy search over everything you've opened.
 - **Explore** S3 in a Forklift-style two-pane explorer and compare files side by side.
 - **See** a VPC as an architecture diagram and an account's costs from Cost Explorer.
 - **Understand and fix** IAM: who can do what, security findings, unused permissions, and previewed, undoable changes.
@@ -32,7 +32,7 @@ Everything is read-only until you ask for a change, and every change starts with
 
 ### Resource browser (read-only)
 
-- **16 services, 24 resource types**:
+- **17 services, 27 resource types**:
 
   | Service | Resource types |
   | --- | --- |
@@ -40,6 +40,7 @@ Everything is read-only until you ask for a change, and every change starts with
   | S3 | Buckets |
   | Lambda | Functions |
   | RDS | DB Instances, DB Clusters |
+  | ElastiCache | Replication Groups, Cache Clusters, Serverless Caches |
   | ECS | Clusters, Services, Tasks |
   | EKS | Clusters, Node Groups |
   | VPC | VPCs, Subnets |
@@ -341,7 +342,7 @@ Open with the ⚙ button in the toolbar.
 
 | Setting | Options | Default |
 | --- | --- | --- |
-| 표시할 서비스 | Which of the 16 services appear in the sidebar | All |
+| 표시할 서비스 | Which of the 17 services appear in the sidebar. A service added by an update starts turned on; one you turn off stays off | All |
 | 화면 테마 | 시스템 설정 따르기, 밝게, 어둡게 | Follow the system |
 | 비교 도구 | FileMerge, VS Code, or a custom command with `{left}` and `{right}` (e.g. `ksdiff {left} {right}`) | FileMerge |
 | kubeconfig 경로 | A kubeconfig file for the EKS tab | `KUBECONFIG` or `~/.kube/config` |
@@ -373,7 +374,7 @@ Under `~/Library/Application Support/dev.finallee.magicmirror/`:
 
 | File | Contents | Kept |
 | --- | --- | --- |
-| `settings.json` | Enabled services, favorites, last profile and region, theme, diff tool, kubeconfig path, cache TTL, the explorer's local folder, PostgreSQL sign-in users, EKS contexts, bookmarks, lane widths, and security checks turned off, ArgoCD and Argo Workflows servers and their list filters | Until changed |
+| `settings.json` | Enabled services and the services the app has already shown, favorites, last profile and region, theme, diff tool, kubeconfig path, cache TTL, the explorer's local folder, PostgreSQL sign-in users, EKS contexts, bookmarks, lane widths, and security checks turned off, ArgoCD and Argo Workflows servers and their list filters | Until changed |
 | `resource-index.json` | The ⌘K index: names, IDs, column values, tags. No raw JSON or detail fields. Readable only by you | 7 days; wiped by ⌘⇧R |
 | `cost-cache.json` | Cost Explorer answers and the monthly request counter | Answers for 6 hours |
 | `iam-changes.jsonl` | IAM changes applied from the app, with undo state | Until deleted |
@@ -407,7 +408,7 @@ A Korean install guide is in [docs/INSTALL.md](docs/INSTALL.md) and is attached 
 **General**
 
 - A profile in `~/.aws/config`. SSO profiles need the AWS CLI v2 (`aws`), which the app uses to sign in.
-- Read permissions for the services you want to browse. The VPC diagram uses EC2 `Describe*` calls plus `rds:DescribeDBInstances`, `elasticloadbalancing:DescribeLoadBalancers`, and `lambda:ListFunctions`; anything it can't read is skipped with a warning. Writing from the S3 explorer needs `s3:PutObject` and `s3:DeleteObject`.
+- Read permissions for the services you want to browse. The VPC diagram uses EC2 `Describe*` calls plus `rds:DescribeDBInstances`, `elasticloadbalancing:DescribeLoadBalancers`, and `lambda:ListFunctions`; anything it can't read is skipped with a warning. ElastiCache reads `elasticache:DescribeReplicationGroups`, `elasticache:DescribeCacheClusters`, and `elasticache:DescribeServerlessCaches`. Writing from the S3 explorer needs `s3:PutObject` and `s3:DeleteObject`.
 
 **IAM workspace**
 
