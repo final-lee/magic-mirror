@@ -1,6 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
+import { ListFind, useListFind } from "../components/ListFind";
 import { formatDateTime } from "../iam/format";
 import { arrange, batchKey, usePrepare } from "../lib/changeLog";
+import { fuzzyKeep } from "../lib/fuzzy";
 import { pgApi } from "./api";
 import { PgError } from "./PgError";
 import { usePgChangeLog } from "./queries";
@@ -34,7 +36,15 @@ export function ChangeLog({ target, targetArn, blockReason, onStart, onStartBatc
   const q = usePgChangeLog();
   const { busy, errors, prepare } = usePrepare();
   const entries = q.data;
-  const lines = useMemo(() => arrange((entries ?? []).filter((e) => e.targetArn === targetArn)), [entries, targetArn]);
+  const mine = useMemo(() => (entries ?? []).filter((e) => e.targetArn === targetArn), [entries, targetArn]);
+  const lines = useMemo(() => arrange(mine), [mine]);
+  // ⌘F: 이 변경 기록 안에서만 찾는다. 평소에는 찾기 줄이 없다. 묶음 머리는 맞는 기록이 하나라도 있으면 남는다
+  const box = useRef<HTMLElement>(null);
+  const find = useListFind(box, { enabled: lines.length > 0 });
+  const found = useMemo(() => {
+    const hit = new Set(fuzzyKeep(mine, find.query, (e) => [e.summary, e.error, e.loginUser, e.database, formatDateTime(e.at), e.ok ? "성공" : "실패"]).map((e) => e.id));
+    return lines.filter((line) => (line.kind === "batch" ? line.entries.some((e) => hit.has(e.id)) : hit.has(line.entry.id)));
+  }, [mine, lines, find.query]);
   const reread = () => void q.refetch();
 
   const undo = (entry: PgChangeLogEntry) =>
@@ -60,8 +70,9 @@ export function ChangeLog({ target, targetArn, blockReason, onStart, onStartBatc
   }
 
   return (
-    <section className="center iam-log">
+    <section className="center iam-log" ref={box}>
       {q.isError && <PgError compact error={q.error} target={target} onRetry={reread} />}
+      <ListFind find={find} count={found.filter((line) => line.kind === "entry").length} />
       {lines.length === 0 ? (
         <div className="empty small">변경 기록이 없어요</div>
       ) : (
@@ -77,7 +88,7 @@ export function ChangeLog({ target, targetArn, blockReason, onStart, onStartBatc
               </tr>
             </thead>
             <tbody>
-              {lines.map((line) => {
+              {found.map((line) => {
                 if (line.kind === "batch") {
                   const key = batchKey(line.batchId);
                   return (
@@ -118,6 +129,7 @@ export function ChangeLog({ target, targetArn, blockReason, onStart, onStartBatc
               })}
             </tbody>
           </table>
+          {found.length === 0 && <div className="empty small">조건에 맞는 기록이 없어요</div>}
         </div>
       )}
     </section>

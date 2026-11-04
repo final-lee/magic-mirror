@@ -154,8 +154,11 @@ export const H_NAMESPACE = "네임스페이스";
 export const H_IP = "IP";
 export const H_HOST_NETWORK = "hostNetwork";
 export const HOST_NETWORK_MARK = "노드 IP";
-export const POD_FILTER_LABEL = "Pod 찾기";
 export const POD_FILTER_PLACEHOLDER = "Pod 이름·IP·노드·서브넷";
+export const LB_FILTER_PLACEHOLDER = "이름·주소·로드 밸런서";
+export const POLICY_FILTER_PLACEHOLDER = "정책 이름·네임스페이스·Pod 선택";
+export const NODES_FILTER_PLACEHOLDER = "노드·서브넷 이름·IP·AZ";
+export const NET_NO_MATCH = "찾는 항목이 없어요";
 export const podsShown = (shown: number, total: number) => `${total}개 중 ${shown}개를 보여요. 검색으로 좁혀 보세요.`;
 
 // ── NetworkPolicy ──

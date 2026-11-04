@@ -1,8 +1,9 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
+import { dispatchKey } from "../keymap/registry";
 import { renderWithClient } from "../test/utils";
 import { argowfApi } from "./api";
 import { ago, CONN, HOUR, NOW, wf } from "./catalogFixtures";
-import { ARCHIVE_EMPTY, ARCHIVE_NO_MATCH, ARCHIVE_SEARCH } from "./catalogText";
+import { ARCHIVE_EMPTY, ARCHIVE_NO_MATCH } from "./catalogText";
 import { ArchiveList } from "./ArchiveList";
 
 vi.mock("./api", () => ({ argowfApi: { archived: vi.fn() } }));
@@ -79,9 +80,16 @@ describe("ArchiveList", () => {
   test("검색", async () => {
     setup();
     await screen.findByRole("row", { name: /nightly-x/ });
-    fireEvent.change(screen.getByRole("textbox", { name: ARCHIVE_SEARCH }), { target: { value: "nightly" } });
+    expect(screen.queryByRole("textbox", { name: "목록에서 찾기" })).toBeNull();
+    act(() => { dispatchKey(new KeyboardEvent("keydown", { key: "f", metaKey: true })); });
+    const input = screen.getByRole("textbox", { name: "목록에서 찾기" });
+    expect(input).toHaveFocus();
+    fireEvent.change(input, { target: { value: "nightly" } });
     expect(screen.queryByRole("row", { name: /old-run/ })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByRole("textbox", { name: ARCHIVE_SEARCH }), { target: { value: "zzzzqq" } });
+    fireEvent.change(input, { target: { value: "zzzzqq" } });
     expect(screen.getByText(ARCHIVE_NO_MATCH)).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("textbox", { name: "목록에서 찾기" })).toBeNull();
+    expect(screen.getByRole("row", { name: /old-run/ })).toBeInTheDocument();
   });
 });

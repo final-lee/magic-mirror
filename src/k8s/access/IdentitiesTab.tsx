@@ -1,10 +1,12 @@
-import { Fragment, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import { ErrorState } from "../../components/ErrorState";
+import { ListFind, useListFind } from "../../components/ListFind";
+import { fuzzyKeep } from "../../lib/fuzzy";
 import type { K8sChange, K8sTarget } from "../types";
 import { EntryActions, EntryCreateButton } from "../rbac/EntryActions";
 import {
   AWS_AUTH_NONE, AWS_AUTH_PRESENT, COLLAPSE, CELL_GLYPHS, CELL_LABELS, CELLS, DANGLING_TITLE, EFFECTIVE, EKS_SECTIONS, EXPAND, H_GROUPS, H_POLICIES, H_PRINCIPAL, H_SOURCE, H_STATE,
-  H_SUMMARY, H_USERNAME, IDENTITIES_LABEL, INACTIVE, MODE_LABEL, MODE_NOTES, MODE_UNKNOWN, NONE, NOT_EVALUATED, NO_MAPPINGS, OPEN_IAM, RBAC_MISSING, SECTION_LABELS, SEE_MATRIX, SEE_MATRIX_TITLE,
+  H_SUMMARY, H_USERNAME, IDENTITIES_LABEL, IDENTITY_FILTER, INACTIVE, MODE_LABEL, MODE_NOTES, MODE_UNKNOWN, NONE, NOT_EVALUATED, NO_IDENTITY_MATCH, NO_MAPPINGS, OPEN_IAM, RBAC_MISSING, SECTION_LABELS, SEE_MATRIX, SEE_MATRIX_TITLE,
   SOURCE_LABELS, SSO_GROUP_TITLE, awsAuthAccounts, danglingText, fetchedAt, gapText, levelText, policyScopeText, ssoGroupRow,
 } from "./text";
 import type { AccessView, MappingRow, Subject } from "./types";
@@ -81,6 +83,9 @@ function Row({ m, indent, onOpenIam, onOpenSubject, onChange, mode }: { m: Mappi
 
 /** 신원 연결: IAM 주체가 쿠버네티스에서 누가 되는지(access entry와 aws-auth), 어느 쪽이 유효한지, SSO 권한 세트별 묶음 */
 export function IdentitiesTab({ target, ssoProfile, view, onRetry, onOpenIam, onOpenSubject, onChange }: Props) {
+  // ⌘F: 이 표 안에서만 찾는다. 찾는 동안에는 권한 세트 묶음을 풀어 맞는 행만 바로 보인다
+  const tab = useRef<HTMLDivElement>(null);
+  const find = useListFind(tab);
   const [grouped, setGrouped] = useState(true);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const toggle = (set: string) =>
@@ -89,10 +94,18 @@ export function IdentitiesTab({ target, ssoProfile, view, onRetry, onOpenIam, on
       if (!next.delete(set)) next.add(set);
       return next;
     });
+  const searching = find.query.trim() !== "";
+  const mappings = useMemo(
+    () =>
+      searching
+        ? fuzzyKeep(view.mappings, find.query, (m) => [m.label, m.principalArn, m.username, m.permissionSet, SOURCE_LABELS[m.source], ...m.groups, ...m.policies.map((p) => p.policyName)])
+        : view.mappings,
+    [view.mappings, find.query, searching],
+  );
   const bySet = new Map<string, MappingRow[]>();
   const plain: MappingRow[] = [];
-  for (const m of view.mappings) {
-    if (grouped && m.permissionSet) {
+  for (const m of mappings) {
+    if (grouped && !searching && m.permissionSet) {
       const list = bySet.get(m.permissionSet) ?? [];
       list.push(m);
       bySet.set(m.permissionSet, list);
@@ -102,7 +115,8 @@ export function IdentitiesTab({ target, ssoProfile, view, onRetry, onOpenIam, on
   }
   const mode = view.mode;
   return (
-    <div className="acc-identities">
+    <div className="acc-identities" ref={tab}>
+      <ListFind find={find} placeholder={IDENTITY_FILTER} count={mappings.length} />
       {view.gaps.map((g, i) => (
         <div key={`${g.section}-${i}`} className="k8s-gap">
           <p className="dim">{gapText(SECTION_LABELS[g.section])}</p>
@@ -166,7 +180,7 @@ export function IdentitiesTab({ target, ssoProfile, view, onRetry, onOpenIam, on
             ))}
           </tbody>
         </table>
-        {view.mappings.length === 0 && <div className="empty small">{NO_MAPPINGS}</div>}
+        {mappings.length === 0 && <div className="empty small">{view.mappings.length === 0 ? NO_MAPPINGS : NO_IDENTITY_MATCH}</div>}
       </div>
       {view.dangling.length > 0 && (
         <section className="k8s-sect" aria-label={DANGLING_TITLE}>

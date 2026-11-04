@@ -1,6 +1,7 @@
 import { type ChangeEvent, Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "../api/errors";
 import { ErrorState } from "../components/ErrorState";
+import { ListFind, useListFind } from "../components/ListFind";
 import { age } from "../k8s/format";
 import { DETAIL_PCT } from "../k8s/lanes";
 import { tokenize } from "../lib/fuzzy";
@@ -145,7 +146,9 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
   const [clusterPick, setClusterPick] = useState<Set<string>>(() => new Set(saved?.clusters));
   const [projectPick, setProjectPick] = useState<Set<string>>(() => new Set(saved?.projects));
   const [labelPicks, setLabelPicks] = useState<LabelPick[]>(() => (saved?.labels ?? []).map(parsePick).filter((p): p is LabelPick => p !== null));
-  const [search, setSearch] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+  const find = useListFind(listRef);
+  const search = find.query;
   const [primary, setPrimary] = useState<GroupDim>(() => parseDim(saved?.groupBy) ?? "set");
   const [secondaryPick, setSecondaryPick] = useState<GroupDim>(() => parseDim(saved?.thenBy) ?? "none");
   // 문제가 있는 묶음은 펴고, 정상인 묶음·정상 행은 접어 문제를 먼저 보인다. 사용자가 직접 펴거나 접은 것은 탭이 열린 동안 그대로 둔다.
@@ -364,7 +367,14 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
   const onDim = (set: (d: GroupDim) => void) => (e: ChangeEvent<HTMLSelectElement>) => set(e.target.value as GroupDim);
 
   return (
-    <div className="argo">
+    <div
+      className="argo"
+      onKeyDown={(e) => {
+        if (e.key !== "Escape" || e.defaultPrevented || !selected) return;
+        if ((e.target as Element).closest(".list-find") || Array.from(document.querySelectorAll(".modal")).some((modal) => !modal.closest("[hidden]"))) return;
+        setSelected(null);
+      }}
+    >
       {apps.isError && <ErrorState error={apps.error} profile="" compact onRetry={() => void apps.refetch()} />}
       {sets.isError && <ErrorState error={sets.error} profile="" compact onRetry={() => void sets.refetch()} />}
       <div className="argo-bar">
@@ -399,7 +409,6 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
           onAdd={(p) => setLabelPicks((l) => [...l, p])}
           onRemove={(p) => setLabelPicks((l) => l.filter((x) => x !== p))}
         />
-        <input className="k8s-filter" aria-label={ARGO_SEARCH} placeholder={ARGO_SEARCH} value={search} onChange={(e) => setSearch(e.target.value)} />
         <label className="argo-group-pick">
           {ARGO_GROUP_BY}
           <select value={primary} onChange={onDim(setPrimary)}>
@@ -432,11 +441,13 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
       </div>
       <div
         className="argo-scroll"
+        ref={listRef}
         onClick={(e) => {
           // 행·머리글·묶음 단추 밖의 빈 곳을 누르면 선택을 푼다
-          if (!(e.target as Element).closest("thead, tbody tr, button")) setSelected(null);
+          if (!(e.target as Element).closest("thead, tbody tr, button, .list-find")) setSelected(null);
         }}
       >
+        <ListFind find={find} placeholder={ARGO_SEARCH} count={visible.length} />
         {apps.isPending ? (
           <div className="empty">{LOADING}</div>
         ) : appRows.length === 0 ? (

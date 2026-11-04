@@ -12,7 +12,6 @@ interface Props {
   s3Service: ServiceInfo;
   location: S3Location | null;
   onLocationChange: (loc: S3Location | null) => void;
-  filter: string;
   selection: SelectionState;
   onSelectionChange: (s: SelectionState) => void;
   focused: boolean;
@@ -94,11 +93,11 @@ function BucketList(p: Props) {
     <FileTable
       columns={columns}
       rows={items}
-      filter={p.filter}
       selection={{ selected: [], anchor: null }}
       onSelectionChange={() => {}}
       onOpen={open}
       emptyText="버킷이 없어요"
+      focused={p.focused}
     />
   );
 }
@@ -119,13 +118,13 @@ function ObjectList(p: Props & { location: S3Location; up: () => void }) {
       <FileTable
         columns={S3_COLUMNS}
         rows={entries.map(s3EntryToRow)}
-        filter={p.filter}
         selection={p.selection}
         onSelectionChange={p.onSelectionChange}
         onOpen={open}
         onBack={p.up}
         onDragStart={p.onDragStart}
         emptyText="빈 폴더예요"
+        focused={p.focused}
       />
       {q.hasNextPage && (
         <button className="btn more" disabled={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>

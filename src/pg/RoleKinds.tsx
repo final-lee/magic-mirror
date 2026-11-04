@@ -15,7 +15,7 @@ export const roleShown = (role: Pick<PgRoleSummary, "kind" | "system">, kinds: R
   (role.kind === "user" ? kinds.users : kinds.groups) && (kinds.system || !role.system);
 
 /**
- * 칩과 시스템 역할 토글을 지나고, 툴바 필터(이름에만 적용, 대소문자와 앞뒤 공백은 무시, 퍼지)에도 맞는 역할.
+ * 칩과 시스템 역할 토글을 지나고, ⌘F 찾기 줄의 검색어(이름에만 적용, 대소문자와 앞뒤 공백은 무시, 퍼지)에도 맞는 역할.
  * 종류별·이름순이 화면이 정한 순서라 점수순으로 바꾸지 않고 들어온 순서를 지킨다.
  * 역할 목록과 권한 표가 같은 규칙으로 행을 거르도록 함께 쓴다.
  */

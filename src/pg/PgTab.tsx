@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSettings } from "../api/queries";
 import { DoneNotice } from "../components/DoneNotice";
 import { useApplyNotices } from "../iam/useApplyFlow";
+import { shortcutTitle } from "../keymap/keybindings";
 import { useHistoryKeys } from "../lib/useHistoryKeys";
 import { useRouteHistory } from "../lib/useRouteHistory";
 import { changeBlockReason } from "./canChange";
@@ -34,10 +35,8 @@ import { WhoCan } from "./WhoCan";
 interface Props {
   target: PgTarget;
   title: string;
-  /** 이 탭이 보이는 탭일 때만 ⌘[ ⌘]와 마우스 뒤로/앞으로 버튼에 반응한다 */
+  /** 이 탭이 보이는 탭일 때만 마우스 뒤로/앞으로 버튼에 반응한다(⌘[ ⌘]는 탭의 뿌리 상자가 보이는지로 가린다) */
   active: boolean;
-  /** 툴바 필터. 이 탭이 활성일 때만 값이 온다. */
-  filter: string;
 }
 
 // 처음 열면 역할 목록
@@ -107,7 +106,7 @@ function TopBar({ info, loginUser, connection, fetchedAt, reading, canChange, on
   );
 }
 
-export function PgTab({ target, active, filter }: Props) {
+export function PgTab({ target, active }: Props) {
   const qc = useQueryClient();
   const info = usePgTarget(target);
   const { settings, update } = useSettings();
@@ -118,7 +117,8 @@ export function PgTab({ target, active, filter }: Props) {
   const overview = usePgOverview(target, targetInfo?.iamAuth ? loginUser : null);
   const ov = overview.data;
   const { route, canBack, canForward, navigate, replace, back, forward } = useRouteHistory(HOME, samePgRoute);
-  useHistoryKeys(active, back, forward);
+  const root = useRef<HTMLDivElement>(null);
+  useHistoryKeys(root, active, back, forward);
   // 점검은 모든 데이터베이스를 읽어 무겁다. 점검 화면을 열었을 때만 읽는다. 이 탭이 계속 구독하니 한 번 읽은 건수는 화면을 떠나도 메뉴에 남는다.
   // 점검이 보이지 않는 동안의 새로 고침은, 이미 읽은 점검이면 표시와 무효화만 해 두었다가 다시 열 때 force로 읽는다(refreshPg). 한 번도 열지 않았으면 아무것도 하지 않는다.
   const findings = usePgFindings(target, !!ov && route.view === "findings");
@@ -208,10 +208,10 @@ export function PgTab({ target, active, filter }: Props) {
       />
       <div className="iam-body">
         <div className="iam-bar">
-          <button className="icon" aria-label="뒤로" title="뒤로 (⌘[)" disabled={!canBack} onClick={back}>
+          <button className="icon" aria-label="뒤로" title={shortcutTitle("뒤로", "tab.back")} disabled={!canBack} onClick={back}>
             ‹
           </button>
-          <button className="icon" aria-label="앞으로" title="앞으로 (⌘])" disabled={!canForward} onClick={forward}>
+          <button className="icon" aria-label="앞으로" title={shortcutTitle("앞으로", "tab.forward")} disabled={!canForward} onClick={forward}>
             ›
           </button>
           <nav className="iam-crumb" aria-label="현재 위치">
@@ -256,7 +256,6 @@ export function PgTab({ target, active, filter }: Props) {
           ) : route.view === "roles" ? (
             <RoleList
               roles={o.roles}
-              filter={filter}
               kinds={kinds}
               onKinds={setKinds}
               selectedId={selectedRole}
@@ -272,7 +271,6 @@ export function PgTab({ target, active, filter }: Props) {
               overview={o}
               database={database}
               onDatabase={setDatabase}
-              filter={filter}
               kinds={kinds}
               onKinds={setKinds}
               pick={pick}
@@ -320,7 +318,7 @@ export function PgTab({ target, active, filter }: Props) {
   const connection: Connection | null = !loginUser || !targetInfo?.iamAuth ? null : overview.isError ? "failed" : ov ? "connected" : "connecting";
 
   return (
-    <div className="pg">
+    <div className="pg" ref={root}>
       {targetInfo && (
         <TopBar
           info={targetInfo}

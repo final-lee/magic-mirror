@@ -1,6 +1,7 @@
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { findFor } from "../test/find";
 import { renderWithClient } from "../test/utils";
 import { AssignmentsHarness, cellOf, columnHeads, grid, rowHeads, rowOf, tray } from "../test/assignmentsHarness";
 import { iamApi } from "./api";
@@ -27,7 +28,6 @@ function setup(overview: IamOverview = sampleOverview(), extra: Partial<React.Co
   return { props, overview, update, ...utils };
 }
 
-const toolbarFilter = () => screen.getByRole("textbox", { name: "툴바 필터" });
 const expandTray = () => fireEvent.click(screen.getByRole("button", { name: /^변경 \d+개 · / }));
 const trayList = () => screen.getByRole("list", { name: "담긴 변경" });
 const trayItems = () => within(trayList()).getAllByRole("listitem").map((li) => within(li).getByText(/ · /).textContent);
@@ -61,8 +61,8 @@ describe("tabs", () => {
   });
 });
 
-describe("kind chips and the toolbar filter", () => {
-  test("unticking a kind hides its rows, and the filter narrows the names left", () => {
+describe("kind chips and the ⌘F find line", () => {
+  test("unticking a kind hides its rows, and the find line narrows the names left", () => {
     setup();
     expect(screen.getByRole("checkbox", { name: "사용자" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "그룹" })).toBeChecked();
@@ -73,20 +73,20 @@ describe("kind chips and the toolbar filter", () => {
     expect(rowHeads()).toEqual(["사용자 3", "alice", "bob", "ci-bot", "그룹 2", "admins", "dev-team"]);
 
     // 부분 일치, 대소문자 무시: "bo"는 bob과 ci-bot에 들어 있다
-    fireEvent.change(toolbarFilter(), { target: { value: "BO" } });
+    findFor("BO");
     expect(rowHeads()).toEqual(["사용자 2", "bob", "ci-bot"]);
-    fireEvent.change(toolbarFilter(), { target: { value: "bob" } });
+    findFor("bob");
     expect(rowHeads()).toEqual(["사용자 1", "bob"]);
 
     // 종류를 다시 켜면 이름이 맞는 행만 돌아온다
-    fireEvent.change(toolbarFilter(), { target: { value: "role" } });
+    findFor("role");
     fireEvent.click(screen.getByRole("checkbox", { name: "역할" }));
     expect(rowHeads()).toEqual(["역할 2", "app-role", "AWSServiceRoleForSupport"]);
   });
 
-  test("the filter looks at the name, not the ARN", () => {
+  test("the find line looks at the name, not the ARN", () => {
     setup();
-    fireEvent.change(toolbarFilter(), { target: { value: "123456789012" } });
+    findFor("123456789012");
     expect(screen.getByText("보여줄 행이 없어요")).toBeInTheDocument();
   });
 
@@ -96,10 +96,10 @@ describe("kind chips and the toolbar filter", () => {
     expect(screen.getByText("보여줄 행이 없어요")).toBeInTheDocument();
   });
 
-  test("a pending change stays in the tray while its row is filtered away", () => {
+  test("a pending change stays in the tray while its row is found away", () => {
     setup();
     fireEvent.click(cellOf("bob", "ReadOnlyAccess"));
-    fireEvent.change(toolbarFilter(), { target: { value: "alice" } });
+    findFor("alice");
     expect(screen.queryByRole("button", { name: /^bob · / })).not.toBeInTheDocument();
     expect(tray()).toBe("변경 1개 · ReadOnlyAccess 붙이기 · bob");
   });
@@ -238,11 +238,11 @@ describe("the members tab", () => {
     expect(within(rowOf("alice")).queryByText("경계")).not.toBeInTheDocument();
   });
 
-  test("a group header opens the group, and the filter narrows the users", () => {
+  test("a group header opens the group, and the find line narrows the users", () => {
     const { props } = setup(sampleOverview(), { initialTab: "members" });
     fireEvent.click(screen.getByRole("button", { name: "admins" }));
     expect(props.onOpen).toHaveBeenLastCalledWith({ view: "groups", id: "arn:aws:iam::123456789012:group/admins" });
-    fireEvent.change(toolbarFilter(), { target: { value: "ci" } });
+    findFor("ci");
     expect(rowHeads()).toEqual(["ci-bot"]);
   });
 

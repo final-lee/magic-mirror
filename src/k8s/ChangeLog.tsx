@@ -1,7 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
+import { useRef } from "react";
 import { errorMessage } from "../api/errors";
+import { ListFind, useListFind } from "../components/ListFind";
 import { formatDateTime } from "../iam/format";
 import { usePrepare } from "../lib/changeLog";
+import { fuzzyKeep } from "../lib/fuzzy";
 import { k8sApi } from "./api";
 import * as t from "./text";
 import type { K8sChange, K8sTarget } from "./types";
@@ -19,15 +22,21 @@ export function ChangeLog({ target, onStart }: Props) {
     .filter((e) => e.target.profile === target.profile && e.target.region === target.region && e.target.cluster === target.cluster)
     .slice()
     .sort((a, b) => b.at.localeCompare(a.at));
+  // ⌘F: 이 변경 기록 안에서만 찾는다. 평소에는 찾기 줄이 없다
+  const box = useRef<HTMLElement>(null);
+  const find = useListFind(box);
+  const listed = fuzzyKeep(entries, find.query, (e) => [e.summary, e.error, formatDateTime(e.at), e.ok ? t.CHANGE_SUCCESS : t.CHANGE_FAILED]);
 
   return (
-    <section>
+    <section ref={box}>
       <h2>{t.CHANGE_LOG}</h2>
+      <ListFind find={find} count={listed.length} />
       {q.isError && <p className="err">{errorMessage(q.error)}</p>}
       {q.isSuccess && entries.length === 0 && <p>{t.CHANGE_NO_LOG}</p>}
+      {entries.length > 0 && listed.length === 0 && <p>{t.LIST_NO_MATCH}</p>}
       <table className="k8s-table">
         <tbody>
-          {entries.map((entry) => (
+          {listed.map((entry) => (
             <tr key={entry.id}>
               <td>{formatDateTime(entry.at)}</td>
               <td>{entry.summary}</td>

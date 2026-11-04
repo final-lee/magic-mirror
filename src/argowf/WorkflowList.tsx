@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArgoLabelFilter } from "../argocd/ArgoLabelFilter";
 import { ArgoMultiSelect } from "../argocd/ArgoMultiSelect";
 import { desktop } from "../api/desktop";
 import { errorMessage } from "../api/errors";
 import { Highlight } from "../components/Highlight";
+import { ListFind, useListFind } from "../components/ListFind";
 import { fuzzyKeep, tokenize } from "../lib/fuzzy";
 import { useDebounced } from "../lib/useDebounced";
 import { ActionDialog, needsTypedName } from "./ActionDialog";
@@ -89,7 +90,9 @@ export function WorkflowList({
   onTokenError(m: string): void;
 }) {
   const qc = useQueryClient();
-  const [search, setSearch] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+  const find = useListFind(listRef);
+  const search = find.query;
   const [name, setName] = useState("");
   const [nameMode, setNameMode] = useState<NameMode>("prefix");
   const [after, setAfter] = useState("");
@@ -271,7 +274,6 @@ export function WorkflowList({
         <button className="btn small" aria-pressed={filters.mine} title={`creator가 ${identity}인 것만`} onClick={() => save({ mine: !filters.mine })}>
           내 것만
         </button>
-        <input aria-label="Workflow 검색" placeholder="검색" value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
       <div className="argowf-filters">
         <ArgoLabelFilter options={wfLabelOptions(pool, counted)} picks={picks} onAdd={addPick} onRemove={removePick} />
@@ -326,7 +328,8 @@ export function WorkflowList({
         </div>
       )}
       {list.isError && !isTokenError(list.error) && <p className="err">{errorMessage(list.error)}</p>}
-      <div className="argowf-table-wrap">
+      <div className="argowf-table-wrap" ref={listRef}>
+        <ListFind find={find} placeholder="Workflow 검색" count={visible.length} />
         <table className="argowf-table">
           <thead>
             <tr>

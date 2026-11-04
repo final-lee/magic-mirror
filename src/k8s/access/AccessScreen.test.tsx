@@ -5,6 +5,7 @@ import { AccessScreen } from "./AccessScreen";
 import { accessApi } from "./api";
 import { accessView, grant, mapping } from "./fixtures";
 import { MY_PERMISSIONS, RBAC_MISSING, REFRESH, SCOPE_NOTE, TAB_IDENTITIES, TAB_MATRIX, TAB_WHO_CAN, TAB_WORKLOAD } from "./text";
+import { findInput } from "../testFind";
 
 vi.mock("./api", () => ({ accessApi: { access: vi.fn(), matrix: vi.fn(), cell: vi.fn(), whoCan: vi.fn(), review: vi.fn(), workloadIdentity: vi.fn() } }));
 vi.mock("../api", () => ({ k8sApi: { rules: vi.fn() } }));
@@ -51,7 +52,7 @@ test("opening a subject from the identities jumps to the matrix filtered by that
   fireEvent.click(await screen.findByRole("button", { name: "권한 표" }));
   expect(screen.getByRole("tab", { name: TAB_MATRIX })).toHaveAttribute("aria-selected", "true");
   await waitFor(() => expect(m.matrix).toHaveBeenCalledWith(T, expect.objectContaining({ text: CI }), "p"));
-  expect(screen.getByLabelText("주체 이름 필터")).toHaveValue(CI);
+  expect(findInput()).toHaveValue(CI);
 });
 
 test("my permissions is one click away", async () => {

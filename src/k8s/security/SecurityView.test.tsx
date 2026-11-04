@@ -7,6 +7,7 @@ import { ALLOWED, READ_ONLY, TARGET, finding, report } from "./fixtures";
 import { SecurityView } from "./SecurityView";
 import * as t from "./text";
 import type { SecurityChecksSetting, SecurityReport } from "./types";
+import { findFor, findInputs } from "../testFind";
 
 vi.mock("./api", () => ({ securityApi: { findings: vi.fn() } }));
 vi.mock("../api", () => ({ k8sApi: { rules: vi.fn() } }));
@@ -133,14 +134,15 @@ test("a severity card filters the list and clicking it again clears the filter",
   expect(within(table()).getAllByRole("row").slice(1)).toHaveLength(7);
 });
 
-test("the search box filters by target and message", async () => {
+test("⌘F opens the find line (no search box before) and it filters by target and message", async () => {
   setup();
   await screen.findByRole("table", { name: t.FINDINGS_TABLE_LABEL });
-  fireEvent.change(screen.getByRole("searchbox", { name: t.FILTER_PLACEHOLDER }), { target: { value: "runner" } });
+  expect(findInputs()).toHaveLength(0);
+  findFor("runner");
   const rows = within(table()).getAllByRole("row").slice(1);
   expect(rows).toHaveLength(1);
   expect(rows[0]).toHaveTextContent("ServiceAccount ci/runner");
-  fireEvent.change(screen.getByRole("searchbox", { name: t.FILTER_PLACEHOLDER }), { target: { value: "no-such" } });
+  findFor("no-such");
   expect(screen.getByText(t.NO_MATCH)).toBeInTheDocument();
 });
 

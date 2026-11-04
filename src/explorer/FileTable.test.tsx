@@ -1,6 +1,8 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { dispatchKey } from "../keymap/registry";
 import { FileTable } from "./FileTable";
 import { S3_COLUMNS } from "../lib/s3";
+import { findFor } from "../test/find";
 import { makeResource } from "../test/utils";
 import type { SelectionState } from "./selection";
 
@@ -14,7 +16,6 @@ function setup(selection: SelectionState = { selected: [], anchor: null }, extra
   const props = {
     columns: S3_COLUMNS,
     rows,
-    filter: "",
     selection,
     onSelectionChange: vi.fn(),
     onOpen: vi.fn(),
@@ -66,7 +67,7 @@ test("dragging a selected row drags the whole selection after a small threshold"
   expect(p.onDragStart).toHaveBeenCalledWith(["/p/a.txt", "/p/b.txt"], { clientX: 30, clientY: 10 });
 });
 
-test("dragging an unselected row drags only that row; filter hides rows", () => {
+test("dragging an unselected row drags only that row", () => {
   const p = setup({ selected: ["/p/a.txt"], anchor: "/p/a.txt" });
   fireEvent.pointerDown(row("📄 c.txt"), { clientX: 0, clientY: 0, button: 0 });
   fireEvent.pointerMove(row("📄 c.txt"), { clientX: 20, clientY: 0, buttons: 1 });
@@ -75,12 +76,12 @@ test("dragging an unselected row drags only that row; filter hides rows", () => 
 
 test("empty text", () => {
   render(
-    <FileTable columns={S3_COLUMNS} rows={[]} filter="" selection={{ selected: [], anchor: null }} onSelectionChange={() => {}} onOpen={() => {}} emptyText="비어 있어요" />,
+    <FileTable columns={S3_COLUMNS} rows={[]} selection={{ selected: [], anchor: null }} onSelectionChange={() => {}} onOpen={() => {}} emptyText="비어 있어요" />,
   );
   expect(screen.getByText("비어 있어요")).toBeInTheDocument();
 });
 
-describe("filter order", () => {
+describe("⌘F find order", () => {
   const files = [
     makeResource("/p/aardvark.txt", { name: "📄 aardvark.txt", kind: "File", size: "1" }, { name: "aardvark.txt" }),
     makeResource("/p/rd-notes.txt", { name: "📄 rd-notes.txt", kind: "File", size: "2" }, { name: "rd-notes.txt" }),
@@ -88,13 +89,15 @@ describe("filter order", () => {
   const names = () => screen.getAllByRole("row").slice(1).map((r) => r.textContent);
 
   test("검색 중에는 잘 맞는 순서로 보이고 화살표는 숨긴다", () => {
-    setup(undefined, { rows: files, filter: "rd" });
+    setup(undefined, { rows: files });
+    findFor("rd");
     expect(names()[0]).toContain("rd-notes.txt");
     expect(screen.getByText(/Name/).textContent).not.toMatch(/[▲▼]/);
   });
 
   test("헤더를 누르면 그 열 정렬이 이긴다", () => {
-    setup(undefined, { rows: files, filter: "rd" });
+    setup(undefined, { rows: files });
+    findFor("rd");
     fireEvent.click(screen.getByText(/Name/));
     expect(names()[0]).toContain("aardvark.txt");
     expect(screen.getByText(/Name/).textContent).toContain("▲");
@@ -156,4 +159,23 @@ describe("deselect", () => {
     fireEvent.click(row("📄 a.txt"), { metaKey: true, detail: 1 });
     expect(p.onSelectionChange).toHaveBeenCalledWith({ selected: [], anchor: "/p/a.txt" });
   });
+});
+
+test("the find line is hidden until ⌘F, filters only this table and Esc clears it", () => {
+  setup();
+  expect(screen.queryByRole("search")).toBeNull();
+  const input = findFor("b.t");
+  expect(screen.getAllByRole("row")).toHaveLength(2);
+  expect(screen.getByText("📄 b.txt")).toBeInTheDocument();
+  fireEvent.keyDown(input, { key: "Escape" });
+  expect(screen.queryByRole("search")).toBeNull();
+  expect(screen.getAllByRole("row")).toHaveLength(4);
+});
+
+test("a table that is not the focused pane does not take ⌘F", () => {
+  setup(undefined, { focused: false });
+  act(() => {
+    dispatchKey(new KeyboardEvent("keydown", { key: "f", metaKey: true, cancelable: true }));
+  });
+  expect(screen.queryByRole("search")).toBeNull();
 });

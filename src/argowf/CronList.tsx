@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ErrorState } from "../components/ErrorState";
 import { Highlight } from "../components/Highlight";
+import { ListFind, useListFind } from "../components/ListFind";
 import { fuzzyFilter, tokenize } from "../lib/fuzzy";
 import { cronKey, runsByCron } from "./catalogData";
 import { relTime } from "./catalogFormat";
@@ -45,7 +46,9 @@ const byName = (a: CronRow, b: CronRow) => a.namespace.localeCompare(b.namespace
 export function CronList({ conn, live, namespace = null, workflows, selected, onOpen, onTokenError }: Props) {
   const q = useCrons(conn, namespace, live);
   useTokenGate([q.error], onTokenError);
-  const [search, setSearch] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+  const find = useListFind(listRef);
+  const search = find.query;
   const [creating, setCreating] = useState(false);
   const runs = useMemo(() => runsByCron(workflows), [workflows]);
   const sorted = useMemo(() => (q.data ?? []).filter((c) => !namespace || c.namespace === namespace).sort(byName), [q.data, namespace]);
@@ -69,14 +72,14 @@ export function CronList({ conn, live, namespace = null, workflows, selected, on
       {q.isError && <ErrorState error={q.error} profile={conn.ssoProfile ?? ""} compact onRetry={() => void q.refetch()} />}
       <div className="awc-bar">
         <h2 className="awc-title">CronWorkflows</h2>
-        <input className="k8s-filter" aria-label={CRON_SEARCH} placeholder={CRON_SEARCH} value={search} onChange={(e) => setSearch(e.target.value)} />
         <div className="awc-bar-end">
           <button className="btn primary small" onClick={() => setCreating(true)}>
             만들기
           </button>
         </div>
       </div>
-      <div className="awc-scroll">
+      <div className="awc-scroll" ref={listRef}>
+        <ListFind find={find} placeholder={CRON_SEARCH} count={rows.length} />
         {q.isPending ? (
           <div className="empty">{CAT_LOADING}</div>
         ) : sorted.length === 0 ? (

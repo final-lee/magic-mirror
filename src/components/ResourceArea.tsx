@@ -11,6 +11,7 @@ import { OPEN_EKS_TAB } from "../k8s/text";
 import type { PgTarget } from "../pg/types";
 import { Breadcrumb } from "./Breadcrumb";
 import { DetailPanel } from "./DetailPanel";
+import { ListFind, useListFind } from "./ListFind";
 import { ErrorState } from "./ErrorState";
 import { RawModal } from "./RawModal";
 import { ResourceTable } from "./ResourceTable";
@@ -22,7 +23,6 @@ interface Props {
   profile: string;
   region: string;
   account: string | undefined;
-  filter: string;
   onOpenBucket: (loc: S3Location) => void;
   onOpenVpc?: (vpc: { vpcId: string; name: string; region: string }) => void;
   /** IAM 사용자·역할·정책을 열 때 IAM 작업 공간으로 보낸다. arn이 없으면 대상 없이 탭만 연다. */
@@ -48,8 +48,11 @@ const NOTICE_MS = 5000;
 /** ⌘K에서 고른 리소스가 다시 읽은 목록에 없을 때 */
 export const FOCUS_GONE = "찾던 리소스가 지금 목록에 없어요. 지워졌을 수 있어요";
 
-export function ResourceArea({ service, type, profile, region, account, filter, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onRefresh, active, focus = null }: Props) {
+export function ResourceArea({ service, type, profile, region, account, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onRefresh, active, focus = null }: Props) {
   const q = useResources(profile, region, service, type.id);
+  // ⌘F: 이 목록 안에서만 찾는다(평소에는 찾기 줄이 없다)
+  const listBox = useRef<HTMLElement>(null);
+  const find = useListFind(listBox, { enabled: active });
   const [selectedId, setSelectedId] = useState<string | null>(focus?.id ?? null);
   // 보이게 할 행. 표가 보이게 하면 비우고, 다 읽었는데 없으면 안내하고 비운다.
   const [reveal, setReveal] = useState<string | null>(focus?.id ?? null);
@@ -104,7 +107,7 @@ export function ResourceArea({ service, type, profile, region, account, filter, 
 
   return (
     <>
-      <section className="center detail-host">
+      <section className="center detail-host" ref={listBox}>
         <Breadcrumb service={service} segments={[{ label: type.name }]} count={q.data ? items.length : undefined} />
         {q.data?.truncated && <div className="notice">1,000개까지만 표시해요</div>}
         {notice && (
@@ -118,17 +121,20 @@ export function ResourceArea({ service, type, profile, region, account, filter, 
         ) : q.isPending ? (
           <div className="empty">불러오는 중…</div>
         ) : (
-          <ResourceTable
-            columns={type.columns}
-            items={items}
-            filter={filter}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            onClear={() => setSelectedId(null)}
-            onOpen={open}
-            revealId={reveal}
-            onRevealed={revealed}
-          />
+          <>
+            <ListFind find={find} />
+            <ResourceTable
+              columns={type.columns}
+              items={items}
+              filter={find.query}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onClear={() => setSelectedId(null)}
+              onOpen={open}
+              revealId={reveal}
+              onRevealed={revealed}
+            />
+          </>
         )}
         <StatusBar profile={profile} account={account} region={service.global ? GLOBAL : region} updatedAt={q.dataUpdatedAt} />
         <DetailPanel

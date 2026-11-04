@@ -2,8 +2,9 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { newQueryClient, ssoLoginStub, withClientAndSso } from "../../test/utils";
 import { accessView, iam, mapping } from "./fixtures";
 import { IdentitiesTab } from "./IdentitiesTab";
-import { AWS_AUTH_NONE, INACTIVE, MODE_NOTES, MODE_UNKNOWN, NOT_EVALUATED, RBAC_MISSING, SEE_MATRIX, SSO_GROUP_TITLE, gapText, ssoGroupRow } from "./text";
+import { AWS_AUTH_NONE, INACTIVE, MODE_NOTES, MODE_UNKNOWN, NOT_EVALUATED, RBAC_MISSING, NO_IDENTITY_MATCH, SEE_MATRIX, SSO_GROUP_TITLE, gapText, ssoGroupRow } from "./text";
 import type { AccessView } from "./types";
+import { findFor, findInputs } from "../testFind";
 
 vi.mock("../../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 const T = { profile: "app", region: "r", cluster: "id" };
@@ -85,4 +86,18 @@ test("unreadable sources, a missing RBAC read and dangling bindings are all repo
   expect(screen.getByText("읽기 거부")).toBeInTheDocument();
   expect(screen.getByText(RBAC_MISSING)).toBeInTheDocument();
   expect(screen.getByText(/ClusterRoleBinding old → ClusterRole gone/)).toBeInTheDocument();
+});
+
+test("⌘F finds identities by name, username, group or policy across folded SSO groups, and lists the matches flat", () => {
+  setup(accessView({ mappings: [sso(SSO_A), sso(SSO_B), mapping(CI)] }));
+  expect(findInputs()).toHaveLength(0);
+  findFor("bbbb");
+  expect(screen.getByText(SSO_B)).toBeInTheDocument();
+  expect(screen.queryByText(SSO_A)).not.toBeInTheDocument();
+  expect(screen.queryByText(CI)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Admin.*펼치기/ })).not.toBeInTheDocument();
+  findFor("nothing-like-this");
+  expect(screen.getByText(NO_IDENTITY_MATCH)).toBeInTheDocument();
+  fireEvent.keyDown(findInputs()[0], { key: "Escape" });
+  expect(screen.getByText(CI)).toBeInTheDocument();
 });
