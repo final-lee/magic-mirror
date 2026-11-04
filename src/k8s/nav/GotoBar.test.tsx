@@ -108,6 +108,23 @@ test("clicking a completion goes there without losing the cursor first", () => {
   expect(onGo).toHaveBeenCalledWith({ type: "kind", kind: expect.objectContaining({ plural: "services" }) });
 });
 
+test("choosing ambiguous kinds by click or Tab preserves the selected group and history", () => {
+  const a = { ...TEST_KINDS[1], group: "one.example", kind: "Widget", plural: "widgets", singularName: "widget", shortNames: [], custom: true };
+  const b = { ...a, group: "two.example" };
+  const onGo = vi.fn();
+  render(<GotoBar ctx={{ kinds: [a, b], namespaces: [] }} onGo={onGo} onClose={() => {}} />);
+  const input = screen.getByRole("textbox", { name: "이동 명령" });
+  fireEvent.change(input, { target: { value: "widgets" } });
+  const options = screen.getAllByRole("option");
+  const second = options.find((option) => option.textContent?.includes("two.example"))!;
+  fireEvent.click(second);
+  expect(onGo).toHaveBeenLastCalledWith({ type: "kind", kind: expect.objectContaining({ group: "two.example" }) });
+  expect(loadHistory()[0]).toBe("widgets.two.example");
+  fireEvent.keyDown(input, { key: "Tab" });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(onGo).toHaveBeenLastCalledWith({ type: "kind", kind: expect.objectContaining({ group: "one.example" }) });
+});
+
 describe(":ns", () => {
   test("completes namespaces after ns and a space, and Enter switches", () => {
     const { onGo, onClose, type, key, input } = open();

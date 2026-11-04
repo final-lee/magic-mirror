@@ -1,5 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { ListFind, useListFind } from "../../components/ListFind";
+import { vimTableKeys } from "../../iam/ListTable";
 import { K8sError } from "../K8sError";
 import { DETAIL_PCT } from "../lanes";
 import type { K8sChange, K8sTarget } from "../types";
@@ -149,7 +150,7 @@ export function MatrixTab({ target, context, ssoProfile, live, view, namespace, 
         </details>
       </div>
       {q.isError && <K8sError error={q.error} target={target} ssoProfile={ssoProfile} compact />}
-      <div className="acc-grid-wrap" onClick={blank}>
+      <div className="acc-grid-wrap" onClick={blank} tabIndex={0} onKeyDown={vimTableKeys}>
         {!data && !q.isError && <div className="empty">{LOADING}</div>}
         {data && (
           <table className="acc-grid" aria-label={MATRIX_LABEL}>

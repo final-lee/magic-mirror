@@ -883,6 +883,7 @@ describe("when the rows on screen change", () => {
   test("an open note on an inherited cell closes", () => {
     setup();
     fireEvent.click(cellOf("alice", "app-deploy"));
+    focusCell(cellOf("alice", "app-deploy"));
     findFor("ali");
     expect(screen.queryByText("dev-team 그룹에서 받아요")).not.toBeInTheDocument();
   });

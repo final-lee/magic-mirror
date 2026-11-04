@@ -44,6 +44,20 @@ test("watches events in the namespace and shows newest first", async () => {
   expect(screen.getByText("Pod/b")).toBeInTheDocument();
 });
 
+test("event rows support vim movement", async () => {
+  setup();
+  await vi.waitFor(() => expect(m.watch).toHaveBeenCalled());
+  act(() => emit({ type: "reset", rows: [ev("a", "Normal", "2026-10-30T11:00:00Z"), ev("b", "Warning", "2026-10-30T11:58:00Z")] }));
+  const table = screen.getByRole("table");
+  const rows = within(table).getAllByRole("row").slice(1);
+  fireEvent.keyDown(table, { key: "j" });
+  expect(rows[0]).toHaveAttribute("aria-selected", "true");
+  fireEvent.keyDown(table, { key: "G", shiftKey: true });
+  expect(rows[1]).toHaveAttribute("aria-selected", "true");
+  fireEvent.keyDown(table, { key: "k" });
+  expect(rows[0]).toHaveAttribute("aria-selected", "true");
+});
+
 test("Warning only", async () => {
   setup();
   await vi.waitFor(() => expect(m.watch).toHaveBeenCalled());

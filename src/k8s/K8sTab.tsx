@@ -121,11 +121,13 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
   const kinds = useK8sKinds(target, chosen, ssoProfile, live);
   const nsOrAll = namespace === ALL ? null : namespace;
   const openNode = (name: string) => {
+    setGotoKind(null);
     setFocus((f) => ({ ref: { kind: NODES, namespace: null, name }, nonce: (f?.nonce ?? 0) + 1 }));
     setView("workloads");
   };
   // 네트워크·Helm 화면의 링크(Service, Ingress, Pod, NetworkPolicy, 릴리스 리소스)도 같은 길로 워크로드 화면에서 연다
   const openObject = (ref: ObjectRef) => {
+    setGotoKind(null);
     setFocus((f) => ({ ref, nonce: (f?.nonce ?? 0) + 1 }));
     setView("workloads");
   };
@@ -141,6 +143,7 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
   );
   const goto = (g: Goto) => {
     if (g.type === "kind") {
+      setFocus(null);
       setGotoKind((k) => ({ kind: g.kind, nonce: (k?.nonce ?? 0) + 1 }));
       setView("workloads");
     } else if (g.type === "view") {

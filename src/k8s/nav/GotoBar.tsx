@@ -34,13 +34,13 @@ export function GotoBar({ ctx, onGo, onClose }: Props) {
   const shown = pick !== null && list[pick] ? list[pick].text : typed;
   const showHistory = typed.trim() === "" && history.length > 0;
 
-  const run = (text: string) => {
-    const parsed = parseGoto(text, ctx);
+  const run = (text: string, selected?: Goto) => {
+    const parsed = selected ? { ok: true as const, goto: selected } : parseGoto(text, ctx);
     if (!parsed.ok) {
       setError(parsed.message);
       return;
     }
-    pushHistory(text);
+    pushHistory(selected?.type === "kind" && selected.kind.group ? `${selected.kind.plural}.${selected.kind.group}` : text);
     onGo(parsed.goto);
     onClose(true);
   };
@@ -59,7 +59,7 @@ export function GotoBar({ ctx, onGo, onClose }: Props) {
       onClose(false);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      run(shown);
+      run(shown, pick === null ? undefined : list[pick]?.goto);
     } else if (e.key === "Tab") {
       e.preventDefault();
       if (list.length === 0) return;
@@ -83,7 +83,7 @@ export function GotoBar({ ctx, onGo, onClose }: Props) {
     }
   };
 
-  const choose = (c: Completion) => run(c.text);
+  const choose = (c: Completion) => run(c.text, c.goto);
 
   return (
     <div
@@ -128,7 +128,7 @@ export function GotoBar({ ctx, onGo, onClose }: Props) {
         <ul className="k8s-goto-list" role="listbox" aria-label={GOTO_COMPLETIONS_LABEL}>
           {list.map((c, i) => (
             <li
-              key={`${c.group}/${c.text}`}
+              key={`${c.group}/${c.text}/${c.goto?.type === "kind" ? c.goto.kind.group : ""}`}
               role="option"
               aria-selected={pick === i}
               className={`k8s-goto-item${pick === i ? " on" : ""}`}
