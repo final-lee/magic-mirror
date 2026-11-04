@@ -2,7 +2,7 @@
 //! 고정하는 방법은 이 탭의 context 하나만 남긴(현재 context로 설정한) 임시 kubeconfig를 만들어 `KUBECONFIG`로 주고,
 //! 부모에서 물려받은 `KUBECONFIG`·`KUBE*`·`HELM_KUBE*`는 치우는 것이다. 임시 파일은 터미널을 닫으면(탭 닫기, 앱 끄기 포함) 지운다.
 //! 셸 입력·출력은 어디에도 남기지 않는다. 기록은 열고 닫은 시각과 대상(context)뿐이고 변경 기록에 한 줄로 남는다(`Shells`가 쥔다).
-//! 플러그인 명령은 확인 창에서 사용자가 본 그대로를 `-lc`의 인자 하나로 넘긴다(키 입력으로 흉내 내지 않는다).
+//! 플러그인 명령은 확인 창에서 사용자가 본 그대로를 POSIX 셸의 `-c` 인자 하나로 넘긴다.
 use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -17,7 +17,7 @@ use super::change::{Change, ChangeObject, Operation};
 use super::kubeconfig::{exec_profile, minify};
 use super::log;
 use super::rows::KindRef;
-use super::shell::{decode_chunk, Cleanup, Input, ShellMessage, ShellOpened, Shells};
+use super::shell::{decode_chunk, Cleanup, ExitSender, Input, ShellMessage, ShellOpened, Shells};
 use super::target::K8sTarget;
 use crate::error::AppError;
 use crate::iam::clock::iso;
@@ -98,11 +98,11 @@ pub fn shell_of(env_shell: Option<&str>) -> String {
     }
 }
 
-/// 셸에 넘길 인자: 명령이 없으면 로그인 셸(`-l`, 터미널이라 대화형), 있으면 `-lc <명령>`(명령 전체가 인자 하나)
+/// 대화형 터미널은 로그인 셸을, 플러그인은 POSIX 셸을 사용한다.
 pub fn argv_of(shell: &str, command: Option<&str>) -> Vec<String> {
     match command {
         None => vec![shell.to_string(), "-l".into()],
-        Some(command) => vec![shell.to_string(), "-lc".into(), command.to_string()],
+        Some(command) => vec!["/bin/sh".into(), "-c".into(), command.to_string()],
     }
 }
 
@@ -118,10 +118,48 @@ pub fn exec_profile_of(config: &Kubeconfig, context: &str) -> Option<String> {
 pub fn write_pinned(config: &Kubeconfig, context: &str) -> Result<NamedTempFile, AppError> {
     let pinned = minify(config, context)?;
     let text = serde_json::to_string_pretty(&pinned).map_err(|_| AppError::other(KUBECONFIG_FAILED))?;
-    let mut file = tempfile::Builder::new().prefix("mm-kubeconfig-").suffix(".yaml").tempfile().map_err(|_| AppError::other(KUBECONFIG_FAILED))?;
+    let mut file = tempfile::Builder::new().prefix(&format!("mm-kubeconfig-{}-", std::process::id())).suffix(".yaml").tempfile().map_err(|_| AppError::other(KUBECONFIG_FAILED))?;
     std::io::Write::write_all(&mut file, text.as_bytes()).map_err(|_| AppError::other(KUBECONFIG_FAILED))?;
     Ok(file)
 }
+
+/// 현재 사용자가 남긴 앱의 임시 kubeconfig만 지운다. 심볼릭 링크와 디렉터리는 건드리지 않는다.
+#[cfg(unix)]
+pub fn sweep_pinned_in(dir: &Path) {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(probe) = tempfile::tempfile_in(dir) else { return };
+    let Ok(metadata) = probe.metadata() else { return };
+    let uid = metadata.uid();
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let Some(stem) = name.strip_prefix("mm-kubeconfig-").and_then(|n| n.strip_suffix(".yaml")) else { continue };
+        if stem.is_empty() {
+            continue;
+        }
+        if let Some((pid, random)) = stem.split_once('-') {
+            let Ok(pid) = pid.parse::<libc::pid_t>() else { continue };
+            if pid <= 0 || random.is_empty() || !random.chars().all(|c| c.is_ascii_alphanumeric()) {
+                continue;
+            }
+            // 살아 있거나 확인 권한이 없는 프로세스의 파일은 보존한다.
+            let result = unsafe { libc::kill(pid, 0) };
+            if result == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH) {
+                continue;
+            }
+        } else if !stem.chars().all(|c| c.is_ascii_alphanumeric()) {
+            continue;
+        }
+        let Ok(metadata) = std::fs::symlink_metadata(entry.path()) else { continue };
+        if metadata.file_type().is_file() && metadata.uid() == uid {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+#[cfg(not(unix))]
+pub fn sweep_pinned_in(_dir: &Path) {}
 
 fn locked<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
@@ -205,13 +243,14 @@ impl Launched {
         });
         let record_target = target.clone();
         let record_command = command.clone();
+        let mut sender = ExitSender::new(send);
         shells.register_with(
             log,
             target,
             move |id, now| record_of(&record_target, &context, record_command.as_deref(), id, now),
             true,
             Some(cleanup),
-            move |rx| session(terminal, output, exit, rx, send),
+            move |rx| session(terminal, output, exit, rx, move |message| sender.send(message)),
         )
     }
 }

@@ -6,6 +6,8 @@ export interface TerminalTab {
   title: string;
   /** 확인을 거친 플러그인 명령. null이면 로그인 셸 */
   command: string | null;
+  /** 이 탭의 명령 실행권은 한 번만 소비한다. */
+  launch?: { claimed: boolean };
 }
 
 interface State {
@@ -23,7 +25,7 @@ export function useTerminals() {
   const open = useCallback((command: string | null = null, title?: string) => {
     const id = ++next.current;
     const label = title ?? terminalTitle(++shells.current);
-    setState((s) => ({ tabs: [...s.tabs, { id, title: label, command }], active: id }));
+    setState((s) => ({ tabs: [...s.tabs, { id, title: label, command, launch: { claimed: false } }], active: id }));
     return id;
   }, []);
 
