@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Highlight } from "../components/Highlight";
 import { useModal } from "../iam/useModal";
 import { fuzzyRank, tokenize } from "../lib/fuzzy";
@@ -25,11 +25,8 @@ export function CommandPalette({ onRun, onClose }: { onRun: (command: string) =>
   const { sheetRef, trapTab } = useModal(onClose);
   useEffect(() => inputRef.current?.focus(), []);
 
-  // 열 때 한 번: 이 화면에서 처리할 곳이 있는 명령만
-  const available = useMemo(
-    () => Object.entries(COMMANDS).filter(([id]) => id !== "app.commandPalette" && canRun(id)).map(([id, info]) => ({ id, title: info.title })),
-    [],
-  );
+  // 이 화면에서 처리할 곳이 있는 명령만
+  const available = Object.entries(COMMANDS).filter(([id]) => id !== "app.commandPalette" && canRun(id)).map(([id, info]) => ({ id, title: info.title }));
   const tokens = tokenize(query);
   const shown = tokens.length === 0 ? available : fuzzyRank(available, query, (c) => [c.title, c.id]).map((r) => r.item);
   const active = shown[Math.min(activeIndex, shown.length - 1)];
