@@ -1,7 +1,9 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { ListFind, useListFind } from "../components/ListFind";
+import { fuzzyKeep } from "../lib/fuzzy";
 import { amount, formatDelta, formatMoney, formatPct, formatShare } from "./format";
 import { trendClass } from "./SummaryCards";
-import { BREAKDOWN_EMPTY, BREAKDOWN_LABEL, COL, DRILL_HINT, smallRows } from "./text";
+import { BREAKDOWN_EMPTY, BREAKDOWN_NO_MATCH, BREAKDOWN_LABEL, COL, DRILL_HINT, smallRows } from "./text";
 import type { BreakdownRow, CostBreakdown } from "./types";
 
 type SortKey = keyof typeof COL;
@@ -29,9 +31,13 @@ export function BreakdownTable({ breakdown: b, compare, drillable, onDrill }: Pr
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "current", dir: -1 });
   const cols: SortKey[] = compare ? ["label", "current", "previous", "delta", "deltaPct", "share"] : ["label", "current", "share"];
 
+  // ⌘F: 이 항목 표 안에서만 찾는다(이름과 키). 평소에는 찾기 줄이 없다. 찾는 동안 작은 항목 모음 줄은 숨긴다
+  const box = useRef<HTMLDivElement>(null);
+  const find = useListFind(box, { enabled: b.rows.length > 0 });
+  const searching = find.query.trim() !== "";
   const rows = useMemo(() => {
     const get = SORT_VALUE[sort.key];
-    return [...b.rows].sort((x, y) => {
+    return [...fuzzyKeep(b.rows, find.query, (r) => [r.label, r.key])].sort((x, y) => {
       const p = get(x);
       const q = get(y);
       // 값이 없는 행은 방향과 상관없이 맨 아래
@@ -39,7 +45,7 @@ export function BreakdownTable({ breakdown: b, compare, drillable, onDrill }: Pr
       const c = typeof p === "number" && typeof q === "number" ? p - q : String(p).localeCompare(String(q), "ko");
       return c * sort.dir;
     });
-  }, [b.rows, sort]);
+  }, [b.rows, sort, find.query]);
 
   // 이름은 오름차순, 금액·비율은 큰 것부터 시작한다
   const toggle = (key: SortKey) => setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: key === "label" ? 1 : -1 }));
@@ -72,7 +78,8 @@ export function BreakdownTable({ breakdown: b, compare, drillable, onDrill }: Pr
     share: formatShare(total > 0 ? (amount(b.small.current) / total) * 100 : 0),
   };
   return (
-    <div className="cost-table">
+    <div className="cost-table" ref={box}>
+      <ListFind find={find} count={rows.length} />
       <table aria-label={BREAKDOWN_LABEL}>
         <thead>
           <tr>
@@ -106,7 +113,7 @@ export function BreakdownTable({ breakdown: b, compare, drillable, onDrill }: Pr
               ))}
             </tr>
           ))}
-          {small && (
+          {small && !searching && (
             <tr className="cost-small">
               {cols.map((key) => (
                 <td key={key} className={key === "label" ? "cost-label" : "num"}>
@@ -118,6 +125,7 @@ export function BreakdownTable({ breakdown: b, compare, drillable, onDrill }: Pr
         </tbody>
       </table>
       {b.rows.length === 0 && !b.small && <div className="empty small">{BREAKDOWN_EMPTY}</div>}
+      {b.rows.length > 0 && rows.length === 0 && <div className="empty small">{BREAKDOWN_NO_MATCH}</div>}
     </div>
   );
 }

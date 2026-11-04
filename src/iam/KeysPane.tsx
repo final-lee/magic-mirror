@@ -1,4 +1,7 @@
+import { useRef } from "react";
 import { ErrorState } from "../components/ErrorState";
+import { ListFind, useListFind } from "../components/ListFind";
+import { fuzzyKeep } from "../lib/fuzzy";
 import { formatDay } from "./format";
 import { useAccessKeys } from "./queries";
 import type { AccessKeyInfo, IamChange } from "./types";
@@ -49,27 +52,35 @@ function KeyRow({ k, userName, onFix }: { k: AccessKeyInfo; userName: string; on
 /** 액세스 키 탭(사용자): 상태·나이·마지막 사용과 [비활성화]/[활성화] [삭제]. 비밀 키는 다루지 않는다. */
 export function KeysPane({ profile, userName, onFix }: Props) {
   const q = useAccessKeys(profile, userName);
+  // ⌘F: 이 키 표 안에서만 찾는다(키 ID, 상태, 서비스·리전). 평소에는 찾기 줄이 없다
+  const box = useRef<HTMLDivElement>(null);
+  const find = useListFind(box, { enabled: (q.data?.length ?? 0) > 0 });
   if (q.isError) return <ErrorState compact error={q.error} profile={profile} onRetry={() => void q.refetch()} />;
   if (!q.data) return <div className="empty small">불러오는 중…</div>;
   if (q.data.length === 0) return <div className="empty small">액세스 키가 없어요</div>;
+  const keys = fuzzyKeep(q.data, find.query, (k) => [k.id, k.status, k.lastUsedService, k.lastUsedRegion]);
   return (
-    <table aria-label="액세스 키">
-      <thead>
-        <tr>
-          <th className="nosort">키 ID</th>
-          <th className="nosort">상태</th>
-          <th className="nosort">만든 날</th>
-          <th className="nosort">나이</th>
-          <th className="nosort">마지막 사용</th>
-          <th className="nosort">서비스 · 리전</th>
-          <th className="nosort">조치</th>
-        </tr>
-      </thead>
-      <tbody>
-        {q.data.map((k) => (
-          <KeyRow key={k.id} k={k} userName={userName} onFix={onFix} />
-        ))}
-      </tbody>
-    </table>
+    <div ref={box}>
+      <ListFind find={find} count={keys.length} />
+      <table aria-label="액세스 키">
+        <thead>
+          <tr>
+            <th className="nosort">키 ID</th>
+            <th className="nosort">상태</th>
+            <th className="nosort">만든 날</th>
+            <th className="nosort">나이</th>
+            <th className="nosort">마지막 사용</th>
+            <th className="nosort">서비스 · 리전</th>
+            <th className="nosort">조치</th>
+          </tr>
+        </thead>
+        <tbody>
+          {keys.map((k) => (
+            <KeyRow key={k.id} k={k} userName={userName} onFix={onFix} />
+          ))}
+        </tbody>
+      </table>
+      {keys.length === 0 && <div className="empty small">조건에 맞는 키가 없어요</div>}
+    </div>
   );
 }

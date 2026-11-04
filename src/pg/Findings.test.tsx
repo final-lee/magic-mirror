@@ -1,4 +1,5 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
+import { findFor, pressFindKey } from "../test/find";
 import { renderWithClient } from "../test/utils";
 import { pgApi } from "./api";
 import { Findings } from "./Findings";
@@ -317,4 +318,46 @@ test("reads the findings once for the whole screen", async () => {
   setup();
   await loaded();
   expect(m.findings).toHaveBeenCalledTimes(1);
+});
+
+describe("⌘F find line", () => {
+  const data = () =>
+    findingsOf(
+      [
+        group("bypassRls", "high", "위험한 권한", [item({ role: "app_owner", detail: "슈퍼유저급 권한이에요" }), item({ role: "bob", detail: "비밀번호가 없어요" })]),
+        group("emptyLogin", "low", "참고 사항", [item({ role: "alice", detail: "만료일이 없어요" })]),
+      ],
+      [{ database: "legacy", reason: "연결할 수 없어요" }],
+    );
+
+  test("nothing before ⌘F; ⌘F filters every group and drops the groups without a match; Esc clears and closes", async () => {
+    m.findings.mockResolvedValue(data());
+    setup();
+    await loaded();
+    expect(screen.queryByRole("search")).toBeNull();
+    expect(rows("위험한 권한")).toHaveLength(2);
+    const input = findFor("bob");
+    expect(input).toHaveFocus();
+    expect(rows("위험한 권한")).toHaveLength(1);
+    expect(screen.queryByRole("table", { name: "참고 사항" })).toBeNull();
+    expect(screen.queryByRole("table", { name: "점검하지 못한 데이터베이스" })).toBeNull();
+    findFor("legacy");
+    expect(screen.getByRole("table", { name: "점검하지 못한 데이터베이스" })).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "위험한 권한" })).toBeNull();
+    findFor("zzzz");
+    expect(screen.getByText("조건에 맞는 항목이 없어요")).toBeInTheDocument();
+    // 점검이 못 보는 것에 대한 말은 목록이 아니라 늘 보인다
+    expect(screen.getByText(FOOTNOTE)).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("search")).toBeNull();
+    expect(rows("위험한 권한")).toHaveLength(2);
+    expect(screen.getByRole("table", { name: "참고 사항" })).toBeInTheDocument();
+  });
+
+  test("with no findings at all there is nothing to find in", async () => {
+    m.findings.mockResolvedValue(findingsOf([]));
+    setup();
+    await screen.findByText("발견된 문제가 없어요");
+    expect(pressFindKey()).toBe(false);
+  });
 });

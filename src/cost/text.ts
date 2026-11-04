@@ -51,6 +51,7 @@ export const smallRows = (n: number) => `작은 항목 ${n}개`;
 export const BREADCRUMB_LABEL = "분해 경로";
 export const CRUMB_ROOT = "전체";
 export const BREAKDOWN_EMPTY = "이 기간에는 비용이 없어요";
+export const BREAKDOWN_NO_MATCH = "조건에 맞는 항목이 없어요";
 export const DRILL_HINT = "눌러서 이 항목으로 내려가기";
 
 export const PERMISSIONS_HINT = "필요한 권한: ce:GetCostAndUsage, ce:GetCostForecast, ce:ListCostAllocationTags";

@@ -1,6 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { formatDateTime } from "../iam/format";
+import { findFor } from "../test/find";
 import { renderWithClient } from "../test/utils";
 import { pgApi } from "./api";
 import { ChangeLog } from "./ChangeLog";
@@ -455,5 +456,33 @@ describe("while changes are blocked on this target", () => {
       </QueryClientProvider>,
     );
     expect(undoButton(rows()[0])).toBeEnabled();
+  });
+});
+
+describe("⌘F find line", () => {
+  test("nothing before ⌘F; ⌘F filters only this log; Esc clears and closes", async () => {
+    setup([sampleLogEntry({ at: "2026-10-29T12:30:00Z" }), sampleLogEntry({ id: "log-0", at: "2026-10-28T12:30:00Z", summary: "그룹에 넣기: bob → app_write", database: "analytics" })]);
+    await table();
+    expect(screen.queryByRole("search")).toBeNull();
+    const input = findFor("analytics");
+    expect(input).toHaveFocus();
+    expect(rows()).toHaveLength(1);
+    expect(within(rows()[0]).getByText("그룹에 넣기: bob → app_write")).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("search")).toBeNull();
+    expect(rows()).toHaveLength(2);
+  });
+
+  test("a batch keeps its header while any of its entries matches and says so when nothing does", async () => {
+    const member = (id: string, at: string) => sampleLogEntry({ id, at, batchId: "b-1", summary: `${id}: 묶음 변경` });
+    setup([member("m-2", "2026-10-29T12:09:00Z"), member("m-1", "2026-10-29T12:06:00Z"), sampleLogEntry({ id: "s-1", summary: "단독 변경", at: "2026-10-29T11:00:00Z" })]);
+    await table();
+    findFor("m-1");
+    const texts = rows().map((r) => r.textContent ?? "");
+    expect(texts).toHaveLength(2);
+    expect(texts[0]).toContain("묶음 · 변경 2개");
+    expect(texts[1]).toContain("m-1");
+    findFor("zzzz");
+    expect(screen.getByText("조건에 맞는 기록이 없어요")).toBeInTheDocument();
   });
 });
