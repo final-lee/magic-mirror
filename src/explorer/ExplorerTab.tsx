@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { errorMessage } from "../api/errors";
 import { useS3Objects } from "../api/queries";
 import type { ServiceInfo } from "../api/types";
+import { useCommand } from "../keymap/registry";
 import type { S3Location } from "../lib/s3";
 import { explorerApi, onMouseNav } from "./api";
 import { ConfirmDialog, type DialogAction } from "./ConfirmDialog";
@@ -20,7 +21,6 @@ interface Props {
   profile: string | null;
   region: string;
   s3Service: ServiceInfo | undefined;
-  filter: string;
   active: boolean;
   initialLocalPath: string | null;
   onLocalPathChange: (path: string) => void;
@@ -69,6 +69,7 @@ export function ExplorerTab(p: Props) {
     dialogRef.current = next;
     setDialogState(next);
   };
+  const root = useRef<HTMLDivElement>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [finderOver, setFinderOver] = useState(false);
 
@@ -291,9 +292,9 @@ export function ExplorerTab(p: Props) {
     if (from === "s3" && to === "local") downloadKeys(ids);
   });
 
-  // 최신 콜백을 Finder 드롭/단축키 리스너에서 쓰기 위한 ref
-  const handlers = useRef({ uploadPaths, compare, remove, go });
-  handlers.current = { uploadPaths, compare, remove, go };
+  // 최신 콜백을 Finder 드롭/마우스 뒤로·앞으로 리스너에서 쓰기 위한 ref
+  const handlers = useRef({ uploadPaths, go });
+  handlers.current = { uploadPaths, go };
 
   // 마우스 뒤로/앞으로 버튼: 포인터가 있는 패널(없으면 포커스된 패널)에 적용.
   // WKWebView는 3·4번 버튼을 DOM으로 넘기지 않아 네이티브 "mouse-nav" 이벤트가 주 경로이고,
@@ -371,43 +372,29 @@ export function ExplorerTab(p: Props) {
     };
   }, [p.active]);
 
-  useEffect(() => {
-    if (!p.active) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (dialog) return;
-      const tag = (document.activeElement as HTMLElement | null)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
-      if (e.key === "Tab") {
-        const el = document.activeElement as HTMLElement | null;
-        const inTable = !!el?.closest("[data-pane] table");
-        if (el && el !== document.body && !inTable) return;
-        e.preventDefault();
-        setFocused((f) => (f === "local" ? "s3" : "local"));
-      } else if (e.metaKey && (e.key === "[" || e.key === "]")) {
-        e.preventDefault();
-        handlers.current.go(focused, e.key === "[" ? "back" : "fwd");
-      } else if (e.metaKey && e.key.toLowerCase() === "d") {
-        e.preventDefault();
-        handlers.current.compare();
-      } else if (e.metaKey && e.key === "Backspace" && focused === "s3") {
-        e.preventDefault();
-        handlers.current.remove();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [p.active, dialog, focused]);
+  // 키: 레지스트리 명령. 보이는 탭(root)에서만, 대화상자가 떠 있거나 글자를 입력하는 중이면 키가 이 처리기까지 오지 않는다(keybindings.ts의 when).
+  useCommand("tab.back", () => go(focused, "back"), { host: root });
+  useCommand("tab.forward", () => go(focused, "fwd"), { host: root });
+  useCommand("explorer.compare", compare, { host: root });
+  useCommand("explorer.delete", remove, { host: root, enabled: focused === "s3" });
+  // Tab: 커서가 어디에도 없거나 표 안에 있을 때만 칸을 바꾼다(그 밖에서는 평소 Tab 이동). 눌렀을 때의 커서로 따진다.
+  useCommand("explorer.switchPane", () => setFocused((f) => (f === "local" ? "s3" : "local")), {
+    host: root,
+    enabled: () => {
+      const el = document.activeElement as HTMLElement | null;
+      return !el || el === document.body || !!el.closest("[data-pane] table");
+    },
+  });
 
   if (!p.profile || !p.s3Service) return <div className="empty">프로필을 고르세요</div>;
 
   return (
-    <div className="explorer">
+    <div className="explorer" ref={root}>
       <div className="panes">
         {localPath ? (
           <LocalPane
             path={localPath}
             onPathChange={changeLocalPath}
-            filter={focused === "local" ? p.filter : ""}
             selection={localSel}
             onSelectionChange={setLocalSel}
             focused={focused === "local"}
@@ -426,7 +413,6 @@ export function ExplorerTab(p: Props) {
           s3Service={p.s3Service}
           location={location}
           onLocationChange={changeLocation}
-          filter={focused === "s3" ? p.filter : ""}
           selection={s3Sel}
           onSelectionChange={setS3Sel}
           focused={focused === "s3"}

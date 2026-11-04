@@ -58,7 +58,7 @@ const READ_REPLICA = "읽기 전용 복제본이라 바꿀 수 없어요";
 const AFTER = "2026-10-29T12:30:00Z";
 
 type Props = React.ComponentProps<typeof PgTab>;
-const baseProps: Props = { target: pgTarget, title: "🐘 orders-aurora", active: true, filter: "" };
+const baseProps: Props = { target: pgTarget, title: "🐘 orders-aurora", active: true };
 
 function setup(extra: Partial<Props> = {}) {
   const utils = renderWithClient(<PgTab {...baseProps} {...extra} />);

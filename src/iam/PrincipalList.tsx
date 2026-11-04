@@ -1,3 +1,5 @@
+import { useRef } from "react";
+import { ListFind, useListFind } from "../components/ListFind";
 import { fuzzyFilter } from "../lib/fuzzy";
 import { BadgeList } from "./Badges";
 import { formatAgo, formatDay } from "./format";
@@ -69,7 +71,6 @@ export function filterPrincipals(items: PrincipalSummary[], filter: string): Pri
 interface Props {
   kind: PrincipalKind;
   items: PrincipalSummary[];
-  filter: string;
   selectedId: string | null;
   onSelect: (arn: string) => void;
   /** 선택을 푼다(고른 행을 다시 누르거나 빈 곳) */
@@ -77,20 +78,25 @@ interface Props {
   onOpen: (arn: string) => void;
 }
 
-export function PrincipalList({ kind, items, filter, selectedId, onSelect, onClear, onOpen }: Props) {
+export function PrincipalList({ kind, items, selectedId, onSelect, onClear, onOpen }: Props) {
   const text = TEXT[kind];
+  const box = useRef<HTMLDivElement>(null);
+  const find = useListFind(box);
   return (
-    <ListTable
-      label={text.label}
-      rows={filterPrincipals(items, filter)}
-      ranked={filter.trim() !== ""}
-      columns={COLUMNS[kind]}
-      rowKey={(p) => p.arn}
-      selectedId={selectedId}
-      onSelect={onSelect}
-      onClear={onClear}
-      onOpen={onOpen}
-      empty={items.length === 0 ? text.empty : text.noMatch}
-    />
+    <div className="find-host" ref={box}>
+      <ListFind find={find} />
+      <ListTable
+        label={text.label}
+        rows={filterPrincipals(items, find.query)}
+        ranked={find.query.trim() !== ""}
+        columns={COLUMNS[kind]}
+        rowKey={(p) => p.arn}
+        selectedId={selectedId}
+        onSelect={onSelect}
+        onClear={onClear}
+        onOpen={onOpen}
+        empty={items.length === 0 ? text.empty : text.noMatch}
+      />
+    </div>
   );
 }

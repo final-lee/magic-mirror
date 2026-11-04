@@ -4,6 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { api } from "../api/client";
 import type { Settings } from "../api/types";
 import type { SsoLogin } from "../lib/useSsoLogin";
+import { dispatchKey } from "../keymap/registry";
+import { findFor } from "../test/find";
 import { newQueryClient, renderWithClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { pgApi } from "./api";
 import {
@@ -73,16 +75,19 @@ const IAM_OFF_INSTANCE = "이 인스턴스는 IAM 데이터베이스 인증이 �
 const PROMPT_INTRO = "IAM 인증으로 접속할 DB 사용자 이름을 입력하세요(예: iam_admin). 이 대상에 대해 기억해 둘게요";
 
 type Props = React.ComponentProps<typeof PgTab>;
-const baseProps: Props = { target: pgTarget, title: "🐘 orders-aurora", active: true, filter: "" };
+const baseProps: Props = { target: pgTarget, title: "🐘 orders-aurora", active: true };
+
+// 보이지 않는 탭은 앱처럼 [hidden] 상자 안에 둔다(키맵은 보이는 상자만 본다)
+const tab = (props: Props) => (
+  <div hidden={!props.active}>
+    <PgTab {...props} />
+  </div>
+);
 
 function setup(extra: Partial<Props> = {}) {
-  const utils = renderWithClient(<PgTab {...baseProps} {...extra} />);
+  const utils = renderWithClient(tab({ ...baseProps, ...extra }));
   const update = (next: Partial<Props>) =>
-    utils.rerender(
-      <QueryClientProvider client={utils.qc as QueryClient}>
-        <PgTab {...baseProps} {...extra} {...next} />
-      </QueryClientProvider>,
-    );
+    utils.rerender(<QueryClientProvider client={utils.qc as QueryClient}>{tab({ ...baseProps, ...extra, ...next })}</QueryClientProvider>);
   return { ...utils, update };
 }
 
@@ -99,7 +104,10 @@ const crumb = () => within(screen.getByRole("navigation", { name: "현재 위치
 /** 연결이 끝나 메뉴가 보일 때까지 기다린다 */
 const connected = () => screen.findByRole("navigation", { name: "PostgreSQL 메뉴" });
 const promptInput = () => screen.getByRole("textbox", { name: "DB 사용자" }) as HTMLInputElement;
-const metaKey = (key: "[" | "]") => fireEvent.keyDown(window, { key, metaKey: true });
+const metaKey = (key: "[" | "]") =>
+  act(() => {
+    dispatchKey(new KeyboardEvent("keydown", { key, metaKey: true, cancelable: true }));
+  });
 const rowOf = (name: string) => screen.getByText(name).closest("tr") as HTMLElement;
 const openRole = async (name: string) => {
   fireEvent.doubleClick(await screen.findByText(name));
@@ -841,10 +849,11 @@ describe("roles", () => {
     expect(crumb().getByText("역할")).toBeInTheDocument();
   });
 
-  test("the toolbar filter narrows the list by name", async () => {
-    const { update } = setup();
+  test("⌘F opens the find line in the role list and narrows it by name", async () => {
+    setup();
     await screen.findByText("alice");
-    update({ filter: "app_" });
+    expect(screen.queryByRole("search")).not.toBeInTheDocument();
+    findFor("app_");
     expect(screen.queryByText("alice")).not.toBeInTheDocument();
     expect(screen.getByText("app_owner")).toBeInTheDocument();
     expect(screen.getByText("app_read")).toBeInTheDocument();
@@ -868,11 +877,13 @@ describe("roles", () => {
     expect(await screen.findByRole("heading", { name: "bob" })).toBeInTheDocument();
   });
 
-  test("the detail is for the role of the row, and the toolbar filter does not touch it", async () => {
-    const { update } = setup();
-    await openRole("app_owner");
-    update({ filter: "zzz" });
-    expect(screen.getByRole("heading", { name: "app_owner" })).toBeInTheDocument();
+  test("the detail is for the role of the row, and a find left in the list does not touch it", async () => {
+    setup();
+    await screen.findByText("alice");
+    findFor("app_o");
+    fireEvent.doubleClick(screen.getByText("app_owner"));
+    expect(await screen.findByRole("heading", { name: "app_owner" })).toBeInTheDocument();
+    expect(screen.queryByRole("search")).not.toBeInTheDocument();
   });
 
   test("back and forward walk through the history and keep the selected row", async () => {
@@ -988,10 +999,10 @@ describe("privileges", () => {
     expect(rowHeads()).toEqual(["사용자 5", "alice", "app_owner", "bob", "iam_admin", "postgres", "그룹 2", "app_read", "app_write"]);
   });
 
-  test("the toolbar filter narrows the rows by name", async () => {
-    const { update } = setup();
+  test("⌘F narrows the rows by name", async () => {
+    setup();
     await openPrivileges();
-    update({ filter: "app_" });
+    findFor("app_");
     expect(rowHeads()).toEqual(["사용자 1", "app_owner", "그룹 2", "app_read", "app_write"]);
   });
 
@@ -1436,11 +1447,12 @@ describe("history keys", () => {
   });
 
   test("a tab that is not showing ignores ⌘[ and the mouse buttons", async () => {
-    setup({ active: false });
+    const { update } = setup();
     await openRole("alice");
+    update({ active: false });
+    await waitFor(() => expect(mouseNav).toBeNull());
     metaKey("[");
-    expect(screen.getByRole("heading", { name: "alice" })).toBeInTheDocument();
-    expect(mouseNav).toBeNull();
+    expect(screen.getByRole("heading", { name: "alice", hidden: true })).toBeInTheDocument();
   });
 
   test("the mouse back and forward buttons navigate", async () => {

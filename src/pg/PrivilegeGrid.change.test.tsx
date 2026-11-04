@@ -32,7 +32,7 @@ function Harness({ initialKinds = DEFAULT_KINDS, database: initialDatabase, over
       overview={ov}
       database={database}
       onDatabase={setDatabase}
-      filter=""
+     
       kinds={kinds}
       onKinds={setKinds}
       editing={editing}

@@ -1,4 +1,5 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type UIEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type RefObject, type UIEvent } from "react";
+import { ListFind, useListFind, type ListFindState } from "../components/ListFind";
 import { visibleRange } from "../iam/AssignmentGrid";
 import { parsePos, posKey, type Pos } from "../lib/gridPos";
 import { BrushPicker } from "./BrushPicker";
@@ -132,8 +133,6 @@ interface Props {
   /** 이 탭에서 고른 데이터베이스(PgTab이 들고 있다). 없거나 연결할 수 없으면 대상의 기본 데이터베이스 */
   database: string | undefined;
   onDatabase: (database: string) => void;
-  /** 툴바 필터. 역할 이름에 적용한다 */
-  filter: string;
   /** 종류 칩과 시스템 역할 토글의 상태. 역할 목록과 같은 것을 쓴다(탭이 들고 있다) */
   kinds: RoleKindsValue;
   onKinds: (next: RoleKindsValue) => void;
@@ -155,10 +154,13 @@ interface Props {
  * 그때 칸의 상세는 Enter나 더블클릭으로 연다.
  * 데이터베이스 선택은 표 위에 있고, 종류 칩과 필터는 역할 목록과 같다.
  */
-export function PrivilegeGrid({ target, overview, database, onDatabase, filter, kinds, onKinds, pick = null, onPickUsed, editing = false, draft }: Props) {
+export function PrivilegeGrid({ target, overview, database, onDatabase, kinds, onKinds, pick = null, onPickUsed, editing = false, draft }: Props) {
   // 칠할 권한은 이 화면이 든다: 데이터베이스를 바꿔도 남고, 다른 화면에 갔다 오면 처음(읽기)으로 돌아온다
   const [brushId, setBrushId] = useState<BrushId>(DEFAULT_BRUSH);
   const change: ChangeMode | null = editing && draft ? { brush: brushOf(brushId), draft } : null;
+  // ⌘F의 찾기는 역할 이름에 적용한다. 데이터베이스를 바꿔도 검색어가 남도록 여기서 들고, 표 상자(DatabasePrivileges)가 host가 된다
+  const box = useRef<HTMLDivElement>(null);
+  const find = useListFind(box);
   return (
     <DatabaseScreen
       overview={overview}
@@ -176,7 +178,8 @@ export function PrivilegeGrid({ target, overview, database, onDatabase, filter, 
           target={target}
           overview={overview}
           database={db}
-          filter={filter}
+          box={box}
+          find={find}
           kinds={kinds}
           pick={pick && pick.database === db ? pick : null}
           onPickUsed={onPickUsed}
@@ -191,7 +194,9 @@ interface BodyProps {
   target: PgTarget;
   overview: PgOverview;
   database: string;
-  filter: string;
+  /** 찾기 줄과 표를 감싸는 상자(⌘F의 host)와 찾기 상태. 둘 다 PrivilegeGrid가 들고 있다 */
+  box: RefObject<HTMLDivElement>;
+  find: ListFindState;
   kinds: RoleKindsValue;
   /** 이 데이터베이스에 대한 점검의 부탁. 없으면 null */
   pick: SchemaFocus | null;
@@ -200,12 +205,12 @@ interface BodyProps {
   change: ChangeMode | null;
 }
 
-function DatabasePrivileges({ target, overview, database, filter, kinds, pick, onPickUsed, change }: BodyProps) {
+function DatabasePrivileges({ target, overview, database, box, find, kinds, pick, onPickUsed, change }: BodyProps) {
   const q = usePgDatabase(target, database);
   const view = q.data;
   const [selected, setSelected] = useState<CellKey | null>(null);
   // 점검에서 열렸으면 첫 모습을 부탁에서 정한다(openedFrom). 처음 그려질 때만 정하고, 그 뒤로는 사용자가 정한다.
-  const [start] = useState(() => openedFrom(pick, shownRows(overview.roles, kinds, filter)));
+  const [start] = useState(() => openedFrom(pick, shownRows(overview.roles, kinds, find.query)));
   const [marked, setMarked] = useState<string | null>(start.marked);
   const [focusReq, setFocusReq] = useState<FocusReq | null>(start.focusReq);
   // 부탁은 한 번만 쓰고 알린다(strict mode가 효과를 두 번 돌려도 한 번이다)
@@ -216,7 +221,7 @@ function DatabasePrivileges({ target, overview, database, filter, kinds, pick, o
     onPickUsed?.();
   }, [pick, onPickUsed]);
 
-  const rows = useMemo(() => shownRows(overview.roles, kinds, filter), [overview.roles, kinds, filter]);
+  const rows = useMemo(() => shownRows(overview.roles, kinds, find.query), [overview.roles, kinds, find.query]);
   const index = useMemo(() => (view ? indexOf(view) : null), [view]);
 
   // 상세는 지금 표에 보이는 칸에게만 둔다: 그 역할의 행(필터, 칩)과 그 스키마의 열(다시 읽기)이 있어야 한다.
@@ -239,9 +244,10 @@ function DatabasePrivileges({ target, overview, database, filter, kinds, pick, o
   const empty = rows.length === 0 ? (overview.roles.length === 0 ? "역할이 없어요" : "조건에 맞는 역할이 없어요") : index.schemas.length === 0 ? "스키마가 없어요" : null;
 
   return (
-    <>
+    <div className="find-host" ref={box}>
       {q.isError && <PgError compact error={q.error} target={target} />}
       {view.truncated && <div className="notice">{TRUNCATED_TEXT}</div>}
+      <ListFind find={find} />
       <div className="pg-split">
         <Grid
           rows={rows}
@@ -273,7 +279,7 @@ function DatabasePrivileges({ target, overview, database, filter, kinds, pick, o
           />
         )}
       </div>
-    </>
+    </div>
   );
 }
 

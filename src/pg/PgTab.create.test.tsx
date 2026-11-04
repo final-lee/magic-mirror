@@ -50,7 +50,7 @@ const MANAGE_REASON = "이 사용자는 rds_superuser 멤버가 아니고 CREATE
 const PASSWORD = "Xk3pQ9mZtR7vNb2WcH5yJd4a";
 const settings: Settings = { enabledServices: ["ec2", "rds"], favorites: [], lastProfile: "prod", lastRegion: null, pgLogins: { [ARN]: LOGIN_USER } };
 
-const setup = () => renderWithClient(<PgTab target={pgTarget} title="🐘 orders-aurora" active filter="" />);
+const setup = () => renderWithClient(<PgTab target={pgTarget} title="🐘 orders-aurora" active />);
 const menu = () => within(screen.getByRole("navigation", { name: "PostgreSQL 메뉴" }));
 const openMenu = (label: string) => fireEvent.click(menu().getByText(label).closest("button")!);
 const connected = () => screen.findByRole("navigation", { name: "PostgreSQL 메뉴" });
