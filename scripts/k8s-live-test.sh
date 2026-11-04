@@ -85,6 +85,8 @@ YAML
   source scripts/k8s-live/network.sh "$kc"
   # K5 보안 점검 픽스처: 점검마다 걸리는 워크로드와 RBAC
   source scripts/k8s-live/security.sh "$kc"
+  # 관계 트리(xray) 픽스처: Deployment와 그것을 쓰고 고르는 Service·ConfigMap·ServiceAccount·Ingress·HPA
+  source scripts/k8s-live/xray.sh "$kc"
 
   # exec 플러그인 시험용: kind의 클라이언트 인증서를 ExecCredential로 내보내는 가짜 플러그인, SSO 만료를 흉내 내는 플러그인,
   # 평소엔 바로 답하다가 slow.armed 파일이 생기면 40초 멈추는 플러그인(watch가 멈춘 목록을 알리는지 보는 시험)

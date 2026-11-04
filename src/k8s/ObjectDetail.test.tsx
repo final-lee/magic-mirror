@@ -383,3 +383,30 @@ test("no usage columns without metrics for the pod", async () => {
   expect(await screen.findByText("app")).toBeInTheDocument();
   expect(screen.queryByRole("columnheader", { name: H_CPU_USAGE })).toBeNull();
 });
+
+// 관계 탭(xray)은 XrayView.test에서 자세히 본다. 여기서는 어떤 객체에 탭이 있고 노드가 상세로 열리는지만 본다
+vi.mock("./xray/api", () => ({ xrayApi: { get: vi.fn() } }));
+
+test("a deployment has a relations tab whose nodes open as objects; a plain custom object has none", async () => {
+  const { xrayApi } = await import("./xray/api");
+  vi.mocked(xrayApi.get).mockResolvedValue({
+    sections: [{ edge: "reference", nodes: [{ group: "", version: "v1", kind: "ConfigMap", namespace: "prod", name: "web-config", edge: "reference", roles: ["volume"], current: false, presence: "found", status: null, problems: [], children: [] }] }],
+    gaps: [], truncated: false, partial: [], nodes: 1,
+  });
+  m.get.mockResolvedValue(view({ kind: DEPLOYMENTS }));
+  const kinds: K8sKind[] = [{ ...CONFIGMAPS, verbs: ["list"], custom: false }];
+  const handlers = setup({ objectRef: { kind: DEPLOYMENTS, namespace: "prod", name: "web" }, kinds });
+  const tab = await screen.findByRole("tab", { name: "관계" });
+  expect(xrayApi.get).not.toHaveBeenCalled();
+  fireEvent.click(tab);
+  expect(tab).toHaveAttribute("aria-selected", "true");
+  fireEvent.click(await screen.findByRole("button", { name: "ConfigMap web-config 열기" }));
+  expect(handlers.onOpen).toHaveBeenCalledWith({ kind: expect.objectContaining({ kind: "ConfigMap" }), namespace: "prod", name: "web-config" });
+});
+
+test("a custom object without owners or children has no relations tab", async () => {
+  m.get.mockResolvedValue(view({ kind: widgetKind }));
+  setup({ objectRef: { kind: widgetKind, namespace: "prod", name: "w1" } });
+  await screen.findByRole("tab", { name: TAB_YAML });
+  expect(screen.queryByRole("tab", { name: "관계" })).not.toBeInTheDocument();
+});
