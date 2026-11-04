@@ -75,7 +75,10 @@ fn points_elsewhere(key: &str) -> bool {
 pub fn env_of(parent: impl IntoIterator<Item = (String, String)>, kubeconfig: &Path, exec_profile: Option<&str>, path: &str) -> Vec<(String, String)> {
     let mut env: Vec<(String, String)> = parent
         .into_iter()
-        .filter(|(key, _)| !points_elsewhere(key) && !["PATH", "TERM", "COLORTERM"].contains(&key.as_str()) && !(exec_profile.is_some() && key == "AWS_PROFILE"))
+        .filter(|(key, _)| {
+            let replaced = ["PATH", "TERM", "COLORTERM"].contains(&key.as_str()) || (exec_profile.is_some() && key == "AWS_PROFILE");
+            !points_elsewhere(key) && !replaced
+        })
         .collect();
     env.push(("KUBECONFIG".into(), kubeconfig.to_string_lossy().into_owned()));
     env.push(("PATH".into(), path.to_string()));
