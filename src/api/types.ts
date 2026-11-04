@@ -79,6 +79,16 @@ export interface Favorite {
   type: string;
 }
 
+/** 로컬 셸에서 실행할 EKS 플러그인. 확인 설정을 생략한 예전 항목은 확인한다. */
+export interface K8sPlugin {
+  name: string;
+  description?: string | null;
+  kinds: ("*" | K8sKindRef)[];
+  command: string;
+  confirm?: boolean;
+  key?: string | null;
+}
+
 export interface Settings {
   enabledServices: string[];
   /** 앱이 이미 보여 준 서비스. 백엔드가 새 서비스를 한 번 켤 때 쓰고, 화면은 읽지 않고 그대로 돌려 저장한다. */
@@ -102,6 +112,7 @@ export interface Settings {
   k8sLaneWidths?: K8sLaneWidths;
   /** EKS 보안 점검: 끈 점검 항목과 시스템 네임스페이스 포함 여부. 비어 있으면 모두 켜고 시스템 네임스페이스는 뺀다 */
   k8sSecurityChecks?: K8sSecurityChecks;
+  k8sPlugins?: K8sPlugin[];
   /** ArgoCD API 서버 목록(이름과 주소). 토큰은 넣지 않는다(키체인에 있다). */
   argocdServers?: ArgocdServer[];
   /** ArgoCD 서버 주소 → 그 서버 목록에서 마지막으로 고른 필터·묶기 */
