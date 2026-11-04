@@ -78,10 +78,11 @@ export function PluginActions({ plugins, context, objectRef, container, host, on
   const menu = useRef<HTMLSpanElement>(null);
   const matching = plugins.map((plugin, index) => ({ plugin, index })).filter(({ plugin }) => supportsKind(plugin, objectRef.kind));
   const bindings = useMemo<Keybinding[]>(
-    () => plugins.flatMap((plugin, index) => (plugin.key ? [{ key: plugin.key, command: pluginCommand(index), when: PLUGIN_WHEN, scope: "k8s" as const, handler: "registry" as const }] : [])),
+    () => plugins.flatMap((plugin, index) => (plugin.key ? [{ key: plugin.key, command: pluginCommand(index), title: plugin.name, when: PLUGIN_WHEN, scope: "k8s" as const, handler: "registry" as const }] : [])),
     [plugins],
   );
   useExtraBindings(bindings);
+  useCommand("k8s.pluginMenuClose", () => setOpen(false), { host: menu, enabled: open });
 
   const request = (plugin: K8sPlugin) => {
     setOpen(false);
@@ -102,14 +103,9 @@ export function PluginActions({ plugins, context, objectRef, container, host, on
     const away = (e: PointerEvent) => {
       if (!menu.current?.contains(e.target as Node)) setOpen(false);
     };
-    const escape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
     document.addEventListener("pointerdown", away, true);
-    document.addEventListener("keydown", escape);
     return () => {
       document.removeEventListener("pointerdown", away, true);
-      document.removeEventListener("keydown", escape);
     };
   }, [open]);
 

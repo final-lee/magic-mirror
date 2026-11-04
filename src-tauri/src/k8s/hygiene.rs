@@ -40,7 +40,16 @@ fn is_test_only(path: &Path) -> bool {
 
 fn sources() -> Vec<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut out = vec![root.join("k8s_commands.rs"), root.join("k8s_helm_commands.rs")];
+    let mut out: Vec<_> = fs::read_dir(&root)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name().and_then(|name| name.to_str()).is_some_and(|name| {
+                name == "k8s_commands.rs" || (name.starts_with("k8s_") && name.ends_with("_commands.rs"))
+            })
+        })
+        .collect();
     let mut stack = vec![root.join("k8s")];
     while let Some(dir) = stack.pop() {
         for entry in fs::read_dir(dir).unwrap().flatten() {
@@ -116,6 +125,9 @@ fn only_allowed_files_call_write_apis() {
 #[test]
 fn the_scan_sees_k8s_files() {
     assert!(sources().iter().any(|p| p.ends_with("kubeconfig.rs")));
+    for name in ["k8s_terminal_commands.rs", "k8s_describe_commands.rs", "k8s_xray_commands.rs"] {
+        assert!(sources().iter().any(|p| p.ends_with(name)), "{name}");
+    }
 }
 
 #[test]

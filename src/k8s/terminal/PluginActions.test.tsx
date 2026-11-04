@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { useRef } from "react";
 import type { K8sPlugin } from "../../api/types";
+import { CommandPalette } from "../../keymap/CommandPalette";
+import { ShortcutsDialog } from "../../keymap/ShortcutsDialog";
 import { resetKeymap, useKeymapListener } from "../../keymap/registry";
 import type { K8sKindRef, ObjectRef } from "../types";
 import { PluginActions } from "./PluginActions";
@@ -108,4 +110,22 @@ test("a saved template that cannot be quoted safely is refused with the reason a
   fireEvent.click(screen.getByRole("menuitem", { name: /나쁨/ }));
   expect(screen.getByRole("alert")).toHaveTextContent(PLUGIN_INVALID);
   expect(onRun).not.toHaveBeenCalled();
+});
+
+test("plugin names and keys appear in shortcuts and the command palette", () => {
+  const { rerender } = render(<><Harness plugins={[logs]} onRun={vi.fn()} /></>);
+  rerender(<><Harness plugins={[logs]} onRun={vi.fn()} /><ShortcutsDialog onClose={() => {}} /></>);
+  expect(screen.getByRole("dialog")).toHaveTextContent("로그");
+  expect(screen.getByRole("dialog")).toHaveTextContent("⌃⌥L");
+  rerender(<><Harness plugins={[logs]} onRun={vi.fn()} /><CommandPalette onRun={() => {}} onClose={() => {}} /></>);
+  expect(screen.getByRole("dialog")).toHaveTextContent("로그");
+  expect(screen.getByRole("dialog")).toHaveTextContent("⌃⌥L");
+});
+
+test("Escape closes the plugin menu through the keymap", () => {
+  render(<Harness plugins={[logs]} onRun={vi.fn()} />);
+  openMenu();
+  expect(screen.getByRole("menu")).toBeInTheDocument();
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
 });
