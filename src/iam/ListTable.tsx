@@ -23,7 +23,14 @@ interface Props<T> {
   empty: string;
   /** 행이 이미 검색 점수순이다: 사용자가 머리글을 누르기 전까지 다시 정렬하지 않는다 */
   ranked?: boolean;
+  /** k9s식 이동 키: j·k는 아래·위 행, g·G는 맨 위·맨 아래 행(EKS 목록) */
+  vimKeys?: boolean;
 }
+
+type Step = "next" | "prev" | "first" | "last";
+const ARROW_STEP: Record<string, Step | undefined> = { ArrowDown: "next", ArrowUp: "prev" };
+/** EKS 목록의 k9s식 이동 키 */
+const VIM_STEP: Record<string, Step | undefined> = { j: "next", k: "prev", g: "first", G: "last" };
 
 function compare(a: string | number, b: string | number): number {
   if (typeof a === "number" && typeof b === "number") return a - b;
@@ -31,7 +38,7 @@ function compare(a: string | number, b: string | number): number {
 }
 
 /** 사용자·그룹·역할·정책 목록이 함께 쓰는 정렬·선택 가능한 표. 첫 열을 기준으로 처음 정렬한다. */
-export function ListTable<T>({ label, rows, columns, rowKey, selectedId, onSelect, onClear, onOpen, empty, ranked }: Props<T>) {
+export function ListTable<T>({ label, rows, columns, rowKey, selectedId, onSelect, onClear, onOpen, empty, ranked, vimKeys }: Props<T>) {
   const toggle = useToggleSelect(selectedId, onSelect, onClear);
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: columns[0].key, dir: 1 });
   const [sortedByUser, setSortedByUser] = useState(false);
@@ -66,10 +73,12 @@ export function ListTable<T>({ label, rows, columns, rowKey, selectedId, onSelec
       onOpen(selectedId);
       return;
     }
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const plain = !e.metaKey && !e.ctrlKey && !e.altKey;
+    const step = ARROW_STEP[e.key] ?? (vimKeys && plain ? VIM_STEP[e.key] : undefined);
+    if (!step) return;
     e.preventDefault();
     const i = sorted.findIndex((r) => rowKey(r) === selectedId);
-    const next = e.key === "ArrowDown" ? Math.min(sorted.length - 1, i + 1) : Math.max(0, i - 1);
+    const next = step === "first" ? 0 : step === "last" ? sorted.length - 1 : step === "next" ? Math.min(sorted.length - 1, i + 1) : Math.max(0, i - 1);
     // 맨 끝에서 더 가려 하면 그대로 둔다(같은 행을 다시 고르면 토글하는 목록이 있다)
     if (sorted[next] && next !== i) onSelect(rowKey(sorted[next]));
   };

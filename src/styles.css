@@ -1968,3 +1968,21 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .argowf-workspace .k8s-log-bar input[type="number"] { width: 80px; }
 .awc-userinfo { grid-template-columns: 140px 1fr; }
 .awc-userinfo-acts { display: flex; align-items: center; gap: 10px; align-self: flex-start; }
+
+/* k9s식 탐색: `:` 명령 줄(EKS 탭 맨 위)과 한 글자 키 안내(목록 아래 상태 줄) */
+.k8s-goto { position: relative; flex: none; padding: 6px 12px; border-bottom: 1px solid var(--accent); background: var(--panel); z-index: 6; }
+.k8s-goto-line { display: flex; align-items: center; gap: 8px; }
+.k8s-goto-prompt { color: var(--accent); font-weight: 700; font-family: var(--mono, monospace); }
+.k8s-goto-input { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; color: var(--text); font-size: 13px; }
+.k8s-goto-hint { flex: none; font-size: 11px; }
+.k8s-goto-error { margin: 4px 0 0; font-size: 12px; }
+.k8s-goto-list { position: absolute; left: 0; right: 0; top: 100%; margin: 0; padding: 4px 0; list-style: none; max-height: 280px; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-top: 0; box-shadow: 0 10px 24px var(--tone-00000073); }
+.k8s-goto-item { display: flex; align-items: center; gap: 12px; padding: 4px 14px; cursor: pointer; font-size: 12px; }
+.k8s-goto-item > .mono { flex: none; min-width: 210px; }
+.k8s-goto-item > .dim:not(.k8s-chip) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k8s-goto-item > .k8s-chip { flex: none; }
+.k8s-goto-item:hover, .k8s-goto-item.on { background: var(--hover, var(--line)); }
+.k8s-goto-item.on { box-shadow: inset 2px 0 0 var(--accent); }
+.k8s-key-note-host { position: absolute; left: 10px; bottom: 8px; z-index: 5; pointer-events: none; }
+.k8s-key-note { pointer-events: auto; display: flex; align-items: center; gap: 8px; max-width: 520px; padding: 5px 8px 5px 12px; border: 1px solid var(--line); border-left: 3px solid var(--yellow, var(--accent)); border-radius: 4px; background: var(--panel); font-size: 12px; box-shadow: 0 4px 14px var(--tone-00000073); animation: k8s-pop 0.12s ease-out; }
+.k8s-key-note .icon { flex: none; font-size: 13px; line-height: 1; }

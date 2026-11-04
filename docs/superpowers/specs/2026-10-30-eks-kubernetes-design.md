@@ -343,13 +343,30 @@
 - **시험**: 순수 부분은 단위 시험(릴리스 해석·계산된 값·압축 폭탄, manifest 나누기·객체별 차이·Secret 가리기, 명령 인자·차트 위치 검증, helm 찾기·버전·환경 변수·시간 제한·오류 분류, 차트 되살리기와 경로 탈출 거절, 계획·재확인·values 비기록, 가짜 API 서버로 목록·ConfigMap 드라이버·권한·쪽 넘기기·캐시). 화면은 `src/k8s/helm/*.test.tsx`(목록·거르기·문제·상세·도구 모음 권한·helm 없음·리소스 열기·이력·변경 틀 미리보기·이름 입력·기록 되돌리기). kind 실제 시험은 `k8s::live_tests::helm`(`scripts/k8s-live/helm.sh`가 로컬 차트로 `flow`(리비전 둘)·`broken`(failed)·`cmrel`(ConfigMap 드라이버)을 helm으로 설치하고 로컬 차트 저장소를 띄운다): 목록·상세·이력을 helm 출력과 대조, 업그레이드(미리보기 뒤 외부 변경이면 낡음) → 기록(values 없음) → 되돌리기 → 롤백 → 삭제(이름 확인)를 helm·kubectl로 확인, 이력 유지 삭제와 롤백 복구, 로컬 경로·저장소 ref 설치와 저장소 차트로 업그레이드.
 - 남은 것·알려진 한계: Chart.yaml의 의존성 조건(`condition`·`tags`)은 저장된 서브차트를 그대로 쓰므로 values 편집으로 켜고 끌 수 없다(다른 차트로 업그레이드하면 된다). 로컬 경로 설치에서 의존 차트를 받지 않은 차트는 helm이 거절한 이유가 미리보기 오류로 보인다. 앱이 직접 `--wait`·`--atomic`은 쓰지 않는다(적용은 helm이 리소스를 제출하면 끝나고, 롤아웃 진행은 워크로드 상세에서 본다).
 
+### 탐색: `:` 이동과 한 글자 키 (k9s식, 2026-11-04)
+키보드만으로 종류·메뉴를 오가고 고른 행에 동작을 거는 부분이다. 모든 키는 키맵 레지스트리를 지나고(`keybindings.ts` 표 + `useCommand`, 설계: `2026-11-04-keymap-design.md`), 화면 코드는 `src/k8s/nav/`에 있다.
+
+- **종류 별칭(`k8s_kinds`)**: API 서버가 알려 주는 `shortNames`(`po`, `deploy`, `svc`)와 단수 이름(`singularName`)을 `K8sKind`에 더했다(`shortNames: string[]`, `singularName: string`). 집계 discovery(`/api`, `/apis`, 1.26+)의 `shortNames`·`singularResource`를 그룹마다 권장(맨 앞) 버전에서 읽고(`read/kinds.rs::discover_names`), kube의 `Discovery`가 버리는 값이라 같은 두 요청을 따로 한 번 더 보낸다(종류 읽기와 `join`). 별칭은 있으면 좋은 정보라서 이 요청이 실패·시간 초과여도 종류 목록은 그대로 나가고 별칭만 빈다.
+- **이름 풀이(`nav/aliases.ts`)**: `:` 뒤 이름 하나를 대소문자 없이 복수형·단수형·Kind·짧은 이름·그룹을 붙인 이름(`deployments.apps`, `widgets.v1.acme.io`)과 견준다. 서버가 주지 않는 k9s 별칭(`sec`, `dp`, `ro`·`rb`·`cr`·`crb` 등)만 표(`EXTRA`)로 더하고, 종류 목록을 아직 못 읽었으면 내장 종류가 이 표로 열린다. 같은 이름이 여럿이면 코어 그룹 > 내장 그룹 > 사용자 정의 순으로 이기고, 같은 우선순위에서 둘 이상(서로 다른 사용자 정의 그룹의 `wd`)이면 고르지 않고 어느 그룹들인지 보이며 "복수형.그룹으로 적어요"라고 한다. 모르는 이름은 퍼지(없으면 편집 거리 2 이내)로 가까운 이름을 곁들여 입력줄 아래 오류로 보인다.
+- **`:` 명령 줄(`k8s.goto`, `nav/GotoBar.tsx`)**: EKS 탭이 연결돼 있고 입력칸·터미널·대화상자에 커서가 없을 때 `:`로 탭 맨 위에 한 줄 입력줄이 열린다. 치는 대로 메뉴·종류 후보(퍼지, 최대 8개, 이름이 같은 메뉴와 종류는 메뉴 하나)와 대표 이름·그룹·다른 이름을 보이고, `Tab`·`⇧Tab`이 후보를 입력줄에 채워 돌고, `Enter`가 이동하고, `Esc`·✕·커서가 줄 밖으로 가면 닫는다(Esc는 원래 있던 자리로, 이동했으면 새 목록으로 커서를 돌린다). 정확히 맞는 이름만 이동하고 `de` 같은 일부는 짐작해서 가지 않는다(Tab으로 채워야 한다).
+  - 종류: 메뉴를 워크로드(All)로 바꾸고 그 종류의 목록을 연다(왼쪽 종류 트리에서 선택됨, 열려 있던 상세는 닫힘). 북마크 화면에서도 같은 길이다. 메뉴 항목을 직접 누르면 `:`가 고른 종류는 잊고 기본 종류(Pod)부터 시작한다.
+  - 메뉴: `overview`·`workloads`(all)·`events`(ev)·`network`(net)·`forwards`(pf)·`helm`·`permissions`(내 권한)·`access`·`security`·`changes`. 종류 별칭과 겹치는 이름(`events`)은 메뉴가 이긴다. ArgoCD·Argo Workflows는 EKS 탭 화면이 아니라서 넣지 않았다.
+  - 네임스페이스: `ns <이름>`(`namespace <이름>`)은 위쪽 네임스페이스 선택을 바꾸고(후보는 네임스페이스 watch가 아는 이름, `ns all`은 모든 네임스페이스), 없는 이름은 가까운 이름과 함께 거절한다. 인자 없는 `:ns`는 Namespace 종류 목록으로 간다(`ns`가 그 종류의 짧은 이름).
+  - 기록: 실행에 성공한 명령은 브라우저 저장소(`mm.k8s.goto-history`, 최근 20개, 같은 명령은 하나)에 남고, 빈 입력줄에 "최근 명령"으로 보이며 `↑`·`↓`이 기록을 오간다(`↓`로 치던 글자까지 돌아온다). 실패한 명령은 남기지 않는다.
+- **한 글자 키**(표: 키맵 설계 "EKS 목록의 k9s식 한 글자 키"): 목록 상자(`.k8s-list-pane`) 안에 커서가 있고 입력칸·터미널·대화상자가 아닐 때만 레지스트리가 보낸다(`when: k8sListFocus && !inputFocus && !terminalFocus && !dialogOpen`). 숨은 탭은 host 규칙으로 받지 않는다. 키는 상세 도구 줄의 **단추를 누르는 것**으로 일한다(`nav/rowKeys.ts`: 상세 안의 `data-tab`·`data-k8s-action` 단추를 찾아 `click()`). 그래서 종류별 적용 여부·권한(`can`)·상태(cordon 여부)·미리보기부터 여는 변경 틀이 단추와 같은 하나의 규칙이다.
+  - `j`·`k`·`g`·`G`(`ListTable`의 `vimKeys`, 목록 컴포넌트가 직접 처리: 워크로드·Helm·네트워크 로드밸런서·정책·보안 점검 목록), `/`는 ⌘F와 같다(EKS 본문 어디서나).
+  - `y` YAML 탭, `d` describe 탭(상세가 `data-tab="describe"` 탭을 내줄 때; 없으면 "이 상세에는 describe 보기가 없어요"), `e` YAML 편집(편집 단추), `l` 로그 탭(Pod·워크로드), `s` Pod는 셸 탭(방식 칸을 "셸"로) / Deployment·StatefulSet은 복제본 수 칸으로 커서를 옮기고 Enter로 scale 미리보기, `a` 셸 탭에서 방식을 attach로(세션은 평소처럼 확인 단계를 거쳐 연다), `⇧F` Pod·Service의 포트포워딩 줄(대상 포트 칸)로 커서, `r` rollout restart 미리보기(Deployment·StatefulSet·DaemonSet), `c`·`u` 노드 cordon·uncordon 미리보기(이미 그 상태면 안내만), `⌃D` 삭제 미리보기(모든 종류), `0` 모든 네임스페이스(네임스페이스가 있는 종류에서만).
+  - 하지 못하면 아무것도 하지 않고 목록 아래 상태 줄(`role="status"`, 4초 뒤 사라짐·✕로 닫음)에 이유를 보인다: 행을 아직 안 골랐다, 상세를 읽는 중이다, 이 종류에서는 쓸 수 없다(키마다 맞는 종류를 문장으로), 권한이 없다(단추의 `title`과 같은 문구), 이미 cordon된 노드·이미 모든 네임스페이스.
+  - 바꾸는 키는 어떤 것도 바로 적용하지 않는다. scale은 숫자를 고친 뒤 Enter(단추를 누른 것과 같다), 나머지는 단추를 누른 것과 같이 미리보기 창이 뜬다.
+- **지금 되지 않는 것**: 접근 탭의 표(신원·권한 표·누가 할 수 있나·워크로드 신원)와 이벤트·포트포워딩·변경 기록 표는 `ListTable`이 아니라서 `j`·`k`·`g`·`G`가 없다(⌘F·`/`는 된다). `d`는 describe 탭이 이 브랜치에 들어와야 동작한다.
+
 ## 계약 (Tauri 명령)
 ```ts
 type K8sTarget = { profile: string; region: string; cluster: string };
 k8s_open(target, context: string | null): K8sSession          // context 찾기·접속·신원. 후보가 여럿이면 후보를 돌려준다
 k8s_close(target): void
 k8s_overview(target): K8sOverview
-k8s_kinds(target): K8sKind[]                                    // API discovery
+k8s_kinds(target): K8sKind[]                                    // API discovery(+ shortNames·singularName)
 k8s_list(target, kind, namespace: string | null, selector: string | null): K8sList
 k8s_watch(target, kind, namespace, channel): WatchId            // 변경분을 채널로
 k8s_unwatch(watchId): void

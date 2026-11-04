@@ -35,6 +35,10 @@ function builtin(key: string): boolean | undefined {
       return !!active?.closest(TEXT_INPUT) && !active.closest(".xterm");
     case "terminalFocus":
       return !!active?.closest(".xterm");
+    case "k8sFocus":
+      return !!active?.closest(".k8s-body");
+    case "k8sListFocus":
+      return !!active?.closest(".k8s-list-pane");
     case "findOpen":
       return !!active?.closest(".list-find");
     case "dialogOpen":
