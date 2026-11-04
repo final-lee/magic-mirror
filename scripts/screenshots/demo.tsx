@@ -57,6 +57,31 @@ const RESOURCES: Record<string, ReturnType<typeof res>[]> = {
     res("static-site", "static-site", { region: "us-east-1", created: "2025-01-20T08:00:00Z" }),
     res("data-lake-raw", "data-lake-raw", { region: REGION, created: "2025-06-02T11:30:00Z" }),
   ],
+  "elasticache/replication-groups": [
+    res("sessions", "sessions", { engine: "valkey", status: "available", nodeType: "cache.r7g.large", shards: "1", nodes: "3", endpoint: "master.sessions.x1y2z3.apn2.cache.amazonaws.com:6379" }, [
+      ["Cluster mode", "disabled"],
+      ["Automatic failover", "enabled"],
+      ["Multi-AZ", "enabled"],
+      ["Primary endpoint", "master.sessions.x1y2z3.apn2.cache.amazonaws.com:6379"],
+      ["Reader endpoint", "replica.sessions.x1y2z3.apn2.cache.amazonaws.com:6379"],
+      ["Member clusters", "sessions-001, sessions-002, sessions-003"],
+      ["Encryption in transit", "Yes (required)"],
+      ["Encryption at rest", "Yes"],
+      ["User groups", "app-users"],
+      ["Snapshot retention (days)", "7"],
+      ["Created", "2025-09-14T03:20:00Z"],
+    ]),
+    res("cart", "cart", { engine: "valkey", status: "available", nodeType: "cache.r7g.xlarge", shards: "3", nodes: "6", endpoint: "clustercfg.cart.x1y2z3.apn2.cache.amazonaws.com:6379" }),
+    res("rate-limit", "rate-limit", { engine: "redis", status: "modifying", nodeType: "cache.m7g.large", shards: "1", nodes: "2", endpoint: "master.rate-limit.x1y2z3.apn2.cache.amazonaws.com:6379" }),
+  ],
+  "elasticache/cache-clusters": [
+    res("sessions-001", "sessions-001", { engine: "valkey", version: "8.0.1", status: "available", nodeType: "cache.r7g.large", nodes: "1", group: "sessions" }),
+    res("sessions-002", "sessions-002", { engine: "valkey", version: "8.0.1", status: "available", nodeType: "cache.r7g.large", nodes: "1", group: "sessions" }),
+    res("catalog-mc", "catalog-mc", { engine: "memcached", version: "1.6.22", status: "available", nodeType: "cache.m7g.large", nodes: "2", group: "" }),
+  ],
+  "elasticache/serverless-caches": [
+    res("feature-flags", "feature-flags", { engine: "valkey", version: "8.0", status: "available", endpoint: "feature-flags-x1y2z3.serverless.apn2.cache.amazonaws.com:6379" }),
+  ],
 };
 
 // 백엔드의 리소스 색인(⌘K) 흉내: list_resources가 읽은 목록의 검색용 사본. 다른 리전의 오래된 목록 하나를 미리 넣어 둔다.
@@ -250,7 +275,7 @@ mockIPC(
         return services;
       case "get_settings":
         return {
-          enabledServices: ["ec2", "s3", "lambda", "rds", "ecs", "eks", "vpc", "iam", "dynamodb", "logs", "sqs", "secretsmanager"],
+          enabledServices: ["ec2", "s3", "lambda", "rds", "elasticache", "ecs", "eks", "vpc", "iam", "dynamodb", "logs", "sqs", "secretsmanager"],
           favorites: [{ service: "ec2", type: "instances" }, { service: "s3", type: "buckets" }],
           lastProfile: "prod",
           lastRegion: REGION,

@@ -3,6 +3,7 @@ pub mod dynamodb;
 pub mod ec2;
 pub mod ecr;
 pub mod ecs;
+pub mod elasticache;
 pub mod eks;
 pub mod iam;
 pub mod lambda;
@@ -46,6 +47,7 @@ pub fn registry() -> Vec<AdapterRef> {
         Arc::new(s3::S3),
         Arc::new(lambda::Lambda),
         Arc::new(rds::Rds),
+        Arc::new(elasticache::ElastiCache),
         Arc::new(ecs::Ecs),
         Arc::new(eks::Eks),
         Arc::new(vpc::Vpc),
@@ -136,8 +138,8 @@ mod tests {
         assert_eq!(
             ids,
             vec![
-                "ec2", "s3", "lambda", "rds", "ecs", "eks", "vpc", "iam", "dynamodb", "logs", "cloudfront", "sqs",
-                "sns", "ecr", "route53", "secretsmanager"
+                "ec2", "s3", "lambda", "rds", "elasticache", "ecs", "eks", "vpc", "iam", "dynamodb", "logs", "cloudfront",
+                "sqs", "sns", "ecr", "route53", "secretsmanager"
             ]
         );
     }
