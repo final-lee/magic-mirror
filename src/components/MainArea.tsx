@@ -10,7 +10,6 @@ interface Props {
   profile: string | null;
   region: string;
   account: string | undefined;
-  filter: string;
   onOpenBucket: (loc: S3Location) => void;
   onOpenVpc?: (vpc: { vpcId: string; name: string; region: string }) => void;
   onOpenIam?: (arn: string | null) => void;
@@ -21,7 +20,7 @@ interface Props {
   focus?: ResourceFocus | null;
 }
 
-export function MainArea({ services, selection, profile, region, account, filter, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onRefresh, active, focus = null }: Props) {
+export function MainArea({ services, selection, profile, region, account, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onRefresh, active, focus = null }: Props) {
   const service = services.find((s) => s.id === selection?.service);
   const type = service?.types.find((t) => t.id === selection?.type);
   if (!profile || !service || !type) {
@@ -38,7 +37,6 @@ export function MainArea({ services, selection, profile, region, account, filter
       profile={profile}
       region={region}
       account={account}
-      filter={filter}
       onOpenBucket={onOpenBucket}
       onOpenVpc={onOpenVpc}
       onOpenIam={onOpenIam}

@@ -161,18 +161,26 @@ test("loads and saves the selected theme", async () => {
   await waitFor(() => expect(document.documentElement.dataset.theme).toBe("light"));
 });
 
-test("cmd+F focuses the filter", async () => {
+test("⌘F opens a find line inside the visible list that filters only it; Esc clears and closes it", async () => {
+  m.getSettings.mockResolvedValue({ enabledServices: ["ec2", "iam", "s3"], favorites: [], lastProfile: "prod", lastRegion: null });
+  m.listResources.mockResolvedValue({ items: [makeResource("assets", { name: "assets" }), makeResource("logs", { name: "logs" })], truncated: false });
   renderWithClient(<App />);
-  const filter = await screen.findByPlaceholderText(/필터/);
-  fireEvent.keyDown(window, { key: "f", metaKey: true });
-  expect(filter).toHaveFocus();
-});
-
-test("cmd+F is case-insensitive (caps lock)", async () => {
-  renderWithClient(<App />);
-  const filter = await screen.findByPlaceholderText(/필터/);
+  fireEvent.click((await screen.findAllByText("S3"))[0]);
+  fireEvent.click(screen.getByText("Buckets"));
+  const table = await screen.findByTestId("resource-table");
+  await within(table).findByText("logs");
+  // 평소에는 찾기 줄이 없다
+  expect(screen.queryByRole("search")).toBeNull();
+  // 대문자(Caps Lock)도 같은 키
   fireEvent.keyDown(window, { key: "F", metaKey: true });
-  expect(filter).toHaveFocus();
+  const input = screen.getByRole("textbox", { name: "목록에서 찾기" });
+  expect(input).toHaveFocus();
+  fireEvent.change(input, { target: { value: "ass" } });
+  expect(within(table).queryByText("logs")).toBeNull();
+  expect(table).toHaveTextContent("assets");
+  fireEvent.keyDown(input, { key: "Escape" });
+  expect(screen.queryByRole("search")).toBeNull();
+  expect(within(table).getByText("logs")).toBeInTheDocument();
 });
 
 test("no profiles shows setup guide", async () => {
@@ -491,18 +499,6 @@ describe("IAM 작업 공간 탭", () => {
     fireEvent.click(await screen.findByText("🔐 IAM 관리"));
     await screen.findByRole("tab", { name: IAM_TAB });
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["리소스", IAM_TAB, "S3: assets"]);
-  });
-
-  test("the toolbar filter narrows the IAM list only while that tab is active", async () => {
-    const list = await openIamUsers();
-    expect(within(list).getByText("alice")).toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText(/필터/), { target: { value: "bob" } });
-    expect(within(list).queryByText("alice")).not.toBeInTheDocument();
-    expect(within(list).getByText("bob")).toBeInTheDocument();
-    // 다른 탭으로 갔다 오면 필터가 지워진다(다른 탭과 같은 동작)
-    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
-    fireEvent.click(screen.getByRole("tab", { name: IAM_TAB }));
-    expect(within(screen.getByTestId("iam-list")).getByText("alice")).toBeInTheDocument();
   });
 
   test("⌘R rebuilds the IAM snapshot with a forced overview call", async () => {
