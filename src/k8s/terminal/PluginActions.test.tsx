@@ -113,7 +113,8 @@ test("a saved template that cannot be quoted safely is refused with the reason a
 });
 
 test("plugin names and keys appear in shortcuts and the command palette", () => {
-  const { rerender } = render(<><Harness plugins={[logs]} onRun={vi.fn()} /><ShortcutsDialog onClose={() => {}} /></>);
+  const { rerender } = render(<><Harness plugins={[logs]} onRun={vi.fn()} /></>);
+  rerender(<><Harness plugins={[logs]} onRun={vi.fn()} /><ShortcutsDialog onClose={() => {}} /></>);
   expect(screen.getByRole("dialog")).toHaveTextContent("로그");
   expect(screen.getByRole("dialog")).toHaveTextContent("⌃⌥L");
   rerender(<><Harness plugins={[logs]} onRun={vi.fn()} /><CommandPalette onRun={() => {}} onClose={() => {}} /></>);
