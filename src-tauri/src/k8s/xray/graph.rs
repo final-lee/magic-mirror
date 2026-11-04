@@ -47,6 +47,15 @@ fn by_attention(items: &mut [&Item]) {
     items.sort_by(|a, b| (a.problems.is_empty(), &a.kind.kind, &a.name).cmp(&(b.problems.is_empty(), &b.kind.kind, &b.name)));
 }
 
+/// 소유자 한 칸: 더미에서 찾았거나, 찾지 못해 ownerReference만 남은 것
+type Linked<'a> = Result<&'a Item, Box<Ref>>;
+
+/// 가까운 소유자부터 위로 이어지는 사슬과, 사슬에 들지 않은 다른 소유자
+struct OwnerChain<'a> {
+    chain: Vec<Linked<'a>>,
+    others: Vec<Linked<'a>>,
+}
+
 struct Builder<'a> {
     pool: &'a Pool,
     count: usize,
@@ -122,9 +131,9 @@ impl<'a> Builder<'a> {
     // ───── 소유 ─────
 
     /// 소유자 쪽 사슬. 컨트롤러 소유자를 먼저 따라 올라간다(여럿이면 첫 소유자만 사슬이 되고 나머지는 옆에 둔다).
-    fn owner_chain(&self, root: &Item) -> (Vec<Result<&'a Item, Ref>>, Vec<Result<&'a Item, Ref>>) {
+    fn owner_chain(&self, root: &Item) -> OwnerChain<'a> {
         let pool = self.pool;
-        let resolve = |child: &Item, o: &pool::OwnerRef| -> Result<&'a Item, Ref> {
+        let resolve = |child: &Item, o: &pool::OwnerRef| -> Linked<'a> {
             if let Some(found) = pool.by_uid(&o.uid) {
                 return Ok(found);
             }
@@ -134,7 +143,7 @@ impl<'a> Builder<'a> {
                 }
             }
             let kind = crate::k8s::rows::KindRef { group: o.group.clone(), version: o.version.clone(), kind: o.kind.clone(), plural: String::new(), namespaced: child.namespace.is_some() };
-            Err(Ref { kind, namespace: child.namespace.clone(), name: o.name.clone(), roles: vec![] })
+            Err(Box::new(Ref { kind, namespace: child.namespace.clone(), name: o.name.clone(), roles: vec![] }))
         };
         let pick = |item: &Item| -> Option<pool::OwnerRef> { item.owners.iter().find(|o| o.controller).or_else(|| item.owners.first()).cloned() };
         let mut chain = Vec::new();
@@ -152,7 +161,7 @@ impl<'a> Builder<'a> {
         }
         let first = pick(root);
         let others = root.owners.iter().filter(|o| first.as_ref().is_none_or(|f| f.uid != o.uid)).map(|o| resolve(root, o)).collect();
-        (chain, others)
+        OwnerChain { chain, others }
     }
 
     fn descendants(&mut self, item: &Item, depth: usize, seen: &mut HashSet<String>) -> Vec<XrayNode> {
@@ -179,7 +188,7 @@ impl<'a> Builder<'a> {
         if root.owners.is_empty() && self.pool.children_of(&root.uid).is_empty() {
             return vec![];
         }
-        let (chain, others) = self.owner_chain(root);
+        let OwnerChain { chain, others } = self.owner_chain(root);
         let mut current = Self::node(root, Edge::Owner, vec![]);
         current.current = true;
         self.count += 1;
