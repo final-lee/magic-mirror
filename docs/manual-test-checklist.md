@@ -3,7 +3,7 @@
 실제 SSO 프로필로 `npm run tauri dev` 실행 후 확인한다.
 
 ## 기본
-- [ ] 첫 실행 시 16개 서비스가 모두 사이드바에 보인다
+- [ ] 첫 실행 시 17개 서비스가 모두 사이드바에 보인다
 - [ ] 프로필 드롭다운에 `~/.aws/config`의 프로필이 모두 보이고, 바꾸면 그 프로필의 기본 리전으로 바뀐다
 - [ ] 앱을 재시작하면 마지막 프로필/리전/활성 서비스/즐겨찾기가 복원된다
 - [ ] 상태바에 프로필 · 계정 ID · 리전(전역 서비스는 global)이 보인다
@@ -13,6 +13,7 @@
 - [ ] S3: Buckets → 목록과 상세 확인 (버킷 더블클릭/Enter는 `S3: 버킷` 탭으로 열려요)
 - [ ] Lambda: Functions
 - [ ] RDS: DB Instances / DB Clusters
+- [ ] ElastiCache: Replication Groups / Cache Clusters / Serverless Caches. 사이드바에서 RDS 바로 아래에 있다. Replication Groups의 엔드포인트가 클러스터 모드면 구성 엔드포인트, 아니면 기본 엔드포인트이고 상세에 읽기 엔드포인트·암호화·AUTH·사용자 그룹이 콘솔과 같다. Cache Clusters의 Memcached는 구성 엔드포인트와 노드마다 엔드포인트가 보인다. 콘솔 열기는 그 리전의 ElastiCache 첫 화면이다
 - [ ] ECS: Clusters / Services / Tasks
 - [ ] EKS: Clusters / Node Groups
 - [ ] VPC: VPCs / Subnets
