@@ -40,9 +40,16 @@ fn is_test_only(path: &Path) -> bool {
 
 fn sources() -> Vec<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut out: Vec<_> = fs::read_dir(&root).unwrap().flatten().map(|entry| entry.path()).filter(|path| {
-        path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name == "k8s_commands.rs" || (name.starts_with("k8s_") && name.ends_with("_commands.rs")))
-    }).collect();
+    let mut out: Vec<_> = fs::read_dir(&root)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name().and_then(|name| name.to_str()).is_some_and(|name| {
+                name == "k8s_commands.rs" || (name.starts_with("k8s_") && name.ends_with("_commands.rs"))
+            })
+        })
+        .collect();
     let mut stack = vec![root.join("k8s")];
     while let Some(dir) = stack.pop() {
         for entry in fs::read_dir(dir).unwrap().flatten() {
