@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
+import { CodeEditor } from "../components/CodeEditor";
 import { useSheetFocus } from "../iam/previewParts";
 import type { BatchEntry } from "./ChangeBatch";
 import * as t from "./text";
 import type { K8sKindRef } from "./types";
 import { MAX_DOCUMENTS, parseDocuments, resolveChange, yamlProblems } from "./yamlDocs";
-import { YamlEditor } from "./YamlEditor";
 
 interface Props {
   /** 이 클러스터가 내주는 종류(apiVersion·kind로 plural을 찾는다) */
@@ -44,7 +44,7 @@ export function YamlCreate({ kinds, namespace, onPreview, onClose }: Props) {
         <div className="cp-body">
           <h3>{t.YAML_CREATE}</h3>
           <p>{t.YAML_CREATE_HINT}</p>
-          <YamlEditor value="" onChange={setText} />
+          <CodeEditor value="" onChange={setText} label={t.YAML_EDITOR_LABEL} />
           {problems.length > 0 && (
             <ul className="err" role="alert" aria-label={t.YAML_PROBLEMS}>
               {problems.map((problem, i) => (

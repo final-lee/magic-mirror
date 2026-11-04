@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { editorView, typeYaml } from "../test/codemirror";
 import { iamApi } from "./api";
 import { NEW_POLICY_TEMPLATE, PolicyEditor } from "./PolicyEditor";
 import type { ValidationResult } from "./types";
@@ -16,11 +17,11 @@ function setup(extra: Partial<React.ComponentProps<typeof PolicyEditor>> = {}) {
   const utils = render(<PolicyEditor profile="prod" mode="edit" name="s3-scratch" title="인라인 정책 편집" document={DOC} {...props} {...extra} />);
   return { props, ...utils };
 }
-const editor = () => screen.getByRole("textbox", { name: "정책 JSON" }) as HTMLTextAreaElement;
+const editorText = () => editorView("정책 JSON").state.doc.toString();
 const nameInput = () => screen.getByRole("textbox", { name: "정책 이름" });
 const previewButton = () => screen.getByRole("button", { name: "미리보기" });
 const checkButton = () => screen.getByRole("button", { name: "검사" });
-const typeDoc = (value: string) => fireEvent.change(editor(), { target: { value } });
+const typeDoc = (value: string) => typeYaml(value, "정책 JSON");
 const CHANGED = DOC.replace("s3:GetObject", "s3:PutObject");
 
 beforeEach(() => {
@@ -29,14 +30,13 @@ beforeEach(() => {
 });
 
 describe("editing an existing policy", () => {
-  test("shows the title, the fixed name and the document in a monospace box", () => {
+  test("shows the title, the fixed name and the document in the editor", () => {
     setup();
     expect(screen.getByRole("heading", { name: "인라인 정책 편집" })).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "정책 이름" })).not.toBeInTheDocument();
     expect(screen.getByText("s3-scratch")).toBeInTheDocument();
-    expect(editor()).toHaveValue(DOC);
-    expect(editor()).toHaveClass("mono");
-    expect(editor()).toHaveAttribute("spellcheck", "false");
+    expect(screen.getByRole("textbox", { name: "정책 JSON" })).toBeInTheDocument();
+    expect(editorText()).toBe(DOC);
   });
 
   test("the preview is off until something changed, then hands over the fixed name and the text", () => {
@@ -93,40 +93,31 @@ describe("live JSON check", () => {
 });
 
 describe("Tab key", () => {
-  test("inserts two spaces at the caret and keeps the focus in the box", async () => {
-    setup({ document: "{}" });
-    editor().focus();
-    editor().setSelectionRange(1, 1);
-    await userEvent.keyboard("{Tab}");
-    expect(editor()).toHaveValue("{  }");
-    expect(editor()).toHaveFocus();
-    expect(editor().selectionStart).toBe(3);
-  });
+  const box = () => screen.getByRole("textbox", { name: "정책 JSON" });
+  const caretAt = (pos: number) => {
+    const view = editorView("정책 JSON");
+    view.focus();
+    view.dispatch({ selection: { anchor: pos } });
+  };
 
-  test("replaces a selection", async () => {
-    setup({ document: "abcd" });
-    editor().focus();
-    editor().setSelectionRange(1, 3);
+  test("Tab indents the line and keeps the focus in the editor; Shift+Tab outdents it", async () => {
+    setup({ document: '{\n"a": 1\n}' });
+    caretAt(3);
     await userEvent.keyboard("{Tab}");
-    expect(editor()).toHaveValue("a  d");
-  });
-
-  test("Shift+Tab and Tab right after Esc move the focus on instead of trapping it", async () => {
-    setup({ document: "{}" });
-    editor().focus();
+    expect(editorText()).toBe('{\n  "a": 1\n}');
+    expect(box()).toHaveFocus();
     await userEvent.keyboard("{Shift>}{Tab}{/Shift}");
-    expect(editor()).not.toHaveFocus();
-    expect(editor()).toHaveValue("{}");
+    expect(editorText()).toBe('{\n"a": 1\n}');
+  });
 
-    editor().focus();
-    await userEvent.keyboard("{Escape}{Tab}");
-    expect(editor()).not.toHaveFocus();
-    expect(editor()).toHaveValue("{}");
-
-    editor().focus();
-    editor().setSelectionRange(0, 0);
-    await userEvent.keyboard("{Tab}"); // Esc 효과는 한 번뿐이다
-    expect(editor()).toHaveValue("  {}");
+  test("Tab right after Esc is left to the browser (focus moves on) instead of indenting", () => {
+    setup({ document: "{}" });
+    caretAt(0);
+    // CodeMirror의 Tab 탈출은 keyCode를 본다(user-event는 keyCode를 넣지 않는다)
+    fireEvent.keyDown(box(), { key: "Escape", keyCode: 27 });
+    const notPrevented = fireEvent.keyDown(box(), { key: "Tab", keyCode: 9 });
+    expect(notPrevented).toBe(true);
+    expect(editorText()).toBe("{}");
   });
 });
 
@@ -238,7 +229,7 @@ describe("adding a new inline policy", () => {
 
   test("starts from a valid template and asks for a name", () => {
     setupNew();
-    expect(editor()).toHaveValue(NEW_POLICY_TEMPLATE);
+    expect(editorText()).toBe(NEW_POLICY_TEMPLATE);
     expect(() => JSON.parse(NEW_POLICY_TEMPLATE)).not.toThrow();
     expect(nameInput()).toHaveValue("");
     expect(previewButton()).toBeDisabled();

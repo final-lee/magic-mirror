@@ -2,6 +2,7 @@ import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { dispatchKey } from "../keymap/registry";
 import { findFor, pressFind } from "../test/find";
+import { editorView, typeYaml } from "../test/codemirror";
 import { renderWithClient } from "../test/utils";
 import { iamApi } from "./api";
 import {
@@ -740,9 +741,9 @@ describe("changing IAM", () => {
   test("editing a managed policy goes editor → preview → apply, and the editor closes once applied", async () => {
     setup({ focus: deployPolicy.arn, nonce: 1 });
     fireEvent.click(await screen.findByRole("button", { name: "편집" }));
-    const box = (await screen.findByRole("textbox", { name: "정책 JSON" })) as HTMLTextAreaElement;
-    const changed = box.value.replace("s3:GetObject", "s3:GetObjectVersion");
-    fireEvent.change(box, { target: { value: changed } });
+    await screen.findByRole("textbox", { name: "정책 JSON" });
+    const changed = editorView("정책 JSON").state.doc.toString().replace("s3:GetObject", "s3:GetObjectVersion");
+    typeYaml(changed, "정책 JSON");
     fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
     await previewDialog();
     const update: IamChange = { op: "updateManagedPolicy", policyArn: deployPolicy.arn, document: changed };

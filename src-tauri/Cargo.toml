@@ -1,6 +1,6 @@
 [package]
 name = "magic-mirror"
-version = "0.8.0"
+version = "0.10.0"
 edition = "2021"
 
 [lib]
@@ -33,6 +33,7 @@ aws-sdk-ec2 = "1"
 aws-sdk-s3 = "1"
 aws-sdk-lambda = "1"
 aws-sdk-rds = "1"
+aws-sdk-elasticache = "1"
 aws-sdk-ecs = "1"
 aws-sdk-eks = "1"
 # EKS 탭: kubeconfig의 exec 플러그인으로 접속하는 쿠버네티스 클라이언트. TLS는 앱의 다른 곳처럼 rustls + aws-lc-rs만 쓴다
