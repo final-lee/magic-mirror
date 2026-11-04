@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { renderWithClient } from "../test/utils";
+import { dispatchKey } from "../keymap/registry";
 import { argowfApi } from "./api";
 import { WorkflowList } from "./WorkflowList";
 import { WorkflowDetail } from "./WorkflowDetail";
@@ -97,8 +98,13 @@ test("요약과 칩 개수는 선택 전 기준이며 우선순위와 퍼지 검
   await waitFor(() => expect(argowfApi.workflows).toHaveBeenLastCalledWith(conn, expect.objectContaining({ phases: ["Running"] })));
   expect(screen.getByRole("button", { name: "Failed 1" })).toBeInTheDocument();
   expect(screen.queryByText("fail")).not.toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Workflow 검색"), { target: { value: "pay" } });
+  expect(screen.queryByRole("textbox", { name: "목록에서 찾기" })).toBeNull();
+  act(() => { dispatchKey(new KeyboardEvent("keydown", { key: "f", metaKey: true })); });
+  const input = screen.getByRole("textbox", { name: "목록에서 찾기" });
+  fireEvent.change(input, { target: { value: "pay" } });
   expect(screen.getByText("running")).toBeInTheDocument();
+  fireEvent.keyDown(input, { key: "Escape" });
+  expect(screen.queryByRole("textbox", { name: "목록에서 찾기" })).toBeNull();
 });
 
 test("목록의 보관 전용 행은 보관 상세로 연다", async () => {

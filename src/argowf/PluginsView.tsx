@@ -1,5 +1,8 @@
+import { useRef } from "react";
 import { desktop } from "../api/desktop";
 import { errorMessage } from "../api/errors";
+import { ListFind, useListFind } from "../components/ListFind";
+import { fuzzyKeep } from "../lib/fuzzy";
 import { useTokenGate } from "./catalogHooks";
 import { usePlugins } from "./catalogQueries";
 import type { ArgoWfConn, ArgoWfSession } from "./types";
@@ -22,6 +25,9 @@ export function PluginsView({
   const q = usePlugins(conn, namespace, live);
   useTokenGate([q.error], onTokenError);
   const rows = (q.data ?? []).filter((p) => !namespace || p.namespace === namespace);
+  const listRef = useRef<HTMLDivElement>(null);
+  const find = useListFind(listRef);
+  const visible = fuzzyKeep(rows, find.query, (p) => [p.name, p.namespace, p.description, p.image]);
   const docs = (
     <button className="btn small" onClick={() => void desktop.openUrl(PLUGINS_DOCS)}>
       문서 열기 ↗
@@ -47,7 +53,8 @@ export function PluginsView({
         <span className="dim">실행기 플러그인(ExecutorPlugin ConfigMap)</span>
         <div className="awc-bar-end">{docs}</div>
       </div>
-      <div className="awc-scroll">
+      <div className="awc-scroll" ref={listRef}>
+        <ListFind find={find} count={visible.length} />
         {q.error ? (
           <div className="empty" role="alert">
             {errorMessage(q.error)}
@@ -56,6 +63,8 @@ export function PluginsView({
           <div className="empty">불러오는 중…</div>
         ) : rows.length === 0 ? (
           <div className="empty">실행기 플러그인이 없어요</div>
+        ) : visible.length === 0 ? (
+          <div className="empty">맞는 항목이 없어요</div>
         ) : (
           <table className="k8s-table awc-table">
             <thead>
@@ -67,7 +76,7 @@ export function PluginsView({
               </tr>
             </thead>
             <tbody>
-              {rows.map((p) => (
+              {visible.map((p) => (
                 <tr key={`${p.namespace}/${p.name}`}>
                   <td className="mono">{p.name}</td>
                   <td className="mono">{p.namespace}</td>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { errorMessage } from "../api/errors";
 import { ErrorState } from "../components/ErrorState";
+import { useModal } from "../iam/useModal";
 import { age } from "../k8s/format";
 import { DETAIL_PCT } from "../k8s/lanes";
 import { argocdApi } from "./api";
@@ -232,15 +233,8 @@ interface SheetProps {
 function SyncSheet({ app, onCancel, onConfirm }: SheetProps) {
   const [prune, setPrune] = useState(false);
   const [dryRun, setDryRun] = useState(false);
-  const cancel = useRef(onCancel);
-  cancel.current = onCancel;
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") cancel.current();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, []);
+  const { sheetRef, trapTab } = useModal(onCancel);
+  useEffect(() => { sheetRef.current?.focus(); }, [sheetRef]);
   const revisions = app.sources.map((s) => s.targetRevision ?? "HEAD").join(", ");
   return (
     <div
@@ -249,7 +243,7 @@ function SyncSheet({ app, onCancel, onConfirm }: SheetProps) {
         if (e.target === e.currentTarget) onCancel();
       }}
     >
-      <div className="sheet" role="dialog" aria-modal="true" aria-label={ARGO_SYNC_TITLE}>
+      <div className="sheet" role="dialog" aria-modal="true" aria-label={ARGO_SYNC_TITLE} ref={sheetRef} tabIndex={-1} onKeyDown={trapTab}>
         <h3>{ARGO_SYNC_TITLE}</h3>
         <p>{ARGO_SYNC_NOTE}</p>
         <dl className="kv">

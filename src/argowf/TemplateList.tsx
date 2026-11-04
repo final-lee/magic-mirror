@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ErrorState } from "../components/ErrorState";
 import { Highlight } from "../components/Highlight";
+import { ListFind, useListFind } from "../components/ListFind";
 import { fuzzyFilter, tokenize } from "../lib/fuzzy";
 import { cronsUsing, runsByTemplate, successRate, templateKey } from "./catalogData";
 import { useTokenGate } from "./catalogHooks";
@@ -46,7 +47,9 @@ const order = (a: TemplateRow, b: TemplateRow) =>
 export function TemplateList({ conn, live, namespace = null, workflows, crons, selected, onOpen, onTokenError }: Props) {
   const q = useTemplates(conn, namespace, live);
   useTokenGate([q.error], onTokenError);
-  const [search, setSearch] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+  const find = useListFind(listRef);
+  const search = find.query;
   const [creating, setCreating] = useState<TemplateKind | null>(null);
   const runs = useMemo(() => runsByTemplate(workflows), [workflows]);
   const sorted = useMemo(() => (q.data ?? []).filter((t) => !namespace || t.namespace === null || t.namespace === namespace).sort(order), [q.data, namespace]);
@@ -58,7 +61,6 @@ export function TemplateList({ conn, live, namespace = null, workflows, crons, s
       {q.isError && <ErrorState error={q.error} profile={conn.ssoProfile ?? ""} compact onRetry={() => void q.refetch()} />}
       <div className="awc-bar">
         <h2 className="awc-title">템플릿</h2>
-        <input className="k8s-filter" aria-label={TPL_SEARCH} placeholder={TPL_SEARCH} value={search} onChange={(e) => setSearch(e.target.value)} />
         <div className="awc-bar-end">
           <button className="btn small" onClick={() => setCreating("ClusterWorkflowTemplate")}>
             클러스터 템플릿 만들기
@@ -68,7 +70,8 @@ export function TemplateList({ conn, live, namespace = null, workflows, crons, s
           </button>
         </div>
       </div>
-      <div className="awc-scroll">
+      <div className="awc-scroll" ref={listRef}>
+        <ListFind find={find} placeholder={TPL_SEARCH} count={rows.length} />
         {q.isPending ? (
           <div className="empty">{CAT_LOADING}</div>
         ) : sorted.length === 0 ? (

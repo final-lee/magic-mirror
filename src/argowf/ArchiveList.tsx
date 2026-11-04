@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ErrorState } from "../components/ErrorState";
 import { Highlight } from "../components/Highlight";
+import { ListFind, useListFind } from "../components/ListFind";
 import { fuzzyFilter, tokenize } from "../lib/fuzzy";
 import { isFailed } from "./catalogData";
 import { durationText, relTime } from "./catalogFormat";
@@ -55,7 +56,9 @@ export function ArchiveList({ conn, live, namespace = null, selected, onOpen, on
     live,
   );
   useTokenGate([q.error], onTokenError);
-  const [search, setSearch] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+  const find = useListFind(listRef);
+  const search = find.query;
   const sorted = useMemo(() => (q.data?.pages.flatMap((page) => page.rows) ?? []).sort(newest), [q.data]);
   const tokens = useMemo(() => tokenize(search), [search]);
   const rows = useMemo(() => fuzzyFilter(sorted, search, (w) => [w.name, w.namespace, w.cron, w.template, ...Object.values(w.labels)]), [sorted, search]);
@@ -66,7 +69,6 @@ export function ArchiveList({ conn, live, namespace = null, selected, onOpen, on
       {q.isError && <ErrorState error={q.error} profile={conn.ssoProfile ?? ""} compact onRetry={() => void q.refetch()} />}
       <div className="awc-bar">
         <h2 className="awc-title">보관함</h2>
-        <input className="k8s-filter" aria-label={ARCHIVE_SEARCH} placeholder={ARCHIVE_SEARCH} value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
       <div className="awc-filters">
         <input aria-label="레이블 선택자" placeholder="레이블 (key=value)" value={label} onChange={(e) => setLabel(e.target.value)} />
@@ -86,7 +88,8 @@ export function ArchiveList({ conn, live, namespace = null, selected, onOpen, on
           끝나기 전 <input type="datetime-local" value={before} onChange={(e) => setBefore(e.target.value)} />
         </label>
       </div>
-      <div className="awc-scroll">
+      <div className="awc-scroll" ref={listRef}>
+        <ListFind find={find} placeholder={ARCHIVE_SEARCH} count={rows.length} />
         {q.isPending ? (
           <div className="empty">{CAT_LOADING}</div>
         ) : sorted.length === 0 ? (
