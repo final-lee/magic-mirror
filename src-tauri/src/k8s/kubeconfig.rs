@@ -159,5 +159,26 @@ pub fn with_path(config: &Kubeconfig, context: &str, path: &str) -> Kubeconfig {
     kc
 }
 
+/// 지정한 context와 그 context가 가리키는 cluster·user만 남긴다.
+pub fn minify(config: &Kubeconfig, name: &str) -> Result<Kubeconfig, AppError> {
+    let entry = config.contexts.iter().find(|entry| entry.name == name)
+        .filter(|entry| entry.context.is_some())
+        .ok_or_else(|| AppError::other("선택한 context를 찾지 못했어요"))?;
+    let context = entry.context.as_ref().expect("context checked above");
+    let cluster = config.clusters.iter().find(|entry| entry.name == context.cluster && entry.cluster.is_some())
+        .ok_or_else(|| AppError::other("context의 cluster를 찾지 못했어요"))?;
+    let user = match context.user.as_ref().filter(|name| !name.is_empty()) {
+        Some(name) => Some(config.auth_infos.iter().find(|entry| entry.name == *name && entry.auth_info.is_some())
+            .ok_or_else(|| AppError::other("context의 user를 찾지 못했어요"))?),
+        None => None,
+    };
+    let mut result = config.clone();
+    result.contexts = vec![entry.clone()];
+    result.clusters = vec![cluster.clone()];
+    result.auth_infos = user.into_iter().cloned().collect();
+    result.current_context = Some(name.to_string());
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests;

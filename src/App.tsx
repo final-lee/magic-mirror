@@ -418,6 +418,8 @@ export default function App() {
               // 연결을 닫고 감시를 버린 뒤 다시 열어야 새 kubeconfig의 인증을 쓴다.
               for (const t of k8sTabs) void refreshK8s(qc, t.target, t.target.profile);
             }}
+            k8sPlugins={settings.k8sPlugins}
+            onK8sPluginsChange={(plugins) => update({ k8sPlugins: plugins })}
             updater={updater}
             appVersion={appVersion}
             cacheTtlMinutes={settings.resourceCacheTtlMinutes ?? null}

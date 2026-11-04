@@ -1968,3 +1968,9 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .argowf-workspace .k8s-log-bar input[type="number"] { width: 80px; }
 .awc-userinfo { grid-template-columns: 140px 1fr; }
 .awc-userinfo-acts { display: flex; align-items: center; gap: 10px; align-self: flex-start; }
+
+/* EKS 플러그인 설정 */
+.sheet .k8s-plugin-settings .btn { width: auto; flex: 0 0 auto; }
+.k8s-plugin-settings .tools { align-items: center; justify-content: flex-end; }
+.k8s-plugin-settings .tools > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.k8s-plugin-editor > label:not(:has(input[type="checkbox"])) { display: block; margin-top: 8px; }

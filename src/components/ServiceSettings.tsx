@@ -5,6 +5,8 @@ import type { Updater } from "../lib/useUpdater";
 import type { ServiceInfo } from "../api/types";
 import type { DiffTool } from "../explorer/types";
 import { SETTINGS_KUBECONFIG_LABEL, SETTINGS_KUBECONFIG_PLACEHOLDER } from "../k8s/text";
+import { PluginSettings } from "../k8s/terminal/PluginSettings";
+import type { K8sPlugin } from "../api/types";
 import type { Theme } from "../lib/theme";
 import { ServiceBadge } from "./ServiceBadge";
 
@@ -27,6 +29,8 @@ interface Props {
   onDiffToolChange?: (tool: DiffTool, command: string | null) => void;
   kubeconfigPath?: string | null;
   onKubeconfigPathChange?: (path: string | null) => void;
+  k8sPlugins?: K8sPlugin[];
+  onK8sPluginsChange?: (plugins: K8sPlugin[]) => void;
   updater?: Updater;
   appVersion?: string | null;
   /** 리소스 목록 캐시 TTL(분). 비어 있으면 기본값, 0이면 무제한 */
@@ -81,6 +85,8 @@ export function ServiceSettings({
   onDiffToolChange,
   kubeconfigPath,
   onKubeconfigPathChange,
+  k8sPlugins,
+  onK8sPluginsChange,
   updater,
   appVersion,
   cacheTtlMinutes,
@@ -176,6 +182,7 @@ export function ServiceSettings({
             />
           </>
         )}
+        {onK8sPluginsChange && <PluginSettings plugins={k8sPlugins ?? []} onChange={onK8sPluginsChange} />}
         {onCacheTtlChange && (
           <>
             <h4>리소스 캐시</h4>
