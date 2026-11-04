@@ -449,10 +449,27 @@ impl Shells {
     where
         F: Future<Output = ()> + Send + 'static,
     {
+        let target = info.target.clone();
+        self.register_with(log, target, |key, now| record_of(&info, key, now), input, cleanup, run)
+    }
+
+    /// `register`와 같되 기록 한 줄을 `record`(기록 번호, 지금 시각)로 직접 만든다. Pod가 아닌 세션(로컬 터미널)이 쓴다.
+    pub fn register_with<F>(
+        self: &Arc<Self>,
+        log: &Path,
+        target: K8sTarget,
+        record: impl FnOnce(String, i64) -> log::Entry,
+        input: bool,
+        cleanup: Option<Cleanup>,
+        run: impl FnOnce(mpsc::UnboundedReceiver<Input>) -> F,
+    ) -> Result<ShellOpened, AppError>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
         let id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
         let now = now_secs();
         let key = new_log_id(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis()));
-        log::append(log, &record_of(&info, key.clone(), now)).map_err(|_| AppError::other(RECORD_FAILED))?;
+        log::append(log, &record(key.clone(), now)).map_err(|_| AppError::other(RECORD_FAILED))?;
         let (tx, rx) = mpsc::unbounded_channel();
         let mut entries = locked(&self.entries);
         let finish = Finish { shells: self.clone(), id };
@@ -462,7 +479,7 @@ impl Shells {
             let _finish = finish;
             session.await;
         });
-        entries.insert(id, ShellEntry { target: info.target, input: tx, handle: task.abort_handle(), log: log.to_path_buf(), key, cleanup });
+        entries.insert(id, ShellEntry { target, input: tx, handle: task.abort_handle(), log: log.to_path_buf(), key, cleanup });
         Ok(ShellOpened { id, input })
     }
 

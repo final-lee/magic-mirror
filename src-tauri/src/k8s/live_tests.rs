@@ -35,6 +35,7 @@ mod network;
 mod rbac;
 mod security;
 mod xray;
+mod terminal;
 
 fn env(name: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| panic!("{name}이 필요해요. scripts/k8s-live-test.sh로 돌려 주세요"))

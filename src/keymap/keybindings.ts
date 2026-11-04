@@ -47,6 +47,7 @@ export const COMMANDS: Record<string, CommandInfo> = {
   "list.copyId": { title: "고른 리소스 ID 복사", scope: "list" },
   "dialog.close": { title: "대화상자 닫기", scope: "dialog" },
   "terminal.leave": { title: "터미널에서 빠져나오기", scope: "terminal" },
+  "k8s.terminal": { title: "EKS 터미널 열기", scope: "k8s" },
   "explorer.compare": { title: "로컬·S3 파일 비교", scope: "explorer" },
   "explorer.delete": { title: "고른 S3 객체 삭제", scope: "explorer" },
   "explorer.switchPane": { title: "로컬·S3 칸 바꾸기", scope: "explorer" },

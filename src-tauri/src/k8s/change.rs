@@ -69,6 +69,8 @@ pub enum Operation {
     Drain,
     /// 셸·attach 세션을 연 기록. 클러스터에 쓰지 않으니 미리보기·적용 대상이 아니다.
     Shell { container: String, mode: ShellMode },
+    /// 앱 안 로컬 터미널을 연 기록(대상은 고정한 context, `terminal::terminal_object`). 플러그인이면 실행한 명령이 있다. 입력·출력은 남기지 않는다.
+    Terminal { #[serde(default)] command: Option<String> },
     /// 노드 셸 디버그 Pod 만들기. 대상(`Change.target`)은 만들 Pod, `node`는 고정할 노드.
     NodeShell { node: String, image: String },
     /// YAML 객체 하나를 server-side apply한다. 없는 객체면 만들고, `force`면 다른 manager의 필드도 가져온다.

@@ -22,6 +22,7 @@ pub mod review;
 pub mod rows;
 pub mod shell;
 pub mod target;
+pub mod terminal;
 pub mod tls;
 pub mod watch;
 pub mod xray;

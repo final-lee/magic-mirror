@@ -22,6 +22,7 @@ mod k8s_describe_commands;
 mod k8s_xray_commands;
 mod k8s_helm_commands;
 mod k8s_security_commands;
+mod k8s_terminal_commands;
 mod model;
 mod mouse_nav;
 mod pg;
@@ -164,6 +165,7 @@ pub fn run() {
             k8s_commands::k8s_shell_input,
             k8s_commands::k8s_shell_resize,
             k8s_commands::k8s_shell_close,
+            k8s_terminal_commands::k8s_terminal_open,
             k8s_commands::k8s_forward_open,
             k8s_commands::k8s_forward_list,
             k8s_commands::k8s_forward_close,

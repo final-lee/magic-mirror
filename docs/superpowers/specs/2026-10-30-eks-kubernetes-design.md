@@ -53,6 +53,18 @@
   - 노드마다 종류 참조(group·version·kind), 네임스페이스, 이름, 상태 글(목록 줄과 같은 값), 이상 표시(목록과 같은 `problems`), 관계 모습(`roles`: 볼륨·환경 변수·사용 중 …), `presence`(찾음·없음·알 수 없음). 노드를 누르면 소유자·자식 링크와 같은 길(`onOpen`)로 그 객체 상세가 열린다.
   - 한도: 트리 전체 300노드, 한 부모 아래 50개(참조는 종류마다 50개). 넘으면 응답의 `truncated`가 참이고 화면이 알린다. 목록이 쪽 수 한도(6쪽)에서 멈춘 종류는 `partial`로 알리고 "없음"으로 단정하지 않는다. 권한이 없거나(403) 읽지 못한 종류는 실패가 아니라 `gaps`(종류와 오류)로 돌려주고 나머지 관계는 그대로 보인다. 객체 자신을 읽지 못할 때만 명령이 실패한다.
   - 탭은 관계를 계산하는 내장 종류(Pod·워크로드·Service·EndpointSlice·Ingress·NetworkPolicy·HPA·PDB·ConfigMap·Secret·ServiceAccount·PVC·PV·StorageClass·Node·PriorityClass)와, 상세가 이미 소유자나 자식을 가진 객체(사용자 정의 리소스 등)에 있다. 객체의 resourceVersion이 바뀌면 다시 읽고(목록 밖 객체는 30초), [다시 읽기] 단추가 있다.
+- 플러그인 설정은 `k8sPlugins`에 이름·설명·종류(`*` 또는 kind 참조)·명령·확인 여부·선택 단축키를 저장한다. 예전 설정은 빈 목록이고, 확인 여부를 생략한 항목은 확인을 기본으로 한다.
+- 설정 화면에서 추가·편집·삭제한다. 단축키는 한 글자 또는 수식 키와 한 글자로 적고 고정 키 표 및 다른 플러그인과의 충돌을 거절한다.
+- 명령의 `$NAMESPACE`, `$NAME`, `$CONTEXT`, `$KIND`, `$CONTAINER` 값은 셸 단일 인자로 인용한다. kubeconfig 축소는 선택한 context와 그 cluster·user만 남기며 선택한 context를 현재 context로 설정한다.
+- 안전하게 치환할 수 있도록 변수는 독립된 단어 또는 일반 따옴표 안에만 둔다. 명령 치환, 백틱, 중괄호 변수, here 문서 등은 저장할 때 거절한다. 따옴표 안의 변수도 따옴표를 잠시 닫아 단일 인자로 인용한다.
+- 지금 된 것(2026-11-04, 앱 안 터미널·플러그인 실행):
+  - PTY 크레이트 `portable-pty`(0.9): 표준 `Command`는 제어 터미널·창 크기(SIGWINCH)를 다루지 못해 셸이 대화형으로 동작하지 않는다. 쓰는 것은 PTY 열기·크기 변경·자식 종료뿐이고, `CommandBuilder::new`·`spawn_command`는 `k8s/terminal/pty.rs`에만 있게 hygiene 허용 목록에 올렸다(그 셸에서 `kubectl`이 클러스터를 바꿀 수 있어서 kube 쓰기 호출과 같은 취급).
+  - 고정: 탭이 연결한 context 하나만 남긴 임시 kubeconfig(`mm-kubeconfig-*.yaml`, 0600, 현재 context 설정)를 `KUBECONFIG`로 주고, 부모의 `KUBECONFIG`·`KUBE*`·`HELM_KUBE*`는 치운다. kubeconfig의 exec 플러그인이 쓰는 AWS 프로필이 있으면 `AWS_PROFILE`로 준다. PATH는 로그인 셸 PATH. 셸은 `$SHELL`(없으면 `/bin/zsh`)을 `-l`로 연다. 한계: 사용자의 rc 파일이 `KUBECONFIG`를 다시 내보내면 고정이 풀린다(플러그인 명령은 `-lc`라 대화형 rc를 읽지 않는다).
+  - 수명: 세션은 셸·attach와 같은 `Shells`가 쥔다(입력·크기·닫기는 `k8s_shell_*` 그대로, 열기는 `k8s_terminal_open`). 닫기·탭 닫기(`k8s_close`)·앱 끄기에서 프로세스를 죽이고 임시 파일을 지운다(`cleanup`을 `settle`이 기다린다). 열고 닫은 시각은 변경 기록에 `terminal` 한 줄(대상 이름이 context, 플러그인이면 명령)로 남고 입력·출력은 남기지 않는다.
+  - 화면: 왼쪽 메뉴 "터미널"(명령 `k8s.terminal`), 머리줄에 고정한 context, 안쪽 탭으로 여러 터미널, 다른 화면을 봐도 유지(숨기기만), xterm 설정은 `PodTerminal`과 공유(`terminal/xterm.ts`), ⌘⎋로 빠져나온다.
+  - 플러그인 실행: 상세 도구 줄 "플러그인" 메뉴(그 종류의 플러그인만, 없으면 이유와 함께 꺼짐). 고르면 확장한 명령을 그대로 보이는 확인 창(확인을 끈 플러그인은 바로)을 거쳐 새 터미널 탭에서 실행한다. 명령은 키 입력으로 흉내 내지 않고 `$SHELL -lc <명령>`의 인자 하나로 넘긴다(입력 경합·줄 편집기 해석 없이 확인한 문자열 그대로, 종료 코드를 알 수 있다). 끝난 플러그인 탭은 다시 열지 않고 닫는다. `$KIND`는 `복수형.그룹`, `$CONTAINER`는 Pod의 첫 컨테이너(워크로드는 템플릿의 첫 컨테이너). 플러그인 키는 `useExtraBindings`로 표 뒤에 더하고 목록·상세 상자(host)에서만, 입력칸·터미널·대화상자 밖에서만 받는다.
+  - 시험: Rust 환경·argv·임시 파일·수명(대상 닫기, 종료, 기록 실패)·실제 PTY, kind 시험 `k8s::live_tests::terminal`, 프런트 탭·플러그인 확인·키·K8sTab 연결.
+
 
 ## 대상과 탭
 - **EKS → Clusters** 행을 더블클릭하면 `☸️ <클러스터 이름>` 탭이 열린다. 이것이 유일한 진입점이고, 사이드바에 별도 메뉴(클러스터 선택 화면)는 두지 않는다.
