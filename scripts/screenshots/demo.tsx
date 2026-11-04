@@ -11,6 +11,9 @@ import { installOverlayScrollbars } from "../../src/lib/overlayScrollbars";
 import { iamMock } from "./iam";
 import { costMock } from "./cost";
 import { ARGOWF_DEMO_SERVER, argowfMock } from "./argowf";
+import { k8sMock, k8sResources, k8sSettings } from "./k8s";
+import { argocdMock, argocdResources, argocdSettings } from "./argocd";
+import { pgMock, pgResources, pgSettings } from "./pg";
 import services from "./services.json";
 
 const ACCOUNT = "123456789012";
@@ -254,11 +257,16 @@ mockIPC(
           explorerLocalPath: `${HOME}/Projects/web/dist`,
           diffTool: "filemerge",
           argoWorkflowsServers: [ARGOWF_DEMO_SERVER],
+          ...k8sSettings,
+          ...argocdSettings,
+          ...pgSettings,
         };
       case "save_settings":
         return null;
       case "list_resources": {
-        const items = a.region === "us-west-2" && a.service === "ec2" && a.typeId === "instances" ? WEST : (RESOURCES[`${a.service}/${a.typeId}`] ?? []);
+        const key = `${a.service}/${a.typeId}`;
+        const extra = { ...k8sResources, ...argocdResources, ...pgResources } as Record<string, ReturnType<typeof res>[]>;
+        const items = a.region === "us-west-2" && a.service === "ec2" && a.typeId === "instances" ? WEST : (RESOURCES[key] ?? extra[key] ?? []);
         recordIndex(a.profile, a.region, a.service, a.typeId, items);
         return { items, truncated: false };
       }
@@ -315,7 +323,12 @@ mockIPC(
       default:
         if (cmd.startsWith("cost_")) return costMock(cmd, a);
         if (cmd.startsWith("argowf_")) return argowfMock(cmd, a);
-        return cmd.startsWith("iam_") ? iamMock(cmd, a) ?? null : null;
+        if (cmd.startsWith("iam_")) return iamMock(cmd, a) ?? null;
+        for (const mock of [k8sMock, argocdMock, pgMock]) {
+          const answer = mock(cmd, a);
+          if (answer !== undefined) return answer;
+        }
+        return null;
     }
   },
   { shouldMockEvents: true },
