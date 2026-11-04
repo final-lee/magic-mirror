@@ -6,6 +6,7 @@ import { NAV_ACCESS } from "../access/text";
 import { NAV_HELM } from "../helm/text";
 import { NAV_NETWORK } from "../network/text";
 import { NAV_SECURITY } from "../security/text";
+import { NAV_TERMINAL } from "../terminal/text";
 import type { K8sKind, K8sKindRef } from "../types";
 import { closestNames, resolveKind, suggestKinds } from "./aliases";
 import {
@@ -20,6 +21,7 @@ export const VIEW_NAMES: { view: K8sView; names: string[]; label: string }[] = [
   { view: "network", names: ["network", "net", "networking"], label: NAV_NETWORK },
   { view: "forwards", names: ["forwards", "forward", "pf", "portforward"], label: NAV_FORWARDS },
   { view: "helm", names: ["helm"], label: NAV_HELM },
+  { view: "terminal", names: ["terminal", "term", "kubectl"], label: NAV_TERMINAL },
   { view: "myRules", names: ["permissions", "perms", "myrules"], label: NAV_MY_PERMISSIONS },
   { view: "access", names: ["access", "rbac"], label: NAV_ACCESS },
   { view: "security", names: ["security", "audit"], label: NAV_SECURITY },

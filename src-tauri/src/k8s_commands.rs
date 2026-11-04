@@ -218,6 +218,16 @@ impl K8sState {
     pub fn session(&self, t: &K8sTarget) -> Result<Arc<Session>, AppError> {
         locked(&self.sessions).get(t).cloned().ok_or_else(|| AppError::other(NOT_OPENED))
     }
+
+    /// 열려 있는 셸 세션들. 로컬 터미널도 같은 목록에 올라서 대상을 닫거나 앱을 끌 때 함께 닫힌다.
+    pub fn shells(&self) -> &Arc<Shells> {
+        &self.shells
+    }
+
+    /// 변경 기록 파일
+    pub fn log_path(&self) -> &std::path::Path {
+        &self.log_path
+    }
 }
 
 #[derive(Debug, Serialize)]

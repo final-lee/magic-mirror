@@ -2003,3 +2003,27 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .xray-badge.edge-reference { background: var(--accent-soft); color: var(--accent); }
 .xray-badge.edge-selector { background: var(--green-soft); color: var(--green-text); }
 .xray-badge.edge-target { background: var(--yellow-soft); color: var(--yellow); }
+/* EKS 플러그인 설정 */
+.sheet .k8s-plugin-settings .btn { width: auto; flex: 0 0 auto; }
+.k8s-plugin-settings .tools { align-items: center; justify-content: flex-end; }
+.k8s-plugin-settings .tools > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.k8s-plugin-editor > label:not(:has(input[type="checkbox"])) { display: block; margin-top: 8px; }
+
+/* EKS 터미널 화면과 플러그인 메뉴 */
+.k8s-term-view { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.k8s-term-view[hidden] { display: none; }
+.k8s-term-head { display: flex; align-items: baseline; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 12px; flex-wrap: wrap; }
+.k8s-term-head b { padding: 1px 8px; border-radius: 10px; background: var(--accent-soft); color: var(--text); overflow-wrap: anywhere; }
+.k8s-term-bar { display: flex; align-items: center; gap: 8px; padding-right: 10px; border-bottom: 1px solid var(--line); }
+.k8s-term-bar .k8s-tabs { flex: 1; min-width: 0; border-bottom: 0; overflow-x: auto; }
+.k8s-term-tab { display: inline-flex; align-items: center; }
+.k8s-term-tab .icon { width: 18px; height: 18px; font-size: 11px; }
+.k8s-term-command { margin: 0; padding: 4px 12px; font-size: 12px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; user-select: text; }
+.k8s-term-panes { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.k8s-term-panes .empty { gap: 10px; align-content: center; }
+.k8s-plugin-menu { position: relative; display: inline-flex; }
+.k8s-plugin-pop { position: absolute; top: 100%; left: 0; z-index: 6; min-width: 180px; margin-top: 4px; padding: 4px; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border-input); border-radius: 8px; box-shadow: 0 6px 20px var(--shadow); font-size: 12px; }
+.k8s-plugin-item { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 6px 10px; border: 0; border-radius: 5px; background: none; color: var(--text); text-align: left; cursor: pointer; }
+.k8s-plugin-item:hover, .k8s-plugin-item:focus-visible { background: var(--accent); color: var(--on-accent); outline: none; }
+.k8s-plugin-item kbd { font-size: 11px; opacity: .8; }
+.k8s-plugin-command { margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--terminal-bg); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; font-size: 12px; }
