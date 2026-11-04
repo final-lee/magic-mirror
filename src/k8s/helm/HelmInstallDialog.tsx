@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "../../api/errors";
+import { CodeEditor } from "../../components/CodeEditor";
 import { useSheetFocus } from "../../iam/previewParts";
 import { yamlProblem } from "../text";
 import type { K8sChange } from "../types";
 import { yamlProblems } from "../yamlDocs";
-import { YamlEditor } from "../YamlEditor";
 import { helmApi } from "./api";
 import { ChartSourceFields, EMPTY_SOURCE, toSource, type SourceForm } from "./ChartSourceFields";
 import * as t from "./text";
@@ -97,7 +97,7 @@ export function HelmInstallDialog({ namespace: initialNamespace, onPreview, onCl
             {loading ? t.INSTALL_LOADING_DEFAULTS : t.INSTALL_LOAD_DEFAULTS}
           </button>
           {defaultsError && <p className="err" role="alert">{defaultsError}</p>}
-          <YamlEditor key={editor.key} value={editor.initial} onChange={setValues} label={t.VALUES_EDITOR_LABEL} />
+          <CodeEditor key={editor.key} value={editor.initial} onChange={setValues} label={t.VALUES_EDITOR_LABEL} />
           {problems.length > 0 && (
             <ul className="err" role="alert" aria-label={t.VALUES_INVALID}>
               {problems.map((problem, i) => (
