@@ -312,8 +312,23 @@ body.ovs-dragging { cursor: default; user-select: none; }
 .sel { display: flex; align-items: center; gap: 4px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 6px; padding: 2px 6px; }
 .sel small { color: var(--dim); }
 .sel select { background: transparent; color: var(--text); border: 0; font: inherit; outline: none; }
-.search { flex: 1; max-width: 300px; margin-left: auto; background: var(--code-bg); border: 1px solid var(--border-input); border-radius: 6px; padding: 5px 10px; color: var(--text); font: inherit; outline: none; }
-.search:focus { border-color: var(--accent); }
+.titlebar-gap { flex: 1; }
+/* ⌘F 목록 안 찾기 줄: 평소에는 없고 ⌘F를 누르면 목록 안쪽 맨 위에 붙는다 */
+.list-find { flex: none; display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.list-find input { flex: 1; min-width: 0; background: var(--code-bg); border: 1px solid var(--accent); border-radius: 6px; padding: 4px 8px; color: var(--text); font: inherit; outline: none; }
+.list-find-icon { color: var(--dim); }
+.list-find-count { font-size: 11px; white-space: nowrap; }
+/* 찾기 줄과 목록을 한 상자로 묶는다: ⌘F의 host이고, 목록이 남는 높이를 차지한다 */
+.find-host { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* 명령 팔레트·단축키 보기 */
+.cmd-keys { margin-left: auto; display: inline-flex; gap: 4px; }
+kbd { display: inline-block; min-width: 18px; padding: 1px 6px; border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--surface-2); font: 11px ui-monospace, Menlo, monospace; text-align: center; color: var(--text); }
+.shortcuts-body { max-height: 60vh; overflow: auto; padding: 4px 2px; }
+.shortcuts-body h4 { margin: 12px 0 4px; font-size: 12px; color: var(--dim); font-weight: 600; }
+.shortcuts-table { width: 100%; }
+.shortcuts-table td { padding: 3px 8px; max-width: none; }
+.shortcuts-table td:first-child { width: 110px; }
+.shortcuts-table tbody tr:nth-child(even) td { background: none; }
 .icon { width: 28px; height: 26px; display: grid; place-items: center; border-radius: 6px; color: var(--dim); background: none; border: 0; cursor: pointer; }
 .icon:hover { background: var(--surface-2); color: var(--foreground-strong); }
 .titlebar .icon { width: 32px; height: 30px; font-size: 20px; line-height: 1; }
@@ -1568,7 +1583,6 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .acc-matrix-tab { overflow: hidden; }
 .acc-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .acc-push { margin-left: auto; }
-.acc-filter { width: 16em; }
 .acc-chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 10px 1px 7px; border: 1px solid var(--line); border-radius: 11px; color: var(--dim); font-size: 12px; cursor: pointer; }
 .acc-chip.on { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
 .acc-chip input { margin: 0; accent-color: var(--accent); }
@@ -1670,7 +1684,6 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .net-rules { margin: 0; padding-left: 18px; }
 .net-rules ul { margin: 2px 0 6px; padding-left: 16px; }
 .net-deny { color: var(--red); margin: 0; }
-.net-filter { width: 100%; max-width: 320px; margin-bottom: 6px; }
 /* VPC 다이어그램: EKS 탭이 노드·로드 밸런서를 강조해서 열었을 때 막대에 보이는 안내 */
 .vm-highlight { display: inline-flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 9px; font-size: 12px; border: 1px solid var(--badge-pink); }
 /* helm */

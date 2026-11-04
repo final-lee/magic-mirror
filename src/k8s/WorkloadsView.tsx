@@ -55,6 +55,7 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
   const [picked, setKind] = useState<K8sKindRef>(PODS);
   const kind = fixedKind ?? picked;
   const [stack, setStack] = useState<ObjectRef[]>([]);
+  const pane = useRef<HTMLDivElement>(null);
   const started = useRef<{ change: K8sChange; version: string | null } | null>(null);
   const [rollout, setRollout] = useState<{ change: K8sChange; version: string | null } | null>(null);
 
@@ -118,7 +119,7 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
           <LaneResizer lane="tree" onResize={lanes.resize} onCommit={lanes.commit} />
         </>
       )}
-      <div className="k8s-list-pane">
+      <div className="k8s-list-pane" ref={pane}>
         {banner}
         {watch.error && <K8sError error={watch.error} target={target} ssoProfile={ssoProfile} compact />}
         <ObjectList
@@ -128,6 +129,8 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
           showNamespace={namespace === null}
           usage={usage}
           historyKey={historyKey(target, context)}
+          host={pane}
+          active={visible}
           selectedUid={topRow?.uid ?? null}
           onSelect={(r) => setStack([{ kind, namespace: r.namespace, name: r.name }])}
           onClear={() => setStack([])}

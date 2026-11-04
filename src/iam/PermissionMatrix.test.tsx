@@ -1,4 +1,6 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { dispatchKey } from "../keymap/registry";
+import { findFor } from "../test/find";
 import { ec2Perms, iamPerms, s3Perms } from "./fixtures";
 import { PermissionMatrix } from "./PermissionMatrix";
 
@@ -62,16 +64,24 @@ test("the selected cell is pressed", () => {
   expect(screen.getByRole("button", { name: /Amazon S3 읽기/ })).toHaveAttribute("aria-pressed", "false");
 });
 
-test("the filter box narrows services by name or prefix", () => {
+test("⌘F opens the find line (hidden until then) and narrows services by name or prefix", () => {
   setup();
-  const box = screen.getByRole("searchbox", { name: "서비스 필터" });
-  fireEvent.change(box, { target: { value: "ec2" } });
+  expect(screen.queryByRole("search")).toBeNull();
+  findFor("ec2");
   expect(screen.getByRole("rowheader", { name: /Amazon EC2/ })).toBeInTheDocument();
   expect(screen.queryByRole("rowheader", { name: /Amazon S3/ })).not.toBeInTheDocument();
-  fireEvent.change(box, { target: { value: "amazon" } });
+  findFor("amazon");
   expect(screen.getAllByRole("rowheader")).toHaveLength(2);
-  fireEvent.change(box, { target: { value: "없는서비스" } });
+  findFor("없는서비스");
   expect(screen.getByText("조건에 맞는 서비스가 없어요")).toBeInTheDocument();
+});
+
+test("without any allowed service there is no table to find in", () => {
+  setup({ services: [] });
+  act(() => {
+    dispatchKey(new KeyboardEvent("keydown", { key: "f", metaKey: true, cancelable: true }));
+  });
+  expect(screen.queryByRole("search")).toBeNull();
 });
 
 test("admin-like principals get a banner", () => {

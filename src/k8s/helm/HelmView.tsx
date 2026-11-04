@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ListFind, useListFind } from "../../components/ListFind";
 import { ListTable, type ListColumn } from "../../iam/ListTable";
 import { age } from "../format";
 import { K8sError } from "../K8sError";
@@ -39,10 +40,12 @@ interface Props {
 
 const keyOf = (r: { namespace: string; name: string }) => `${r.namespace}/${r.name}`;
 
-/** Helm 릴리스 목록(이름·차트·네임스페이스 거르기, 문제 있는 것만)과 70% 상세 */
+/** Helm 릴리스 목록(⌘F로 이름·차트·네임스페이스 찾기, 문제 있는 것만)과 70% 상세 */
 export function HelmView({ target, context, ssoProfile, live, visible, namespace, kinds, appliedChange, onChange, onOpenObject, lanes, now }: Props) {
   const qc = useQueryClient();
-  const [query, setQuery] = useState("");
+  // ⌘F: 이 목록(과 위에 뜬 상세) 안에서만 찾는다. 평소에는 찾기 줄이 없다
+  const pane = useRef<HTMLDivElement>(null);
+  const find = useListFind(pane, { enabled: visible });
   const [onlyProblems, setOnlyProblems] = useState(false);
   const [selected, setSelected] = useState<{ namespace: string; name: string } | null>(null);
   const [installing, setInstalling] = useState(false);
@@ -59,7 +62,7 @@ export function HelmView({ target, context, ssoProfile, live, visible, namespace
   }, [appliedChange, qc, target]);
 
   const rows = releases.data;
-  const needle = query.trim().toLowerCase();
+  const needle = find.query.trim().toLowerCase();
   const shown = useMemo(
     () =>
       (rows ?? []).filter(
@@ -96,10 +99,10 @@ export function HelmView({ target, context, ssoProfile, live, visible, namespace
 
   return (
     <div className="k8s-workloads">
-      <div className="k8s-list-pane">
+      <div className="k8s-list-pane" ref={pane}>
         <div className="k8s-list">
+          <ListFind find={find} placeholder={t.FILTER_PLACEHOLDER} count={shown.length} />
           <div className="k8s-list-bar">
-            <input type="search" className="k8s-filter" aria-label={t.FILTER_PLACEHOLDER} placeholder={t.FILTER_PLACEHOLDER} value={query} onChange={(e) => setQuery(e.target.value)} />
             <label className="k8s-check">
               <input type="checkbox" checked={onlyProblems} onChange={(e) => setOnlyProblems(e.target.checked)} />
               {t.ONLY_PROBLEMS}

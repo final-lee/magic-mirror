@@ -195,12 +195,13 @@ test("여러 개를 골라 일괄 동작하고 결과 표를 보이며, prod가 
   const dialog = await screen.findByRole("dialog", { name: "일괄 동작 결과" });
   expect(argowfApi.batchAction).toHaveBeenCalledWith(
     conn,
-    [
+    expect.arrayContaining([
       { namespace: "test", name: "dev-a" },
       { namespace: "prod", name: "prod-b" },
-    ],
+    ]),
     { kind: "stop", nodeFieldSelector: null, message: null },
   );
+  expect(vi.mocked(argowfApi.batchAction).mock.calls[0][1]).toHaveLength(2);
   expect(within(dialog).getByText("권한이 없어요")).toBeInTheDocument();
   expect(within(dialog).getByText("성공")).toBeInTheDocument();
 });

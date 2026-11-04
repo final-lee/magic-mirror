@@ -1,3 +1,4 @@
+import { ListFind, useListFind } from "../../components/ListFind";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ListTable, type ListColumn } from "../../iam/ListTable";
@@ -62,6 +63,9 @@ function columns(grouped: boolean): ListColumn<Finding>[] {
 export function SecurityView({ target, context, ssoProfile, live, setting, onSetting, appliedChange, onChange, onOpenObject, onOpenIam, onOpenAccess, lanes }: Props) {
   const qc = useQueryClient();
   const q = useSecurityFindings(target, context, ssoProfile, live);
+  // ⌘F: 이 목록(과 위에 뜬 상세) 안에서만 찾는다. 평소에는 찾기 줄이 없다
+  const pane = useRef<HTMLDivElement>(null);
+  const find = useListFind(pane, { enabled: q.data !== undefined });
   const [filter, setFilter] = useState<FindingFilter>(NO_FILTER);
   const [grouped, setGrouped] = useState(false);
   const [panel, setPanel] = useState(false);
@@ -79,7 +83,7 @@ export function SecurityView({ target, context, ssoProfile, live, setting, onSet
 
   const report = q.data;
   const visible = useMemo(() => (report ? visibleFindings(report.findings, current) : []), [report, current]);
-  const shown = useMemo(() => filterFindings(visible, filter), [visible, filter]);
+  const shown = useMemo(() => filterFindings(visible, { ...filter, query: find.query }), [visible, filter, find.query]);
   const counts = useMemo(() => countFindings(visible), [visible]);
   const perCheck = useMemo(() => {
     const out: Partial<Record<CheckId, number>> = {};
@@ -121,8 +125,9 @@ export function SecurityView({ target, context, ssoProfile, live, setting, onSet
 
   return (
     <div className="k8s-workloads">
-      <div className="k8s-list-pane sec-pane">
+      <div className="k8s-list-pane sec-pane" ref={pane}>
         <div className="k8s-list">
+          <ListFind find={find} placeholder={FILTER_PLACEHOLDER} count={shown.length} />
           <div className="sec-head">
             <b>{SECURITY_LABEL}</b>
             <span className="dim sec-note">{SCOPE_NOTE}</span>
@@ -130,7 +135,6 @@ export function SecurityView({ target, context, ssoProfile, live, setting, onSet
           </div>
           <Summary counts={counts} severity={filter.severity} category={filter.category} onSeverity={(severity) => setFilter((f) => ({ ...f, severity }))} onCategory={(category) => setFilter((f) => ({ ...f, category }))} hiddenSystem={hiddenSystemCount(report.findings, current)} />
           <div className="k8s-list-bar">
-            <input type="search" className="k8s-filter" aria-label={FILTER_PLACEHOLDER} placeholder={FILTER_PLACEHOLDER} value={filter.query} onChange={(e) => setFilter((f) => ({ ...f, query: e.target.value }))} />
             <label className="k8s-check" title={INCLUDE_SYSTEM_TITLE}>
               <input type="checkbox" checked={current.includeSystem} onChange={(e) => onSetting(withIncludeSystem(current, e.target.checked))} />
               {INCLUDE_SYSTEM}

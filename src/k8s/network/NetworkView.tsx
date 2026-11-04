@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { K8sError } from "../K8sError";
 import { DETAIL_PCT, LaneResizer, type Lane } from "../lanes";
 import type { ObjectRef, K8sTarget } from "../types";
@@ -46,6 +46,8 @@ interface Props {
 export function NetworkView({ target, context, ssoProfile, live, namespace, onOpenObject, onOpenVpc, lanes }: Props) {
   const q = useK8sNetwork(target, context, ssoProfile, live);
   const [tab, setTab] = useState<NetworkTab>("lb");
+  // ⌘F를 받는 상자: 보이는 목록과 그 위에 뜨는 상세를 함께 감싼다(상세에 커서가 있어도 ⌘F는 목록으로 간다)
+  const pane = useRef<HTMLDivElement>(null);
   const [lbSel, setLbSel] = useState<string | null>(null);
   const [policySel, setPolicySel] = useState<string | null>(null);
   const refetch = () => void q.refetch();
@@ -64,7 +66,7 @@ export function NetworkView({ target, context, ssoProfile, live, namespace, onOp
   const detailOpen = (tab === "lb" && lbRow) || (tab === "policies" && policy);
   return (
     <div className="k8s-workloads">
-      <div className="k8s-list-pane net-pane">
+      <div className="k8s-list-pane net-pane" ref={pane}>
         <div className="net-top">
           <div role="tablist" className="k8s-tabs" aria-label={NETWORK_TABS_LABEL}>
             {TABS.map((t) => (
@@ -90,12 +92,12 @@ export function NetworkView({ target, context, ssoProfile, live, namespace, onOp
         </div>
         <Gaps gaps={n.gaps} awsProfile={target.profile} k8sProfile={ssoProfile} onRetry={refetch} />
         {tab === "lb" && n.loadBalancers && (
-          <LoadBalancers network={n} namespace={namespace} selected={lbSel} onSelect={setLbSel} onClear={() => setLbSel(null)} />
+          <LoadBalancers network={n} namespace={namespace} selected={lbSel} onSelect={setLbSel} onClear={() => setLbSel(null)} host={pane} />
         )}
-        {tab === "nodes" && <NodesSubnets network={n} onOpenObject={onOpenObject} />}
-        {tab === "pods" && <PodIps network={n} namespace={namespace} onOpenObject={onOpenObject} />}
+        {tab === "nodes" && <NodesSubnets network={n} onOpenObject={onOpenObject} host={pane} />}
+        {tab === "pods" && <PodIps network={n} namespace={namespace} onOpenObject={onOpenObject} host={pane} />}
         {tab === "policies" && n.policies && (
-          <Policies policies={n.policies} namespaces={n.namespaces} namespace={namespace} selected={policySel} onSelect={setPolicySel} onClear={() => setPolicySel(null)} />
+          <Policies policies={n.policies} namespaces={n.namespaces} namespace={namespace} selected={policySel} onSelect={setPolicySel} onClear={() => setPolicySel(null)} host={pane} />
         )}
         {detailOpen && <LaneResizer lane="detailPct" onResize={lanes.resize} onCommit={lanes.commit} style={{ right: `${detailPct}%` }} />}
         {tab === "lb" && lbRow && (

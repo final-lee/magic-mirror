@@ -7,6 +7,7 @@ import { DEPLOYMENTS } from "./kinds";
 import { CHANGE_UNDO, SHELL_CLOSED_AT } from "./text";
 import { formatDateTime } from "../iam/format";
 import type { K8sChange } from "./types";
+import { findFor, findInputs } from "./testFind";
 
 vi.mock("./api", () => ({ k8sApi: { changeLog: vi.fn(), undo: vi.fn(), preview: vi.fn(), apply: vi.fn() } }));
 const target = { profile: "p", region: "r", cluster: "c" };
@@ -67,4 +68,17 @@ test("a shell session shows when it was opened and closed and can never be undon
   expect(await screen.findByText("Pod 셸 열기: dev/web-1 (app)")).toBeInTheDocument();
   expect(screen.getByText(new RegExp(SHELL_CLOSED_AT(formatDateTime("2026-10-30T11:05:00Z"))))).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: CHANGE_UNDO })).not.toBeInTheDocument();
+});
+
+test("⌘F finds change records by summary; nothing is visible before it", async () => {
+  vi.mocked(k8sApi.changeLog).mockResolvedValue([
+    { id: "one", at: "2026-10-30T11:00:00Z", target, change, summary: "scale web", ok: true, error: null, inverse: change, undoOf: null, undone: false },
+    { id: "two", at: "2026-10-30T12:00:00Z", target, change, summary: "restart api", ok: true, error: null, inverse: null, undoOf: null, undone: false },
+  ]);
+  render(withClientAndSso(<ChangeLog target={target} onStart={vi.fn()} />, newQueryClient(), ssoLoginStub()));
+  await screen.findByText("scale web");
+  expect(findInputs()).toHaveLength(0);
+  findFor("restart");
+  expect(screen.getByText("restart api")).toBeInTheDocument();
+  expect(screen.queryByText("scale web")).not.toBeInTheDocument();
 });

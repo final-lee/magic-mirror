@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState } from "react";
 import { DoneNotice } from "../components/DoneNotice";
 import { ErrorState } from "../components/ErrorState";
+import { shortcutTitle } from "../keymap/keybindings";
 import { useHistoryKeys } from "../lib/useHistoryKeys";
 import { Assignments } from "./AssignmentsScreen";
 import { BatchPreviewDialog } from "./BatchPreviewDialog";
@@ -25,10 +26,8 @@ import { WhoCan } from "./WhoCan";
 
 interface Props {
   profile: string;
-  /** 이 탭이 보이는 탭일 때만 ⌘[ ⌘]와 마우스 뒤로/앞으로 버튼에 반응한다 */
+  /** 이 탭이 보이는 탭일 때만 마우스 뒤로/앞으로 버튼에 반응한다(⌘[ ⌘]는 탭의 뿌리 상자가 보이는지로 가린다) */
   active: boolean;
-  /** 툴바 필터. 목록 화면에 적용된다 */
-  filter: string;
   /** 리소스 목록에서 넘어온 대상(사용자·역할·정책 ARN). nonce가 바뀔 때마다 그곳으로 이동한다 */
   focus: string | null;
   nonce: number;
@@ -60,7 +59,7 @@ function listCount(ov: IamOverview, view: IamView): number | null {
 /** IAM은 적용한 뒤 반영되기까지 시간이 걸린다. 완료 안내마다 이 말을 붙인다 */
 const PROPAGATION_HINT = "반영까지 몇 초 걸릴 수 있어요";
 
-export function IamTab({ profile, active, filter, focus, nonce }: Props) {
+export function IamTab({ profile, active, focus, nonce }: Props) {
   const qc = useQueryClient();
   const overview = useIamOverview(profile);
   const ov = overview.data;
@@ -86,12 +85,13 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
     if (target) navigate(target);
   }, [ov, focus, nonce, navigate]);
 
-  // ⌘[ / ⌘]와 마우스 뒤로/앞으로 버튼: 보이는 탭에서만, 확인 창이 떠 있거나 글자를 입력하는 중이면 건드리지 않는다.
-  useHistoryKeys(active, back, forward);
+  // ⌘[ / ⌘](tab.back / tab.forward)와 마우스 뒤로/앞으로 버튼: 보이는 탭에서만, 확인 창이 떠 있거나 글자를 입력하는 중이면 건드리지 않는다.
+  const root = useRef<HTMLDivElement>(null);
+  useHistoryKeys(root, active, back, forward);
 
   if (!ov) {
     return (
-      <div className="iam">
+      <div className="iam" ref={root}>
         {overview.isError ? (
           <ErrorState error={overview.error} profile={profile} onRetry={() => void overview.refetch()} />
         ) : (
@@ -144,7 +144,6 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
           key={kind}
           kind={kind}
           items={listOf(ov, kind)}
-          filter={filter}
           selectedId={selected[route.view] ?? null}
           onSelect={(arn) => select(route.view, arn)}
           onClear={() => select(route.view, null)}
@@ -161,7 +160,6 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
       <section className="center">
         <PolicyList
           items={ov.policies}
-          filter={filter}
           selectedId={selected.policies ?? null}
           onSelect={(id) => select("policies", id)}
           onClear={() => select("policies", null)}
@@ -183,7 +181,6 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
         onTab={(tab) => remember({ tab })}
         onOpen={navigate}
         onPreview={(changes) => batch.start(changes, { onApplied: draft.removeApplied })}
-        filter={filter}
       />
     );
   } else if (route.view === "findings") {
@@ -195,14 +192,14 @@ export function IamTab({ profile, active, filter, focus, nonce }: Props) {
   }
 
   return (
-    <div className="iam">
+    <div className="iam" ref={root}>
       <IamNav view={route.view} counts={counts} onSelect={(view) => navigate({ view })} />
       <div className="iam-body">
         <div className="iam-bar">
-          <button className="icon" aria-label="뒤로" title="뒤로 (⌘[)" disabled={!canBack} onClick={back}>
+          <button className="icon" aria-label="뒤로" title={shortcutTitle("뒤로", "tab.back")} disabled={!canBack} onClick={back}>
             ‹
           </button>
-          <button className="icon" aria-label="앞으로" title="앞으로 (⌘])" disabled={!canForward} onClick={forward}>
+          <button className="icon" aria-label="앞으로" title={shortcutTitle("앞으로", "tab.forward")} disabled={!canForward} onClick={forward}>
             ›
           </button>
           <nav className="iam-crumb" aria-label="현재 위치">

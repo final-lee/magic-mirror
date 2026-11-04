@@ -43,6 +43,9 @@ import { useUpdater } from "./lib/useUpdater";
 import { SsoBanner } from "./components/SsoBanner";
 import { SsoLoginContext, useSsoLogin } from "./lib/useSsoLogin";
 import { useTheme } from "./lib/theme";
+import { CommandPalette } from "./keymap/CommandPalette";
+import { ShortcutsDialog } from "./keymap/ShortcutsDialog";
+import { runCommand, useCommand, useKeymapListener } from "./keymap/registry";
 
 const sameFav = (a: Favorite, b: Favorite) => a.service === b.service && a.type === b.type;
 
@@ -55,9 +58,10 @@ export default function App() {
   const [profile, setProfile] = useState<string | null>(null);
   const [region, setRegion] = useState("us-east-1");
   const [selection, setSelection] = useState<Favorite | null>(null);
-  const [filter, setFilter] = useState("");
   const [showSettings, setShowSettings] = useState(false);
-  const filterRef = useRef<HTMLInputElement>(null);
+  // ⇧⌘P 명령 팔레트, ⌘/ 단축키 보기
+  const [commandsOpen, setCommandsOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // ⌘K 리소스 찾기. focus는 거기서 고른 리소스로, nonce가 바뀔 때마다 그 행을 고른다(같은 리소스를 다시 골라도).
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [focus, setFocus] = useState<ResourceFocus | null>(null);
@@ -127,27 +131,14 @@ export default function App() {
   // 하드 리셋: 모든 프로필·리전의 리소스 목록 캐시(메모리·디스크)를 버리고 보이는 목록을 처음부터 다시 읽는다
   const hardReset = useCallback(() => hardResetResourceCache(qc), [qc]);
 
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (!e.metaKey) return;
-      const key = e.key.toLowerCase();
-      if (key === "f") {
-        e.preventDefault();
-        filterRef.current?.focus();
-      } else if (key === "r" && e.shiftKey) {
-        e.preventDefault();
-        hardReset().catch((err: unknown) => console.error("리소스 캐시를 비우지 못했어요", err));
-      } else if (key === "r") {
-        e.preventDefault();
-        refresh();
-      } else if (key === "k") {
-        e.preventDefault();
-        if (profile) setPaletteOpen(true);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [refresh, hardReset, profile]);
+  // 앱 전체 단축키(표: src/keymap/keybindings.ts). ⌘F는 목록마다 등록한다(ListFind)
+  useKeymapListener();
+  useCommand("app.findResource", () => setPaletteOpen(true), { enabled: profile !== null });
+  useCommand("app.commandPalette", () => setCommandsOpen(true));
+  useCommand("app.showShortcuts", () => setShortcutsOpen(true));
+  useCommand("app.refresh", refresh);
+  useCommand("app.hardReset", () => void hardReset().catch((err: unknown) => console.error("리소스 캐시를 비우지 못했어요", err)));
+  useCommand("app.openSettings", () => setShowSettings(true));
 
   if (profiles.data && profiles.data.length === 0) return <NoProfiles />;
   const failed = [
@@ -180,46 +171,38 @@ export default function App() {
     const id = `s3:${loc.bucket}`;
     setExplorerTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs : [...tabs, { id, location: { ...loc, prefix: "" } }]));
     setActiveTab(id);
-    setFilter("");
   };
   // highlight는 EKS 탭이 노드·로드 밸런서를 강조해서 열 때만 온다. 이미 열린 탭은 새 강조를 받을 때만 바꾸고, 목록에서 다시 열 때는 그대로 둔다.
   const openVpc = (v: { vpcId: string; name: string; region: string; highlight?: VpcHighlight }) => {
     const id = `vpc:${v.vpcId}`;
     setVpcTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs.map((t) => (t.id === id && v.highlight ? { ...t, highlight: v.highlight } : t)) : [...tabs, { id, ...v }]));
     setActiveTab(id);
-    setFilter("");
   };
   const openPg = (target: PgTarget, title: string) => {
     const id = pgTabId(target);
     setPgTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs : [...tabs, { id, target, title }]));
     setActiveTab(id);
-    setFilter("");
   };
   const openK8s = (target: K8sTarget) => {
     const id = k8sTabId(target);
     setK8sTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs : [...tabs, { id, target }]));
     setActiveTab(id);
-    setFilter("");
   };
   const openIam = (focus: string | null = null) => {
     setIamTab((t) => ({ focus, nonce: (t?.nonce ?? 0) + 1 }));
     setActiveTab("iam");
-    setFilter("");
   };
   const openCost = () => {
     setCostTab(true);
     setActiveTab("cost");
-    setFilter("");
   };
   const openArgocd = () => {
     setArgocdTab(true);
     setActiveTab("argocd");
-    setFilter("");
   };
   const openArgoWorkflows = () => {
     setArgowfTab(true);
     setActiveTab("argowf");
-    setFilter("");
   };
   const closeTab = (id: string) => {
     if (id === "iam") setIamTab(null);
@@ -242,7 +225,6 @@ export default function App() {
   };
   const activate = (id: string) => {
     setActiveTab(id);
-    setFilter("");
   };
   const diffTitle = (l: FileRef, r: FileRef) => (refName(l) === refName(r) ? `⇄ ${refName(l)}` : `⇄ ${refName(l)} ↔ ${refName(r)}`);
   const tabs: TabInfo[] = [
@@ -291,14 +273,12 @@ export default function App() {
   const select = (sel: Favorite) => {
     setSelection(sel);
     setFocus(null);
-    setFilter("");
   };
 
   // ⌘K에서 고른 리소스로 간다: 리소스 탭, 그 리전(전역 서비스는 그대로), 그 종류, 그 행
   const pickResource = (p: PalettePick) => {
     setPaletteOpen(false);
     setActiveTab("resources");
-    setFilter("");
     if (p.region !== GLOBAL && p.region !== region) changeRegion(p.region);
     setSelection({ service: p.service, type: p.type });
     focusNonce.current += 1;
@@ -321,9 +301,6 @@ export default function App() {
           onProfile={changeProfile}
           region={region}
           onRegion={changeRegion}
-          filter={filter}
-          onFilter={setFilter}
-          filterRef={filterRef}
           onRefresh={refresh}
           onOpenSettings={() => setShowSettings(true)}
           onOpenPalette={() => profile && setPaletteOpen(true)}
@@ -352,7 +329,6 @@ export default function App() {
             profile={profile}
             region={region}
             account={account.data}
-            filter={filter}
             onOpenBucket={openExplorer}
             onOpenVpc={openVpc}
             onOpenIam={openIam}
@@ -365,7 +341,7 @@ export default function App() {
         </div>
         {profile && iamTab && (
           <div className="tabpane" hidden={activeTab !== "iam"}>
-            <IamTab profile={profile} active={activeTab === "iam"} filter={activeTab === "iam" ? filter : ""} focus={iamTab.focus} nonce={iamTab.nonce} />
+            <IamTab profile={profile} active={activeTab === "iam"} focus={iamTab.focus} nonce={iamTab.nonce} />
           </div>
         )}
         {profile && costTab && (
@@ -390,7 +366,6 @@ export default function App() {
               region={region}
               s3Service={s3Service}
               initialLocation={t.location}
-              filter={activeTab === t.id ? filter : ""}
               active={activeTab === t.id}
               initialLocalPath={settings.explorerLocalPath ?? null}
               onLocalPathChange={(path) => update({ explorerLocalPath: path })}
@@ -408,7 +383,7 @@ export default function App() {
           ))}
         {pgTabs.map((t) => (
           <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
-            <PgTab target={t.target} title={t.title} active={activeTab === t.id} filter={activeTab === t.id ? filter : ""} />
+            <PgTab target={t.target} title={t.title} active={activeTab === t.id} />
           </div>
         ))}
         {k8sTabs.map((t) => (
@@ -422,7 +397,6 @@ export default function App() {
               profile={profile}
               left={t.left}
               right={t.right}
-              active={activeTab === t.id}
               transfers={transfers}
             />
           </div>
@@ -454,6 +428,17 @@ export default function App() {
         {paletteOpen && profile && (
           <ResourcePalette profile={profile} services={enabled} ttlMs={resourceTtlMs(settings.resourceCacheTtlMinutes)} onPick={pickResource} onClose={() => setPaletteOpen(false)} />
         )}
+        {commandsOpen && (
+          <CommandPalette
+            onClose={() => setCommandsOpen(false)}
+            onRun={(command) => {
+              setCommandsOpen(false);
+              // 팔레트가 닫히고 포커스가 돌아온 뒤에 실행한다(명령이 연 대화상자가 팔레트와 겹치지 않게)
+              setTimeout(() => runCommand(command), 0);
+            }}
+          />
+        )}
+        {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
       </div>
     </SsoLoginContext.Provider>
   );

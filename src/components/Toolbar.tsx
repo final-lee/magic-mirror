@@ -1,5 +1,5 @@
-import type { RefObject } from "react";
 import type { ProfileInfo } from "../api/types";
+import { shortcutTitle } from "../keymap/keybindings";
 import { REGIONS } from "../lib/regions";
 
 interface Props {
@@ -8,16 +8,13 @@ interface Props {
   onProfile: (p: string) => void;
   region: string;
   onRegion: (r: string) => void;
-  filter: string;
-  onFilter: (f: string) => void;
-  filterRef: RefObject<HTMLInputElement>;
   onRefresh: () => void;
   onOpenSettings: () => void;
   /** ⌘K 리소스 찾기를 연다 */
   onOpenPalette: () => void;
 }
 
-export function Toolbar({ profiles, profile, onProfile, region, onRegion, filter, onFilter, filterRef, onRefresh, onOpenSettings, onOpenPalette }: Props) {
+export function Toolbar({ profiles, profile, onProfile, region, onRegion, onRefresh, onOpenSettings, onOpenPalette }: Props) {
   const regions = REGIONS.includes(region) ? REGIONS : [region, ...REGIONS];
   return (
     <header className="titlebar">
@@ -41,24 +38,11 @@ export function Toolbar({ profiles, profile, onProfile, region, onRegion, filter
           ))}
         </select>
       </label>
-      <input
-        ref={filterRef}
-        className="search"
-        placeholder="필터  ⌘F"
-        title="글자 일부만 순서대로 쳐도 찾아요(poa → prod-orders-api). 공백으로 나누면 모두 맞는 것만 보여요"
-        value={filter}
-        onChange={(e) => onFilter(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            onFilter("");
-            e.currentTarget.blur();
-          }
-        }}
-      />
-      <button className="icon" title="리소스 찾기 (⌘K)" aria-label="리소스 찾기" onClick={onOpenPalette}>
+      <span className="titlebar-gap" />
+      <button className="icon" title={shortcutTitle("리소스 찾기", "app.findResource")} aria-label="리소스 찾기" onClick={onOpenPalette}>
         ⌕
       </button>
-      <button className="icon" title="새로고침 (⌘R)" aria-label="새로고침" onClick={onRefresh}>
+      <button className="icon" title={shortcutTitle("새로고침", "app.refresh")} aria-label="새로고침" onClick={onRefresh}>
         ⟳
       </button>
       <button className="icon" title="서비스 설정" aria-label="서비스 설정" onClick={onOpenSettings}>

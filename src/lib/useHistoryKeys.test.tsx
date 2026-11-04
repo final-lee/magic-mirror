@@ -1,4 +1,6 @@
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
+import { useRef } from "react";
+import { resetKeymap, useKeymapListener } from "../keymap/registry";
 import { useHistoryKeys } from "./useHistoryKeys";
 
 let mouseNav: ((dir: "back" | "forward") => void) | null = null;
@@ -11,9 +13,18 @@ vi.mock("../explorer/api", () => ({
   }),
 }));
 
+// 앱처럼: 탭 상자는 보이지 않을 때 [hidden] 안에 있고, 키는 창의 디스패처 하나가 받는다
 function Probe({ active, back, forward }: { active: boolean; back: () => void; forward: () => void }) {
-  useHistoryKeys(active, back, forward);
-  return <input aria-label="입력" />;
+  useKeymapListener();
+  const root = useRef<HTMLDivElement>(null);
+  useHistoryKeys(root, active, back, forward);
+  return (
+    <div hidden={!active}>
+      <div ref={root}>
+        <input aria-label="입력" />
+      </div>
+    </div>
+  );
 }
 
 const metaKey = (key: "[" | "]") => fireEvent.keyDown(window, { key, metaKey: true });
@@ -26,6 +37,7 @@ function setup(active = true) {
 }
 
 beforeEach(() => {
+  resetKeymap();
   mouseNav = null;
   document.querySelectorAll(".modal").forEach((e) => e.remove());
 });

@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { dispatchKey } from "../keymap/registry";
 import { k8sApi } from "./api";
 import { PodTerminal } from "./PodTerminal";
 import { ATTACH_OUTPUT_ONLY, SHELL_REOPEN, shellExited } from "./text";
@@ -6,7 +7,7 @@ import type { K8sShellMessage } from "./types";
 
 // jsdom에서는 xterm이 그려지지 않으니 받은 것만 기록하는 가짜 터미널로 바꾼다(vi.mock보다 먼저 만들어야 해서 hoisted)
 const { terms, FakeTerm } = vi.hoisted(() => {
-  const terms: { written: string[]; disposed: boolean; onDataCb: (d: string) => void; cols: number; rows: number }[] = [];
+  const terms: { written: string[]; disposed: boolean; onDataCb: (d: string) => void; cols: number; rows: number; keyHandler: (e: KeyboardEvent) => boolean; blurred: boolean; area: HTMLTextAreaElement | null }[] = [];
   class FakeTerm {
     cols = 100;
     rows = 30;
@@ -16,9 +17,28 @@ const { terms, FakeTerm } = vi.hoisted(() => {
     constructor() {
       terms.push(this);
     }
+    keyHandler: (e: KeyboardEvent) => boolean = () => true;
+    blurred = false;
+    area: HTMLTextAreaElement | null = null;
     loadAddon() {}
-    open() {}
-    focus() {}
+    attachCustomKeyEventHandler(cb: (e: KeyboardEvent) => boolean) {
+      this.keyHandler = cb;
+    }
+    // 진짜 xterm처럼 `.xterm` 안의 입력칸이 커서를 받는다
+    open(el: HTMLElement) {
+      const box = document.createElement("div");
+      box.className = "xterm";
+      this.area = document.createElement("textarea");
+      box.appendChild(this.area);
+      el.appendChild(box);
+    }
+    focus() {
+      this.area?.focus();
+    }
+    blur() {
+      this.blurred = true;
+      this.area?.blur();
+    }
     write(d: string) {
       this.written.push(d);
     }
@@ -138,4 +158,32 @@ test("a node shell opens on the debug pod with no container or confirmation, and
   act(() => emit[0]({ type: "exit", code: 0, reason: null }));
   expect(screen.getByText(shellExited(0, null))).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: SHELL_REOPEN })).not.toBeInTheDocument();
+});
+
+test("⌘⎋ leaves the terminal: xterm lets the key through and the cursor goes back to the app tab; every other key stays with the terminal", async () => {
+  render(
+    <div>
+      <div className="tabbar" role="tablist">
+        <button role="tab" aria-selected className="tab-title">클러스터</button>
+      </div>
+      <PodTerminal target={T} ssoProfile="p" namespace="dev" pod="web-1" container="app" mode="exec" confirmText={null} visible />
+    </div>,
+  );
+  await act(async () => {});
+  const key = (init: KeyboardEventInit) => new KeyboardEvent("keydown", { cancelable: true, bubbles: true, ...init });
+  // xterm에는 ⌘⎋만 처리하지 않게 알려 주고, 나머지 키(⌘F·⎋·글자)는 터미널이 받는다
+  expect(terms[0].keyHandler(key({ key: "Escape", metaKey: true }))).toBe(false);
+  expect(terms[0].keyHandler(key({ key: "Escape" }))).toBe(true);
+  expect(terms[0].keyHandler(key({ key: "f", metaKey: true }))).toBe(true);
+  expect(terms[0].keyHandler(key({ key: "a" }))).toBe(true);
+  terms[0].area!.focus();
+  expect(terms[0].area).toHaveFocus();
+  const handled = dispatchKey(key({ key: "Escape", metaKey: true }));
+  expect(handled).toBe(true);
+  expect(terms[0].blurred).toBe(true);
+  expect(screen.getByRole("tab", { name: "클러스터" })).toHaveFocus();
+  // 터미널에 커서가 없으면 ⌘⎋는 아무것도 하지 않는다
+  terms[0].blurred = false;
+  expect(dispatchKey(key({ key: "Escape", metaKey: true }))).toBe(false);
+  expect(terms[0].blurred).toBe(false);
 });

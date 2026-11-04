@@ -1,11 +1,14 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { findFor, pressFindKey } from "../test/find";
 import { renderWithClient } from "../test/utils";
 import { costApi } from "./api";
 import { CostTab } from "./CostTab";
 import { ACCOUNT, row, sampleBreakdown, sampleOverview } from "./fixtures";
 import {
   BREADCRUMB_LABEL,
+  BREAKDOWN_EMPTY,
   BREAKDOWN_LABEL,
+  BREAKDOWN_NO_MATCH,
   CARD_COMPARE,
   CARD_FORECAST,
   CARD_TOTAL,
@@ -115,6 +118,38 @@ describe("breakdown table", () => {
     expect(firstCells(t)).toEqual(["EC2 - Other", RDS, "Tax", smallRows(2)]);
     fireEvent.click(within(t).getByRole("columnheader", { name: new RegExp(COL.label) }));
     expect(firstCells(t)).toEqual([RDS, "EC2 - Other", "Tax", smallRows(2)]);
+  });
+
+  test("nothing before ⌘F; ⌘F filters only the breakdown rows (the folded small row hides meanwhile); Esc clears and closes", async () => {
+    setup();
+    const t = await table();
+    expect(screen.queryByRole("search")).toBeNull();
+    const input = findFor("tax");
+    expect(input).toHaveFocus();
+    expect(firstCells(t)).toEqual(["Tax"]);
+    // 위의 요약 카드는 그대로다
+    expect(within(card(CARD_TOTAL)).getByText("$60.50")).toBeInTheDocument();
+    findFor("zzzz");
+    expect(screen.getByText(BREAKDOWN_NO_MATCH)).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("search")).toBeNull();
+    expect(firstCells(t)).toEqual([RDS, "EC2 - Other", "Tax", smallRows(2)]);
+  });
+
+  test("drilling into a row starts the next table without the old search", async () => {
+    setup();
+    const t = await table();
+    findFor("relational");
+    fireEvent.click(within(t).getByRole("cell", { name: RDS }));
+    await waitFor(() => expect(m.breakdown).toHaveBeenLastCalledWith("prod", expect.objectContaining({ groupBy: { kind: "usageType" } }), false));
+    await waitFor(() => expect(screen.queryByRole("search")).toBeNull());
+  });
+
+  test("with no rows there is nothing to find in", async () => {
+    m.breakdown.mockResolvedValue(sampleBreakdown({ rows: [], small: null }));
+    setup();
+    await screen.findByText(BREAKDOWN_EMPTY);
+    expect(pressFindKey()).toBe(false);
   });
 
   test("clicking a service drills the whole screen into its usage types, and the breadcrumb goes back up", async () => {

@@ -1,12 +1,14 @@
-import { useMemo } from "react";
+import { useMemo, type RefObject } from "react";
+import { ListFind, useListFind } from "../../components/ListFind";
+import { fuzzyKeep } from "../../lib/fuzzy";
 import { ListTable, type ListColumn } from "../../iam/ListTable";
 import { NETWORK_POLICIES } from "../kinds";
 import type { ObjectRef } from "../types";
 import { NetDetail, Section } from "./Detail";
 import { directionView, rowKey } from "./logic";
 import {
-  ALLOW_ALL, ANYWHERE, DASH, DENY_ALL, DIRECTION_LABELS, H_DIRECTIONS, H_EGRESS, H_INGRESS, H_NAMESPACE, H_POD_SELECTOR, H_POLICY, NOT_ISOLATED, NS_SYSTEM_NOTE,
-  NS_WITHOUT_NONE, NS_WITHOUT_TITLE, OPEN_POLICY_IN_WORKLOADS, POLICY_EMPTY, POLICY_NOTE, POLICY_TABLE_LABEL, SEC_POLICY_EGRESS, SEC_POLICY_INGRESS,
+  ALLOW_ALL, ANYWHERE, DASH, DENY_ALL, DIRECTION_LABELS, H_DIRECTIONS, H_EGRESS, H_INGRESS, H_NAMESPACE, H_POD_SELECTOR, H_POLICY, NET_NO_MATCH, NOT_ISOLATED, NS_SYSTEM_NOTE,
+  NS_WITHOUT_NONE, NS_WITHOUT_TITLE, OPEN_POLICY_IN_WORKLOADS, POLICY_EMPTY, POLICY_FILTER_PLACEHOLDER, POLICY_NOTE, POLICY_TABLE_LABEL, SEC_POLICY_EGRESS, SEC_POLICY_INGRESS,
   SEC_POLICY_SUMMARY, nsWithoutCount, policyPods, ruleFrom, rulePorts, ruleNumber,
 } from "./text";
 import type { NamespacePolicies, PolicyView } from "./types";
@@ -32,6 +34,8 @@ interface Props {
   selected: string | null;
   onSelect: (key: string) => void;
   onClear: () => void;
+  /** ⌘F를 받는 상자: 이 목록과 위에 뜨는 상세를 감싼 네트워크 화면 */
+  host: RefObject<HTMLElement>;
 }
 
 /** 정책이 하나도 없는 네임스페이스(시스템 네임스페이스는 흐리게) */
@@ -58,14 +62,17 @@ function WithoutPolicy({ namespaces }: { namespaces: NamespacePolicies[] }) {
   );
 }
 
-export function Policies({ policies, namespaces, namespace, selected, onSelect, onClear }: Props) {
+export function Policies({ policies, namespaces, namespace, selected, onSelect, onClear, host }: Props) {
   const cols = useMemo(columns, []);
-  const rows = policies.filter((p) => namespace === null || p.namespace === namespace);
+  const find = useListFind(host);
+  const scoped = policies.filter((p) => namespace === null || p.namespace === namespace);
+  const rows = fuzzyKeep(scoped, find.query, (p) => [`${p.namespace}/${p.name}`, policyPods(p.podSelector), ...p.types]);
   return (
     <div className="net-content">
       {namespaces && <WithoutPolicy namespaces={namespaces} />}
       <p className="dim net-note">{POLICY_NOTE}</p>
-      <ListTable label={POLICY_TABLE_LABEL} rows={rows} columns={cols} rowKey={keyOf} selectedId={selected} onSelect={onSelect} onClear={onClear} onOpen={onSelect} empty={POLICY_EMPTY} />
+      <ListFind find={find} placeholder={POLICY_FILTER_PLACEHOLDER} count={rows.length} />
+      <ListTable label={POLICY_TABLE_LABEL} rows={rows} columns={cols} rowKey={keyOf} selectedId={selected} onSelect={onSelect} onClear={onClear} onOpen={onSelect} empty={scoped.length === 0 ? POLICY_EMPTY : NET_NO_MATCH} />
     </div>
   );
 }

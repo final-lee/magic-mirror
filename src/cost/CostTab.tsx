@@ -209,6 +209,7 @@ export function CostTab({ profile }: Props) {
                     </>
                   ) : breakdown.data ? (
                     <BreakdownTable
+                      key={`${path.crumbs.map((c) => c.label).join("›")}|${group.kind}|${group.kind === "tag" ? group.key : ""}`}
                       breakdown={breakdown.data}
                       compare={!!o.compareRange}
                       drillable={canDrill(shown)}

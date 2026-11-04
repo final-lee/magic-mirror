@@ -1,5 +1,7 @@
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { dispatchKey } from "../keymap/registry";
+import { findFor, pressFind } from "../test/find";
 import { editorView, typeYaml } from "../test/codemirror";
 import { renderWithClient } from "../test/utils";
 import { iamApi } from "./api";
@@ -71,16 +73,19 @@ vi.mock("../api/desktop", () => ({ desktop: { copy: vi.fn(), openUrl: vi.fn() } 
 
 const m = vi.mocked(iamApi);
 type Props = React.ComponentProps<typeof IamTab>;
-const baseProps: Props = { profile: "prod", active: true, filter: "", focus: null, nonce: 0 };
+const baseProps: Props = { profile: "prod", active: true, focus: null, nonce: 0 };
+
+// 보이지 않는 탭은 앱처럼 [hidden] 상자 안에 둔다(키맵은 보이는 상자만 본다)
+const tab = (props: Props) => (
+  <div hidden={!props.active}>
+    <IamTab {...props} />
+  </div>
+);
 
 function setup(extra: Partial<Props> = {}) {
-  const utils = renderWithClient(<IamTab {...baseProps} {...extra} />);
+  const utils = renderWithClient(tab({ ...baseProps, ...extra }));
   const update = (next: Partial<Props>) =>
-    utils.rerender(
-      <QueryClientProvider client={utils.qc as QueryClient}>
-        <IamTab {...baseProps} {...extra} {...next} />
-      </QueryClientProvider>,
-    );
+    utils.rerender(<QueryClientProvider client={utils.qc as QueryClient}>{tab({ ...baseProps, ...extra, ...next })}</QueryClientProvider>);
   return { ...utils, update };
 }
 
@@ -100,7 +105,10 @@ const openUser = async (name = "alice") => {
 };
 const waitForMenu = () => screen.findByRole("navigation", { name: "IAM 메뉴" });
 const findingCards = () => screen.findByRole("group", { name: "점검 항목" });
-const metaKey = (key: "[" | "]") => fireEvent.keyDown(window, { key, metaKey: true });
+const metaKey = (key: "[" | "]") =>
+  act(() => {
+    dispatchKey(new KeyboardEvent("keydown", { key, metaKey: true, cancelable: true }));
+  });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -205,13 +213,18 @@ describe("menu and lists", () => {
     expect(await findingCards()).toBeInTheDocument();
   });
 
-  test("the toolbar filter narrows the list", async () => {
-    const { update } = setup();
+  test("⌘F opens the find line in the list and narrows it; Esc clears and closes it", async () => {
+    setup();
     await openUsersList();
     await screen.findByText("alice");
-    update({ filter: "bob" });
+    expect(screen.queryByRole("search")).not.toBeInTheDocument();
+    const input = findFor("bob");
+    expect(input).toHaveFocus();
     expect(screen.queryByText("alice")).not.toBeInTheDocument();
     expect(screen.getByText("bob")).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("search")).not.toBeInTheDocument();
+    expect(screen.getByText("alice")).toBeInTheDocument();
   });
 
   test("the sort order chosen in one list does not carry over to the next one", async () => {
@@ -295,11 +308,12 @@ describe("detail and history", () => {
   });
 
   test("an inactive tab ignores ⌘[ and the mouse buttons", async () => {
-    setup({ active: false });
+    const { update } = setup();
     await openUser();
+    update({ active: false });
+    await waitFor(() => expect(mouseNav).toBeNull());
     metaKey("[");
-    expect(screen.getByRole("heading", { name: "alice" })).toBeInTheDocument();
-    expect(mouseNav).toBeNull();
+    expect(screen.getByRole("heading", { name: "alice", hidden: true })).toBeInTheDocument();
   });
 
   test("history keys are ignored while a dialog is open or while typing", async () => {
@@ -311,8 +325,8 @@ describe("detail and history", () => {
     expect(screen.getByRole("heading", { name: "alice" })).toBeInTheDocument();
     modal.remove();
 
-    const input = screen.getByRole("searchbox", { name: "서비스 필터" });
-    input.focus();
+    const input = pressFind();
+    expect(input).toHaveFocus();
     metaKey("[");
     expect(screen.getByRole("heading", { name: "alice" })).toBeInTheDocument();
     input.blur();
@@ -928,9 +942,9 @@ describe("assignments", () => {
     expect(cell("alice", "dev-team")).toHaveAccessibleName("alice · dev-team: 속함");
   });
 
-  test("the toolbar filter narrows the rows", async () => {
-    const { update } = await openAssignments();
-    update({ filter: "ali" });
+  test("⌘F narrows the rows", async () => {
+    await openAssignments();
+    findFor("ali");
     expect(screen.queryByRole("button", { name: /^bob · / })).not.toBeInTheDocument();
     expect(cell("alice", "ReadOnlyAccess")).toBeInTheDocument();
   });

@@ -3,6 +3,7 @@ import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
 import { CONFIGMAPS, DEPLOYMENTS, NODES, PODS } from "./kinds";
 import { BACK, CAT_CUSTOM, COL_CPU, DETAIL_LABEL, KIND_TREE_LABEL, METRICS_UNAVAILABLE, TAB_SUMMARY, TAB_YAML } from "./text";
+import { findFor, findInputs, pressFind } from "./testFind";
 import type { K8sKind, K8sMetrics, K8sObjectView, K8sRow, K8sWatchMessage } from "./types";
 import { WorkloadsView, type WorkloadsFocus } from "./WorkloadsView";
 
@@ -201,4 +202,28 @@ test("usage is not read for kinds without usage columns or while the tab is hidd
   setup({ fixedKind: PODS, visible: false });
   await vi.waitFor(() => expect(m.watch).toHaveBeenCalledTimes(2));
   expect(m.metrics).not.toHaveBeenCalled();
+});
+
+test("⌘F opens the find line of the list even with the cursor in the detail it covers, filters the rows, and does nothing while the tab is hidden", async () => {
+  m.get.mockImplementation(async (_t, kind, _ns, name) => view(name, { kind }));
+  setup();
+  await vi.waitFor(() => expect(m.watch).toHaveBeenCalledWith(T, PODS, "prod", "p", expect.any(Function)));
+  send("pods", { type: "reset", rows: [row("web-1"), row("db-1")] });
+  expect(findInputs()).toHaveLength(0);
+  fireEvent.click(screen.getByText("web-1"));
+  const detail = await screen.findByRole("complementary", { name: DETAIL_LABEL });
+  within(detail).getAllByRole("button")[0].focus();
+  expect(pressFind()).toBe(true);
+  expect(findInputs()).toHaveLength(1);
+  findFor("db");
+  expect(screen.queryByText("web-1", { selector: "td, td *" })).toBeNull();
+  expect(screen.getByText("db-1")).toBeInTheDocument();
+});
+
+test("a hidden EKS tab's list does not react to ⌘F", async () => {
+  setup({ visible: false });
+  await vi.waitFor(() => expect(m.watch).toHaveBeenCalled());
+  send("pods", { type: "reset", rows: [row("web-1")] });
+  expect(pressFind()).toBe(false);
+  expect(findInputs()).toHaveLength(0);
 });

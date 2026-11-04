@@ -1,5 +1,5 @@
 // 시험용: 할당 화면을 IamTab 없이 띄우는 틀과, 표를 읽는 질의 모음.
-// 틀은 진짜 장바구니 훅과, 툴바 필터를 흉내 내는 입력 상자를 가진다.
+// 틀은 진짜 장바구니 훅을 쓴다. ⌘F 찾기 줄은 화면 자체가 가지니 시험은 test/find의 findFor로 연다.
 import { screen, within } from "@testing-library/react";
 import { useState } from "react";
 import type { AssignmentTab } from "../iam/assignments";
@@ -22,14 +22,12 @@ export function AssignmentsHarness({ overview, profile = "prod", initialTab = "p
   const draft = useAssignmentDraft(profile, overview);
   const added = useAddedColumns(profile);
   const [tab, setTab] = useState<AssignmentTab>(initialTab);
-  const [filter, setFilter] = useState("");
   // IAM 안의 다른 화면으로 갔다 돌아오는 일: 화면은 사라졌다 다시 생기고, 장바구니(draft)와 더한 열은 IamTab처럼 그대로다
   const [shown, setShown] = useState(true);
   return (
     <>
-      <input aria-label="툴바 필터" value={filter} onChange={(e) => setFilter(e.target.value)} />
       <button onClick={() => setShown((s) => !s)}>화면 전환</button>
-      {shown && <Assignments key={profile} profile={profile} overview={overview} draft={draft} extra={added.arns} onAddColumn={added.add} tab={tab} onTab={setTab} onOpen={onOpen} onPreview={onPreview} filter={filter} />}
+      {shown && <Assignments key={profile} profile={profile} overview={overview} draft={draft} extra={added.arns} onAddColumn={added.add} tab={tab} onTab={setTab} onOpen={onOpen} onPreview={onPreview} />}
     </>
   );
 }
