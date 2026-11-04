@@ -3,7 +3,8 @@ import { desktop } from "../api/desktop";
 import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
 import { ForwardsView } from "./ForwardsView";
-import { FORWARD_CLOSE, FORWARD_HEALTHY, FORWARD_NO_POD, FORWARD_OPEN_BROWSER, FORWARDS_EMPTY, forwardTarget } from "./text";
+import { FORWARD_CLOSE, FORWARD_HEALTHY, FORWARD_NO_POD, FORWARD_OPEN_BROWSER, FORWARDS_EMPTY, LIST_NO_MATCH, forwardTarget } from "./text";
+import { findFor, findInputs } from "./testFind";
 import type { K8sForward } from "./types";
 
 vi.mock("./api", () => ({ k8sApi: { forwardList: vi.fn(), forwardClose: vi.fn() } }));
@@ -54,4 +55,16 @@ test("opens in the browser and closes one forward, then re-reads the list", asyn
   await act(async () => {});
   expect(m.forwardClose).toHaveBeenCalledWith(1);
   expect(await screen.findByText(FORWARDS_EMPTY)).toBeInTheDocument();
+});
+
+test("⌘F finds forwards by target, address or pod; nothing is visible before it, and a miss says so", async () => {
+  m.forwardList.mockResolvedValue([forward(), forward({ id: 2, name: "db", localPort: 15432, pod: "db-0" })]);
+  setup();
+  await screen.findByText(forwardTarget(forward()));
+  expect(findInputs()).toHaveLength(0);
+  findFor("15432");
+  expect(screen.getByText("127.0.0.1:15432")).toBeInTheDocument();
+  expect(screen.queryByText("127.0.0.1:18080")).not.toBeInTheDocument();
+  findFor("nothing-like-this");
+  expect(screen.getByText(LIST_NO_MATCH)).toBeInTheDocument();
 });

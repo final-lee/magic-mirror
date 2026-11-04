@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useListFind } from "../components/ListFind";
 import { KEEP_LINES } from "./logBuffer";
 import { LogView, type LogStream } from "./LogView";
 import {
@@ -34,10 +35,13 @@ function LogsShell({ target, ssoProfile, live, stream, containers, initialContai
   const [pretty, setPretty] = useState(true);
   const [showTime, setShowTime] = useState(false);
   const [wrap, setWrap] = useState(true);
+  // ⌘F: 이 로그 안에서 찾는다(찾은 글자는 로그 줄에서 강조). 상세 탭을 감싼 이 상자가 host라 목록의 ⌘F보다 우선한다
+  const box = useRef<HTMLDivElement>(null);
+  const find = useListFind(box);
   const options = useMemo<K8sLogOptions>(() => ({ container, follow, tailLines, previous, sinceSeconds }), [container, follow, tailLines, previous, sinceSeconds]);
 
   return (
-    <div className="k8s-logs">
+    <div className="k8s-logs" ref={box}>
       <div className="k8s-log-bar">
         <div className="k8s-seg" role="group" aria-label={LOG_VIEW_LABEL}>
           <button aria-pressed={pretty} onClick={() => setPretty(true)}>
@@ -91,7 +95,7 @@ function LogsShell({ target, ssoProfile, live, stream, containers, initialContai
           {LOG_WRAP}
         </label>
       </div>
-      <LogView target={target} ssoProfile={ssoProfile} live={live} stream={stream} options={options} pretty={pretty} showTime={showTime} wrap={wrap} />
+      <LogView target={target} ssoProfile={ssoProfile} live={live} stream={stream} options={options} pretty={pretty} showTime={showTime} wrap={wrap} find={find} />
     </div>
   );
 }

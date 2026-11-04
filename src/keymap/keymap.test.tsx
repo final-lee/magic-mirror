@@ -97,3 +97,33 @@ test("keys a component already handled, dialogs and missing handlers are left al
   modal.remove();
   expect(runCommand("app.refresh")).toBe(false);
 });
+
+function Nested({ onRun }: { onRun: (n: string) => void }) {
+  const outer = useRef<HTMLDivElement>(null);
+  const inner = useRef<HTMLDivElement>(null);
+  // 바깥(목록 상자) 처리기가 나중에 등록돼도(부모 효과가 자식 뒤에 돈다) 포개진 안쪽이 이긴다
+  useCommand("list.find", () => onRun("inner"), { host: inner });
+  useCommand("list.find", () => onRun("outer"), { host: outer });
+  return (
+    <div ref={outer}>
+      <button>list</button>
+      <div ref={inner}>
+        <input aria-label="log input" />
+      </div>
+    </div>
+  );
+}
+
+test("nested hosts: focus inside the inner box goes to the inner handler, focus elsewhere in the outer box to the outer one", () => {
+  const ran: string[] = [];
+  render(
+    <Root>
+      <Nested onRun={(n) => ran.push(n)} />
+    </Root>,
+  );
+  screen.getByRole("textbox", { name: "log input" }).focus();
+  fireEvent.keyDown(window, { key: "f", metaKey: true });
+  screen.getByRole("button", { name: "list" }).focus();
+  fireEvent.keyDown(window, { key: "f", metaKey: true });
+  expect(ran).toEqual(["inner", "outer"]);
+});

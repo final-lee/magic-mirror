@@ -5,6 +5,7 @@ import { networkApi } from "./api";
 import { NetworkView } from "./NetworkView";
 import { OPEN_VPC_UNKNOWN } from "./text";
 import type { Network } from "./types";
+import { findFor, findInputs, pressFind } from "../testFind";
 
 vi.mock("./api", () => ({ networkApi: { network: vi.fn() } }));
 vi.mock("../../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
@@ -163,7 +164,7 @@ test("Pod IPs: per-subnet counts with the VPC CNI, a host network pod marked, an
   expect(within(perSubnet).getByText("3")).toBeInTheDocument();
   const pods = screen.getByRole("table", { name: "Pod IP 목록" });
   expect(within(within(pods).getByText("agent").closest("tr")!).getByText("노드 IP")).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Pod 찾기"), { target: { value: "10.0.0.77" } });
+  findFor("10.0.0.77");
   expect(within(screen.getByRole("table", { name: "Pod IP 목록" })).queryByText("agent")).toBeNull();
   expect(screen.getByText("web-1")).toBeInTheDocument();
 });
@@ -230,4 +231,36 @@ test("a failing command (no connection) shows the error instead of the view", as
   );
   expect(await screen.findByText("먼저 연결해 주세요")).toBeInTheDocument();
   expect(screen.queryByRole("tab", { name: "로드밸런서" })).toBeNull();
+});
+
+test("⌘F finds load balancer rows inside the list (none before) and still goes to the list while the detail on top has the cursor", async () => {
+  setup(network());
+  const table = await screen.findByRole("table", { name: "로드 밸런서 목록" });
+  expect(findInputs()).toHaveLength(0);
+  fireEvent.click(within(table).getByText("shop/web").closest("tr")!);
+  within(detail()).getAllByRole("button")[0].focus();
+  expect(pressFind()).toBe(true);
+  expect(findInputs()).toHaveLength(1);
+  findFor("site");
+  const shown = within(screen.getByRole("table", { name: "로드 밸런서 목록" }));
+  expect(shown.getByText("shop/site")).toBeInTheDocument();
+  expect(shown.queryByText("shop/web")).toBeNull();
+  fireEvent.keyDown(findInputs()[0], { key: "Escape" });
+  expect(within(screen.getByRole("table", { name: "로드 밸런서 목록" })).getByText("shop/web")).toBeInTheDocument();
+});
+
+test("⌘F on nodes and subnets filters both tables; NetworkPolicy has its own find", async () => {
+  setup(network());
+  await screen.findByRole("table", { name: "로드 밸런서 목록" });
+  tab("노드·서브넷");
+  await screen.findByRole("table", { name: "노드 목록" });
+  findFor("fargate");
+  expect(within(screen.getByRole("table", { name: "노드 목록" })).queryByText("ip-10-0-0-10")).toBeNull();
+  expect(within(screen.getByRole("table", { name: "노드 목록" })).getByText("fargate-x")).toBeInTheDocument();
+  // 탭을 바꾸면 그 목록의 찾기 줄이 새로 열린다
+  tab("NetworkPolicy");
+  await screen.findByRole("table", { name: "NetworkPolicy 목록" });
+  expect(findInputs()).toHaveLength(0);
+  findFor("allow-web");
+  expect(within(screen.getByRole("table", { name: "NetworkPolicy 목록" })).getByText("allow-web")).toBeInTheDocument();
 });

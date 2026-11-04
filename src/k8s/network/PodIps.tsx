@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { type RefObject } from "react";
+import { ListFind, useListFind } from "../../components/ListFind";
 import { PODS } from "../kinds";
 import type { ObjectRef } from "../types";
 import { Section } from "./Detail";
 import { filterPods, subnetLabel } from "./logic";
 import {
-  DASH, H_CIDR, H_FREE_IPS, H_HOST_NETWORK, H_IP, H_NAMESPACE, H_POD, H_POD_COUNT, H_SUBNET, H_ZONE, HOST_NETWORK_MARK, NOT_VPC_CNI, POD_FILTER_LABEL,
+  DASH, H_CIDR, H_FREE_IPS, H_HOST_NETWORK, H_IP, H_NAMESPACE, H_POD, H_POD_COUNT, H_SUBNET, H_ZONE, HOST_NETWORK_MARK, NOT_VPC_CNI,
   POD_FILTER_PLACEHOLDER, POD_IP_TITLE, PODS_EMPTY, PODS_PARTIAL, PODS_TABLE_LABEL, SUBNET_NOTE, SUBNETS_UNKNOWN, VPC_CNI_NOTE, freeIps, openLink, outsideNote,
   podsShown, H_NODE,
 } from "./text";
@@ -18,16 +19,18 @@ interface Props {
   /** null이면 모든 네임스페이스 */
   namespace: string | null;
   onOpenObject: (ref: ObjectRef) => void;
+  /** ⌘F를 받는 상자: 이 목록을 감싼 네트워크 화면 */
+  host: RefObject<HTMLElement>;
 }
 
 /** VPC CNI의 Pod IP → 서브넷, 서브넷별 Pod 수와 남은 IP, Pod 목록 */
-export function PodIps({ network, namespace, onOpenObject }: Props) {
-  const [query, setQuery] = useState("");
+export function PodIps({ network, namespace, onOpenObject, host }: Props) {
+  const find = useListFind(host);
   const pods = network.pods;
   if (!pods) return null;
   const subnets = network.subnets;
   const scoped = namespace === null ? pods.items : pods.items.filter((p) => p.namespace === namespace);
-  const found = filterPods(scoped, query);
+  const found = filterPods(scoped, find.query);
   const shown = found.slice(0, PODS_SHOWN_MAX);
   const names = new Map((subnets ?? []).map((s) => [s.id, subnetLabel(s)]));
   return (
@@ -61,7 +64,7 @@ export function PodIps({ network, namespace, onOpenObject }: Props) {
         </Section>
       )}
       <Section title={PODS_TABLE_LABEL}>
-        <input className="net-filter" aria-label={POD_FILTER_LABEL} placeholder={POD_FILTER_PLACEHOLDER} value={query} onChange={(e) => setQuery(e.target.value)} />
+        <ListFind find={find} placeholder={POD_FILTER_PLACEHOLDER} count={found.length} />
         {found.length === 0 ? (
           <p className="dim">{PODS_EMPTY}</p>
         ) : (

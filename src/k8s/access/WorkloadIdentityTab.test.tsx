@@ -4,6 +4,7 @@ import { accessApi } from "./api";
 import { WorkloadIdentityTab } from "./WorkloadIdentityTab";
 import { NO_WORKLOADS, ONLY_BROKEN, STATUS_BROKEN, STATUS_UNKNOWN, STATUS_WORKS, WORKLOAD_TRUNCATED, gapText, podsMore } from "./text";
 import type { Check, WorkloadIdentity, WorkloadView } from "./types";
+import { findFor } from "../testFind";
 
 vi.mock("./api", () => ({ accessApi: { workloadIdentity: vi.fn() } }));
 vi.mock("../../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
@@ -41,7 +42,7 @@ test("each service account shows its IRSA and Pod Identity roles with the result
   expect(within(etl).getByText("ServiceAccount 없음")).toBeInTheDocument();
 });
 
-test("only broken connections can be filtered, and the filter box matches names and roles", async () => {
+test("only broken connections can be filtered, and ⌘F matches names and roles", async () => {
   m.workloadIdentity.mockResolvedValue(
     view([
       item({ serviceAccount: "api", irsa: { roleArn: ROLE, audience: "a", check: WORKS } }),
@@ -54,7 +55,7 @@ test("only broken connections can be filtered, and the filter box matches names 
   expect(screen.queryByText("payments/api")).not.toBeInTheDocument();
   expect(screen.getByText("payments/worker")).toBeInTheDocument();
   fireEvent.click(screen.getByLabelText(ONLY_BROKEN));
-  fireEvent.change(screen.getByLabelText("ServiceAccount·역할 이름 찾기"), { target: { value: "TEAM/PAY" } });
+  findFor("TEAM/PAY");
   expect(screen.getByText("payments/api")).toBeInTheDocument();
   expect(screen.queryByText("payments/worker")).not.toBeInTheDocument();
 });

@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore, type RefObject } from "react";
+import { ListFind, useListFind } from "../components/ListFind";
 import { ListTable } from "../iam/ListTable";
 import { columnsFor, type TrendOf } from "./columns";
 import { matchesFilter, parseFilter } from "./selector";
@@ -26,13 +27,17 @@ interface Props {
   usage?: UsageIndex | null;
   /** 앱이 모은 사용량 기록의 키(usageHistory.historyKey). 있으면 Pod·노드 비율 칸에 최근 추이 그래프를 둔다 */
   historyKey?: string | null;
+  /** ⌘F를 받는 상자: 목록과 그 위에 뜨는 상세를 함께 감싼 곳(상세에 커서가 있어도 ⌘F는 이 목록으로 온다) */
+  host: RefObject<HTMLElement>;
+  /** 탭이 보이는 동안에만 ⌘F를 받는다 */
+  active?: boolean;
 }
 
-/** 감시로 받은 행을 이름·레이블 셀렉터·이상 여부로 걸러 보여 준다 */
-export function ObjectList({ kind, rows, status, showNamespace, selectedUid, onSelect, onClear, onOpen, now, usage, historyKey }: Props) {
-  const [query, setQuery] = useState("");
+/** 감시로 받은 행을 이름·레이블 셀렉터(⌘F로 여는 찾기 줄)·이상 여부로 걸러 보여 준다 */
+export function ObjectList({ kind, rows, status, showNamespace, selectedUid, onSelect, onClear, onOpen, now, usage, historyKey, host, active = true }: Props) {
+  const find = useListFind(host, { enabled: active });
   const [onlyProblems, setOnlyProblems] = useState(false);
-  const filter = parseFilter(query);
+  const filter = parseFilter(find.query);
   const shown = rows.filter((r) => matchesFilter(r, filter) && (!onlyProblems || r.problems.length > 0));
   const at = now ?? Date.now();
   // 새 기록이 들어올 때마다 다시 그려 추이 그래프를 늘린다
@@ -55,8 +60,8 @@ export function ObjectList({ kind, rows, status, showNamespace, selectedUid, onS
   };
   return (
     <div className="k8s-list">
+      <ListFind find={find} placeholder={FILTER_PLACEHOLDER} count={shown.length} />
       <div className="k8s-list-bar">
-        <input type="search" className="k8s-filter" aria-label={FILTER_PLACEHOLDER} placeholder={FILTER_PLACEHOLDER} value={query} onChange={(e) => setQuery(e.target.value)} />
         <label className="k8s-check">
           <input type="checkbox" checked={onlyProblems} onChange={(e) => setOnlyProblems(e.target.checked)} />
           {ONLY_PROBLEMS}
