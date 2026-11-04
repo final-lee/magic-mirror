@@ -3,7 +3,7 @@ import { useModal } from "../iam/useModal";
 import { fuzzyKeep } from "../lib/fuzzy";
 import { COMMANDS, KEYBINDINGS, type KeyScope } from "./keybindings";
 import { keyLabel } from "./keys";
-import { canRun } from "./registry";
+import { canRun, getExtraBindings } from "./registry";
 
 export const SHORTCUTS_TITLE = "단축키";
 
@@ -26,8 +26,9 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
   const { sheetRef, trapTab } = useModal(onClose);
   useEffect(() => inputRef.current?.focus(), []);
   // 어떤 명령을 지금 처리할 곳이 있는지
-  const usable = new Set(KEYBINDINGS.filter((b) => b.handler === "registry" && canRun(b.command)).map((b) => b.command));
-  const rows = KEYBINDINGS.map((b) => ({ ...b, title: COMMANDS[b.command]?.title ?? b.command, label: keyLabel(b.key) }));
+  const bindings = [...KEYBINDINGS, ...getExtraBindings()];
+  const usable = new Set(bindings.filter((b) => b.handler === "registry" && canRun(b.command)).map((b) => b.command));
+  const rows = bindings.map((b) => ({ ...b, title: b.title ?? COMMANDS[b.command]?.title ?? b.command, label: keyLabel(b.key) }));
   const shown = fuzzyKeep(rows, query, (r) => [r.title, r.label, SCOPE_LABEL[r.scope]]);
   return (
     <div className="modal">

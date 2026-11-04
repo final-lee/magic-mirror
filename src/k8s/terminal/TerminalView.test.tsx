@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { dispatchKey, resetKeymap } from "../../keymap/registry";
 import { k8sApi } from "../api";
 import { shellExited } from "../text";
@@ -68,12 +69,12 @@ let emit: ((msg: K8sShellMessage) => void)[] = [];
 let nextId = 0;
 
 /** 탭 목록 상태까지 쥐는 한 화면(K8sTab이 하는 일) */
-function Screen({ visible = true, plugin }: { visible?: boolean; plugin?: { command: string; title: string } }) {
+function Screen({ visible = true, mounted = true, plugin }: { visible?: boolean; mounted?: boolean; plugin?: { command: string; title: string } }) {
   const terminals = useTerminals();
   return (
     <div>
       <button onClick={() => terminals.open(plugin?.command ?? null, plugin?.title)}>run</button>
-      <TerminalView
+      {mounted && <TerminalView
         target={T}
         context="prod-admin"
         ssoProfile="p"
@@ -83,7 +84,7 @@ function Screen({ visible = true, plugin }: { visible?: boolean; plugin?: { comm
         onSelect={terminals.select}
         onClose={terminals.close}
         onNew={() => terminals.open(null)}
-      />
+      />}
     </div>
   );
 }
@@ -105,6 +106,28 @@ beforeEach(() => {
 
 const tabNames = () => screen.getAllByRole("tab").map((t) => t.textContent);
 const panes = () => Array.from(document.querySelectorAll(".k8s-shell-host")) as HTMLElement[];
+
+test("a plugin command is not launched again after the terminal view remounts", async () => {
+  const plugin = { command: "echo once", title: "한 번" };
+  const screenView = render(<Screen plugin={plugin} />);
+  fireEvent.click(screen.getByText("run"));
+  await act(async () => {});
+  expect(open).toHaveBeenCalledTimes(1);
+  screenView.rerender(<Screen plugin={plugin} mounted={false} />);
+  screenView.rerender(<Screen plugin={plugin} />);
+  await act(async () => {});
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(screen.getByText("echo once")).toBeInTheDocument();
+  expect(screen.getByText(TERMINAL_CLOSE_TAB)).toBeInTheDocument();
+});
+
+test("StrictMode cannot launch a plugin command twice", async () => {
+  render(<StrictMode><Screen plugin={{ command: "echo once", title: "한 번" }} /></StrictMode>);
+  fireEvent.click(screen.getByText("run"));
+  await act(async () => {});
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(screen.getByText(TERMINAL_CLOSE_TAB)).toBeInTheDocument();
+});
 
 test("the header shows the pinned context and an empty view offers a new terminal", async () => {
   render(<Screen />);

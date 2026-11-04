@@ -19,6 +19,12 @@ describe("EKS plugins", () => {
     }
     expect(pluginTemplateError(`echo "$NAME" '$NAME' $NAME`)).toBeNull();
   });
+  it("rejects dollar-quoted strings at validation and expansion", () => {
+    for (const template of ["echo $'x' $NAME", 'echo $"x" $NAME', "echo $'\\'' $NAME #'"]) {
+      expect(pluginTemplateError(template)).not.toBeNull();
+      expect(() => expandPlugin(template, { NAMESPACE: "", NAME: "unsafe", CONTEXT: "", KIND: "", CONTAINER: "" })).toThrow();
+    }
+  });
   it("accepts wildcard and exact kind references", () => {
     const plugin = { name: "x", command: "x", kinds: [pod] };
     expect(supportsKind(plugin, pod)).toBe(true);
