@@ -322,6 +322,10 @@ export interface K8sKind extends K8sKindRef {
   verbs: string[];
   /** 내장 API 그룹이 아닌 종류(사용자 정의 리소스) */
   custom: boolean;
+  /** API 서버가 알려 주는 짧은 이름(`po`, `deploy`). 백엔드는 늘 보내고(못 읽었으면 빈 목록), 시험 자료는 생략해도 된다 */
+  shortNames?: string[];
+  /** API 서버가 알려 주는 단수 이름(`pod`). 못 읽었으면 빈 문자열 */
+  singularName?: string;
 }
 
 /** 소유자 또는 자식. plural은 kinds로 프론트가 찾는다 */

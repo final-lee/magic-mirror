@@ -566,8 +566,7 @@ pub fn k8s_forward_close(k8s: State<'_, K8sState>, id: u64) {
 #[tauri::command]
 pub async fn k8s_kinds(k8s: State<'_, K8sState>, target: K8sTarget) -> Result<Vec<Kind>, AppError> {
     let s = k8s.session(&target)?;
-    let discovery = kinds::discover(&s.client, s.endpoint).await?;
-    Ok(kinds::kinds_of(&discovery))
+    kinds::discover_kinds(&s.client, s.endpoint).await
 }
 
 /// 상세 화면. 소유 관계, 컨테이너, 이벤트, YAML(Secret 값은 가림)을 한 번에 돌려준다.
