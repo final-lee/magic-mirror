@@ -13,7 +13,7 @@
 - EKS 밖의 쿠버네티스 클러스터(kubeconfig에 있어도 열지 않는다).
 - NetworkPolicy가 실제로 막는 트래픽 계산, 웹훅 authorizer 평가.
 - 클러스터·노드그룹·애드온 생성, 삭제, 업그레이드(AWS 쪽 인프라 변경).
-- Helm 릴리스 관리, 디버그용 ephemeral 컨테이너, 셸 입력 기록.
+- 디버그용 ephemeral 컨테이너, 셸 입력 기록. (Helm 릴리스 관리는 2026-11-03에 범위에 넣었다: 아래 "Helm")
 - 비용 분석.
 
 ## 단계
@@ -39,7 +39,7 @@
 3. 리소스 사용량: (2026-11-03 구현함) Pod·컨테이너 CPU/메모리 열(metrics-server), request·limit 대비 %, 워크로드·네임스페이스 집계, 사용량 그래프(Prometheus 없이 앱이 metrics-server 값을 모은다). 아래 "사용량(metrics-server)"과 "사용량 그래프" 참고.
 4. 내장 종류 트리: (2026-11-03 구현함) HPA, PDB, ResourceQuota, LimitRange, PriorityClass, RuntimeClass, Lease, Mutating·ValidatingWebhookConfiguration, EndpointSlice, IngressClass, Role·ClusterRole·RoleBinding·ClusterRoleBinding, CustomResourceDefinition 자체. API discovery로 제공 버전만 표시하고 목록·상세 요약과 북마크를 지원한다.
 5. 탐색: 키보드 중심 조작(명령 팔레트, `:종류` 이동), `kubectl describe` 형식 출력, xray식 관계 트리, 앱 안 터미널(kubectl), 플러그인.
-6. Helm: 릴리스 목록·values·이력, 업그레이드·롤백·삭제, 차트 설치(설계에 없음).
+6. Helm: (2026-11-03 구현함) 릴리스 목록·values·이력·manifest·리소스 연결, 업그레이드(values 편집, 다른 차트)·롤백·삭제, 차트 설치(로컬 경로·저장소·OCI). 아래 "Helm" 참고.
 7. 점검·권한: popeye식 위생 점검(K5), RBAC 역조회(K4).
 
 우선순위(매일 쓰는 빈도): ① 셸·port-forward·restart·scale·삭제 ② Pod CPU/메모리 열 ③ 트리에 내장 종류 추가 ④ 로그 K3 나머지 ⑤ Helm 읽기 전용.
@@ -48,7 +48,7 @@
 - **EKS → Clusters** 행을 더블클릭하면 `☸️ <클러스터 이름>` 탭이 열린다. 이것이 유일한 진입점이고, 사이드바에 별도 메뉴(클러스터 선택 화면)는 두지 않는다.
 - 대상은 `{ profile, region, cluster }`. 같은 대상의 탭은 하나만 열린다.
 - 탭을 닫으면 그 탭의 watch, 로그 스트림, 셸, port-forward, 연결을 모두 정리한다.
-- 하위 화면: 개요, 워크로드, 로그, 접근, 보안 점검, 네트워크, 셸, 포트포워딩, 변경 기록.
+- 하위 화면: 개요, 워크로드, 로그, 접근, 보안 점검, 네트워크, 셸, 포트포워딩, Helm, 변경 기록.
 - 상단 막대: kubeconfig context 이름, 클러스터에서 보이는 신원, 네임스페이스 선택(전체 포함), "YAML로 만들기".
 
 ## 접속
@@ -147,6 +147,13 @@
 - 노드 → 서브넷·AZ. VPC CNI면 Pod IP가 속한 서브넷.
 - 기존 VPC 다이어그램 열기(클러스터 노드와 로드밸런서 강조).
 - NetworkPolicy는 목록과 상세만.
+- 지금 된 것 (2026-11-03): 왼쪽 메뉴 "🌐 네트워크"(읽기 전용, `k8s_network`, `src-tauri/src/k8s/network/`, 프론트 `src/k8s/network/`). 탭 넷:
+  - **로드밸런서**: type이 LoadBalancer인 Service와 모든 Ingress. 짝은 status 호스트명(DNS 이름과 같음, 대소문자·끝 점·`dualstack.` 무시)을 먼저 보고, 없으면 태그로 찾는다. 태그는 `elbv2.k8s.aws/cluster`가 이 클러스터 이름이어야 하고 `service.k8s.aws/stack`=`네임스페이스/이름`(Service), `ingress.k8s.aws/stack`=그룹 이름 또는 `네임스페이스/이름`(Ingress)이다. 호스트명이 있으면 호스트명이 이긴다. 짝이 없으면 이유(주소 없음 / ELBv2에 없음 / AWS 읽기 실패)를 보인다. ELBv2만 읽으므로 클래식 로드 밸런서(CLB)는 "찾지 못함"으로 나오고 안내 문구에 CLB일 수 있다고 적는다(CLB SDK를 새로 들이지 않았다). 행을 누르면 70% 상세: 요약, 로드 밸런서, 리스너(기본 동작과 ALB 규칙), 대상 그룹과 대상 상태(정상·비정상과 사유, 대상 IP는 Pod로, 인스턴스 ID는 노드로 링크). 클러스터 태그가 붙었지만 어떤 객체도 가리키지 않는 로드 밸런서는 아래에 따로 보인다.
+  - **노드·서브넷**: 노드 → providerID의 인스턴스 ID → EC2(DescribeInstances, 필터로 조회) → 서브넷·AZ. 서브넷 표는 클러스터 VPC 전체(남은 IP, 용량, 노드 수, Pod 수). VPC는 EKS DescribeCluster, 실패하면 인스턴스의 VPC.
+  - **Pod IP**: kube-system에 `k8s-app=aws-node` Pod가 있으면 VPC CNI로 보고 Pod IP를 서브넷 CIDR에 대어(가장 긴 접두) 서브넷별 Pod 수를 센다. hostNetwork Pod는 노드 IP라 세지 않고, 어느 서브넷에도 없는 IP는 따로 센다. VPC CNI가 아니면 서브넷에 잇지 않고 Pod 목록만 보인다.
+  - **NetworkPolicy**: 목록과 상세(대상 Pod, 방향, 들어오고 나가는 규칙 요약: 기본 policyTypes 적용, 모두 차단·모두 허용 구분). 정책이 하나도 없는 네임스페이스에 표시(시스템 네임스페이스는 흐리게). 실제로 막히는 트래픽은 계산하지 않는다.
+  - AWS를 읽지 못한 부분(권한, SSO 만료, 시간 초과)은 화면 위에 이유와 함께 한 줄로 묶여 남고 나머지는 그대로 보인다.
+  - [VPC 다이어그램 열기]는 클러스터의 노드(인스턴스 ID)와 로드 밸런서(ARN)를 강조해서 기존 VPC 구조도 탭을 연다(`VpcMapTab`의 선택 속성 `highlight`, 앱의 `openVpc`에 선택 필드 `highlight`). 이미 열린 탭은 새 강조를 받을 때만 바꾼다. 상세의 [VPC 다이어그램에서 보기]는 그 로드 밸런서 하나만 강조한다. 강조 리소스는 칸이 넘쳐도 "+N"에 묻히지 않게 앞에 놓고, 막대에서 끌 수 있다.
 
 ## 접근
 
@@ -159,14 +166,41 @@
 ### 실효 권한 (순수 함수)
 - 입력: Role, ClusterRole, RoleBinding, ClusterRoleBinding, 신원 매핑, access policy. 출력: 주체(사용자, 그룹, ServiceAccount, IAM 주체)별 규칙과 출처 경로.
 - 처리: `aggregationRule`, `*`, `resourceNames`, 하위 리소스, `nonResourceURLs`, 기본 그룹(`system:authenticated`, `system:serviceaccounts`, `system:serviceaccounts:<ns>`).
-- RBAC만 계산한다. 화면에 "RBAC과 EKS access policy만 계산해요"를 적는다.
-- 권한 표: 주체 × 네임스페이스. 칸은 읽기, 쓰기, 삭제, exec·attach·port-forward, Secret 읽기, RBAC 변경, 권한 상승 가능. 칸을 누르면 동작과 바인딩 경로.
-- 누가 할 수 있나: 동사 + 리소스(+ 하위 리소스) + 네임스페이스(+ 이름) → 주체와 경로. 결과는 `SubjectAccessReview`로 대조할 수 있다(대조 결과가 다르면 표시).
+- RBAC과 EKS access policy만 계산한다. 화면에 "RBAC과 EKS access policy만 계산해요"를 적는다.
+- **엔진 API**(`k8s/access/engine.rs`, 순수. K5 보안 점검과 K8 D의 RBAC 변경 미리보기가 부른다):
+  - `evaluate(rbac, principals) -> Evaluation`: `Rbac`(Role·ClusterRole(`aggregationRule` 포함)·RoleBinding·ClusterRoleBinding)과 유효한 신원 매핑(`Principal`: IAM 주체의 쿠버네티스 사용자 이름·그룹·access policy)을 받아 주체별 `SubjectRules`를 만든다. 규칙마다 `Grant`(범위 + 규칙 + 출처 `Source`: 방법(직접·매핑이 준 그룹·기본 그룹·access policy·`system:masters` 내장) → 바인딩 → 역할 → 합쳐 준 ClusterRole).
+  - `Evaluation::can(subject, Query { verb, group, resource, subresource, namespace, name }) -> Decision { allowed, grants }`와 `can_non_resource(subject, verb, path)`. 목록에 없는 주체(바인딩에 이름이 없는 ServiceAccount 등)는 그 자리에서 계산한다.
+  - `Evaluation::who_can(&Query) -> Vec<WhoCan>`: 할 수 있는 주체와 경로. 기본 그룹(`system:authenticated` 등)에서 물려받은 권한은 그 그룹 항목에만 두고 사용자·ServiceAccount 줄마다 되풀이하지 않는다.
+  - `diff::diff(before, after) -> Vec<SubjectDiff>`: 두 RBAC 시점에서 누가 무엇을 얻고 잃는지. 달라진 규칙에서 대표 요청을 만들어 양쪽을 평가하고 결과가 바뀐 것만 낸다(`*`는 두 시점의 규칙에 나온 (그룹, 리소스)와 표준 동사로 펼치고 나머지는 `*`로 적는다).
+  - `Evaluation::dangling()`: 없는 역할을 가리키는 바인딩. `Evaluation::identity_of(subject)`: SubjectAccessReview 대조에 쓸 사용자·그룹.
+- **의미**(API 서버의 RBAC 인가와 같다): `*`는 모든 동사·그룹·리소스(하위 리소스 포함)에 맞고, `pods`는 `pods/exec`에 맞지 않으며 `*/exec`만 하위 리소스에 맞는다(`pods/*`는 맞지 않는다). `resourceNames`는 이름을 지정한 요청에만 맞는다. RoleBinding은 그 네임스페이스에만(ClusterRole을 가리켜도, `nonResourceURLs`는 무시), ClusterRoleBinding은 모든 네임스페이스·클러스터 범위·비리소스 URL에 적용한다. 네임스페이스 없는 요청(`kubectl get pods -A` 포함)은 ClusterRoleBinding으로 받은 권한만 맞는다. `aggregationRule`은 선택자에 맞는 다른 ClusterRole의 규칙을 이름 순서로 합치고(여러 단계, 순환은 끊는다) 그 ClusterRole에 적어 둔 `rules`는 쓰지 않는다. 모든 주체는 `system:authenticated`(`system:anonymous`는 `system:unauthenticated`), ServiceAccount는 `system:serviceaccounts`와 `system:serviceaccounts:<ns>`도 가진다. `system:masters`는 API 서버가 모두 허용한다. User 바인딩의 이름이 `system:serviceaccount:<ns>:<name>`이면 그 ServiceAccount에 적용된다. IAM 사용자 이름이 `{{SessionName}}` 템플릿이면 그 템플릿에 맞는 이름의 User 바인딩을 "특정 세션 이름일 때만"으로 표시해 적용한다.
+- **권한 표**: 주체 × 네임스페이스(열: 클러스터 전체 + 고른 네임스페이스 최대 8). 주체는 바인딩에 이름이 나온 사용자·그룹·ServiceAccount와 유효한 IAM 주체다(바인딩에 이름이 없는 ServiceAccount는 `system:serviceaccounts*` 그룹 행으로 본다). 칸 일곱은 대표 요청 몇 개가 이름 지정 없이 허용되는지로 정한다. 단계는 전부(모두 허용)·일부(일부만 허용되거나 `resourceNames`로 정해진 이름만)·없음. 네임스페이스 열은 그 네임스페이스의 요청(ClusterRoleBinding 권한 포함), 클러스터 전체 열은 클러스터 범위 요청(ClusterRoleBinding 권한만)으로 계산한다.
+
+  | 칸 | 대표 요청 | 전부 | 일부 |
+  |---|---|---|---|
+  | 읽기 | pods, services, configmaps, persistentvolumeclaims, deployments, statefulsets, daemonsets, jobs, cronjobs, ingresses 10종 × get·list·watch | 30개 모두 | 하나라도 |
+  | 쓰기 | 같은 10종 × create·update·patch | 30개 모두 | 하나라도 |
+  | 삭제 | 같은 10종 × delete·deletecollection | 20개 모두 | 하나라도 |
+  | exec·attach·port-forward | pods/exec, pods/attach, pods/portforward의 create | 셋 모두 | 하나라도 |
+  | Secret 읽기 | secrets × get·list·watch | 셋 모두 | 하나라도 |
+  | RBAC 변경 | roles·rolebindings(클러스터 전체 열은 clusterroles·clusterrolebindings도) × create·update·patch·delete | 모두 | 하나라도 |
+  | 권한 상승 가능 | 직접: roles·clusterroles의 escalate·bind, users·groups·serviceaccounts의 impersonate, serviceaccounts/token create, nodes/proxy get·create. 간접: pods·deployments·statefulsets·daemonsets·jobs·cronjobs create(Pod를 만들어 다른 ServiceAccount 토큰을 쓴다), secrets get·list(토큰 읽기) | 직접 경로 하나라도 | 간접 경로 하나라도(직접은 이름 한정만) |
+
+  칸을 누르면 오른쪽 상세(70%)에 단계, 확인한 동작별 허용 여부, 바인딩 경로가 보인다. 큰 클러스터를 위해 한 쪽(25행)씩 백엔드가 계산해 보내고, 종류 칩·이름 필터·네임스페이스 고르기(검색)가 있다. 계산 결과(`Evaluation`)는 대상마다 캐시하고 연결이 바뀌면 버린다([다시 읽기]는 새로 읽는다).
+- **누가 할 수 있나**: 동사 + 리소스(kubectl 식 `pods`, `deployments.apps`, `pods/exec`) + 네임스페이스(+ 이름) → 주체와 경로(1000명까지). [클러스터에 대조]는 `SubjectAccessReview`를 주체마다 보내고(최대 100명, 동시 4개) 계산은 허용인데 클러스터가 거부한 줄에 "다름"을 붙인다. 이 신원이 `create subjectaccessreviews`를 할 수 없으면(내 권한의 규칙 목록으로 확인) 이유와 함께 꺼 둔다. 세션 이름 템플릿에만 기대는 권한은 클러스터에 같은 신원이 없어 대조하지 않는다.
 
 ### 워크로드 신원
 - ServiceAccount마다 IRSA 어노테이션, Pod Identity 연결(`ListPodIdentityAssociations`), 쓰는 Pod.
 - IRSA 확인: 역할의 신뢰 정책에 이 클러스터의 OIDC 공급자와 `sub` = `system:serviceaccount:<ns>:<sa>`(또는 맞는 와일드카드), `aud` = `sts.amazonaws.com` 조건이 있는지. 없으면 "연결돼 있지만 동작하지 않음".
-- 역할을 누르면 IAM 워크스페이스에서 그 역할을 연다.
+- Pod Identity는 연결의 역할 신뢰 정책이 `pods.eks.amazonaws.com`에 `sts:AssumeRole`과 `sts:TagSession`을 허용하는지 같은 방식으로 확인한다.
+- ServiceAccount의 `eks.amazonaws.com/audience` 어노테이션이 있으면 그 값을 `aud`로 확인한다(기본 `sts.amazonaws.com`). `sub`·`aud` 조건은 `StringEquals`·`StringLike`(와일드카드)·`StringEqualsIgnoreCase`만 풀고, 다른 연산자(`StringNotEquals` 등)에 기대면 "확인하지 못함"이다. 여러 문장 중 하나라도 맞으면 동작한다.
+- 역할을 읽지 못하면(IAM 권한 없음 등) 그 연결만 "확인하지 못함"이고 나머지는 그대로 보인다. 역할을 누르면 IAM 워크스페이스에서 그 역할을 연다.
+- IRSA와 Pod Identity가 모두 있으면 "보통 IRSA가 먼저 쓰여요"를 적는다. Pod는 끝나지 않은 것만 읽고, ServiceAccount·Pod 목록은 쪽 한도(40쪽)에서 잘리면 알린다.
+
+### 지금 된 것 (2026-11-03)
+- K4 전부: 위의 엔진·권한 표·누가 할 수 있나·신원 연결·워크로드 신원과 왼쪽 메뉴 "🛡 접근"(내 권한 아래). 읽기 전용이고 EKS API는 모의 응답으로만 시험했다(`k8s/access/read/tests.rs`). 실제 클러스터 대조는 kind(`k8s::live_tests::access`, 픽스처 `scripts/k8s-live/access.sh`)에서 `SubjectAccessReview`와 `kubectl auth can-i --as`에 요청마다 맞춘다.
+- 신원 연결 읽기: 인증 모드가 `CONFIG_MAP`이면 access entry API를 부르지 않고(그 모드에서는 오류가 난다), 인증 모드를 읽지 못하면 두 출처를 모두 유효하다고 본다. access entry는 목록 → 항목마다 `DescribeAccessEntry`·`ListAssociatedAccessPolicies`를 동시에 8개씩 읽고 한 항목이 실패하면 그 항목만 "자세히 읽지 못했어요"로 남긴다. aws-auth가 없으면 오류가 아니다. 출처마다 실패는 응답의 `gaps`로 오고 화면에 "이 부분을 읽지 못했어요: …"로 보인다.
+- aws-auth 이름을 비우면 인증기처럼 ARN을 사용자 이름으로 보고, `{{AccountID}}`는 채우며 `{{SessionName}}` 등은 그대로 둔다. aws-auth의 `rolearn`은 경로 없이, access entry의 주체는 경로를 포함하니 같은 주체인지는 (계정, 종류, 이름)으로 비교한다.
 
 ## 보안 점검
 - 클러스터: 퍼블릭 엔드포인트가 `0.0.0.0/0`, 컨트롤 플레인 로깅 꺼짐, Secret 암호화 꺼짐, 표준 지원 종료 90일 이내 버전, aws-auth 사용, 생성자 관리자 권한 남음.
@@ -174,6 +208,21 @@
 - 워크로드: privileged, hostPath, hostNetwork, hostPID, root 실행, `allowPrivilegeEscalation`, request·limit 없음, probe 없음, `latest`나 태그 없는 이미지, default SA 토큰 자동 마운트, NetworkPolicy 없는 네임스페이스, IMDS hop limit이 2 이상인 노드그룹(Pod가 노드 역할을 쓸 수 있음).
 - 항목별 켜고 끄기, 시스템 네임스페이스(`kube-system`, `kube-public`, `kube-node-lease`, `amazon-*`) 기본 제외.
 - 각 항목은 대상으로 연결되고, 고칠 수 있는 항목은 해당 변경 미리보기로 이어진다.
+
+### 지금 된 것 (2026-11-04)
+왼쪽 메뉴 "🔍 보안 점검"(내 권한·접근 아래, 읽기 전용). 백엔드 `src-tauri/src/k8s/checks/`(순수 점검 + `read.rs` 읽기), 명령 `k8s_findings(target) → Report`(`k8s_security_commands.rs`), 프론트 `src/k8s/security/`. 처음 계약의 `force`는 두지 않았다(화면의 쿼리가 60초 캐시하고 [다시 점검]이 새로 읽는다).
+- **결과 모양**: `Finding { id, check, severity(high·medium·low), target, namespace, system, message, evidence[], fix? }`. 대상(`target`)은 클러스터 객체(워크로드 화면에서 연다), 주체(사용자·그룹·ServiceAccount·IAM 주체: 접근 화면·IAM·ServiceAccount 객체로 간다), AWS 리소스(`cluster`·`nodegroup`·`nodepool`·`instance`, 열기 없음) 셋이다. `Report { findings, skipped[], gaps[], fetchedAt }`: 입력을 읽지 못한 점검은 `skipped`, 이유는 `gaps`(목록이 쪽 한도에서 잘린 것은 `partial`)에 남고 나머지 점검은 그대로 돈다. AWS 클라이언트를 만들지 못해도 AWS 부분만 gap이다.
+- **점검 28개** (이름은 `CheckId`와 프론트 `CHECKS`가 같다)
+  - 클러스터 6: `clusterPublicEndpoint`(퍼블릭이 켜지고 허용 CIDR에 `0.0.0.0/0`·`::/0`이 있거나 비었음, 높음), `clusterLoggingOff`(다섯 유형 중 꺼진 것. audit·authenticator가 꺼졌으면 중간, 아니면 낮음), `clusterSecretsPlain`(`encryptionConfig`에 secrets 없음, 중간), `clusterVersionSupport`(표준 지원 종료까지 90일 이내 중간, 지났으면 높음), `clusterAwsAuth`(실제로 쓰이는 aws-auth 매핑이 있음. 노드 역할뿐이면 낮음, 아니면 중간), `clusterCreatorAdmin`(클러스터 전체 `AmazonEKSClusterAdminPolicy` access entry 중 클러스터 생성 −60초~+300초에 만들어진 것. EKS는 만든 신원을 알려 주지 않아 "추정"이라고 밝힌다, 중간).
+  - 버전 지원 기간은 `DescribeClusterVersions`(`includeAll`)의 `endOfStandardSupportDate`를 먼저 쓰고, 읽지 못했거나 그 버전이 없으면 코드의 고정 표(`checks/versions.rs`, 출처: AWS 문서 "Amazon EKS Kubernetes versions"의 표준 지원 종료일, 1.23~1.33)를 쓰며 증거에 어느 쪽인지 적는다. 둘 다 모르면 점검하지 않는다.
+  - 권한 10(접근 화면의 실효 권한 엔진 `Evaluation`의 `Grant`를 그대로 쓰고 RBAC을 다시 계산하지 않는다): `adminSubject`(모든 동사·그룹·리소스 규칙. 클러스터 전체 높음, RoleBinding으로 네임스페이스 안만이면 중간, 기본 그룹 `system:masters`는 낮음), `anonymousAccess`(`system:unauthenticated`·`system:anonymous`는 높음, `system:authenticated`는 중간(모든 권한이면 높음), 바인딩 하나당 문제 하나), `escalateBind`·`impersonate`(`serviceaccounts/token` 만들기 포함)·`nodesProxy`·`secretsReadAll`(클러스터 전체 범위만, 이름 한정은 제외, 관리자는 따로 세지 않는다), `podCreateStrongSa`(강한 ServiceAccount가 있는 같은 네임스페이스에서 Pod·Deployment 등을 만들 수 있는 주체. 강함 = 관리자이거나 위 상승 경로가 있음), `unusedRole`(바인딩이 없고 `aggregationRule`로도 합쳐지지 않는 Role·ClusterRole, 낮음), `bindingMissingRole`(낮음), `bindingMissingSubject`(없는 ServiceAccount, 목록을 끝까지 읽었을 때만, 중간).
+  - 기본 구성은 뺀다: 주체의 기본 그룹에서 물려받은 권한과 `system:`·`kubeadm:`·`eks:`로 시작하는 바인딩이 준 권한(익명 점검에서 `system:public-info-viewer` 등), `system:`·`eks:`·`kubeadm:` 이름과 `kubernetes.io/bootstrapping=rbac-defaults` 라벨이 붙은 역할, EKS access policy가 가리키는 `cluster-admin`·`admin`·`edit`·`view`.
+  - 워크로드 12(Pod 템플릿 기준: Deployment·StatefulSet·DaemonSet·Job·CronJob과 컨트롤러 없는 Pod. 컨트롤러가 만든 Pod·Job은 컨트롤러에서 한 번만 본다. 점검마다 워크로드 하나에 문제 하나): `privileged`(높음), `hostPath`(노드 루트·`*.sock`·`/etc`·kubelet·런타임 디렉터리는 높음, 나머지 중간), `hostNetwork`(중간), `hostPid`(높음), `runsAsRoot`(UID 0 명시는 중간, UID·`runAsNonRoot` 모두 미지정은 낮음), `privilegeEscalation`(미지정·true, 중간. privileged 컨테이너와 Windows Pod는 제외), `resourcesMissing`·`probesMissing`(Job·CronJob 제외)·`imageLatest`(태그 없음·`latest`, 다이제스트 고정은 제외)(낮음), `saTokenAutomount`(네임스페이스의 `default` ServiceAccount를 쓰는 워크로드가 있는데 토큰 자동 마운트가 꺼져 있지 않음. 그 ServiceAccount에 다른 권한이 있으면 중간, 아니면 낮음), `noNetworkPolicy`(워크로드가 있으면 중간, 없으면 낮음), `imdsHopLimit`(관리형 노드그룹 시작 템플릿의 `HttpPutResponseHopLimit`과 노드 인스턴스(`DescribeInstances`)의 값이 2 이상. 노드그룹·NodePool·인스턴스 단위, 높음. 시작 템플릿 하나를 읽지 못하면 그 노드그룹만 gap).
+- **자동으로 고치는 것(안전한 부분만)**: ① `default` ServiceAccount의 `automountServiceAccountToken: false` — 그 ServiceAccount에 기본 그룹 말고 다른 권한이 없다고 RBAC으로 확인될 때만(RBAC을 읽지 못하면 고치지 않는다). ② 컨테이너·init 컨테이너의 `allowPrivilegeEscalation: false` 더하기 — 미지정인 컨테이너만(사람이 `true`로 둔 것, privileged, `CAP_SYS_ADMIN` 컨테이너는 제외), Pod 템플릿을 바꿀 수 있는 Deployment·StatefulSet·DaemonSet·CronJob만(Pod와 Job은 만든 뒤에 바꿀 수 없어 증거에 이유를 적는다). 값을 사람이 정해야 하는 것(request·limit·probe·이미지 태그)과 서비스가 깨질 수 있는 것(hostNetwork·hostPID·root 실행·NetworkPolicy)은 고치지 않는다. AWS 쪽 항목은 이 앱이 바꾸지 않는다.
+  - 고치기는 바꾸는 필드만 담은 부분 객체의 `apply` 변경(server-side apply, `force: false`)으로 기존 미리보기·이름 입력·재확인·기록·되돌리기 틀을 그대로 거친다. 충돌은 미리보기가 보여 주고 강제 적용은 그 틀의 이름 입력이다. 주의 문구(롤아웃, setuid·capability 영향, Helm·ArgoCD·Flux가 관리하면 다음 배포 때 되돌아감)는 상세에 보인다. patch 권한이 없으면 이유와 함께 꺼지고 규칙이 불완전하면 켜 둔다. 적용하면 점검을 바로 다시 읽는다.
+- **화면**: 심각도·분류 카드(누르면 거르기), 검색, [시스템 네임스페이스 포함], [점검 항목별로 묶기](접고 펴는 묶음), [점검 항목] 켜고 끄기(분류별 모두 켜기·끄기, 항목마다 찾은 수와 "읽지 못해 점검하지 못했어요" 표시), 읽지 못한 부분과 점검하지 못한 항목 줄. 목록은 `ListTable`(심각도·점검 항목·대상·네임스페이스·내용·자동 수정)이고 행을 누르면 70% 상세(요약, 증거, 왜 중요한가요, 해결 방법, 자동으로 고치기)가 열린다. 도구 모음: [워크로드 화면에서 열기]/[ServiceAccount 열기]/[IAM에서 열기]/[접근 화면에서 보기], 맨 오른쪽 [자동으로 고치기].
+- **설정**: `Settings.k8sSecurityChecks { disabled: string[], includeSystem: bool }`(모든 클러스터에 같이 적용, 키가 없는 예전 설정은 모두 켜고 시스템 네임스페이스는 뺀다). 점검은 항상 전부 계산하고 화면이 걸러서 켜고 끄기가 바로 반영된다. 시스템 네임스페이스는 `is_system_namespace`(`kube-system`·`kube-public`·`kube-node-lease`·`amazon-*`)로 정하고 문제의 `namespace`로 따진다(클러스터 점검은 네임스페이스가 없어 늘 보인다).
+- **시험**: 점검마다 단위 시험(경계: 90일/91일, CIDR 변형, 로그 유형, 컨테이너·init 덮어쓰기, 기본 그룹·내장 바인딩 제외, 네임스페이스 범위 구분, 자동 수정 대상·제외, 읽지 못한 입력의 skipped·gap), EKS·EC2는 모의 AWS 응답(`checks/mock_aws.rs`: DescribeCluster·DescribeClusterVersions·노드그룹·시작 템플릿·DescribeInstances, 쪽 넘기기·거부·부분 실패), 화면은 `src/k8s/security/*.test.*`. kind 실제 시험은 `k8s::live_tests::security`(`scripts/k8s-live/security.sh`: 점검마다 걸리는 워크로드와 RBAC): 찾은 문제의 집합을 픽스처와 대조하고, 권한 없는 계정은 gap·skipped, 고치기는 서버 dry-run diff → 적용 → 다시 점검에서 사라짐을 확인한다.
 
 ## 변경
 
@@ -245,6 +294,11 @@
 - RBAC: 바인딩 추가·제거, 바인딩의 주체 추가·빼기. 권한 표에서 셀로 담는 장바구니(최대 50), 한 번에 미리보기. 미리보기는 실효 권한 계산기로 "누가 무엇을 얻고 잃는지". 적용은 하나씩, 첫 실패에서 멈추고 이미 적용한 것은 되돌리기를 제안한다(IAM 할당 표와 같다). 제거는 원래 객체 전체를 기록해 되돌릴 때 다시 만든다.
 - access entry: 생성, 삭제, k8s 그룹 변경, access policy 연결·해제(범위 포함). EKS API로. 되돌리기도 EKS API로.
 - aws-auth는 전용 편집을 두지 않는다. E로 고치면 "access entry로 옮기세요" 경고.
+- 지금 된 것 (2026-11-04, K8 D): 백엔드 `k8s/rbac/`(`plan` 바인딩 계획, `eks` access entry 계획, `world` 상태와 `Planner`, `assess` 영향·위험, `commit` 읽기·dry-run·재확인·적용)와 `exec/eks.rs`(EKS 쓰기는 여기서만, hygiene이 지킨다). 변경 종류 `bindingCreate`·`bindingSubjects`·`accessEntryCreate|Delete|Groups`·`accessPolicyAssociate|Disassociate`, 바인딩 삭제는 공통 `delete`(되돌리기 = 지운 원본으로 `bindingCreate`). 미리보기에 `effect`(실효 권한 엔진 `access::diff`가 본 누가 무엇을 얻고 잃는지, 권한 상승 주체, 앱 신원의 손실)가 붙는다.
+  - 이름 입력: cluster-admin 바인딩, 권한 상승 경로를 새로 얻는 주체(엔진 권한 표의 "권한 상승" 칸이 직접 경로로 바뀜), `kube-system`·`prod`, 앱의 현재 신원(SelfSubjectReview → 신원 매핑, 없으면 사용자·그룹으로 만든 주체)이 권한을 잃음, `AmazonEKSClusterAdminPolicy`, 영향을 끝까지 계산하지 못함(RBAC·access entry·aws-auth를 읽지 못함). access entry는 ARN 마지막 마디를 입력한다.
+  - 장바구니(최대 50, 대상마다, 화면을 옮겨도 남음): 권한 표 칸 상세의 "권한 바꾸기"와 바인딩 상세 도구에서 담고, 막대의 [한 번에 미리보기]가 `k8s_preview_batch`로 변경을 앞 변경이 적용된 상태에서 차례로 계획(항목별 호출·차이·영향 + 전체 영향)한다. 적용은 `k8s_apply_batch`: 전체를 다시 계획해 미리보기와 다르면 아무것도 적용하지 않고, 같으면 하나씩 리소스 버전 조건으로 적용하다 첫 실패에서 멈춘다. 적용한 것은 변경 기록의 되돌리기로 거꾸로 되돌리는 미리보기를 연다. 장바구니는 RBAC 변경만 받는다(access entry는 하나씩).
+  - 신원 탭에서 access entry 만들기·그룹 변경·정책 연결·해제·삭제. EKS 권한은 미리 확인하지 못해 단추는 인증 모드가 `CONFIG_MAP`일 때만 끄고 API 오류를 그대로 보인다. 정책 연결이 실패하면 방금 만든 entry는 지운다. aws-auth 행에는 "access entry로 옮기세요"를 보이고 YAML 편집 경고(`AWS_AUTH_WARNING`)는 그대로다.
+  - 시험: 순수 계획·위험·영향·되돌리기와 가짜 쿠버네티스·EKS(`rbac/mock_kube.rs`, `mock_eks.rs`)로 미리보기·적용·재확인·일괄·중간 실패·되돌리기, kind(`k8s::live_tests::rbac`, `scripts/k8s-live/rbac.sh`).
 
 ### E. YAML 편집과 적용
 - 편집기: CodeMirror 6(YAML 모드, 문법 검사). `status`, `managedFields`, `metadata.uid`, `resourceVersion`, `creationTimestamp`, `generation`은 빼고 보여준다.
@@ -260,6 +314,29 @@
   - 상세 YAML 탭: 변경 모드에서 [편집]이 읽기 전용 YAML을 CodeMirror 6 편집기로 바꾼다(`@codemirror/*`, 구문 오류는 `yaml` 패키지로 찾아 줄 밑줄과 목록으로 보이고 미리보기를 막는다). 편집기에 들어가는 글은 백엔드가 만든 `editYaml`(서버 필드를 뺀 것). 종류·이름·네임스페이스를 바꾸거나 문서가 둘이면 미리보기 전에 거절한다. patch 권한이 없으면 이유와 함께 끈다.
   - Secret: 편집 글에는 `data`·`stringData`·last-applied가 없다. 키별 [값 보기](읽은 값은 컴포넌트 상태에만)로 읽어 고치거나 [새 값 입력]·키 추가로 `stringData`에 넣고, 건드리지 않은 키는 가린 값(••••)으로 보내 백엔드가 현재 값으로 되돌려 놓는다. 바이너리 값은 새 값 입력으로만 바꾼다. 미리보기의 본문·diff에는 값이 없고(바뀐 키만 `•••• (바뀜)`), 기록에는 `data`·`stringData`를 모두 가린 변경만 남으며, 되돌릴 수 없다는 경고를 보인다.
   - 상단 [YAML로 만들기](변경 모드): 붙여 넣은 글을 문서마다 `apply` 변경으로 바꾼다(종류는 클러스터가 내주는 종류에서 apiVersion·kind로 찾고, 네임스페이스가 없는 문서는 고른 네임스페이스로, 모든 네임스페이스면 그 문서의 오류). 최대 50개. 문서별 미리보기(호출·diff·경고·이름 입력)를 한 창에 보이고, 순서대로 적용하다 첫 실패에서 멈추고 나머지는 건너뛴 뒤 [적용한 것 되돌리기]로 거꾸로 되돌리기 미리보기를 연다. 미리보기가 되지 않는 문서(앞 문서가 만드는 네임스페이스 안의 객체 등) 앞까지만 먼저 적용하고 나머지를 다시 미리보기 한다. 별도 배치 명령(`k8s_preview_batch`/`k8s_apply_batch`) 없이 문서마다 `k8s_preview`/`k8s_apply`를 쓰므로 기록도 문서마다 하나이고 변경 기록 화면에서 하나씩 되돌릴 수도 있다.
+
+### Helm
+릴리스 읽기와 변경(2026-11-03). 왼쪽 메뉴 "⎈ Helm". 읽기는 helm CLI 없이 앱이 직접 하고, 변경만 helm CLI로 한다. 변경은 변경 공통 틀(미리보기 → 이름 입력 → 재확인 → 적용 → 기록 → 되돌리기)을 그대로 거친다.
+
+- **읽기(kube로, helm 불필요)**: helm은 릴리스를 Secret(`type: helm.sh/release.v1`, 라벨 `owner=helm`·`name`·`version`·`status`)으로 저장한다. `data.release`는 쿠버네티스 base64 → helm base64 → gzip → JSON 순(kind에서 helm v4로 확인)이고 앱이 그대로 푼다(`flate2`; 풀린 크기는 64MiB로 제한). ConfigMap 드라이버(`HELM_DRIVER=configmap`)도 함께 읽는다(같은 리비전이 둘 다 있으면 Secret). 한쪽을 읽을 권한이 없으면 다른 쪽만 쓰고, 둘 다 없으면 권한 오류다.
+  - 목록: 먼저 메타데이터만(`list_metadata`, 라벨로 이름·리비전·상태) 받아 릴리스마다 가장 높은 리비전을 고르고 그 데이터만 가져와 푼다(동시 8개). 푼 요약은 저장소 객체의 uid·resourceVersion을 키로 기억해 10초 폴링 때 다시 받지 않는다. 풀지 못하는 데이터는 오류가 아니라 라벨 값만 있는 줄(`unreadable`)이 된다. 선택한 네임스페이스만, 모두면 전체.
+  - 상세: 지금 보는 리비전(기본 최신)의 요약, 사용자 values(`config`, 있는 그대로), 계산된 values(차트 기본값 + 사용자 값, null은 키 삭제, 서브차트는 부모 값 아래 이름으로 합침: `helm get values --all`과 같음을 kind에서 확인), notes, manifest, manifest에서 뽑은 리소스(종류·이름·네임스페이스), 훅, 선언된 의존 차트, 모든 리비전의 이력(상태·갱신·차트·앱 버전·설명).
+  - manifest는 `---`로 나눠 객체로 읽고(`kind: List`는 펼침) 화면에는 Secret의 값을 가려 보인다(원문 주석은 유지). values는 사용자가 준 값이라 있는 그대로 보인다.
+  - 상태 배지: deployed(초록), superseded·uninstalled(흐림), failed·unknown(빨강), pending-*·uninstalling(노랑). 문제(failed·unknown·uninstalling·pending-*)는 목록 위 "문제 N" 칩과 "문제 있는 것만" 거르기로 바로 본다.
+- **화면**: 목록은 `ListTable`(이름·네임스페이스(전체일 때만)·상태·차트·앱 버전·리비전·갱신·설명), 이름·차트·네임스페이스·상태 거르기. 10초마다(탭이 보일 때만) 다시 읽고, Helm 변경을 적용하면 바로 다시 읽는다. 행을 누르면 목록 너비의 70%를 덮는 상세(`.k8s-detail`)가 열린다. 탭: 요약(릴리스·차트·리소스·훅·의존 차트), values(준 값 / 계산된 값), 매니페스트, 이력, notes. 리소스는 이 클러스터가 내주는 종류(discovery)면 이름을 눌러 워크로드 화면에서 연다(네임스페이스가 없으면 릴리스의 네임스페이스). 모르는 종류(CRD 없음)는 글로 둔다. 이력 줄은 [보기](옛 리비전을 읽기 전용으로, 위에 안내와 [최신으로])와 [이 리비전으로 롤백]. 위쪽 오른쪽 도구 모음: `[이력 남기기] [업그레이드] [롤백] [삭제]`(삭제가 맨 오른쪽), 목록 위에 [차트 설치]. 옛 리비전을 보는 동안은 변경 단추를 이유와 함께 끈다.
+- **helm 찾기**: 로그인 셸의 PATH(exec 플러그인과 같은 `k8s::path::login_path`)에서 실행 가능한 `helm`을 찾고 `helm version`으로 버전을 읽는다. 없거나 3.13 미만(서버 dry-run 없음)이면 변경 단추(업그레이드·롤백·삭제·설치)는 꺼지고 `title`·`aria-description`에 이유(설치 안내)를 보인다. 읽기는 helm이 없어도 된다. 권한은 릴리스 저장소(Secret, ConfigMap 드라이버면 ConfigMap)의 `create`(업그레이드·롤백)·`delete`(삭제)를 내 권한(`can`)으로 보고, 확실히 없을 때만 끈다.
+- **helm 실행(`k8s/helm/run.rs`가 프로세스를 띄우는 유일한 곳)**: 인자는 셸을 거치지 않는 배열이고 세션의 `--kube-context`와 `--kubeconfig`(읽은 kubeconfig가 하나일 때, 여럿이면 `KUBECONFIG` 환경 변수)를 넘긴다. `HELM_DRIVER`는 릴리스를 읽은 저장소로 늘 정해 주고, 사용자 셸에서 물려받은 `HELM_KUBE*`·`HELM_NAMESPACE`·`KUBECONFIG`·`HELM_DRIVER`는 치워 다른 클러스터로 새지 않게 한다. 릴리스 이름(DNS 소문자 53자)·네임스페이스·차트·저장소(http(s), 사용자 정보 없음)·버전은 `-`로 시작하거나 공백이 있으면 거절한다. 시간 제한: 미리보기 3분, 적용 10분. helm의 stderr는 SSO 만료는 앱의 SSO 오류로, 클러스터 연결 실패는 연결 안내로, 나머지는 첫 줄 몇 개(토큰은 가림, 400자)로 보인다.
+- **변경 종류**(`Operation`에 더함, 대상은 릴리스 `helm.sh/Release`): `helmUpgrade { values, chart }`, `helmRollback { revision }`, `helmUninstall { keepHistory }`, `helmInstall { chart, values, createNamespace }`. 차트는 `{ reference, repo, version }`: 로컬 경로(절대 경로, `~/`), `oci://…`, 저장소의 차트 이름(저장소 주소와 함께, 또는 이미 helm에 등록한 `repo/chart`). 상대 경로는 받지 않는다(helm의 작업 폴더가 정해져 있지 않다).
+  - 업그레이드: 저장된 릴리스 JSON에서 차트(Chart.yaml, values.yaml, values.schema.json, templates, files·crds, 서브차트는 `charts/<이름>/`)를 임시 폴더에 되살려 저장소 접속 없이 같은 차트로 `helm upgrade --reset-values -f values.yaml`을 한다(편집한 글이 사용자 values 전체가 되므로 키를 지우는 편집도 반영된다; 저장된 서브차트는 이미 조건·별칭이 적용된 것이라 Chart.yaml의 `dependencies`는 뺀다. 파일 이름이 폴더 밖을 가리키면 거절). "다른 차트로"는 위 차트 위치로 같은 명령을 한다.
+  - 미리보기: 업그레이드·설치는 `helm … --dry-run=server -o json`으로 렌더링한 새 manifest를 현재 manifest와 객체별로(그룹·종류·네임스페이스·이름으로 짝지음, apiVersion만 올라가면 한 객체의 변경) 견줘 `Deployment web · spec.replicas` 꼴 필드 항목(새 객체·지워지는 객체는 객체 전체 한 항목)과 `values · replicaCount` 꼴 values 차이를 보인다. Secret은 값 없이 바뀐 키만(`••••`, `•••• (바뀜)`). 롤백은 helm을 부르지 않고 현재 리비전과 그 리비전의 manifest·values를 견준다(삭제돼 이력만 남은 릴리스를 같은 리비전으로 되살리는 것도 롤백이고 모든 객체가 새로 생긴다). 삭제는 지워질 객체 전체를 보인다. 경고: 바뀌는 것 없음, 빠지는 객체 수, 훅(`pre/post-upgrade` 등) 개수, failed·pending 상태, `helm.sh/resource-policy: keep`으로 남는 객체, 삭제는 되돌릴 수 없음(이력을 지울 때).
+  - 이름 입력: 삭제는 늘 릴리스 이름. 그 밖에는 공통 규칙(`change::dangerous`: 네임스페이스가 `kube-system`이거나 네임스페이스·릴리스 이름에 `prod`).
+  - 재확인: 적용 직전에 같은 계획을 다시 만들어(서버 dry-run 포함) 미리보기를 본 릴리스와 같은지(리비전 번호와, 리비전·상태·manifest·사용자 values의 해시. 설치는 "릴리스 없음") 확인하고 다르면 "미리보기 이후 바뀌었어요"로 멈춘다. 이름 입력은 백엔드가 다시 확인한다. 렌더링 결과가 매번 달라지는 차트(`randAlphaNum` 등)를 위해 해시는 렌더링 결과가 아니라 현재 릴리스 상태만 쓴다.
+  - 되돌리기(기록의 역변경, 같은 미리보기를 거친다): 업그레이드·롤백 → 업그레이드 직전 리비전으로 롤백(롤백으로 되살린 경우는 다시 삭제(이력 유지)), 설치 → 삭제(만든 네임스페이스는 남는다는 경고), 삭제 → 이력을 남겼으면 롤백으로 되살리기, 남기지 않았으면 되돌릴 수 없음.
+  - 기록: `k8s-changes.jsonl`에 변경 한 줄(요약 = 미리보기의 영향 문장)을 남기되 **values는 기록하지 않는다**(`change::apply::redact`가 `helmUpgrade`·`helmInstall`의 values를 비운다). 되돌리기용 역변경에는 values가 없다. 오류 글에는 values 조각이 실릴 수 있는 YAML 해석 오류를 넣지 않고 고정 문구만 쓴다.
+- **hygiene 예외(의도적)**: 클러스터 쓰기가 kube 호출이 아니라 helm 프로세스로 나가므로 `k8s::hygiene`에 규칙을 더했다. ① `Command::new(`(프로세스 실행)는 로그인 셸의 PATH를 읽는 `k8s/path.rs`와 helm을 실행하는 `k8s/helm/run.rs`에만 있다. ② 클러스터를 바꾸는 helm 하위 명령 이름(`"upgrade"`·`"install"`·`"uninstall"`·`"rollback"`)은 인자를 만드는 `k8s/helm/cli.rs`에만 있다. 읽기 모듈(`read`·`release`·`detail`·`manifest`)과 `k8s_helm_commands.rs`는 kube 쓰기 호출을 쓰지 않으며 같은 스캔을 받는다(`live_tests/` 아래 파일은 시험 전용이라 스캔하지 않는다).
+- **명령**: `k8s_helm_tool()`, `k8s_helm_releases(target, namespace | null)`, `k8s_helm_release(target, namespace, name, revision | null)`, `k8s_helm_show_values(chart)`(설치 창의 "차트 기본값 불러오기", 클러스터에 닿지 않음). 변경은 `k8s_preview`/`k8s_apply`가 `Operation::Helm*`를 `k8s::helm::plan`으로 보낸다. `Session`에 읽은 kubeconfig 경로 목록(`kubeconfig_paths`)을 더했다. 프론트 `src/k8s/helm/`.
+- **시험**: 순수 부분은 단위 시험(릴리스 해석·계산된 값·압축 폭탄, manifest 나누기·객체별 차이·Secret 가리기, 명령 인자·차트 위치 검증, helm 찾기·버전·환경 변수·시간 제한·오류 분류, 차트 되살리기와 경로 탈출 거절, 계획·재확인·values 비기록, 가짜 API 서버로 목록·ConfigMap 드라이버·권한·쪽 넘기기·캐시). 화면은 `src/k8s/helm/*.test.tsx`(목록·거르기·문제·상세·도구 모음 권한·helm 없음·리소스 열기·이력·변경 틀 미리보기·이름 입력·기록 되돌리기). kind 실제 시험은 `k8s::live_tests::helm`(`scripts/k8s-live/helm.sh`가 로컬 차트로 `flow`(리비전 둘)·`broken`(failed)·`cmrel`(ConfigMap 드라이버)을 helm으로 설치하고 로컬 차트 저장소를 띄운다): 목록·상세·이력을 helm 출력과 대조, 업그레이드(미리보기 뒤 외부 변경이면 낡음) → 기록(values 없음) → 되돌리기 → 롤백 → 삭제(이름 확인)를 helm·kubectl로 확인, 이력 유지 삭제와 롤백 복구, 로컬 경로·저장소 ref 설치와 저장소 차트로 업그레이드.
+- 남은 것·알려진 한계: Chart.yaml의 의존성 조건(`condition`·`tags`)은 저장된 서브차트를 그대로 쓰므로 values 편집으로 켜고 끌 수 없다(다른 차트로 업그레이드하면 된다). 로컬 경로 설치에서 의존 차트를 받지 않은 차트는 helm이 거절한 이유가 미리보기 오류로 보인다. 앱이 직접 `--wait`·`--atomic`은 쓰지 않는다(적용은 helm이 리소스를 제출하면 끝나고, 롤아웃 진행은 워크로드 상세에서 본다).
 
 ## 계약 (Tauri 명령)
 ```ts
@@ -278,11 +355,13 @@ k8s_logs(target, namespace, pod, options, onEvent): StreamId
 k8s_workload_logs(target, kind, namespace, name, options, onEvent): StreamId
 k8s_logs_save(fileName, text): string                          // 저장된 절대 경로
 k8s_unwatch(watchId): void
-k8s_access(target, force: boolean): K8sAccessView               // 신원 매핑, 실효 권한, 권한 표
-k8s_who_can(target, K8sWhoCanQuery): K8sWhoCan
-k8s_review(target, K8sWhoCanQuery, subject): boolean           // SubjectAccessReview 대조
-k8s_workload_identity(target): K8sWorkloadIdentity[]
-k8s_findings(target, force: boolean): K8sFindings
+k8s_access(target, force: boolean): AccessView                 // 신원 매핑(access entry·aws-auth), 인증 모드, 주체 수, 읽지 못한 부분(gaps). 계산 결과는 대상별 캐시
+k8s_access_matrix(target, MatrixQuery): MatrixPage             // 권한 표 한 쪽: 종류·이름 필터, 열(네임스페이스), offset·limit. 칸은 주체마다 열당 7개(0·1·2)
+k8s_access_cell(target, subject, cell, namespace | null): CellDetail  // 칸의 확인한 동작별 허용 여부와 바인딩 경로
+k8s_who_can(target, Query): WhoCanView                         // { entries: { subject, grants }[], total }
+k8s_review(target, Query, subject): ReviewResult               // SubjectAccessReview 대조 { allowed, denied, reason }
+k8s_workload_identity(target): WorkloadView                    // ServiceAccount별 IRSA·Pod Identity·Pod와 신뢰 정책 확인, gaps
+k8s_findings(target): SecurityReport                              // 점검 결과 한 장(findings, skipped, gaps). 항목 켜고 끄기는 화면이 거른다
 k8s_network(target): K8sNetworkView
 k8s_preview(target, K8sChange): K8sPreview
 k8s_apply(target, K8sChange, confirmText | null, undoOf | null): K8sApplyResult
@@ -313,8 +392,8 @@ k8s_undo_batch(batchId): K8sUndo
   - `connect.rs`: kubeconfig 읽기, context 찾기, PATH, `kube::Client`, 오류 분류, SSO 재시도. 탭별 연결 관리.
   - `read/`: 목록, 상세, 소유 관계, 이벤트, discovery, Secret 가리기.
   - `stream/`: watch, 로그, drain 진행.
-  - `access/`: 신원 매핑(access entry, aws-auth), access policy 대응표, 실효 권한, 권한 표, who-can — 순수 함수.
-  - `identity.rs`: IRSA 신뢰 정책 확인(IAM 모듈의 정책 파서 재사용), Pod Identity.
+  - `access/`: `rbac`(RBAC 모델·aggregation), `engine`(실효 권한·can·who-can), `matrix`(권한 표 칸), `diff`(두 시점 비교), `identity`(access entry·aws-auth·인증 모드·access policy 대응표·SSO 묶기), `workload`(IRSA·Pod Identity 신뢰 정책 확인, IAM 모듈의 정책 파서 재사용) — 모두 순수 함수. `read`(읽기 호출과 부분 실패 모으기), `review`(SubjectAccessReview), `view`(화면 응답). 명령은 `k8s_access_commands.rs`.
+  - (옛 계획의 `identity.rs`는 `access/workload.rs`가 맡는다.)
   - `checks/`: 보안 점검 — 순수 함수.
   - `network.rs`: 로드밸런서 짝 찾기, 서브넷.
   - `change/`: 변경 종류, 요청 만들기, 역변경, 미리보기·경고 — 순수 함수.

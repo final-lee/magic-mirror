@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ErrorState } from "../components/ErrorState";
 import { DoneNotice } from "../components/DoneNotice";
 import { useApplyNotices } from "../iam/useApplyFlow";
+import { AccessScreen } from "./access/AccessScreen";
 import { BatchDialog, useK8sBatch } from "./ChangeBatch";
 import { ChangeDialog, useK8sChange } from "./ChangeFlow";
 import { ChangeLog } from "./ChangeLog";
@@ -11,6 +12,10 @@ import { CHANGE_DONE } from "./text";
 import { ContextPicker } from "./ContextPicker";
 import { EventsView } from "./EventsView";
 import { ForwardsView } from "./ForwardsView";
+import { HelmView } from "./helm/HelmView";
+import { CartHost } from "./rbac/CartHost";
+import { isRbacChange } from "./rbac/changes";
+import { refreshAccess } from "./rbac/refresh";
 import { K8sError } from "./K8sError";
 import { K8sNav, type K8sView, type NavBookmark } from "./K8sNav";
 import { NODES, bookmarkKey, bookmarkOf } from "./kinds";
@@ -19,6 +24,9 @@ import { moved } from "./useReorder";
 import { MyRules } from "./MyRules";
 import { NoContext } from "./NoContext";
 import { OverviewView } from "./OverviewView";
+import { NetworkView } from "./network/NetworkView";
+import { SecurityView } from "./security/SecurityView";
+import type { VpcOpen } from "./network/types";
 import { NAMESPACES } from "./targets";
 import { ALL, TopBar, type K8sConnection } from "./TopBar";
 import { WorkloadsView, type WorkloadsFocus } from "./WorkloadsView";
@@ -26,7 +34,7 @@ import { YamlCreate } from "./YamlCreate";
 import { BOOKMARK_MISSING, savedMissing, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNECTING, updateCommand } from "./text";
 import { refreshK8s, useK8sKinds, useK8sRules, useUsageSampler } from "./queries";
 import { useK8sConnection } from "./useK8sConnection";
-import type { K8sChange, K8sKindRef, K8sTarget } from "./types";
+import type { K8sChange, K8sKindRef, K8sTarget, ObjectRef } from "./types";
 import { useK8sWatch } from "./useK8sWatch";
 
 interface Props {
@@ -35,6 +43,8 @@ interface Props {
   active: boolean;
   /** 서비스 어카운트의 IAM 역할 ARN을 IAM 작업 공간에서 연다 */
   onOpenIam?: (arn: string) => void;
+  /** 클러스터의 VPC 다이어그램을 노드·로드 밸런서 강조와 함께 연다(앱이 VPC 탭을 연다) */
+  onOpenVpc?: (open: VpcOpen) => void;
 }
 
 /** 사용량 그래프의 기록을 모은다. 읽을 때마다 다시 그려지는 것이 이 빈 컴포넌트뿐이도록 탭과 떼어 둔다. */
@@ -45,7 +55,7 @@ function UsageSampler({ target, context, namespace, ssoProfile, live }: {
   return null;
 }
 
-export function K8sTab({ target, active, onOpenIam }: Props) {
+export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
   const qc = useQueryClient();
   const { settings, update, settingsReady, ctx, info, chosen, missing, candidate, session, ssoProfile, live } = useK8sConnection(target);
 
@@ -61,6 +71,7 @@ export function K8sTab({ target, active, onOpenIam }: Props) {
       notices.announce(CHANGE_DONE, []);
       setAppliedChange(applied);
       void qc.invalidateQueries({ queryKey: ["k8s-change-log"] });
+      if (isRbacChange(applied)) void refreshAccess(qc, target, chosen);
     },
     () => void qc.invalidateQueries({ queryKey: ["k8s-change-log"] }),
   );
@@ -70,6 +81,12 @@ export function K8sTab({ target, active, onOpenIam }: Props) {
     void qc.invalidateQueries({ queryKey: ["k8s-change-log"] });
   });
   const [creating, setCreating] = useState(false);
+  const onRbacApplied = (applied: K8sChange[]) => {
+    notices.announce(CHANGE_DONE, []);
+    setAppliedChange(applied[applied.length - 1]);
+    void qc.invalidateQueries({ queryKey: ["k8s-change-log"] });
+    void refreshAccess(qc, target, chosen);
+  };
   const namespaces = useK8sWatch(target, chosen ?? "", session.dataUpdatedAt, ssoProfile, NAMESPACES, null, live);
   const names = namespaces.rows.map((r) => r.name);
 
@@ -83,6 +100,11 @@ export function K8sTab({ target, active, onOpenIam }: Props) {
   const nsOrAll = namespace === ALL ? null : namespace;
   const openNode = (name: string) => {
     setFocus((f) => ({ ref: { kind: NODES, namespace: null, name }, nonce: (f?.nonce ?? 0) + 1 }));
+    setView("workloads");
+  };
+  // 네트워크·Helm 화면의 링크(Service, Ingress, Pod, NetworkPolicy, 릴리스 리소스)도 같은 길로 워크로드 화면에서 연다
+  const openObject = (ref: ObjectRef) => {
+    setFocus((f) => ({ ref, nonce: (f?.nonce ?? 0) + 1 }));
     setView("workloads");
   };
 
@@ -168,6 +190,7 @@ export function K8sTab({ target, active, onOpenIam }: Props) {
         />
       )}
       {batch.batch && <BatchDialog batch={batch.batch} api={batch.api} />}
+      <CartHost target={target} ssoProfile={ssoProfile} onApplied={onRbacApplied} />
       <div className="pg-main">
         <K8sNav
           view={view}
@@ -178,7 +201,7 @@ export function K8sTab({ target, active, onOpenIam }: Props) {
           width={lanes.width("nav")}
         />
         <LaneResizer lane="nav" onResize={lanes.resize} onCommit={lanes.commit} />
-        <div className={`k8s-body${listView ? " flush" : ""}`}>
+        <div className={`k8s-body${listView || view === "access" || view === "network" || view === "helm" || view === "security" ? " flush" : ""}`}>
           {session.isError ? (
             <K8sError error={session.error} target={target} ssoProfile={ssoProfile} />
           ) : view === "overview" ? (
@@ -216,10 +239,43 @@ export function K8sTab({ target, active, onOpenIam }: Props) {
             />
           ) : bookmarkView ? (
             <div className="empty">{BOOKMARK_MISSING}</div>
+          ) : view === "network" ? (
+            <NetworkView target={target} context={chosen} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} onOpenObject={openObject} onOpenVpc={onOpenVpc} lanes={lanes} />
           ) : view === "events" ? (
             <EventsView target={target} context={chosen} sessionEpoch={session.dataUpdatedAt} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} />
           ) : view === "forwards" ? (
             <ForwardsView target={target} ssoProfile={ssoProfile} />
+          ) : view === "access" ? (
+            <AccessScreen target={target} context={chosen} ssoProfile={ssoProfile} live={live} namespace={nsOrAll} onOpenIam={onOpenIam} onOpenMyRules={() => setView("myRules")} onChange={change.start} />
+          ) : view === "security" ? (
+            <SecurityView
+              target={target}
+              context={chosen}
+              ssoProfile={ssoProfile}
+              live={live}
+              setting={settings?.k8sSecurityChecks}
+              onSetting={(next) => update({ k8sSecurityChecks: next })}
+              appliedChange={appliedChange}
+              onChange={change.start}
+              onOpenObject={openObject}
+              onOpenIam={onOpenIam}
+              onOpenAccess={() => setView("access")}
+              lanes={lanes}
+            />
+          ) : view === "helm" ? (
+            <HelmView
+              target={target}
+              context={chosen}
+              ssoProfile={ssoProfile}
+              live={live}
+              visible={active}
+              namespace={nsOrAll}
+              kinds={kinds.data ?? []}
+              appliedChange={appliedChange}
+              onChange={change.start}
+              onOpenObject={openObject}
+              lanes={lanes}
+            />
           ) : view === "changeLog" ? (
             <ChangeLog target={target} onStart={change.start} />
           ) : rules.isError ? (

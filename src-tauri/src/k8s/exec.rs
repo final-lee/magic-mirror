@@ -12,6 +12,8 @@ use super::failure::{describe, failure_of, Endpoint, Failure};
 use super::read::api_for;
 use crate::error::AppError;
 
+pub mod eks;
+
 pub const STALE: &str = "미리보기 이후 바뀌었어요. 다시 미리보기 해 주세요";
 pub const WRITE_FAILED: &str = "클러스터에 변경을 보내지 못했어요";
 pub const CONFLICT: &str = "다른 manager가 가진 필드와 충돌해요. 강제 적용으로 다시 미리보기 해 주세요";

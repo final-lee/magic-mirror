@@ -15,7 +15,11 @@ mod iam;
 mod iam_commands;
 mod jsonl;
 pub mod k8s;
+mod k8s_access_commands;
 mod k8s_commands;
+mod k8s_network_commands;
+mod k8s_helm_commands;
+mod k8s_security_commands;
 mod model;
 mod mouse_nav;
 mod pg;
@@ -49,6 +53,7 @@ pub fn run() {
             app.manage(explorer_commands::ExplorerState::default());
             app.manage(iam_commands::IamState::new(dir.join("iam-changes.jsonl")));
             app.manage(k8s_commands::K8sState::new(dir.join("k8s-changes.jsonl")));
+            app.manage(k8s_access_commands::AccessState::default());
             app.manage(argocd::ArgocdState::default());
             app.manage(argowf::client::State::new(dir.join("settings.json")));
             app.manage(pg_commands::PgState::new(dir.join("db-changes.jsonl")));
@@ -129,6 +134,12 @@ pub fn run() {
             pg_commands::pg_preset,
             pg_commands::pg_drop_plan,
             pg_commands::pg_apply_drop,
+            k8s_access_commands::k8s_access,
+            k8s_access_commands::k8s_access_matrix,
+            k8s_access_commands::k8s_access_cell,
+            k8s_access_commands::k8s_who_can,
+            k8s_access_commands::k8s_review,
+            k8s_access_commands::k8s_workload_identity,
             k8s_commands::k8s_context,
             k8s_commands::k8s_open,
             k8s_commands::k8s_close,
@@ -159,6 +170,14 @@ pub fn run() {
             k8s_commands::k8s_drain,
             k8s_commands::k8s_change_log,
             k8s_commands::k8s_undo,
+            k8s_network_commands::k8s_network,
+            k8s_security_commands::k8s_findings,
+            k8s_helm_commands::k8s_helm_tool,
+            k8s_helm_commands::k8s_helm_releases,
+            k8s_helm_commands::k8s_helm_release,
+            k8s_helm_commands::k8s_helm_show_values,
+            k8s_commands::rbac::k8s_preview_batch,
+            k8s_commands::rbac::k8s_apply_batch,
             argocd_commands::argocd_set_token,
             argocd_commands::argocd_forget_token,
             argocd_commands::argocd_session,

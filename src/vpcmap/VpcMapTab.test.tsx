@@ -1,3 +1,4 @@
+import { QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderWithClient } from "../test/utils";
 import { sampleTopology } from "./fixtures";
@@ -143,4 +144,40 @@ test("wheel is ignored when the tab is inactive", async () => {
   const before = screen.getByTestId("vpc-zoom").textContent;
   wheel(screen.getByTestId("vpc-canvas"));
   expect(screen.getByTestId("vpc-zoom").textContent).toBe(before);
+});
+
+test("highlighted resources get a highlight ring and the bar says how many were found, with an off switch", async () => {
+  renderWithClient(<VpcMapTab {...props} highlight={{ ids: ["i-1", "alb-1", "i-gone"], label: "prod-eks" }} />);
+  await screen.findByText("pub-a");
+  expect(tile("i-1")).toHaveClass("highlighted");
+  document.querySelectorAll('.vm-tile[data-id="alb-1"]').forEach((t) => expect(t).toHaveClass("highlighted"));
+  expect(tile("nat-1")).not.toHaveClass("highlighted");
+  // 구조도에 없는 ID는 센다: 둘 찾고 하나는 없다
+  const bar = screen.getByTestId("vpc-highlight");
+  expect(bar).toHaveTextContent("prod-eks 강조 2개 (이 구조도에 없는 1개)");
+  fireEvent.click(within(bar).getByRole("button", { name: "강조 끄기" }));
+  expect(tile("i-1")).not.toHaveClass("highlighted");
+  fireEvent.click(within(screen.getByTestId("vpc-highlight")).getByRole("button", { name: "prod-eks 강조 켜기" }));
+  expect(tile("i-1")).toHaveClass("highlighted");
+});
+
+test("without a highlight nothing is highlighted and there is no bar", async () => {
+  renderWithClient(<VpcMapTab {...props} />);
+  await screen.findByText("pub-a");
+  expect(document.querySelector(".vm-tile.highlighted")).toBeNull();
+  expect(screen.queryByTestId("vpc-highlight")).toBeNull();
+});
+
+test("a new highlight turns a switched-off highlight back on", async () => {
+  const { qc, rerender } = renderWithClient(<VpcMapTab {...props} highlight={{ ids: ["i-1"], label: "a" }} />);
+  await screen.findByText("pub-a");
+  fireEvent.click(screen.getByRole("button", { name: "강조 끄기" }));
+  expect(tile("i-1")).not.toHaveClass("highlighted");
+  rerender(
+    <QueryClientProvider client={qc}>
+      <VpcMapTab {...props} highlight={{ ids: ["nat-1"], label: "b" }} />
+    </QueryClientProvider>,
+  );
+  expect(tile("nat-1")).toHaveClass("highlighted");
+  expect(tile("i-1")).not.toHaveClass("highlighted");
 });

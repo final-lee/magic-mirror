@@ -16,7 +16,7 @@ use crate::iam::commit::{new_log_id, plan::PlanStore};
 use crate::k8s::change::{self, Change, ChangeObject, Operation, Plan, Preview, INVALID_CHANGE};
 use crate::k8s::drain::apply::{self as drain_apply, Job};
 use crate::k8s::drain::run::{DrainMessage, Limits};
-use crate::k8s::{commit, exec, log, node_shell};
+use crate::k8s::{commit, exec, helm, log, node_shell};
 use crate::k8s::connect;
 use crate::k8s::forward::{self, Forward, ForwardRequest, Forwards};
 use crate::k8s::failure::{describe, failure_of, Endpoint, Failure, NOT_OPENED};
@@ -43,6 +43,15 @@ pub struct Session {
     pub context: String,
     /// 로그인 PATH를 넣은 kubeconfig. 재시도 없는 Eviction용 클라이언트를 drain 때 만든다.
     pub kubeconfig: kube::config::Kubeconfig,
+    /// 읽은 kubeconfig 파일들. helm에 `--kubeconfig`로 넘긴다.
+    pub kubeconfig_paths: Vec<PathBuf>,
+}
+
+impl Session {
+    /// helm 명령이 쓰는 이 세션의 클러스터 정보
+    pub fn helm(&self) -> helm::Cluster {
+        helm::Cluster { client: self.client.clone(), endpoint: self.endpoint, context: self.context.clone(), kubeconfig_paths: self.kubeconfig_paths.clone() }
+    }
 }
 
 #[derive(Default)]
@@ -55,6 +64,8 @@ pub struct K8sState {
     node_shells: Arc<node_shell::NodeShells>,
     forwards: Arc<Forwards>,
     plans: Mutex<PlanStore<StoredPlan>>,
+    /// 장바구니(권한 변경 일괄) 미리보기에서 본 계획들
+    batches: Mutex<PlanStore<StoredBatch>>,
     log_path: PathBuf,
 }
 
@@ -81,6 +92,14 @@ impl WatchEntry {
 struct StoredPlan {
     plan: Plan,
     at: String,
+    epoch: u64,
+    session: Arc<Session>,
+}
+
+/// 일괄 미리보기에서 사용자가 본 계획들(변경 순서대로)
+#[derive(Clone)]
+struct StoredBatch {
+    plans: Vec<Plan>,
     epoch: u64,
     session: Arc<Session>,
 }
@@ -290,7 +309,7 @@ pub async fn k8s_open(app: State<'_, AppState>, k8s: State<'_, K8sState>, target
         .await
         .map_err(|_| describe(&Failure::Unreachable, endpoint))?
         .map_err(|e| describe(&failure_of(&e, "get", "version"), endpoint))?;
-    let session = Session { client, endpoint, context, kubeconfig };
+    let session = Session { client, endpoint, context, kubeconfig, kubeconfig_paths: loaded.paths.clone() };
     let context = session.context.clone();
     if !k8s.keep(&target, started, session) {
         return Err(AppError::other(NOT_OPENED));
@@ -599,13 +618,19 @@ fn check_recreate(k8s: &K8sState, target: &K8sTarget, change: &Change) -> Result
 
 
 #[tauri::command]
-pub async fn k8s_preview(k8s: State<'_, K8sState>, target: K8sTarget, change: Change) -> Result<Preview, AppError> {
+pub async fn k8s_preview(app: State<'_, AppState>, k8s: State<'_, K8sState>, target: K8sTarget, change: Change) -> Result<Preview, AppError> {
     check_recreate(&k8s, &target, &change)?;
     let session = k8s.session(&target)?;
     let epoch = k8s.epoch(&target);
     let now = now_secs();
     let at = iso(now);
-    let plan = commit::dry_plan(session.client.clone(), session.endpoint, &change, &at).await?;
+    let plan = if helm::handles(&change) {
+        helm::plan::dry_plan(&session.helm(), &change).await?
+    } else if crate::k8s::rbac::handles(&change) {
+        crate::k8s::rbac::commit::dry_plan(&rbac::context(&app, &session, &target).await?, &change).await?
+    } else {
+        commit::dry_plan(session.client.clone(), session.endpoint, &change, &at).await?
+    };
     if k8s.epoch(&target) != epoch || !Arc::ptr_eq(&session, &k8s.session(&target)?) {
         return Err(AppError::other(NOT_OPENED));
     }
@@ -621,7 +646,14 @@ pub struct K8sApplyResult {
 }
 
 #[tauri::command]
-pub async fn k8s_apply(k8s: State<'_, K8sState>, target: K8sTarget, change: Change, confirm_text: Option<String>, undo_of: Option<String>) -> Result<K8sApplyResult, AppError> {
+pub async fn k8s_apply(
+    app: State<'_, AppState>,
+    k8s: State<'_, K8sState>,
+    target: K8sTarget,
+    change: Change,
+    confirm_text: Option<String>,
+    undo_of: Option<String>,
+) -> Result<K8sApplyResult, AppError> {
     // drain은 진행을 채널로 알리는 `k8s_drain`으로만 적용한다
     if matches!(change.operation, Operation::Drain) {
         return Err(AppError::other(INVALID_CHANGE));
@@ -640,7 +672,13 @@ pub async fn k8s_apply(k8s: State<'_, K8sState>, target: K8sTarget, change: Chan
     } else if matches!(change.operation, Operation::Recreate { .. }) {
         return Err(AppError::other(log::UNDO_UNAVAILABLE));
     }
-    let (plan, outcome) = commit::apply_plan(session.client.clone(), session.endpoint, &change, &seen.plan, &seen.at, confirm_text.as_deref()).await?;
+    let (plan, outcome) = if helm::handles(&change) {
+        helm::plan::apply(&session.helm(), &change, &seen.plan, confirm_text.as_deref()).await?
+    } else if crate::k8s::rbac::handles(&change) {
+        crate::k8s::rbac::commit::apply_plan(&rbac::context(&app, &session, &target).await?, &change, &seen.plan, confirm_text.as_deref()).await?
+    } else {
+        commit::apply_plan(session.client.clone(), session.endpoint, &change, &seen.plan, &seen.at, confirm_text.as_deref()).await?
+    };
     // 확인한 노드 셸 적용으로 만든 Pod는 만든 즉시 UID와 함께 등록한다. 그러면 터미널을 열기 전에 탭이 닫히거나 기록·열기가 실패해도 지워지고,
     // 이 Pod만 터미널을 열 수 있다(같은 표시를 단 다른 Pod는 열 수 없다).
     let mut tracked: Option<(String, String)> = None;
@@ -762,6 +800,8 @@ pub fn k8s_change_log(k8s: State<'_, K8sState>) -> Vec<log::Entry> {
 pub fn k8s_undo(k8s: State<'_, K8sState>, log_id: String) -> Result<log::Undo, AppError> {
     log::undo(&log::read_all(&k8s.log_path), &log_id)
 }
+
+pub mod rbac;
 
 #[cfg(test)]
 mod tests;

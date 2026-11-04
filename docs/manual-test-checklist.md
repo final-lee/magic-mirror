@@ -258,6 +258,58 @@
 - [ ] 셸·attach: Pod 상세 "셸" 탭에서 컨테이너를 골라 열면 bash(없으면 sh)가 뜨고 창 크기를 바꾸면 `stty size`가 따라간다. 다른 탭에 갔다 와도 세션이 살아 있다. attach는 stdin·tty가 켜진 컨테이너에서만 입력이 되고 "입력·Ctrl-C가 주 프로세스로 가요" 경고가 보인다. 변경 기록에는 열고 닫은 시각만 있고 입출력은 없다
 - [ ] 노드 셸: Node 상세 [노드 셸]은 이미지(기본 busybox)를 고칠 수 있는 디버그 Pod 미리보기를 열고 노드 이름 입력을 요구한다. 열리면 `hostname`이 노드 이름이고, 닫으면 디버그 Pod가 지워진다(변경 기록에 만들기와 지우기가 남는다). 노드 이미지 레지스트리에 닿지 않는 노드면 Pod가 Ready가 안 돼 60초 뒤 실패하고 Pod는 지워진다
 - [ ] port-forward: Pod·Service 상세에서 포트를 골라 열면 왼쪽 메뉴 "포트포워딩"에 `127.0.0.1:<포트>`가 보이고 브라우저로 열린다. Service 포워드는 쓰던 Pod를 지워도 다른 준비된 Pod로 다시 붙는다. [닫기]로 닫히고, 클러스터 탭을 닫거나 앱을 끄면 모두 닫힌다
+
+## EKS 쿠버네티스: 접근 (읽기만 한다. 실제 EKS와 SSO로 확인한다)
+준비: access entry와 aws-auth를 모두 쓰는 `API_AND_CONFIG_MAP` 클러스터(가능하면 `API`·`CONFIG_MAP` 클러스터도 하나씩), SSO 권한 세트로 만든 `AWSReservedSSO_*` 역할 둘 이상, IRSA ServiceAccount와 Pod Identity 연결이 있는 워크로드, 클러스터 관리자 신원과 읽기만 되는 신원.
+
+- [ ] 신원: [접근] → [신원]에 인증 모드와 그 설명이 보인다. 같은 주체가 access entry와 aws-auth에 모두 있으면 aws-auth 쪽이 "쓰이지 않아요 · 같은 주체의 access entry가 먼저 쓰여요"로 흐리게 보이고, `API`·`CONFIG_MAP` 클러스터에서는 안 쓰는 쪽 전체가 그렇게 보인다. `{{SessionName}}` 템플릿 사용자 이름이 그대로 보인다
+- [ ] SSO 묶음: `AWSReservedSSO_<권한 세트>_<해시>` 역할이 권한 세트 이름의 한 줄로 묶이고(펼치면 역할 ARN별 줄), [SSO 권한 세트로 묶기]를 끄면 모두 따로 보인다. [IAM에서 열기]가 IAM 작업 공간에서 그 역할을 연다
+- [ ] access policy: AmazonEKSClusterAdmin·Admin·Edit·View 정책은 범위(클러스터 또는 네임스페이스 목록)와 함께 보이고 클러스터 전체 열의 칸이 정책에 맞게 칠해진다. 다른 정책(예: AmazonEKSAdminViewPolicy)은 "평가하지 못함"이 붙는다
+- [ ] 읽지 못한 출처: access entry 목록 권한을 뺀 신원으로 열면 "이 부분을 읽지 못했어요: EKS access entry"가 보이고 나머지(aws-auth, 권한 표)는 그대로 보인다. aws-auth ConfigMap을 읽을 수 없어도 같다
+- [ ] 권한 표: 위에 "RBAC과 EKS access policy만 계산해요"가 있다. 열은 클러스터 전체와 고른 네임스페이스(네임스페이스 고르기에서 찾기·추가·빼기, 최대 8열), 행은 주체(IAM·사용자·그룹·ServiceAccount)다. 종류 칩과 이름 필터가 되고 25행씩 [이전]·[다음]이다. 칸 일곱(읽기·쓰기·삭제·exec·Secret 읽기·RBAC 변경·권한 상승)은 [칸 설명]의 정의대로 칠해진다
+- [ ] `kubectl auth can-i`와 대조: 권한 표의 칸 몇 개(예: 어떤 사용자의 dev 네임스페이스 읽기, Secret 읽기, exec)를 눌러 상세를 열고, 같은 신원으로 `kubectl auth can-i get secrets -n dev --as <사용자> --as-group <그룹>`을 실행해 허용 여부가 상세의 "확인한 동작"과 같은지 본다. 상세의 "바인딩 경로"가 `kubectl get rolebinding,clusterrolebinding -o wide`와 맞는다
+- [ ] aggregation: `aggregate-to-view` 라벨을 단 ClusterRole을 만들면 `view`에 묶인 주체의 상세 경로에 "(그 ClusterRole에서 합쳐짐)"이 보인다(다시 읽기 후)
+- [ ] 누가 할 수 있나: `get secrets`를 네임스페이스와 함께 찾으면 직접·그룹 경유·access policy로 받은 주체가 경로와 함께 나오고, `system:authenticated` 같은 기본 그룹에서 받은 권한은 그 그룹 한 줄뿐이다. [클러스터에 대조(SubjectAccessReview)]는 SubjectAccessReview를 만들 수 없는 신원에서는 꺼지고 이유가 보인다. 만들 수 있는 신원에서는 "일치 N명, 다름 M명"이 나오고 다른 줄에는 "계산은 허용, 클러스터는 거부"가 붙는다
+- [ ] 워크로드 신원: IRSA 어노테이션이 있는 ServiceAccount와 Pod Identity 연결이 표에 보이고 쓰는 Pod 수가 맞다. 역할 신뢰 정책에 이 클러스터의 OIDC 공급자와 맞는 `sub`·`aud` 조건이 있으면 "동작해요", `sub`를 다른 ServiceAccount로 바꾸면 "연결돼 있지만 동작하지 않음"과 이유가, IAM 권한이 없으면 "확인하지 못함"이 보인다. 역할 이름을 누르면 IAM 작업 공간에서 열린다
+## EKS 네트워크 (K6)
+- [ ] 왼쪽 메뉴 "🌐 네트워크" → 로드밸런서 탭에 type이 LoadBalancer인 Service와 Ingress가 나온다. AWS Load Balancer Controller로 만든 것은 로드 밸런서 이름·ALB/NLB·리스너·대상 상태가 보이고, 행을 누르면 70% 상세에 리스너 규칙과 대상 그룹이 뜬다. 비정상 대상에는 사유가 보이고, 대상의 Pod·노드 링크가 워크로드 화면에서 그 객체를 연다
+- [ ] 주소가 아직 없는 Service는 "주소 없음", 주소는 있는데 ELBv2에 없는 것(클래식 로드 밸런서 등)은 "찾지 못함"으로 나온다. 이 클러스터 태그가 붙은 짝 없는 로드 밸런서는 표 아래에 따로 나온다
+- [ ] 노드·서브넷 탭: 노드마다 인스턴스 ID·AZ·서브넷이 나오고(Fargate는 인스턴스 없음), 서브넷 표의 남은 IP가 콘솔(VPC → 서브넷)과 맞다. VPC CNI 클러스터의 Pod IP 탭에서 서브넷별 Pod 수가 맞고, hostNetwork Pod는 "노드 IP"로 표시된다
+- [ ] NetworkPolicy 탭: 정책이 없는 네임스페이스가 위에 표시되고, 정책을 누르면 들어오고 나가는 규칙이 요약된다
+- [ ] SSO가 만료됐거나 elasticloadbalancing·ec2 읽기 권한이 없을 때 해당 부분만 "읽지 못한 부분"에 이유와 함께 나오고 쿠버네티스 쪽 화면은 그대로 보인다
+- [ ] [VPC 다이어그램 열기]로 클러스터 VPC 구조도 탭이 열리고 클러스터의 노드(EC2)와 로드 밸런서에 분홍 테두리가 있다. 막대의 [강조 끄기]로 평소 모양이 된다. 상세의 [VPC 다이어그램에서 보기]는 그 로드 밸런서만 강조한다. 라이트·다크 테마 모두 확인
+## EKS 쿠버네티스: Helm (테스트 클러스터에서만 확인한다)
+준비: 운영과 분리된 테스트 EKS 클러스터와 쓰기 권한이 있는 신원, 읽기만 되는 신원을 하나 더 둔다. 맥에 `helm`(3.13 이상)이 있고, 테스트 네임스페이스에 작은 차트(Deployment + ConfigMap)를 `helm install`로 설치해 두었다가 `helm upgrade`를 한 번 해서 리비전을 둘 만들어 둔다. 실패한 릴리스 하나(`helm install`이 서버에서 거절당한 것)와 이름에 `prod`가 든 릴리스 하나도 둔다.
+
+- [ ] 목록: 왼쪽 메뉴 "⎈ Helm"에서 릴리스마다 가장 높은 리비전 한 줄이 보이고 상태 배지(deployed 초록, failed 빨강, pending-* 노랑)와 차트·앱 버전·리비전이 `helm list -A`와 같다. 실패한 릴리스는 "문제 N"과 "문제 있는 것만"으로 바로 찾는다. 모든 네임스페이스를 고르면 네임스페이스 열이 생긴다. `helm`으로 업그레이드하면 10초 안에 목록이 바뀐다
+- [ ] 상세: 행을 누르면 목록의 70%를 덮는 상세가 열리고 values 탭의 "사용자가 준 값"이 `helm get values`, "계산된 값"이 `helm get values --all`과 같다. 매니페스트 탭은 `helm get manifest`와 같고 Secret 값은 ••••로 가려진다. 이력 탭이 `helm history`와 같고 [보기]로 옛 리비전의 값을 읽기 전용으로 본다(위에 안내, 변경 단추는 꺼짐). 요약의 리소스 이름을 누르면 워크로드 화면에서 그 객체가 열린다(CRD처럼 이 클러스터에 없는 종류는 글로 보인다)
+- [ ] helm 없음: `helm`이 PATH에 없는 상태(이름을 잠깐 바꿔서)로 앱을 열면 읽기는 되고 [업그레이드]·[롤백]·[삭제]·[차트 설치]가 꺼진 채 설치 안내가 제목으로 보인다. 읽기 전용 신원으로 연 탭에서는 `secrets`에 `create`·`delete` 권한이 없다는 이유가 보인다
+- [ ] 업그레이드(values): [업그레이드]에서 값을 고치고 [미리보기]하면 `helm upgrade … --dry-run=server`로 렌더링한 결과가 객체별 필드 차이와 values 차이로 보인다. 적용하면 새 리비전이 생기고 변경 기록에는 values가 없다. 미리보기를 띄운 채 터미널에서 `helm upgrade`를 하고 [적용]하면 "미리보기 이후 바뀌었어요"로 멈춘다. `prod` 이름이나 kube-system은 이름 입력이 필요하다. 변경 기록 [되돌리기]는 롤백 미리보기를 거쳐 이전 값으로 돌린다
+- [ ] 업그레이드(다른 차트): "다른 차트로"에 저장소(주소·차트·버전) 또는 OCI 주소를 넣고 미리보기한다. 없는 버전은 helm의 이유가 미리보기 오류로 보인다
+- [ ] 롤백·삭제: [롤백]은 리비전을 고르면 manifest·values 차이를 보이고, 적용하면 `helm history`에 "Rollback to N"이 남는다. [삭제]는 지워질 객체 전체와 "되돌릴 수 없어요"(이력을 지울 때)를 보이고 릴리스 이름 입력이 늘 필요하다. [이력 남기기]를 켜고 지운 릴리스는 변경 기록 [되돌리기]로 롤백해 되살아난다
+- [ ] 차트 설치: [차트 설치]에서 릴리스 이름·네임스페이스(없으면 만들기)·차트 위치(로컬 경로, 저장소, OCI)를 넣고 [차트 기본값 불러오기]로 values를 채워 고친 뒤 미리보기하면 서버 dry-run 결과(만들어질 객체)가 보인다. 적용하면 `helm list`에 나오고, 변경 기록 [되돌리기]는 릴리스를 삭제한다(만든 네임스페이스는 남는다)
+- [ ] ConfigMap 드라이버: `HELM_DRIVER=configmap`으로 설치한 릴리스도 목록에 나오고 업그레이드·롤백·삭제가 된다
+
+## EKS 권한 변경 (RBAC 장바구니, access entry)
+- [ ] 권한 표 칸 → "권한 바꾸기"에서 주체 빼기·바인딩 삭제·권한 주기를 장바구니에 담으면 막대에 `장바구니 N/50`이 보인다
+- [ ] 바인딩 상세의 주체 추가·빼기·삭제 담기, 화면을 옮겨도 장바구니가 남는다
+- [ ] [한 번에 미리보기]: 변경마다 호출·차이와 전체 "누가 무엇을 얻고 잃는지"가 보인다
+- [ ] cluster-admin 바인딩·kube-system·prod·내 신원이 권한을 잃는 변경은 이름을 입력해야 적용된다
+- [ ] 적용 중 실패하면 거기서 멈추고 나머지는 건너뛰며, [적용한 것 되돌리기]가 거꾸로 되돌린다
+- [ ] 미리보기 뒤 다른 곳에서 바꾸면 "미리보기 이후 바뀌었어요"로 아무것도 적용되지 않는다
+- [ ] 신원 탭: access entry 만들기·그룹 변경·정책 연결·해제·삭제와 변경 기록의 되돌리기(실제 EKS)
+- [ ] AmazonEKSClusterAdminPolicy 연결과 내 access entry 변경은 이름 입력을 요구한다
+## EKS 쿠버네티스: 보안 점검 (읽기만 한다. 고치기는 테스트 클러스터에서만 확인한다)
+- [ ] 왼쪽 메뉴 "🔍 보안 점검"을 열면 심각도(높음·중간·낮음)와 분류(클러스터·권한·워크로드)별 개수 카드가 나오고, 카드를 누르면 그 조건으로 목록이 걸러지고 다시 누르면 풀린다
+- [ ] 클러스터 점검이 실제 EKS 설정과 맞는다: 퍼블릭 엔드포인트가 0.0.0.0/0이면 "높음", 꺼진 로그 유형(콘솔과 대조), KMS 암호화 유무, 표준 지원 종료 90일 이내(EKS 문서의 종료일과 대조), aws-auth 사용, 클러스터 생성 직후 만들어진 관리자 access entry("추정"으로 표시)
+- [ ] 권한 점검이 접근 화면의 "누가 할 수 있나"와 맞는다: cluster-admin·system:masters 주체, 익명·system:authenticated에 준 권한(system:public-info-viewer 같은 기본 설정은 안 나온다), bind·escalate·impersonate·nodes/proxy·모든 Secret 읽기, Pod 생성 + 강한 ServiceAccount, 쓰이지 않는 역할, 없는 역할·ServiceAccount를 가리키는 바인딩
+- [ ] 워크로드 점검: privileged, hostPath(노드 루트·런타임 소켓은 "높음"), hostNetwork, hostPID, root 실행, allowPrivilegeEscalation, request·limit·probe 없음, latest·태그 없는 이미지, default ServiceAccount 토큰 자동 마운트, NetworkPolicy 없는 네임스페이스, IMDS hop limit 2 이상 노드그룹(시작 템플릿과 인스턴스 설정)
+- [ ] 시스템 네임스페이스(`kube-system`, `kube-public`, `kube-node-lease`, `amazon-*`)의 문제는 처음에 숨겨지고 "N건은 숨겼어요"가 보인다. [시스템 네임스페이스 포함]을 켜면 보인다
+- [ ] [점검 항목]에서 항목을 끄면 목록과 개수에서 바로 빠지고, 앱을 다시 켜고 다른 클러스터를 열어도 그대로다(설정 `k8sSecurityChecks`). [모두 켜기]·[모두 끄기]가 분류 단위로 동작한다
+- [ ] [점검 항목별로 묶기]를 켜면 항목마다 접고 펼 수 있는 묶음이 나오고, 행을 다시 누르거나 빈 곳을 누르면 선택이 풀린다
+- [ ] 행을 누르면 70% 상세가 열려 증거, 왜 중요한지, 해결 방법이 보이고, 오른쪽 위 도구 모음의 [워크로드 화면에서 열기]·[IAM에서 열기]·[접근 화면에서 보기]가 대상으로 간다. AWS 리소스(클러스터·노드그룹)는 열기 단추 없이 AWS에서 고치라는 안내가 나온다
+- [ ] 고칠 수 있는 항목(allowPrivilegeEscalation 미지정, 권한 없는 default ServiceAccount 토큰 자동 마운트)은 도구 모음 오른쪽 끝의 [자동으로 고치기]가 변경 미리보기를 연다: 서버 dry-run, 바뀌는 필드만의 diff, 롤아웃 주의. 적용하면 점검이 다시 읽혀 그 항목이 사라지고 변경 기록 [되돌리기]가 된다. patch 권한이 없으면 이유와 함께 꺼진다. Helm·ArgoCD가 관리하는 객체는 주의 문구에 그 도구 이름이 나온다
+- [ ] AWS 읽기가 막힌 계정(예: eks:DescribeCluster 거부)에서도 화면이 뜨고, 읽지 못한 부분과 "점검하지 못한 항목"이 위에 남는다. SSO가 만료되면 로그인 버튼이 나온다
 ## ⚙️ Argo Workflows (personal `stg-eks`의 Argo Server, 조작은 시험용 템플릿으로만)
 준비: Tailscale로 personal Argo Server(`https://argo-workflows-stg.<tailnet>.ts.net`)에 닿고, kubeconfig에 `stg-eks` context(exec가 `AWS_PROFILE=personal`)가 있다. 실제 잡(예: notification Cron)에는 조작하지 않는다. 조작 확인은 따로 만든 시험용 WorkflowTemplate(예: `echo` 한 단계, `activeDeadlineSeconds` 있음)으로만 한다.
 

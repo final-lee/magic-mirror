@@ -1,5 +1,7 @@
 //! EKS 탭. 조회와 변경을 분리하며 클러스터 쓰기는 `exec`에서만 보낸다.
+pub mod access;
 pub mod change;
+pub mod checks;
 pub mod commit;
 pub mod drain;
 pub mod exec;
@@ -7,10 +9,13 @@ pub mod log;
 pub mod connect;
 pub mod failure;
 pub mod forward;
+pub mod helm;
 pub mod kubeconfig;
 pub mod logs;
+pub mod network;
 pub mod node_shell;
 pub mod path;
+pub mod rbac;
 pub mod read;
 pub mod review;
 pub mod rows;
