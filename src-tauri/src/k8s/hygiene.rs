@@ -1,6 +1,6 @@
 //! 클러스터에 쓰는 호출이 허용된 파일 밖에 없는지 글자로 확인한다(PG의 `pg::hygiene`과 같은 방식).
 //! K1에서 허용되는 것은 `review.rs`의 `create`(SelfSubjectReview, SelfSubjectRulesReview) 하나다. `shell.rs`는 exec·attach, `forward.rs`는 port-forward만 연다. 이후 단계가 `exec.rs`를 더한다.
-//! 프로세스를 띄우는 곳(`Command::new`)은 로그인 셸의 PATH를 읽는 `path.rs`와 helm을 실행하는 `helm/run.rs` 둘뿐이다.
+//! 프로세스를 띄우는 곳은 로그인 PATH의 `path.rs`, helm의 `helm/run.rs`, 읽기 전용 describe의 `describe.rs`뿐이다.
 //! helm은 클러스터를 바꾸는 CLI라 kube 쓰기 호출과 같은 취급이다: 그 하위 명령(upgrade·install·uninstall·rollback)의 이름은 인자를 만드는 `helm/cli.rs`에만 있어야 한다.
 
 use std::fs;
@@ -28,6 +28,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("k8s/forward.rs", &[".portforward("]),
     ("k8s/path.rs", &["Command::new("]),
     ("k8s/helm/run.rs", &["Command::new("]),
+    ("k8s/describe.rs", &["Command::new("]),
 ];
 
 /// 시험일 때만 컴파일되는 파일은 스캔하지 않는다: `hygiene.rs`, `live_tests.rs`와 `live_tests/` 아래 파일, 이름이 `tests.rs`인 파일

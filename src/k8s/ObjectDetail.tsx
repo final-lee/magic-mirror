@@ -4,6 +4,7 @@ import { ErrorState } from "../components/ErrorState";
 import { BindingActions } from "./rbac/BindingActions";
 import { isBinding } from "./rbac/changes";
 import { ChangeActions } from "./ChangeActions";
+import { DescribeView } from "./DescribeView";
 import { can } from "./can";
 import { Percent, Problems, valueKeys } from "./columns";
 import { age, formatBytes, formatCpu } from "./format";
@@ -283,7 +284,7 @@ function prettyJson(value: string): string | null {
 /** 객체 하나의 상세(요약·YAML). 소유자·자식·노드 링크는 onOpen으로 상세 스택에 쌓는다. */
 export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose,
   onOpenIam, now, widthPct = DETAIL_PCT, onChange, rolloutProgress, appliedChange, shellNamespace, usageIndex }: Props) {
-  const [tab, setTab] = useState<"summary" | "yaml" | "logs" | "shell">("summary");
+  const [tab, setTab] = useState<"summary" | "yaml" | "logs" | "shell" | "describe">("summary");
   // 노드 셸: 변경 틀로 디버그 Pod를 만들고 나면 그 Pod에 들어가는 터미널을 연다
   const [nodeShell, setNodeShell] = useState<{ namespace: string; pod: string } | null>(null);
   const seenChange = useRef(appliedChange);
@@ -391,6 +392,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
       )}
       <div role="tablist" className="k8s-tabs">
         <button role="tab" aria-selected={tab === "summary"} onClick={() => setTab("summary")}>{TAB_SUMMARY}</button>
+        <button role="tab" data-tab="describe" aria-selected={tab === "describe"} onClick={() => setTab("describe")}>describe</button>
         <button role="tab" aria-selected={tab === "yaml"} onClick={() => setTab("yaml")}>{TAB_YAML}</button>
         {(pod || workload) && <button role="tab" aria-selected={tab === "logs"} onClick={() => setTab("logs")}>{TAB_LOGS}</button>}
         {((pod && changes) || nodeShell) && <button role="tab" aria-selected={tab === "shell"} onClick={() => setTab("shell")}>{TAB_SHELL}</button>}
@@ -450,6 +452,8 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
               <SecretKeys target={target} ssoProfile={ssoProfile} namespace={objectRef.namespace} name={objectRef.name} keys={q.data.secretKeys} canRead={canRead} />
             )}
           </Summary>
+        ) : tab === "describe" ? (
+          <DescribeView target={target} context={context} objectRef={objectRef} resourceVersion={resourceVersion} ssoProfile={ssoProfile} live={live} view={q.data} onRefreshObject={() => void q.refetch()} />
         ) : tab === "yaml" && editing && onChange ? (
           <YamlEdit target={target} ssoProfile={ssoProfile} objectRef={objectRef} view={q.data} canRead={canRead} onPreview={onChange} onCancel={() => setEditing(false)} actions={editSlot} />
         ) : (
