@@ -32,7 +32,7 @@ test("change history rows move with vim keys without undoing", async () => {
   render(withClientAndSso(<ChangeLog target={target} onStart={vi.fn()} />, newQueryClient(), ssoLoginStub()));
   await screen.findByText("scale web");
   fireEvent.keyDown(screen.getByRole("table"), { key: "G", shiftKey: true });
-  expect(screen.getByText("scale web").closest("tr")).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByText("scale web").closest("tr")).toHaveFocus();
 });
 
 /** 되돌리기가 일반 변경 미리보기와 적용을 거치는 화면이다. */

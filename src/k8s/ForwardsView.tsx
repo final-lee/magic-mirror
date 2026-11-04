@@ -34,13 +34,13 @@ export function ForwardsView({ target, ssoProfile }: Props) {
       {listed.length === 0 ? (
         <div className="empty">{mine.length === 0 ? FORWARDS_EMPTY : LIST_NO_MATCH}</div>
       ) : (
-        <table className="k8s-table" aria-label={NAV_FORWARDS} tabIndex={0} onKeyDown={vimTableKeys}>
+        <table className="k8s-table k8s-vim-rows" aria-label={NAV_FORWARDS} tabIndex={0} onKeyDown={vimTableKeys}>
           <thead>
             <tr><th>{H_FORWARD_TARGET}</th><th>{H_FORWARD_LOCAL}</th><th>{H_FORWARD_POD}</th><th>{H_FORWARD_STATE}</th><th /></tr>
           </thead>
           <tbody>
             {listed.map((f) => (
-              <tr key={f.id} className={f.error || f.pod === null ? "k8s-warn" : undefined}>
+              <tr key={f.id} tabIndex={-1} className={f.error || f.pod === null ? "k8s-warn" : undefined}>
                 <td className="mono">{forwardTarget(f)}</td>
                 <td className="mono">{forwardAddress(f)}</td>
                 <td className="mono">{f.pod ?? ""}</td>

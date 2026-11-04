@@ -38,7 +38,7 @@ function Summary({ levels, name }: { levels: number[]; name: string }) {
 
 function Row({ m, indent, onOpenIam, onOpenSubject, onChange, mode }: { m: MappingRow; indent?: boolean; mode: AccessView["mode"] } & Pick<Props, "onOpenIam" | "onOpenSubject" | "onChange">) {
   return (
-    <tr className={m.effective ? undefined : "acc-inactive"}>
+    <tr tabIndex={-1} className={m.effective ? undefined : "acc-inactive"}>
       <td className={indent ? "acc-indent" : undefined}>
         <div className="acc-principal">
           <b>{m.label}</b>
@@ -147,7 +147,7 @@ export function IdentitiesTab({ target, ssoProfile, view, onRetry, onOpenIam, on
         {onChange && <EntryCreateButton mode={mode} onChange={onChange} />}
         <span className="dim acc-push">{fetchedAt(view.fetchedAt)}</span>
       </div>
-      <div className="tbl acc-table" tabIndex={0} onKeyDown={vimTableKeys}>
+      <div className="tbl acc-table k8s-vim-rows" tabIndex={0} onKeyDown={vimTableKeys}>
         <table aria-label={IDENTITIES_LABEL}>
           <thead>
             <tr>
@@ -165,7 +165,7 @@ export function IdentitiesTab({ target, ssoProfile, view, onRetry, onOpenIam, on
               const expanded = open.has(set);
               return (
                 <Fragment key={set}>
-                  <tr className="acc-group-row">
+                  <tr className="acc-group-row" tabIndex={-1}>
                     <td colSpan={7}>
                       <button className="link" aria-expanded={expanded} aria-label={`${ssoGroupRow(set, rows.length)} ${expanded ? COLLAPSE : EXPAND}`} onClick={() => toggle(set)}>
                         {expanded ? "▾" : "▸"} {ssoGroupRow(set, rows.length)}

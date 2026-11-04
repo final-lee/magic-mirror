@@ -71,8 +71,8 @@ export const COMMANDS: Record<string, CommandInfo> = {
 };
 
 /** EKS 목록에 커서가 있고 입력칸·터미널·대화상자가 아닐 때(한 글자 키의 조건) */
-const K8S_LIST = "k8sListFocus && !dialogOpen && !inputFocus && !terminalFocus";
-const K8S_BODY = "k8sFocus && !dialogOpen && !inputFocus && !terminalFocus";
+const K8S_LIST = "k8sListFocus && !dialogOpen && !inlineDialog && !inputFocus && !terminalFocus";
+const K8S_BODY = "k8sFocus && !dialogOpen && !inlineDialog && !inputFocus && !terminalFocus";
 
 export const KEYBINDINGS: Keybinding[] = [
   { key: "cmd+k", command: "app.findResource", when: "!dialogOpen", scope: "app", handler: "registry" },
@@ -98,7 +98,7 @@ export const KEYBINDINGS: Keybinding[] = [
   { key: "f7", command: "diff.next", scope: "diff", handler: "registry" },
   { key: "shift+f7", command: "diff.prev", scope: "diff", handler: "registry" },
   // EKS 탭: k9s식 명령 줄과 한 글자 키(설계: 키맵 설계 "EKS 목록의 k9s식 한 글자 키")
-  { key: ":", command: "k8s.goto", when: "!dialogOpen && !inputFocus && !terminalFocus", scope: "k8s", handler: "registry" },
+  { key: ":", command: "k8s.goto", when: "!dialogOpen && !inlineDialog && !inputFocus && !terminalFocus", scope: "k8s", handler: "registry" },
   { key: "/", command: "list.find", when: K8S_BODY, scope: "k8s", handler: "registry" },
   { key: "j", command: "list.move", scope: "k8s", handler: "component" },
   { key: "k", command: "list.move", scope: "k8s", handler: "component" },

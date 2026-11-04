@@ -117,6 +117,18 @@ test.each(["dialog", "alertdialog"])("focused inline %s blocks list shortcuts", 
   expect(run).toHaveBeenCalledTimes(1);
 });
 
+test("global find still works while an inline popover has focus", () => {
+  const run = vi.fn();
+  function Inline() {
+    useCommand("list.find", run);
+    return <div role="dialog"><button>팝오버</button></div>;
+  }
+  render(<Root><Inline /></Root>);
+  screen.getByRole("button", { name: "팝오버" }).focus();
+  fireEvent.keyDown(window, { key: "f", metaKey: true });
+  expect(run).toHaveBeenCalledTimes(1);
+});
+
 function Nested({ onRun }: { onRun: (n: string) => void }) {
   const outer = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
