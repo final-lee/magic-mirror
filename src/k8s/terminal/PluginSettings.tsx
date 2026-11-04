@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { K8sPlugin } from "../../api/types";
 import type { K8sKindRef } from "../types";
-import { pluginKeyError } from "./plugins";
+import { pluginKeyError, pluginTemplateError } from "./plugins";
 
 const formatKind = (kind: "*" | K8sKindRef) => kind === "*" ? "*" : `${kind.group || "core"}/${kind.version}/${kind.kind}/${kind.plural}/${kind.namespaced ? "namespaced" : "cluster"}`;
 
@@ -39,8 +39,9 @@ export function PluginSettings({ plugins, onChange }: { plugins: K8sPlugin[]; on
   };
   const parsed = parseKinds(kinds);
   const keyError = pluginKeyError(key, plugins.filter((_, index) => index !== editing).flatMap((plugin) => plugin.key ? [plugin.key] : []));
+  const templateError = pluginTemplateError(command);
   const save = () => {
-    if (editing === null || !name.trim() || !command.trim() || !parsed || keyError) return;
+    if (editing === null || !name.trim() || !command.trim() || !parsed || keyError || templateError) return;
     const plugin: K8sPlugin = { name: name.trim(), description: description.trim() || null, kinds: parsed, command, confirm, key: key.trim() || null };
     const next = plugins.slice();
     if (editing === next.length) next.push(plugin);
@@ -68,10 +69,11 @@ export function PluginSettings({ plugins, onChange }: { plugins: K8sPlugin[]; on
           {!parsed && <p className="err">종류를 확인해 주세요</p>}
           <label>명령<input className="field-input mono" value={command} onChange={(event) => setCommand(event.target.value)} /></label>
           <p className="dim">$NAMESPACE $NAME $CONTEXT $KIND $CONTAINER를 쓸 수 있어요.</p>
+          {templateError && <p className="err">{templateError}</p>}
           <label>단축키<input className="field-input mono" value={key} onChange={(event) => setKey(event.target.value)} /></label>
           {keyError && <p className="err">{keyError}</p>}
           <label><input type="checkbox" checked={confirm} onChange={(event) => setConfirm(event.target.checked)} />실행 전 확인</label>
-          <div className="tools"><button className="btn tone-primary" disabled={!name.trim() || !command.trim() || !parsed || !!keyError} onClick={save}>저장</button><button className="btn tone-secondary" onClick={() => setEditing(null)}>취소</button></div>
+          <div className="tools"><button className="btn tone-primary" disabled={!name.trim() || !command.trim() || !parsed || !!keyError || !!templateError} onClick={save}>저장</button><button className="btn tone-secondary" onClick={() => setEditing(null)}>취소</button></div>
         </div>
       )}
     </section>

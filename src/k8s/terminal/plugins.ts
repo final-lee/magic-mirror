@@ -16,7 +16,44 @@ export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+const PLACEHOLDER = /^\$(NAMESPACE|NAME|CONTEXT|KIND|CONTAINER)/;
+const BOUNDARY = /[\s;|&<>]/;
+
+/** 셸 문법을 완전히 해석하지 않으므로 안전하게 인용할 수 없는 템플릿은 거절한다. */
+export function pluginTemplateError(template: string): string | null {
+  if (template.includes("$(") || template.includes("${") || template.includes("`")) {
+    return "명령 치환과 중괄호 변수는 사용할 수 없어요";
+  }
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < template.length; i++) {
+    const char = template[i];
+    if (char === "\\" && quote !== "'") {
+      if (PLACEHOLDER.test(template.slice(i + 1))) return "변수 앞에 역슬래시를 쓸 수 없어요";
+      i++;
+      continue;
+    }
+    if ((char === "'" || char === '"') && (quote === null || quote === char)) {
+      quote = quote === null ? char : null;
+      continue;
+    }
+    if (quote === null && char === "<" && template[i + 1] === "<") return "here 문서는 사용할 수 없어요";
+    if (quote === null && (char === "(" || char === ")" || char === "#")) return "이 셸 구문에서는 변수를 사용할 수 없어요";
+    const match = char === "$" ? template.slice(i).match(PLACEHOLDER) : null;
+    if (!match) continue;
+    const after = template[i + match[0].length];
+    if (after && /[A-Za-z0-9_]/.test(after)) return "변수 이름을 확인해 주세요";
+    const before = template[i - 1];
+    if (quote === null && ((before && !BOUNDARY.test(before)) || (after && !BOUNDARY.test(after)))) {
+      return "변수는 독립된 단어 또는 따옴표 안에 넣어 주세요";
+    }
+    i += match[0].length - 1;
+  }
+  return quote === null ? null : "닫히지 않은 따옴표가 있어요";
+}
+
 export function expandPlugin(template: string, values: PluginValues): string {
+  const error = pluginTemplateError(template);
+  if (error) throw new Error(error);
   let quote: "'" | '"' | null = null;
   let result = "";
   for (let i = 0; i < template.length; i++) {
@@ -32,12 +69,10 @@ export function expandPlugin(template: string, values: PluginValues): string {
       continue;
     }
     if (char === "$") {
-      const match = template.slice(i).match(/^\$(NAMESPACE|NAME|CONTEXT|KIND|CONTAINER)\b/);
+      const match = template.slice(i).match(PLACEHOLDER);
       if (match) {
         const value = values[match[1] as keyof PluginValues];
-        result += quote === "'" ? value.replace(/'/g, "'\\''")
-          : quote === '"' ? value.replace(/[\\"$`]/g, "\\$&")
-          : shellQuote(value);
+        result += quote ? quote + shellQuote(value) + quote : shellQuote(value);
         i += match[0].length - 1;
         continue;
       }
