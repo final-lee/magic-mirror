@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
+import { CodeEditor } from "../../components/CodeEditor";
 import { useSheetFocus } from "../../iam/previewParts";
 import { yamlProblem } from "../text";
 import type { K8sChange } from "../types";
 import { yamlProblems } from "../yamlDocs";
-import { YamlEditor } from "../YamlEditor";
 import { ChartSourceFields, EMPTY_SOURCE, toSource, type SourceForm } from "./ChartSourceFields";
 import * as t from "./text";
 import { HELM_RELEASE_KIND, type HelmReleaseDetail } from "./types";
@@ -54,7 +54,7 @@ export function HelmUpgradeDialog({ detail, onPreview, onClose }: Props) {
           </div>
           {other ? <ChartSourceFields form={form} onChange={setForm} /> : <p>{t.UPGRADE_STORED_NOTE(detail.chart.name ? `${detail.chart.name}-${detail.chart.version}` : "")}</p>}
           <h4>{t.VALUES_LABEL}</h4>
-          <YamlEditor value={detail.userValues} onChange={setValues} label={t.VALUES_EDITOR_LABEL} />
+          <CodeEditor value={detail.userValues} onChange={setValues} label={t.VALUES_EDITOR_LABEL} />
           {problems.length > 0 && (
             <ul className="err" role="alert" aria-label={t.VALUES_INVALID}>
               {problems.map((problem, i) => (
