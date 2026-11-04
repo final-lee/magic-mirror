@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { errorMessage } from "../api/errors";
@@ -30,16 +30,20 @@ export function DescribeView({ target, context, objectRef, resourceVersion, ssoP
   ssoProfile: string; live: boolean; view: K8sObjectView; onRefreshObject: () => void; toolbar: HTMLElement | null;
 }) {
   const secret = objectRef.kind.group === "" && objectRef.kind.kind === "Secret";
-  const lastRead = useRef(0);
+  const queryClient = useQueryClient();
+  const queryKey = ["k8s", targetKey(target), "describe", context, kindKey(objectRef.kind), objectRef.namespace, objectRef.name];
+  const cached = queryClient.getQueryState(queryKey);
+  const lastRead = useRef(Math.max(cached?.dataUpdatedAt ?? 0, cached?.errorUpdatedAt ?? 0));
   const query = useQuery<string, AppError>({
-    queryKey: ["k8s", targetKey(target), "describe", context, kindKey(objectRef.kind), objectRef.namespace, objectRef.name],
+    queryKey,
     queryFn: () => {
       lastRead.current = Date.now();
       return invoke<string>("k8s_describe", { target, kind: objectRef.kind, namespace: objectRef.namespace, name: objectRef.name, profile: ssoProfile });
     },
     enabled: live && context !== null && !secret,
-    staleTime: Infinity,
+    staleTime: 10_000,
     retry: false,
+    retryOnMount: false,
   });
   const lastVersion = useRef(resourceVersion);
   useEffect(() => {
