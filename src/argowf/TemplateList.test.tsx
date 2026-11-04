@@ -1,8 +1,9 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
+import { dispatchKey } from "../keymap/registry";
 import { renderWithClient } from "../test/utils";
 import { argowfApi } from "./api";
 import { CONN, cron, tpl, wf } from "./catalogFixtures";
-import { CAT_NO_TEMPLATE_MATCH, CAT_NO_TEMPLATES, TPL_CLUSTER, TPL_SEARCH } from "./catalogText";
+import { CAT_NO_TEMPLATE_MATCH, CAT_NO_TEMPLATES, TPL_CLUSTER } from "./catalogText";
 import { TemplateList } from "./TemplateList";
 import type { WfRow } from "./types";
 
@@ -85,15 +86,21 @@ describe("TemplateList", () => {
     fireEvent.click(rowOf("backup"));
     expect(onOpen).toHaveBeenLastCalledWith("WorkflowTemplate", "ops", "backup");
 
-    fireEvent.change(screen.getByRole("textbox", { name: TPL_SEARCH }), { target: { value: "bkp" } });
+    expect(screen.queryByRole("textbox", { name: "목록에서 찾기" })).toBeNull();
+    act(() => { dispatchKey(new KeyboardEvent("keydown", { key: "f", metaKey: true })); });
+    const input = screen.getByRole("textbox", { name: "목록에서 찾기" });
+    expect(input).toHaveFocus();
+    fireEvent.change(input, { target: { value: "bkp" } });
     expect(
       screen
         .getAllByRole("row")
         .slice(1)
         .map((r) => within(r).getAllByRole("cell")[0].textContent),
     ).toEqual(["backup"]);
-    fireEvent.change(screen.getByRole("textbox", { name: TPL_SEARCH }), { target: { value: "zzzzqq" } });
+    fireEvent.change(input, { target: { value: "zzzzqq" } });
     expect(screen.getByText(CAT_NO_TEMPLATE_MATCH)).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(rowOf("report")).toBeInTheDocument();
   });
 
   test("템플릿이 없으면 안내한다", async () => {
