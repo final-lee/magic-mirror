@@ -44,6 +44,25 @@ fn auth(json: serde_json::Value) -> AuthInfo {
 }
 
 #[test]
+fn minify_keeps_only_the_selected_context_and_its_dependencies() {
+    let result = minify(&fixture(), "prod-admin").unwrap();
+    assert_eq!(result.current_context.as_deref(), Some("prod-admin"));
+    assert_eq!(result.contexts.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["prod-admin"]);
+    assert_eq!(result.clusters.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["prod-alias"]);
+    assert_eq!(result.auth_infos.iter().map(|u| u.name.as_str()).collect::<Vec<_>>(), ["admin-user"]);
+    assert!(minify(&fixture(), "missing").is_err());
+    let mut broken = fixture();
+    broken.clusters.clear();
+    assert!(minify(&broken, "prod-admin").is_err());
+    let mut duplicates = fixture();
+    duplicates.contexts.push(duplicates.contexts[1].clone());
+    duplicates.clusters.push(duplicates.clusters[1].clone());
+    duplicates.auth_infos.push(duplicates.auth_infos[1].clone());
+    let result = minify(&duplicates, "prod-admin").unwrap();
+    assert_eq!((result.contexts.len(), result.clusters.len(), result.auth_infos.len()), (1, 1, 1));
+}
+
+#[test]
 fn matches_by_arn_name_or_endpoint_case_and_slash_insensitively() {
     let c = candidates(&fixture(), ARN, ENDPOINT);
     let names: Vec<_> = c.iter().map(|c| c.name.as_str()).collect();

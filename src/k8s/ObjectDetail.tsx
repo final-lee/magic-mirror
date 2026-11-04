@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import type { K8sPlugin } from "../api/types";
 import { errorMessage } from "../api/errors";
 import { ErrorState } from "../components/ErrorState";
 import { BindingActions } from "./rbac/BindingActions";
 import { isBinding } from "./rbac/changes";
 import { ChangeActions } from "./ChangeActions";
+import { DescribeView } from "./DescribeView";
 import { can } from "./can";
 import { Percent, Problems, valueKeys } from "./columns";
 import { age, formatBytes, formatCpu } from "./format";
@@ -18,7 +20,11 @@ import { NodeShellPane } from "./NodeShellPane";
 import { ShellTab } from "./ShellTab";
 import { YamlEdit } from "./YamlEdit";
 import { UsageGraphs } from "./UsageGraphs";
+import { XrayView } from "./xray/XrayView";
+import { hasRelations } from "./xray/logic";
+import { TAB_RELATIONS } from "./xray/text";
 import { JsonView, YamlView } from "./YamlView";
+import { PluginActions } from "./terminal/PluginActions";
 import {
   BACK, CHILDREN_TRUNCATED, CLOSE, COL_NAME, COLUMN_LABELS, CREATED_AT, DETAIL_LABEL, H_IMAGE, H_KIND, H_LAST_TERMINATION, H_MESSAGE,
   H_REASON, H_RESTARTS, H_STATE, INIT_MARK, LOADING, NO_RECENT_EVENTS, OPEN_IN_IAM, SEC_ANNOTATIONS, SEC_CHILDREN, SEC_CONDITIONS,
@@ -53,6 +59,12 @@ interface Props {
   widthPct?: number;
   /** 사용량(metrics-server). Pod 상세의 컨테이너 표가 요청·제한과 견주어 보여 준다. 없으면 사용량 열이 없다 */
   usageIndex?: UsageIndex | null;
+  /** 설정의 플러그인(사용자가 정의한 로컬 명령). 없으면 플러그인 메뉴가 없다 */
+  plugins?: K8sPlugin[];
+  /** 확인을 마친 플러그인 명령을 이 탭의 새 터미널에서 실행한다 */
+  onRunPlugin?: (command: string, title: string) => void;
+  /** 플러그인 키를 받는 목록·상세 상자. 없으면 이 상세 안에서만 받는다 */
+  pluginHost?: RefObject<HTMLElement>;
 }
 
 /** 사용량 한 칸: 값 아래에 요청·제한과 그 대비 비율 */
@@ -282,8 +294,8 @@ function prettyJson(value: string): string | null {
 
 /** 객체 하나의 상세(요약·YAML). 소유자·자식·노드 링크는 onOpen으로 상세 스택에 쌓는다. */
 export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose,
-  onOpenIam, now, widthPct = DETAIL_PCT, onChange, rolloutProgress, appliedChange, shellNamespace, usageIndex }: Props) {
-  const [tab, setTab] = useState<"summary" | "yaml" | "logs" | "shell">("summary");
+  onOpenIam, now, widthPct = DETAIL_PCT, onChange, rolloutProgress, appliedChange, shellNamespace, usageIndex, plugins, onRunPlugin, pluginHost }: Props) {
+  const [tab, setTab] = useState<"summary" | "yaml" | "logs" | "shell" | "describe" | "relations">("summary");
   // 노드 셸: 변경 틀로 디버그 Pod를 만들고 나면 그 Pod에 들어가는 터미널을 연다
   const [nodeShell, setNodeShell] = useState<{ namespace: string; pod: string } | null>(null);
   const seenChange = useRef(appliedChange);
@@ -336,8 +348,11 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
   // 불완전한 규칙은 서버 판단에 맡기고 확실히 거부된 것만 끈다. 새 객체를 만드는 apply가 아니라 있는 객체를 고치므로 patch 권한을 본다.
   const patchRule = rules.data && can(rules.data, { verb: "patch", group: objectRef.kind.group, resource: objectRef.kind.plural, name: objectRef.name });
   const editDenied = patchRule === "no" ? CHANGE_DENIED("patch", objectRef.kind.plural) : undefined;
+  const aside = useRef<HTMLElement>(null);
+  // 플러그인의 $CONTAINER: Pod는 init이 아닌 첫 컨테이너, 워크로드는 Pod 템플릿의 첫 컨테이너
+  const pluginContainer = (pod ? logContainers?.find((c) => !c.init) : workload ? templateContainers.find((c) => !c.init) : undefined)?.name ?? null;
   return (
-    <aside className="k8s-detail" aria-label={DETAIL_LABEL} style={{ width: `${widthPct}%` }}>
+    <aside className="k8s-detail" aria-label={DETAIL_LABEL} style={{ width: `${widthPct}%` }} ref={aside}>
       <div className="k8s-detail-head">
         {onBack && (
           <button className="icon" aria-label={BACK} title={BACK} onClick={onBack}>
@@ -351,13 +366,24 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
         </button>
       </div>
       {rolloutProgress && <p role="status">{rolloutProgress}</p>}
-      {onChange && q.data && (
+      {(onChange || (plugins && onRunPlugin)) && q.data && (
         <div className="k8s-actions k8s-toolbar">
-          {editing ? (
+          {plugins && onRunPlugin && (
+            <PluginActions
+              plugins={plugins}
+              context={context}
+              objectRef={objectRef}
+              container={pluginContainer}
+              host={pluginHost ?? aside}
+              onRun={onRunPlugin}
+            />
+          )}
+          {onChange && (editing ? (
             <span className="k8s-toolbar-slot" ref={setEditSlot} />
           ) : (
             <button
               className="btn small tone-primary"
+              data-k8s-action="edit"
               disabled={!!editDenied}
               title={editDenied}
               aria-description={editDenied}
@@ -368,9 +394,9 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
             >
               {YAML_EDIT}
             </button>
-          )}
-          {isBinding(objectRef.kind) && <BindingActions target={target} objectRef={objectRef} view={q.data} rules={rules.data} onStart={onChange} />}
-          <ChangeActions target={target} ssoProfile={ssoProfile} objectRef={objectRef} view={q.data} rules={rules.data} shellNamespace={shellNamespace ?? "default"} onStart={onChange} />
+          ))}
+          {onChange && isBinding(objectRef.kind) && <BindingActions target={target} objectRef={objectRef} view={q.data} rules={rules.data} onStart={onChange} />}
+          {onChange && <ChangeActions target={target} ssoProfile={ssoProfile} objectRef={objectRef} view={q.data} rules={rules.data} shellNamespace={shellNamespace ?? "default"} onStart={onChange} />}
         </div>
       )}
       {(pod || service) && objectRef.namespace && (
@@ -390,10 +416,12 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
         </ObjectForwards>
       )}
       <div role="tablist" className="k8s-tabs">
-        <button role="tab" aria-selected={tab === "summary"} onClick={() => setTab("summary")}>{TAB_SUMMARY}</button>
-        <button role="tab" aria-selected={tab === "yaml"} onClick={() => setTab("yaml")}>{TAB_YAML}</button>
-        {(pod || workload) && <button role="tab" aria-selected={tab === "logs"} onClick={() => setTab("logs")}>{TAB_LOGS}</button>}
-        {((pod && changes) || nodeShell) && <button role="tab" aria-selected={tab === "shell"} onClick={() => setTab("shell")}>{TAB_SHELL}</button>}
+        <button role="tab" data-tab="summary" aria-selected={tab === "summary"} onClick={() => setTab("summary")}>{TAB_SUMMARY}</button>
+        <button role="tab" data-tab="describe" aria-selected={tab === "describe"} onClick={() => setTab("describe")}>describe</button>
+        <button role="tab" data-tab="yaml" aria-selected={tab === "yaml"} onClick={() => setTab("yaml")}>{TAB_YAML}</button>
+        {(pod || workload) && <button role="tab" data-tab="logs" aria-selected={tab === "logs"} onClick={() => setTab("logs")}>{TAB_LOGS}</button>}
+        {((pod && changes) || nodeShell) && <button role="tab" data-tab="shell" aria-selected={tab === "shell"} onClick={() => setTab("shell")}>{TAB_SHELL}</button>}
+        {hasRelations(objectRef.kind, q.data) && <button role="tab" data-tab="relations" aria-selected={tab === "relations"} onClick={() => setTab("relations")}>{TAB_RELATIONS}</button>}
       </div>
       <div className={`k8s-detail-body${tab === "logs" || shellTab ? " flush" : ""}`}>
         {/* 셸 세션은 다른 탭을 보는 동안에도 유지한다: 숨기기만 한다 */}
@@ -432,6 +460,8 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
           <PodLogs key={objectKey} target={target} ssoProfile={ssoProfile} live={live} namespace={objectRef.namespace} pod={objectRef.name} containers={logContainers} />
         ) : tab === "logs" && workload && objectRef.namespace ? (
           <WorkloadLogs key={objectKey} target={target} ssoProfile={ssoProfile} live={live} kind={objectRef.kind} namespace={objectRef.namespace} name={objectRef.name} containers={templateContainers} />
+        ) : tab === "relations" ? (
+          <XrayView key={objectKey} target={target} context={context} ssoProfile={ssoProfile} live={live} objectRef={objectRef} resourceVersion={resourceVersion} kinds={kinds} onOpen={onOpen} />
         ) : q.isError ? (
           <ErrorState error={q.error} profile={ssoProfile} compact onRetry={() => void q.refetch()} onLoggedIn={() => void q.refetch()} />
         ) : !q.data ? (
@@ -450,6 +480,8 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
               <SecretKeys target={target} ssoProfile={ssoProfile} namespace={objectRef.namespace} name={objectRef.name} keys={q.data.secretKeys} canRead={canRead} />
             )}
           </Summary>
+        ) : tab === "describe" ? (
+          <DescribeView target={target} context={context} objectRef={objectRef} resourceVersion={resourceVersion} ssoProfile={ssoProfile} live={live} view={q.data} onRefreshObject={() => void q.refetch()} />
         ) : tab === "yaml" && editing && onChange ? (
           <YamlEdit target={target} ssoProfile={ssoProfile} objectRef={objectRef} view={q.data} canRead={canRead} onPreview={onChange} onCancel={() => setEditing(false)} actions={editSlot} />
         ) : (

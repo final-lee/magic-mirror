@@ -1,6 +1,7 @@
 //! 클러스터에 쓰는 호출이 허용된 파일 밖에 없는지 글자로 확인한다(PG의 `pg::hygiene`과 같은 방식).
 //! K1에서 허용되는 것은 `review.rs`의 `create`(SelfSubjectReview, SelfSubjectRulesReview) 하나다. `shell.rs`는 exec·attach, `forward.rs`는 port-forward만 연다. 이후 단계가 `exec.rs`를 더한다.
-//! 프로세스를 띄우는 곳(`Command::new`)은 로그인 셸의 PATH를 읽는 `path.rs`와 helm을 실행하는 `helm/run.rs` 둘뿐이다.
+//! 프로세스를 띄우는 곳은 로그인 PATH의 `path.rs`, helm의 `helm/run.rs`, 읽기 전용 describe의 `describe.rs`뿐이다.
+//! 앱 안 터미널은 사용자의 로그인 셸을 PTY에 띄우는데(`portable-pty`의 `CommandBuilder::new`·`spawn_command`) 그 셸에서 `kubectl`로 클러스터를 바꿀 수 있어서 kube 쓰기 호출과 같은 취급이다: 이 둘은 `k8s/terminal/pty.rs`에만 있어야 한다.
 //! helm은 클러스터를 바꾸는 CLI라 kube 쓰기 호출과 같은 취급이다: 그 하위 명령(upgrade·install·uninstall·rollback)의 이름은 인자를 만드는 `helm/cli.rs`에만 있어야 한다.
 
 use std::fs;
@@ -12,7 +13,7 @@ const WRITE_CALLS: &[&str] = &[
     ".patch_metadata(", ".patch_scale(", ".replace_scale(", ".patch_status(", ".replace_status(", ".patch_approval(",
     ".patch_resize(", ".replace_resize(", ".patch_ephemeral_containers(", ".replace_ephemeral_containers(", ".create_token_request(",
     "Method::DELETE", "Request::post", "Request::put", "Request::patch", "Request::delete",
-    "Command::new(",
+    "Command::new(", "CommandBuilder::new(", ".spawn_command(",
     ".create_access_entry(", ".delete_access_entry(", ".update_access_entry(", ".associate_access_policy(", ".disassociate_access_policy(",
 ];
 /// 클러스터를 바꾸는 helm 하위 명령 이름. 인자를 만드는 `k8s/helm/cli.rs`에서만 쓴다.
@@ -28,6 +29,8 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("k8s/forward.rs", &[".portforward("]),
     ("k8s/path.rs", &["Command::new("]),
     ("k8s/helm/run.rs", &["Command::new("]),
+    ("k8s/describe.rs", &["Command::new("]),
+    ("k8s/terminal/pty.rs", &["CommandBuilder::new(", ".spawn_command("]),
 ];
 
 /// 시험일 때만 컴파일되는 파일은 스캔하지 않는다: `hygiene.rs`, `live_tests.rs`와 `live_tests/` 아래 파일, 이름이 `tests.rs`인 파일
@@ -118,7 +121,7 @@ fn the_scan_sees_k8s_files() {
 #[test]
 fn the_terminal_and_forward_calls_live_in_their_own_files_and_the_scan_reads_them() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    for (file, call) in [("k8s/shell.rs", ".exec("), ("k8s/shell.rs", ".attach("), ("k8s/forward.rs", ".portforward(")] {
+    for (file, call) in [("k8s/shell.rs", ".exec("), ("k8s/shell.rs", ".attach("), ("k8s/forward.rs", ".portforward("), ("k8s/terminal/pty.rs", ".spawn_command("), ("k8s/terminal/pty.rs", "CommandBuilder::new(")] {
         let path = root.join(file);
         assert!(sources().contains(&path), "{file}를 스캔하지 않아요");
         let text = fs::read_to_string(&path).unwrap();

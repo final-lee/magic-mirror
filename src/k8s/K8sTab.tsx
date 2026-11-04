@@ -1,7 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ErrorState } from "../components/ErrorState";
 import { DoneNotice } from "../components/DoneNotice";
+import { useCommand } from "../keymap/registry";
 import { useApplyNotices } from "../iam/useApplyFlow";
 import { AccessScreen } from "./access/AccessScreen";
 import { BatchDialog, useK8sBatch } from "./ChangeBatch";
@@ -20,6 +21,8 @@ import { K8sError } from "./K8sError";
 import { K8sNav, type K8sView, type NavBookmark } from "./K8sNav";
 import { NODES, bookmarkKey, bookmarkOf } from "./kinds";
 import { LaneResizer, useLaneWidths } from "./lanes";
+import { GotoBar } from "./nav/GotoBar";
+import type { Goto } from "./nav/goto";
 import { moved } from "./useReorder";
 import { MyRules } from "./MyRules";
 import { NoContext } from "./NoContext";
@@ -29,8 +32,10 @@ import { SecurityView } from "./security/SecurityView";
 import type { VpcOpen } from "./network/types";
 import { NAMESPACES } from "./targets";
 import { ALL, TopBar, type K8sConnection } from "./TopBar";
-import { WorkloadsView, type WorkloadsFocus } from "./WorkloadsView";
+import { WorkloadsView, type WorkloadsFocus, type WorkloadsGoto } from "./WorkloadsView";
 import { YamlCreate } from "./YamlCreate";
+import { TerminalView } from "./terminal/TerminalView";
+import { useTerminals } from "./terminal/useTerminals";
 import { BOOKMARK_MISSING, savedMissing, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNECTING, updateCommand } from "./text";
 import { refreshK8s, useK8sKinds, useK8sRules, useUsageSampler } from "./queries";
 import { useK8sConnection } from "./useK8sConnection";
@@ -63,6 +68,23 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
   const [view, setView] = useState<K8sView>("overview");
   const [appliedChange, setAppliedChange] = useState<K8sChange | null>(null);
   const [focus, setFocus] = useState<WorkloadsFocus | null>(null);
+  // `:` 명령 줄(k9s): 열려 있는지, 마지막으로 고른 종류, 열기 전에 커서가 있던 곳
+  const root = useRef<HTMLDivElement>(null);
+  const [gotoOpen, setGotoOpen] = useState(false);
+  const [gotoKind, setGotoKind] = useState<WorkloadsGoto | null>(null);
+  const beforeGoto = useRef<Element | null>(null);
+  const terminals = useTerminals();
+  // 터미널 화면을 처음 열면 셸을 하나 띄운다(터미널은 다른 화면을 보는 동안에도 유지된다)
+  const selectView = (next: K8sView) => {
+    if (next === "terminal" && terminals.tabs.length === 0) terminals.open(null);
+    setView(next);
+  };
+  // 플러그인 명령은 새 터미널 탭에서 실행한다
+  const runPlugin = (command: string, title: string) => {
+    terminals.open(command, title);
+    setView("terminal");
+  };
+  useCommand("k8s.terminal", () => selectView("terminal"), { host: root, enabled: active });
   const notices = useApplyNotices();
   const change = useK8sChange(
     target,
@@ -106,6 +128,34 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
   const openObject = (ref: ObjectRef) => {
     setFocus((f) => ({ ref, nonce: (f?.nonce ?? 0) + 1 }));
     setView("workloads");
+  };
+
+  const connected = settingsReady && !ctx.isPending && !ctx.isError && chosen !== null;
+  useCommand(
+    "k8s.goto",
+    () => {
+      beforeGoto.current = document.activeElement;
+      setGotoOpen(true);
+    },
+    { host: root, enabled: connected && !gotoOpen },
+  );
+  const goto = (g: Goto) => {
+    if (g.type === "kind") {
+      setGotoKind((k) => ({ kind: g.kind, nonce: (k?.nonce ?? 0) + 1 }));
+      setView("workloads");
+    } else if (g.type === "view") {
+      selectView(g.view);
+    } else {
+      setUserNs(g.namespace);
+    }
+  };
+  // 닫으면 커서를 돌려 놓는다: 이동했으면 새 화면의 목록으로, 아니면 열기 전 자리로
+  const closeGoto = (went: boolean) => {
+    setGotoOpen(false);
+    setTimeout(() => {
+      const next = went ? root.current?.querySelector<HTMLElement>(".k8s-body [tabindex=\"0\"]") : beforeGoto.current;
+      (next as HTMLElement | null)?.focus?.();
+    }, 0);
   };
 
   const reconnect = () => void refreshK8s(qc, target, ssoProfile);
@@ -158,7 +208,8 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
 
   const connection: K8sConnection = session.isError ? "failed" : session.isSuccess && !session.isFetching ? "connected" : "connecting";
   return (
-    <div className="pg">
+    <div className="pg" ref={root}>
+      {gotoOpen && <GotoBar ctx={{ kinds: kinds.data ?? [], namespaces: names }} onGo={goto} onClose={closeGoto} />}
       {/* 연결돼 있는 동안 고른 네임스페이스(전체면 모두)의 사용량을 계속 모은다 */}
       <UsageSampler target={target} context={chosen} namespace={nsOrAll} ssoProfile={ssoProfile} live={live} />
       <TopBar
@@ -194,14 +245,18 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
       <div className="pg-main">
         <K8sNav
           view={view}
-          onSelect={setView}
+          onSelect={(v) => {
+            // 메뉴로 직접 옮기면 `:` 명령이 고른 종류는 잊는다(All로 돌아올 때 기본 종류부터)
+            setGotoKind(null);
+            selectView(v);
+          }}
           bookmarks={navBookmarks}
           onMoveBookmark={(from, to) => update({ k8sBookmarks: moved(bookmarks, from, to) })}
           onRemoveBookmark={removeBookmark}
           width={lanes.width("nav")}
         />
         <LaneResizer lane="nav" onResize={lanes.resize} onCommit={lanes.commit} />
-        <div className={`k8s-body${listView || view === "access" || view === "network" || view === "helm" || view === "security" ? " flush" : ""}`}>
+        <div className={`k8s-body${listView || view === "access" || view === "network" || view === "helm" || view === "security" || view === "terminal" ? " flush" : ""}`}>
           {session.isError ? (
             <K8sError error={session.error} target={target} ssoProfile={ssoProfile} />
           ) : view === "overview" ? (
@@ -228,9 +283,13 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
               kinds={kinds.data ?? []}
               discoveryAvailable={kinds.data !== undefined}
               focus={focus}
+              goto={gotoKind}
+              onAllNamespaces={() => setUserNs(ALL)}
               onOpenIam={onOpenIam}
               onChange={change.start}
               appliedChange={appliedChange}
+              plugins={settings?.k8sPlugins}
+              onRunPlugin={runPlugin}
               banner={kinds.isError && <ErrorState error={kinds.error} profile={ssoProfile} compact onRetry={refetchKinds} onLoggedIn={refetchKinds} />}
               fixedKind={fixedKind}
               bookmarked={marks}
@@ -276,7 +335,7 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
               onOpenObject={openObject}
               lanes={lanes}
             />
-          ) : view === "changeLog" ? (
+          ) : view === "terminal" ? null : view === "changeLog" ? (
             <ChangeLog target={target} onStart={change.start} />
           ) : rules.isError ? (
             <K8sError error={rules.error} target={target} ssoProfile={ssoProfile} />
@@ -284,6 +343,20 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
             <MyRules rules={rules.data} allNamespaces={namespace === ALL} />
           ) : (
             <div className="empty">{STATE_CONNECTING}</div>
+          )}
+          {/* 터미널은 열려 있는 동안 다른 화면을 봐도 유지한다: 숨기기만 한다 */}
+          {(terminals.tabs.length > 0 || view === "terminal") && (
+            <TerminalView
+              target={target}
+              context={chosen}
+              ssoProfile={ssoProfile}
+              visible={view === "terminal" && !session.isError}
+              tabs={terminals.tabs}
+              active={terminals.active}
+              onSelect={terminals.select}
+              onClose={terminals.close}
+              onNew={() => terminals.open(null)}
+            />
           )}
         </div>
       </div>

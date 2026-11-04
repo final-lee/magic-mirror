@@ -4,6 +4,7 @@ pub mod change;
 pub mod checks;
 pub mod commit;
 pub mod drain;
+pub mod describe;
 pub mod exec;
 pub mod log;
 pub mod connect;
@@ -21,8 +22,10 @@ pub mod review;
 pub mod rows;
 pub mod shell;
 pub mod target;
+pub mod terminal;
 pub mod tls;
 pub mod watch;
+pub mod xray;
 
 #[cfg(test)]
 mod hygiene;

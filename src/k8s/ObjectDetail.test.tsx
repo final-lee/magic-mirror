@@ -14,6 +14,7 @@ vi.mock("./api", () => ({ k8sApi: { get: vi.fn(), rules: vi.fn(), secretValue: v
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 // 터미널(xterm)은 PodTerminal.test에서 본다
 const terminalProps: Record<string, unknown>[] = [];
+vi.mock("./DescribeView", () => ({ DescribeView: () => <div>describe output</div> }));
 vi.mock("./PodTerminal", () => ({ PodTerminal: (p: Record<string, unknown>) => (terminalProps.push(p), null) }));
 const m = vi.mocked(k8sApi);
 const T = { profile: "app", region: "r", cluster: "c" };
@@ -41,6 +42,15 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Pod·Service 상세가 셸·port-forward 버튼의 권한을 읽는다. 시험이 따로 정하지 않으면 아무 권한도 없다
   m.rules.mockResolvedValue({ namespace: "prod", resourceRules: [], nonResourceRules: [], incomplete: false });
+});
+
+test("describe tab opens for a custom object", async () => {
+  m.get.mockResolvedValue(view({ kind: widgetKind }));
+  setup({ objectRef: { kind: widgetKind, namespace: "prod", name: "w1" } });
+  const tab = await screen.findByRole("tab", { name: "describe" });
+  fireEvent.click(tab);
+  expect(tab).toHaveAttribute("aria-selected", "true");
+  expect(await screen.findByText("describe output")).toBeInTheDocument();
 });
 
 test("change actions are there without any switch when the detail can start changes", async () => {
@@ -372,4 +382,31 @@ test("no usage columns without metrics for the pod", async () => {
   setup({ usageIndex: buildUsageIndex({ podsUnavailable: null, nodesUnavailable: null, pods: [], nodes: [] }) });
   expect(await screen.findByText("app")).toBeInTheDocument();
   expect(screen.queryByRole("columnheader", { name: H_CPU_USAGE })).toBeNull();
+});
+
+// 관계 탭(xray)은 XrayView.test에서 자세히 본다. 여기서는 어떤 객체에 탭이 있고 노드가 상세로 열리는지만 본다
+vi.mock("./xray/api", () => ({ xrayApi: { get: vi.fn() } }));
+
+test("a deployment has a relations tab whose nodes open as objects; a plain custom object has none", async () => {
+  const { xrayApi } = await import("./xray/api");
+  vi.mocked(xrayApi.get).mockResolvedValue({
+    sections: [{ edge: "reference", nodes: [{ group: "", version: "v1", kind: "ConfigMap", namespace: "prod", name: "web-config", edge: "reference", roles: ["volume"], current: false, presence: "found", status: null, problems: [], children: [] }] }],
+    gaps: [], truncated: false, partial: [], nodes: 1,
+  });
+  m.get.mockResolvedValue(view({ kind: DEPLOYMENTS }));
+  const kinds: K8sKind[] = [{ ...CONFIGMAPS, verbs: ["list"], custom: false }];
+  const handlers = setup({ objectRef: { kind: DEPLOYMENTS, namespace: "prod", name: "web" }, kinds });
+  const tab = await screen.findByRole("tab", { name: "관계" });
+  expect(xrayApi.get).not.toHaveBeenCalled();
+  fireEvent.click(tab);
+  expect(tab).toHaveAttribute("aria-selected", "true");
+  fireEvent.click(await screen.findByRole("button", { name: "ConfigMap web-config 열기" }));
+  expect(handlers.onOpen).toHaveBeenCalledWith({ kind: expect.objectContaining({ kind: "ConfigMap" }), namespace: "prod", name: "web-config" });
+});
+
+test("a custom object without owners or children has no relations tab", async () => {
+  m.get.mockResolvedValue(view({ kind: widgetKind }));
+  setup({ objectRef: { kind: widgetKind, namespace: "prod", name: "w1" } });
+  await screen.findByRole("tab", { name: TAB_YAML });
+  expect(screen.queryByRole("tab", { name: "관계" })).not.toBeInTheDocument();
 });

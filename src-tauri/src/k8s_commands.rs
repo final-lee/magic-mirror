@@ -218,6 +218,16 @@ impl K8sState {
     pub fn session(&self, t: &K8sTarget) -> Result<Arc<Session>, AppError> {
         locked(&self.sessions).get(t).cloned().ok_or_else(|| AppError::other(NOT_OPENED))
     }
+
+    /// 열려 있는 셸 세션들. 로컬 터미널도 같은 목록에 올라서 대상을 닫거나 앱을 끌 때 함께 닫힌다.
+    pub fn shells(&self) -> &Arc<Shells> {
+        &self.shells
+    }
+
+    /// 변경 기록 파일
+    pub fn log_path(&self) -> &std::path::Path {
+        &self.log_path
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -566,8 +576,7 @@ pub fn k8s_forward_close(k8s: State<'_, K8sState>, id: u64) {
 #[tauri::command]
 pub async fn k8s_kinds(k8s: State<'_, K8sState>, target: K8sTarget) -> Result<Vec<Kind>, AppError> {
     let s = k8s.session(&target)?;
-    let discovery = kinds::discover(&s.client, s.endpoint).await?;
-    Ok(kinds::kinds_of(&discovery))
+    kinds::discover_kinds(&s.client, s.endpoint).await
 }
 
 /// 상세 화면. 소유 관계, 컨테이너, 이벤트, YAML(Secret 값은 가림)을 한 번에 돌려준다.

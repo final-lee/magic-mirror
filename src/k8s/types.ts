@@ -99,6 +99,8 @@ export type K8sChange = K8sChangeObject & (
   | { type: "recreate"; object: Record<string, unknown> }
   /** 셸·attach를 연 기록(미리보기·적용 대상이 아니다) */
   | { type: "shell"; container: string; mode: "exec" | "attach" }
+  /** 앱 안 로컬 터미널을 연 기록. 대상 이름은 고정한 context, 플러그인이면 command가 실행한 명령 */
+  | { type: "terminal"; command: string | null }
   /** 노드 셸 디버그 Pod 만들기. 대상(kind·namespace·name)은 만들 Pod, node는 고정할 노드 */
   | { type: "nodeShell"; node: string; image: string }
   /** YAML 객체 하나를 server-side apply(field manager magic-mirror). force는 다른 manager의 필드까지 가져온다 */
@@ -322,6 +324,10 @@ export interface K8sKind extends K8sKindRef {
   verbs: string[];
   /** 내장 API 그룹이 아닌 종류(사용자 정의 리소스) */
   custom: boolean;
+  /** API 서버가 알려 주는 짧은 이름(`po`, `deploy`). 백엔드는 늘 보내고(못 읽었으면 빈 목록), 시험 자료는 생략해도 된다 */
+  shortNames?: string[];
+  /** API 서버가 알려 주는 단수 이름(`pod`). 못 읽었으면 빈 문자열 */
+  singularName?: string;
 }
 
 /** 소유자 또는 자식. plural은 kinds로 프론트가 찾는다 */

@@ -16,7 +16,7 @@ use super::review::{identity, rules, IdentitySource};
 use super::rows::KindRef;
 use super::read::api_for;
 use super::read::detail::{get, ContainerState};
-use super::read::kinds::{discover, kinds_of};
+use super::read::kinds::discover_kinds;
 use super::read::metrics::{metrics, Unavailable};
 use super::read::overview::k8s_parts;
 use super::read::secret::{key_missing, secret_value, secrets_kind, Encoding, SecretKey, SecretValue, MASK};
@@ -26,6 +26,7 @@ use super::watch::{run, WatchMessage};
 use crate::error::AppError;
 
 mod access;
+mod describe;
 mod helm;
 
 const PRIVATE: Endpoint = Endpoint { public: false, private: true };
@@ -33,6 +34,8 @@ const PRIVATE: Endpoint = Endpoint { public: false, private: true };
 mod network;
 mod rbac;
 mod security;
+mod xray;
+mod terminal;
 
 fn env(name: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| panic!("{name}이 필요해요. scripts/k8s-live-test.sh로 돌려 주세요"))
@@ -300,19 +303,23 @@ async fn admin() -> kube::Client {
 #[ignore]
 async fn discovery_lists_builtin_and_custom_kinds() {
     let client = admin().await;
-    let kinds = kinds_of(&discover(&client, PRIVATE).await.unwrap());
+    let kinds = discover_kinds(&client, PRIVATE).await.unwrap();
     let find = |g: &str, k: &str| kinds.iter().find(|x| x.kind.group == g && x.kind.kind == k).cloned();
     let deploy = find("apps", "Deployment").expect("Deployment");
     assert!(!deploy.custom && deploy.kind.namespaced && deploy.kind.plural == "deployments");
     assert!(find("mm.example.com", "Widget").expect("Widget").custom);
     assert!(find("", "Pod").is_some() && find("", "Node").is_some_and(|n| !n.kind.namespaced));
+    // 별칭은 API 서버가 준다(`kubectl get po`, `deploy`와 같은 이름)
+    let pod = find("", "Pod").unwrap();
+    assert!(pod.short_names.iter().any(|n| n == "po") && pod.singular_name == "pod");
+    assert!(deploy.short_names.iter().any(|n| n == "deploy"));
 }
 
 #[tokio::test]
 #[ignore]
 async fn discovery_kinds_can_be_listed_in_the_watch() {
     let client = admin().await;
-    let kinds = kinds_of(&discover(&client, PRIVATE).await.unwrap());
+    let kinds = discover_kinds(&client, PRIVATE).await.unwrap();
     for (group, name) in [("coordination.k8s.io", "Lease"), ("rbac.authorization.k8s.io", "ClusterRole"), ("discovery.k8s.io", "EndpointSlice")] {
         let kind = kinds.iter().find(|k| k.kind.group == group && k.kind.kind == name).expect("served kind").kind.clone();
         let (tx, mut rx) = mpsc::unbounded_channel();

@@ -127,6 +127,7 @@ export function HelmView({ target, context, ssoProfile, live, visible, namespace
               onClear={() => setSelected(null)}
               onOpen={(id) => pick(id, select)}
               empty={(rows ?? []).length === 0 ? t.LIST_EMPTY : t.LIST_NO_MATCH}
+              vimKeys
             />
           )}
         </div>
