@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { ListFind, useListFind } from "../components/ListFind";
+import { fuzzyKeep } from "../lib/fuzzy";
 import { findings, type FindingGroup, type FindingItem, type FindingKind } from "./findings";
 import {
   CAT_FIND_COUNT_UNIT,
@@ -31,6 +33,9 @@ export function Findings({ workflows, crons, templates, now, onOpenWorkflow, onO
   const [picked, setPicked] = useState<FindingKind | null>(null);
   // 고른 카드가 없거나 지금은 문제가 없으면 문제가 있는 첫 카드를 보인다
   const current = groups.find((g) => g.kind === picked && g.items.length > 0) ?? groups.find((g) => g.items.length > 0) ?? null;
+  const listRef = useRef<HTMLDivElement>(null);
+  const find = useListFind(listRef);
+  const visible = fuzzyKeep(current?.items ?? [], find.query, (item) => [item.subject, item.name, item.scope, item.detail]);
 
   const open = (item: FindingItem) => {
     const t = item.target;
@@ -52,7 +57,8 @@ export function Findings({ workflows, crons, templates, now, onOpenWorkflow, onO
           ))}
         </div>
         {current ? (
-          <div className="fx-items">
+          <div className="fx-items" ref={listRef}>
+            <ListFind find={find} count={visible.length} />
             <h3 className="fx-items-title">
               {current.title}{" "}
               <span className="dim">
@@ -78,7 +84,7 @@ export function Findings({ workflows, crons, templates, now, onOpenWorkflow, onO
                 </tr>
               </thead>
               <tbody>
-                {current.items.map((item) => (
+                {visible.map((item) => (
                   <tr key={item.id}>
                     <td className="dim">{item.subject}</td>
                     <td>

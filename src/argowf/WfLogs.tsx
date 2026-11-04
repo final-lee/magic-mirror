@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { reportSsoExpired } from "../api/invoke";
 import { errorMessage } from "../api/errors";
+import { ListFind, useListFind } from "../components/ListFind";
 import { JsonLogLine } from "../k8s/JsonLogLine";
 import { KEEP_LINES } from "../k8s/logBuffer";
 import { highlight, searchPattern } from "../k8s/logSearch";
@@ -38,7 +39,9 @@ export function WfLogs({
   const [since, setSince] = useState<number | null>(null);
   const [timestamps, setTimestamps] = useState(false);
   const [fromArtifact, setFromArtifact] = useState(false);
-  const [query, setQuery] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+  const find = useListFind(listRef);
+  const query = find.query;
   const [paused, setPaused] = useState<WfLogLine[] | null>(null);
   const [auto, setAuto] = useState(true);
   const [lines, setLines] = useState<WfLogLine[]>([]);
@@ -137,7 +140,6 @@ export function WfLogs({
         <label>
           최근 줄 <input type="number" min={1} value={tail} onChange={(e) => setTail(Math.max(1, Number(e.target.value)))} />
         </label>
-        <input aria-label="로그 검색" placeholder="로그 검색" value={query} onChange={(e) => setQuery(e.target.value)} />
         <button className="btn small" onClick={() => setPaused(paused ? null : lines)}>
           {paused ? "재개" : "일시정지"}
         </button>
@@ -169,22 +171,25 @@ export function WfLogs({
       {fromArtifact && <p className="dim">Pod가 지워져서 보관된 로그(main-logs 아티팩트)를 보여 줘요</p>}
       {error && <p className="err">{error}</p>}
       {ended && shown.length === 0 && !error && <p>Pod가 지워져 로그가 없어요</p>}
-      <pre className="argowf-logs">
-        {shown.map((line, i) => (
-          <span key={i}>
-            {!pod && <span className={`argowf-pod-color-${[...line.pod].reduce((n, c) => n + c.charCodeAt(0), 0) % 6}`}>{line.pod} </span>}
-            {line.text.trimStart().startsWith("{") ? (
-              <JsonLogLine line={line.text} query={query} />
-            ) : (
-              <>
-                {highlight(line.text, pattern)}
-                {"\n"}
-              </>
-            )}
-          </span>
-        ))}
-        <span ref={bottom} />
-      </pre>
+      <div ref={listRef}>
+        <ListFind find={find} placeholder="로그 검색" />
+        <pre className="argowf-logs">
+          {shown.map((line, i) => (
+            <span key={i}>
+              {!pod && <span className={`argowf-pod-color-${[...line.pod].reduce((n, c) => n + c.charCodeAt(0), 0) % 6}`}>{line.pod} </span>}
+              {line.text.trimStart().startsWith("{") ? (
+                <JsonLogLine line={line.text} query={query} />
+              ) : (
+                <>
+                  {highlight(line.text, pattern)}
+                  {"\n"}
+                </>
+              )}
+            </span>
+          ))}
+          <span ref={bottom} />
+        </pre>
+      </div>
     </div>
   );
 }

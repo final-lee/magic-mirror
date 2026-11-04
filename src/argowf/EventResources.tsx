@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { desktop } from "../api/desktop";
 import { errorMessage } from "../api/errors";
+import { ListFind, useListFind } from "../components/ListFind";
+import { fuzzyKeep } from "../lib/fuzzy";
 import { ActionDialog, needsTypedName } from "./ActionDialog";
 import { argowfApi } from "./api";
 import { useCatalogAction, useTokenGate } from "./catalogHooks";
@@ -60,7 +62,10 @@ export function EventResources({ conn, live, namespace, links, onTokenError, kin
   const raw = q.error ? errorMessage(q.error) : null;
   const error = raw?.includes(ARGO_EVENTS_MISSING) ? ARGO_EVENTS_MISSING : raw;
   const title = kind === "EventSource" ? "Event Sources" : "Sensors";
-  const rows = q.data ?? [];
+  const listRef = useRef<HTMLDivElement>(null);
+  const find = useListFind(listRef);
+  const rows: (EventSourceRow | SensorRow)[] = q.data ?? [];
+  const visible = fuzzyKeep(rows, find.query, (row) => [row.name, row.namespace, row.status, row.message]);
   return (
     <div className="awc">
       <div className="awc-bar">
@@ -73,7 +78,8 @@ export function EventResources({ conn, live, namespace, links, onTokenError, kin
           </div>
         )}
       </div>
-      <div className="awc-scroll">
+      <div className="awc-scroll" ref={listRef}>
+        <ListFind find={find} count={visible.length} />
         {error ? (
           <div className="empty" role="alert">
             {error}
@@ -82,6 +88,8 @@ export function EventResources({ conn, live, namespace, links, onTokenError, kin
           <div className="empty">불러오는 중…</div>
         ) : rows.length === 0 ? (
           <div className="empty">{kind === "EventSource" ? "EventSource가 없어요" : "Sensor가 없어요"}</div>
+        ) : visible.length === 0 ? (
+          <div className="empty">맞는 항목이 없어요</div>
         ) : (
           <table className="k8s-table awc-table">
             <thead>
@@ -92,7 +100,7 @@ export function EventResources({ conn, live, namespace, links, onTokenError, kin
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => {
+              {visible.map((row) => {
                 const on = selected?.namespace === row.namespace && selected.name === row.name;
                 return (
                   <tr

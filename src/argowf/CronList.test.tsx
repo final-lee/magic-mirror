@@ -1,7 +1,8 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { dispatchKey } from "../keymap/registry";
 import { renderWithClient } from "../test/utils";
 import { argowfApi } from "./api";
-import { CAT_NO_CRON_MATCH, CAT_NO_CRONS, CRON_MISSED, CRON_SEARCH, CRON_SUSPENDED } from "./catalogText";
+import { CAT_NO_CRON_MATCH, CAT_NO_CRONS, CRON_MISSED, CRON_SUSPENDED } from "./catalogText";
 import { CONN, cron, runs } from "./catalogFixtures";
 import { CronList } from "./CronList";
 import { ARGOWF_TOKEN_INVALID } from "./text";
@@ -60,15 +61,21 @@ describe("CronList", () => {
   test("검색은 퍼지로 걸러 목록을 줄이고, 맞는 게 없으면 안내한다", async () => {
     setup();
     await screen.findByRole("row", { name: /nightly/ });
-    fireEvent.change(screen.getByRole("textbox", { name: CRON_SEARCH }), { target: { value: "wkrp" } });
+    expect(screen.queryByRole("textbox", { name: "목록에서 찾기" })).toBeNull();
+    act(() => { dispatchKey(new KeyboardEvent("keydown", { key: "f", metaKey: true })); });
+    const input = screen.getByRole("textbox", { name: "목록에서 찾기" });
+    expect(input).toHaveFocus();
+    fireEvent.change(input, { target: { value: "wkrp" } });
     expect(
       screen
         .getAllByRole("row")
         .slice(1)
         .map((r) => within(r).getAllByRole("cell")[0].textContent),
     ).toEqual(["weekly-report"]);
-    fireEvent.change(screen.getByRole("textbox", { name: CRON_SEARCH }), { target: { value: "zzzzqq" } });
+    fireEvent.change(input, { target: { value: "zzzzqq" } });
     expect(screen.getByText(CAT_NO_CRON_MATCH)).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.getByRole("row", { name: /nightly/ })).toBeInTheDocument();
   });
 
   test("행을 누르면(Enter도) 연다. 고른 행은 표시된다", async () => {

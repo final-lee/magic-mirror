@@ -1,4 +1,7 @@
+import { useRef } from "react";
 import { errorMessage } from "../api/errors";
+import { ListFind, useListFind } from "../components/ListFind";
+import { fuzzyKeep } from "../lib/fuzzy";
 import { useTokenGate } from "./catalogHooks";
 import { useEventBindings } from "./catalogQueries";
 import type { ArgoWfConn, TemplateKind } from "./types";
@@ -19,13 +22,17 @@ export function EventBindings({
   const q = useEventBindings(conn, namespace, live);
   useTokenGate([q.error], onTokenError);
   const rows = q.data ?? [];
+  const listRef = useRef<HTMLDivElement>(null);
+  const find = useListFind(listRef);
+  const visible = fuzzyKeep(rows, find.query, (row) => [row.name, row.namespace, row.selector, row.template?.name, ...row.parameters]);
   return (
     <div className="awc">
       <div className="awc-bar">
         <h2 className="awc-title">Event Bindings</h2>
         <span className="dim">Argo Server의 이벤트 API(/api/v1/events)로 받은 이벤트를 템플릿 실행으로 잇는 WorkflowEventBinding</span>
       </div>
-      <div className="awc-scroll">
+      <div className="awc-scroll" ref={listRef}>
+        <ListFind find={find} count={visible.length} />
         {q.error ? (
           <div className="empty" role="alert">
             {errorMessage(q.error)}
@@ -34,6 +41,8 @@ export function EventBindings({
           <div className="empty">불러오는 중…</div>
         ) : rows.length === 0 ? (
           <div className="empty">Event Binding이 없어요</div>
+        ) : visible.length === 0 ? (
+          <div className="empty">맞는 항목이 없어요</div>
         ) : (
           <table className="k8s-table awc-table">
             <thead>
@@ -46,7 +55,7 @@ export function EventBindings({
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {visible.map((row) => (
                 <tr key={`${row.namespace}/${row.name}`}>
                   <td className="mono">{row.name}</td>
                   <td className="mono">{row.namespace}</td>

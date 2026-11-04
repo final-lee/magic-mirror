@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { dispatchKey } from "../keymap/registry";
 import { argowfApi } from "./api";
 import { WfLogs } from "./WfLogs";
 import { conn } from "./shellFixtures";
@@ -21,6 +22,21 @@ const logs = (extra: Partial<Parameters<typeof WfLogs>[0]> = {}) => (
   <WfLogs conn={conn} namespace="ns" name="job" pod="job-1" running={false} live onTokenError={vi.fn()} {...extra} />
 );
 const defaults = { container: "main", follow: false, tailLines: 1000, previous: false, sinceSeconds: null, timestamps: false };
+
+test("⌘F는 로그 찾기를 열고 Esc는 강조를 지우고 닫는다", async () => {
+  render(logs());
+  await waitFor(() => expect(argowfApi.logs).toHaveBeenCalled());
+  act(() => send({ type: "lines", lines: [{ pod: "job-1", text: "error occurred" }] }));
+  expect(screen.queryByRole("textbox", { name: "목록에서 찾기" })).toBeNull();
+  act(() => { dispatchKey(new KeyboardEvent("keydown", { key: "f", metaKey: true })); });
+  const input = screen.getByRole("textbox", { name: "목록에서 찾기" });
+  expect(input).toHaveFocus();
+  fireEvent.change(input, { target: { value: "error" } });
+  expect(document.querySelector("mark")).toHaveTextContent("error");
+  fireEvent.keyDown(input, { key: "Escape" });
+  expect(screen.queryByRole("textbox", { name: "목록에서 찾기" })).toBeNull();
+  expect(document.querySelector("mark")).toBeNull();
+});
 
 test("직전 컨테이너·최근 N초·시각 표시 옵션을 로그 호출에 넘긴다", async () => {
   render(logs());
