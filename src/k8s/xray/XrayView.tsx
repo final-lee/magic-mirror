@@ -1,4 +1,5 @@
 import { errorMessage } from "../../api/errors";
+import { createPortal } from "react-dom";
 import { ErrorState } from "../../components/ErrorState";
 import { Problems } from "../columns";
 import { resolveLink } from "../kinds";
@@ -21,6 +22,7 @@ interface Props {
   kinds: K8sKind[];
   /** 노드의 객체를 상세로 연다(소유자·자식 링크와 같은 길) */
   onOpen: (ref: ObjectRef) => void;
+  toolbar: HTMLElement | null;
 }
 
 function Row({ node, parent, kinds, onOpen }: { node: XrayNode; parent: XrayEdge; kinds: K8sKind[]; onOpen: (ref: ObjectRef) => void }) {
@@ -75,22 +77,19 @@ function Tree({ nodes, parent, kinds, onOpen }: { nodes: XrayNode[]; parent: Xra
 }
 
 /** 관계 탭: 소유·참조·선택·대상으로 묶은 들여쓰기 트리. 노드를 누르면 그 객체의 상세로 간다 */
-export function XrayView({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen }: Props) {
+export function XrayView({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, toolbar }: Props) {
   const q = useK8sXray(target, context, objectRef, resourceVersion, ssoProfile, live);
+  const refresh = toolbar && createPortal(<button className="btn tone-secondary" onClick={() => void q.refetch()} disabled={q.isFetching}>{XRAY_REFRESH}</button>, toolbar);
   if (q.isError) {
-    return <ErrorState error={q.error} profile={ssoProfile} compact onRetry={() => void q.refetch()} onLoggedIn={() => void q.refetch()} />;
+    return <>{refresh}<ErrorState error={q.error} profile={ssoProfile} compact onRetry={() => void q.refetch()} onLoggedIn={() => void q.refetch()} /></>;
   }
   if (!q.data) {
-    return <div className="empty">{XRAY_LOADING}</div>;
+    return <>{refresh}<div className="empty">{XRAY_LOADING}</div></>;
   }
   const x = q.data;
   return (
     <div className="xray" aria-label={XRAY_LABEL}>
-      <div className="k8s-actions k8s-toolbar">
-        <button className="btn tone-secondary" onClick={() => void q.refetch()} disabled={q.isFetching}>
-          {XRAY_REFRESH}
-        </button>
-      </div>
+      {refresh}
       {x.gaps.map((g) => (
         <p key={g.kind} role="status" className="dim">
           {xrayGap(g.kind, errorMessage(g.error))}
