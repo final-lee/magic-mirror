@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { K8sPlugin } from "../api/types";
 import { K8sError } from "./K8sError";
 import { KindTree } from "./KindTree";
 import { DETAIL_PCT, LaneResizer, type Lane } from "./lanes";
@@ -35,6 +36,9 @@ interface Props {
   onOpenIam?: (arn: string) => void;
   onChange?: (change: K8sChange) => void;
   appliedChange?: K8sChange | null;
+  /** 설정의 플러그인과 그 명령을 이 탭의 새 터미널에서 실행하는 함수. 둘 다 있어야 상세에 플러그인 메뉴가 생긴다 */
+  plugins?: K8sPlugin[];
+  onRunPlugin?: (command: string, title: string) => void;
   /** 목록 위에 붙이는 알림(종류 발견 실패 등). 종류 트리와 기본 종류 탐색은 그대로 쓴다. */
   banner?: ReactNode;
   /** 북마크 화면: 이 종류만 보이고 종류 트리는 숨긴다 */
@@ -51,7 +55,7 @@ interface Props {
 
 /** 종류 트리 + 감시 목록 + 상세 스택 */
 export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live, visible = true, namespace, kinds, focus, onOpenIam, banner,
-  fixedKind, bookmarked, onToggleBookmark, lanes, onChange, appliedChange, discoveryAvailable = false }: Props) {
+  fixedKind, bookmarked, onToggleBookmark, lanes, onChange, appliedChange, discoveryAvailable = false, plugins, onRunPlugin }: Props) {
   const [picked, setKind] = useState<K8sKindRef>(PODS);
   const kind = fixedKind ?? picked;
   const [stack, setStack] = useState<ObjectRef[]>([]);
@@ -156,6 +160,9 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
             rolloutProgress={progress}
             appliedChange={appliedChange}
             shellNamespace={namespace ?? undefined}
+            plugins={plugins}
+            onRunPlugin={onRunPlugin}
+            pluginHost={pane}
             widthPct={detailPct}
           />
         )}

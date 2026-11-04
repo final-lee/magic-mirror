@@ -1,7 +1,7 @@
 import type { K8sPlugin } from "../../api/types";
 import { KEYBINDINGS } from "../../keymap/keybindings";
 import { normalizeKey } from "../../keymap/keys";
-import type { K8sKindRef } from "../types";
+import type { K8sKindRef, ObjectRef } from "../types";
 
 export interface PluginValues {
   NAMESPACE: string;
@@ -81,6 +81,19 @@ export function expandPlugin(template: string, values: PluginValues): string {
   }
   return result;
 }
+
+/** `$KIND` 값: kubectl이 알아보는 `복수형.그룹`(코어 그룹은 복수형만) */
+export function kindArgument(kind: K8sKindRef): string {
+  return kind.group ? `${kind.plural}.${kind.group}` : kind.plural;
+}
+
+/** 고른 객체에서 플러그인 변수의 값을 만든다. 네임스페이스가 없는 객체와 컨테이너가 없는 종류는 빈 값이다. */
+export function pluginValues(context: string, object: ObjectRef, container: string | null): PluginValues {
+  return { NAMESPACE: object.namespace ?? "", NAME: object.name, CONTEXT: context, KIND: kindArgument(object.kind), CONTAINER: container ?? "" };
+}
+
+/** 플러그인 i번째의 키 명령 이름 */
+export const pluginCommand = (index: number) => `k8s.plugin.${index}`;
 
 export function supportsKind(plugin: K8sPlugin, kind: K8sKindRef): boolean {
   return plugin.kinds.some((candidate) => candidate === "*" || (candidate.group === kind.group && candidate.version === kind.version && candidate.kind === kind.kind && candidate.plural === kind.plural));

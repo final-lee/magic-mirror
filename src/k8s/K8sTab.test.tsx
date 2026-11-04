@@ -43,11 +43,17 @@ import {
   savedMissing,
   WARNINGS_ONLY,
 } from "./text";
+import { runCommand } from "../keymap/registry";
 import { DEPLOYMENTS, NODES, PODS } from "./kinds";
+import { NAV_TERMINAL, PLUGIN_MENU, PLUGIN_RUN, TERMINAL_PINNED } from "./terminal/text";
 import type { K8sContextCandidate, K8sContextInfo, K8sRow, K8sRules, K8sSession, K8sTarget, K8sWatchMessage } from "./types";
 
 // 터미널(xterm)은 PodTerminal.test에서 본다
 vi.mock("./PodTerminal", () => ({ PodTerminal: () => null }));
+// 로컬 터미널(xterm)은 terminal/TerminalView.test에서 본다. 여기서는 어떤 명령으로 열렸는지만 본다
+vi.mock("./terminal/LocalTerminal", () => ({
+  LocalTerminal: ({ command, title }: { command: string | null; title: string }) => <div data-testid="local-terminal" data-command={command ?? ""}>{title}</div>,
+}));
 vi.mock("./api", () => ({
   k8sApi: { context: vi.fn(), open: vi.fn(), close: vi.fn(), rules: vi.fn(), watch: vi.fn(), unwatch: vi.fn(), kinds: vi.fn(), get: vi.fn(), secretValue: vi.fn(), overview: vi.fn(), metrics: vi.fn(), preview: vi.fn(), apply: vi.fn() },
 }));
@@ -496,4 +502,53 @@ test("create from YAML: the selected namespace fills in, and the document is pre
   await screen.findByText(BATCH_DONE);
   expect(m.apply).toHaveBeenCalledWith(target, expect.objectContaining({ name: "c", namespace: "team" }), null, null, target.profile);
   expect(await screen.findByText(CHANGE_DONE)).toBeInTheDocument();
+});
+
+const terminals = () => screen.queryAllByTestId("local-terminal");
+
+test("the terminal item opens a shell pinned to this context, which survives leaving the view", async () => {
+  m.context.mockResolvedValue(info([cand("ctx")]));
+  setup();
+  await screen.findByText(STATE_CONNECTED);
+  expect(terminals()).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: NAV_TERMINAL }));
+  expect(await screen.findByLabelText(TERMINAL_PINNED)).toHaveTextContent("ctx");
+  expect(terminals().map((t) => t.dataset.command)).toEqual([""]);
+  // 다른 화면으로 가도 터미널은 그대로 있고(숨기기만 한다) 돌아오면 새로 열지 않는다
+  fireEvent.click(screen.getByRole("button", { name: NAV_ALL }));
+  expect(terminals()).toHaveLength(1);
+  expect(terminals()[0].closest(".k8s-term-view")).toHaveAttribute("hidden");
+  fireEvent.click(screen.getByRole("button", { name: NAV_TERMINAL }));
+  expect(terminals()).toHaveLength(1);
+  expect(terminals()[0].closest(".k8s-term-view")).not.toHaveAttribute("hidden");
+});
+
+test("the k8s.terminal command opens the terminal view of the visible tab", async () => {
+  m.context.mockResolvedValue(info([cand("ctx")]));
+  setup();
+  await screen.findByText(STATE_CONNECTED);
+  act(() => {
+    expect(runCommand("k8s.terminal")).toBe(true);
+  });
+  expect(await screen.findByLabelText(TERMINAL_PINNED)).toHaveTextContent("ctx");
+  expect(screen.getByRole("button", { name: NAV_TERMINAL })).toHaveAttribute("aria-current", "page");
+});
+
+test("a plugin chosen in an object's detail asks first, then runs its exact command in a new terminal tab", async () => {
+  m.context.mockResolvedValue(info([cand("ctx")]));
+  m.overview.mockResolvedValue({ ...emptyOverview, nodes: [{
+    name: "ip-1", ready: true, unschedulable: false, pressures: [], instanceType: null, zone: null, groupKind: "self", group: null, kubeletVersion: "v1.31.0",
+    capacity: { cpuMilli: 1000, memoryBytes: 1, pods: 1 }, allocatable: { cpuMilli: 1000, memoryBytes: 1, pods: 1 },
+    requested: { cpuMilli: 0, memoryBytes: 0, pods: 0 }, limits: { cpuMilli: 0, memoryBytes: 0, pods: 0 }, usage: null,
+  }] });
+  m.get.mockResolvedValue({ kind: NODES, row: ns("ip-1"), annotations: {}, owners: [], children: [], childrenTruncated: false, childrenError: null, containers: [], conditions: [], events: [], eventsError: null, yaml: "", editYaml: "", secretKeys: null });
+  setup({ k8sPlugins: [{ name: "노드 보기", kinds: ["*"], command: "kubectl describe $KIND $NAME", confirm: true }] });
+  fireEvent.click(await screen.findByRole("button", { name: "ip-1" }));
+  fireEvent.click(await screen.findByRole("button", { name: new RegExp(PLUGIN_MENU) }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "노드 보기" }));
+  expect(screen.getByText("kubectl describe 'nodes' 'ip-1'")).toBeInTheDocument();
+  expect(terminals()).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: PLUGIN_RUN }));
+  expect(terminals().map((t) => [t.dataset.command, t.textContent])).toEqual([["kubectl describe 'nodes' 'ip-1'", "노드 보기"]]);
+  expect(screen.getByRole("button", { name: NAV_TERMINAL })).toHaveAttribute("aria-current", "page");
 });

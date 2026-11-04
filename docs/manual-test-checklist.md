@@ -338,3 +338,8 @@
 - [ ] Reports: Cron 레이블을 고르면 실행별 걸린 시간·CPU·메모리 막대가 보이고 막대를 누르면 그 Workflow가 열린다
 - [ ] Argo Events: Argo Events가 없는 `stg-eks`에서 Event Sources·Sensors·Event Flow가 "이 클러스터에 Argo Events가 없어요"를 보인다. Event Bindings는 빈 목록
 - [ ] User Info: 신원과 그룹이 보이고 [토큰 복사]는 클립보드에만 들어간다. Plugins는 context 연결에서 ExecutorPlugin ConfigMap을 보인다(없으면 빈 목록)
+
+## EKS 터미널·플러그인 (시험용 클러스터만)
+- [ ] 왼쪽 메뉴 [터미널]: 셸이 열리고 머리줄에 고정한 context가 보인다. `kubectl config get-contexts`에 그 context 하나만 나오고 `echo $KUBECONFIG`가 임시 파일이다. [새 터미널]로 탭을 더하고 ⌘⎋로 빠져나온다
+- [ ] 다른 화면을 봤다 와도 터미널이 그대로이고, 탭(클러스터 탭)을 닫으면 셸이 끝나고 `ls $TMPDIR/mm-kubeconfig-*`에 파일이 남지 않는다
+- [ ] 설정에서 플러그인을 추가(`kubectl describe $KIND $NAME`)하고 객체 상세 [플러그인] 메뉴에서 실행: 확장한 명령이 확인 창에 그대로 보이고, [실행] 뒤 새 터미널 탭에서 돈다. 변경 기록에 터미널 열기가 한 줄 남는다
