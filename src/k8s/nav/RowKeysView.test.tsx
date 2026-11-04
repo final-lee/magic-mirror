@@ -7,7 +7,7 @@ import { CHANGE_CORDON, CHANGE_DELETE, CHANGE_RESTART, CHANGE_SCALE, CHANGE_UNCO
 import type { K8sChange, K8sKindRef, K8sObjectView, K8sRow, K8sRules, K8sWatchMessage } from "../types";
 import { WorkloadsView } from "../WorkloadsView";
 import {
-  KEY_ALREADY_ALL, KEY_ALREADY_CORDONED, KEY_CLUSTER_SCOPED, KEY_NO_DESCRIBE, KEY_NO_SELECTION, KEY_NOT_CORDONED, KEY_ONLY,
+  KEY_ALREADY_ALL, KEY_ALREADY_CORDONED, KEY_CLUSTER_SCOPED, KEY_NO_SELECTION, KEY_NOT_CORDONED, KEY_ONLY,
 } from "./text";
 
 // 터미널·로그 본문은 따로 시험한다. 여기서는 키가 상세의 어느 단추·탭에 닿는지만 본다
@@ -163,20 +163,12 @@ describe("tabs", () => {
     expect(m.shellConfirmName).not.toHaveBeenCalled();
   });
 
-  test("d selects the describe tab when the detail offers it, otherwise says so", async () => {
+  test("d selects the describe tab", async () => {
     setup();
     await open("pods", [row("web-1")], "web-1");
     press({ key: "d" });
-    expect(note()).toBe(KEY_NO_DESCRIBE);
-    // describe 탭을 가진 상세(다른 화면이 더한다)에서는 그 탭 단추를 누른다
-    const describe = document.createElement("button");
-    describe.setAttribute("role", "tab");
-    describe.dataset.tab = "describe";
-    const clicked = vi.fn();
-    describe.addEventListener("click", clicked);
-    document.querySelector('[role="tablist"]')!.appendChild(describe);
-    press({ key: "d" });
-    expect(clicked).toHaveBeenCalled();
+    expect(tab("describe")).toHaveAttribute("aria-selected", "true");
+    expect(note()).toBe("");
   });
 
   test.each<[string, K8sKindRef, string]>([

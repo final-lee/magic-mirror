@@ -1,7 +1,7 @@
 import { DEPLOYMENTS, STATEFULSETS, hasWorkloadLogs, isPod, isService } from "../kinds";
 import type { K8sKindRef, ObjectRef } from "../types";
 import {
-  KEY_ALREADY_CORDONED, KEY_LOADING, KEY_NOT_AVAILABLE, KEY_NOT_CORDONED, KEY_NO_DESCRIBE, KEY_NO_SELECTION, KEY_ONLY,
+  KEY_ALREADY_CORDONED, KEY_LOADING, KEY_NOT_AVAILABLE, KEY_NOT_CORDONED, KEY_NO_SELECTION, KEY_ONLY,
 } from "./text";
 
 /** 목록의 고른 행에 쓰는 한 글자 키의 명령 이름 */
@@ -84,7 +84,7 @@ export function pressRow(command: RowCommand, pane: HTMLElement | null, object: 
   const tab = TAB[command];
   if (tab) {
     const button = find<HTMLButtonElement>(detail, `[role="tab"][data-tab="${tab}"]`);
-    if (!button) return command === "k8s.describe" ? KEY_NO_DESCRIBE : KEY_LOADING;
+    if (!button) return KEY_LOADING;
     button.click();
     // 셸 탭: s는 셸, a는 attach로 방식을 맞춰 둔다(세션을 연 뒤에는 방식 칸이 없다). 여는 것은 단추와 확인 단계를 거친다
     const mode = command === "k8s.shell" ? "mode-exec" : command === "k8s.attach" ? "mode-attach" : null;

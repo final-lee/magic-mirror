@@ -28,7 +28,6 @@ export const KEY_NOTE_LABEL = "키 안내";
 export const KEY_NOTE_DISMISS = "안내 닫기";
 export const KEY_NO_SELECTION = "먼저 행을 골라 주세요(↑↓)";
 export const KEY_LOADING = "상세를 읽는 중이에요. 잠시 뒤 다시 눌러 주세요";
-export const KEY_NO_DESCRIBE = "이 상세에는 describe 보기가 없어요";
 export const KEY_NOT_AVAILABLE = "지금은 쓸 수 없어요";
 export const KEY_ALREADY_ALL = "이미 모든 네임스페이스를 보고 있어요";
 export const KEY_CLUSTER_SCOPED = (kind: string) => `${kind}은(는) 네임스페이스가 없는 종류예요`;
