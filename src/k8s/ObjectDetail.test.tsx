@@ -14,6 +14,7 @@ vi.mock("./api", () => ({ k8sApi: { get: vi.fn(), rules: vi.fn(), secretValue: v
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
 // 터미널(xterm)은 PodTerminal.test에서 본다
 const terminalProps: Record<string, unknown>[] = [];
+vi.mock("./DescribeView", () => ({ DescribeView: () => <div>describe output</div> }));
 vi.mock("./PodTerminal", () => ({ PodTerminal: (p: Record<string, unknown>) => (terminalProps.push(p), null) }));
 const m = vi.mocked(k8sApi);
 const T = { profile: "app", region: "r", cluster: "c" };
@@ -41,6 +42,15 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Pod·Service 상세가 셸·port-forward 버튼의 권한을 읽는다. 시험이 따로 정하지 않으면 아무 권한도 없다
   m.rules.mockResolvedValue({ namespace: "prod", resourceRules: [], nonResourceRules: [], incomplete: false });
+});
+
+test("describe tab opens for a custom object", async () => {
+  m.get.mockResolvedValue(view({ kind: widgetKind }));
+  setup({ objectRef: { kind: widgetKind, namespace: "prod", name: "w1" } });
+  const tab = await screen.findByRole("tab", { name: "describe" });
+  fireEvent.click(tab);
+  expect(tab).toHaveAttribute("aria-selected", "true");
+  expect(await screen.findByText("describe output")).toBeInTheDocument();
 });
 
 test("change actions are there without any switch when the detail can start changes", async () => {

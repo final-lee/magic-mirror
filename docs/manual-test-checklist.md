@@ -338,3 +338,7 @@
 - [ ] Reports: Cron 레이블을 고르면 실행별 걸린 시간·CPU·메모리 막대가 보이고 막대를 누르면 그 Workflow가 열린다
 - [ ] Argo Events: Argo Events가 없는 `stg-eks`에서 Event Sources·Sensors·Event Flow가 "이 클러스터에 Argo Events가 없어요"를 보인다. Event Bindings는 빈 목록
 - [ ] User Info: 신원과 그룹이 보이고 [토큰 복사]는 클립보드에만 들어간다. Plugins는 context 연결에서 ExecutorPlugin ConfigMap을 보인다(없으면 빈 목록)
+
+## EKS describe
+- [ ] 로컬 kind에서 Deployment와 클러스터 범위 객체의 describe 탭이 같은 context의 `kubectl describe` 출력과 맞고, 다시 읽기와 객체 갱신이 동작한다.
+- [ ] kubectl이 없거나 권한이 없을 때 이유와 요약·조건·컨테이너·이벤트 대체 출력이 보인다. 밝은 테마와 어두운 테마에서 확인한다.

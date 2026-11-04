@@ -26,6 +26,7 @@ use super::watch::{run, WatchMessage};
 use crate::error::AppError;
 
 mod access;
+mod describe;
 mod helm;
 
 const PRIVATE: Endpoint = Endpoint { public: false, private: true };
