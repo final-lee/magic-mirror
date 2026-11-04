@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useRef, useState } from "react";
 import { ErrorState } from "../../components/ErrorState";
 import { ListFind, useListFind } from "../../components/ListFind";
+import { vimTableKeys } from "../../iam/ListTable";
 import { fuzzyKeep } from "../../lib/fuzzy";
 import type { K8sChange, K8sTarget } from "../types";
 import { EntryActions, EntryCreateButton } from "../rbac/EntryActions";
@@ -146,7 +147,7 @@ export function IdentitiesTab({ target, ssoProfile, view, onRetry, onOpenIam, on
         {onChange && <EntryCreateButton mode={mode} onChange={onChange} />}
         <span className="dim acc-push">{fetchedAt(view.fetchedAt)}</span>
       </div>
-      <div className="tbl acc-table">
+      <div className="tbl acc-table" tabIndex={0} onKeyDown={vimTableKeys}>
         <table aria-label={IDENTITIES_LABEL}>
           <thead>
             <tr>

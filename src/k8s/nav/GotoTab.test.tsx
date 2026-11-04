@@ -132,6 +132,21 @@ test("choosing the same kind again from another menu brings it back", async () =
   expect(within(screen.getByRole("navigation", { name: KIND_TREE_LABEL })).getByRole("button", { name: "Deployment" })).toHaveAttribute("aria-current", "page");
 });
 
+test("a node link after a kind goto wins over the stale kind request", async () => {
+  m.overview.mockResolvedValue({ ...emptyOverview, nodes: [{
+    name: "ip-1", ready: true, unschedulable: false, pressures: [], instanceType: "m6i.large", zone: "a", groupKind: "managed", group: "ng",
+    kubeletVersion: "v1.31.4", capacity: { cpuMilli: 2000, memoryBytes: 1000, pods: 29 }, allocatable: { cpuMilli: 2000, memoryBytes: 1000, pods: 29 },
+    requested: { cpuMilli: 500, memoryBytes: 200, pods: 5 }, limits: { cpuMilli: 1000, memoryBytes: 400, pods: 5 }, usage: null,
+  }] });
+  setup();
+  await connected();
+  submit("deploy");
+  submit("overview");
+  fireEvent.click(await screen.findByRole("button", { name: "ip-1" }));
+  expect(within(screen.getByRole("navigation", { name: KIND_TREE_LABEL })).getByRole("button", { name: "Node" })).toHaveAttribute("aria-current", "page");
+  await vi.waitFor(() => expect(m.get).toHaveBeenCalledWith(target, expect.objectContaining({ plural: "nodes" }), null, "ip-1", expect.anything()));
+});
+
 test(":ns switches the namespace from the watched list, :ns all shows every namespace, an unknown one is refused", async () => {
   setup();
   await connected();

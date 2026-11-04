@@ -32,6 +32,15 @@ test("lists this cluster's forwards with their address and pod, and not another 
   expect(screen.queryByText(/elsewhere/)).not.toBeInTheDocument();
 });
 
+test("forward rows move with vim keys without activating their actions", async () => {
+  m.forwardList.mockResolvedValue([forward(), forward({ id: 2, name: "db" })]);
+  setup();
+  const table = await screen.findByRole("table");
+  fireEvent.keyDown(table, { key: "G", shiftKey: true });
+  expect(screen.getByText(forwardTarget(forward({ id: 2, name: "db" }))).closest("tr")).toHaveAttribute("aria-selected", "true");
+  expect(m.forwardClose).not.toHaveBeenCalled();
+});
+
 test("shows the last connection error and a service with no ready pod", async () => {
   m.forwardList.mockResolvedValue([forward({ error: "연결이 거절됐어요" }), forward({ id: 2, pod: null, localPort: 18081 })]);
   setup();

@@ -44,7 +44,7 @@ function builtin(key: string): boolean | undefined {
     case "findOpen":
       return !!active?.closest(".list-find");
     case "dialogOpen":
-      return visibleModal();
+      return visibleModal() || (!!active?.closest('[role="dialog"], [role="alertdialog"]') && !active.closest("[hidden]"));
     case "textSelected":
       return (window.getSelection()?.toString() ?? "").length > 0;
     default:

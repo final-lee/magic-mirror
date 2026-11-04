@@ -89,6 +89,7 @@ export interface Completion {
   /** 줄 오른쪽(다른 이름들, 그룹) */
   hint: string;
   group: string;
+  goto?: Goto;
 }
 
 const MAX_COMPLETIONS = 8;
@@ -121,6 +122,7 @@ export function completions(input: string, ctx: GotoContext): Completion[] {
     title: h.name,
     hint: [h.kind.group || "core", ...h.others].join(" · "),
     group: GOTO_GROUP_KIND,
+    goto: { type: "kind", kind: h.kind },
     score: h.score,
   }));
   // 이름이 같은 메뉴와 종류(events)는 메뉴만 보인다. 점수가 높은 것부터, 같으면 메뉴가 먼저

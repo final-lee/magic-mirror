@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { ListFind, useListFind } from "../components/ListFind";
+import { vimTableKeys } from "../iam/ListTable";
 import { fuzzyKeep } from "../lib/fuzzy";
 import { age } from "./format";
 import { K8sError } from "./K8sError";
@@ -50,7 +51,7 @@ export function EventsView({ target, context, sessionEpoch, ssoProfile, live, na
       ) : rows.length === 0 && !w.error ? (
         <div className="empty">{base.length === 0 ? NO_EVENTS : LIST_NO_MATCH}</div>
       ) : (
-        <table className="k8s-table" aria-label={NAV_EVENTS}>
+        <table className="k8s-table" aria-label={NAV_EVENTS} tabIndex={0} onKeyDown={vimTableKeys}>
           <thead>
             <tr><th>{H_TIME}</th><th>{H_KIND}</th><th>{H_REASON}</th><th>{H_OBJECT}</th><th>{H_MESSAGE}</th><th>{H_COUNT}</th></tr>
           </thead>

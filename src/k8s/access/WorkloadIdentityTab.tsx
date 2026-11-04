@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { ErrorState } from "../../components/ErrorState";
 import { ListFind, useListFind } from "../../components/ListFind";
+import { vimTableKeys } from "../../iam/ListTable";
 import { K8sError } from "../K8sError";
 import { DETAIL_PCT } from "../lanes";
 import type { K8sTarget } from "../types";
@@ -87,7 +88,7 @@ export function WorkloadIdentityTab({ target, context, ssoProfile, live, onOpenI
           </span>
         )}
       </div>
-      <div className="tbl acc-table" onClick={(e) => {
+      <div className="tbl acc-table" tabIndex={0} onKeyDown={(e) => vimTableKeys(e, true)} onClick={(e) => {
         if (!(e.target as Element).closest("thead, tbody tr")) setSelected(null);
       }}>
         <table aria-label={WORKLOAD_LABEL}>

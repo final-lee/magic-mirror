@@ -3,6 +3,7 @@ import { useRef } from "react";
 import { errorMessage } from "../api/errors";
 import { ListFind, useListFind } from "../components/ListFind";
 import { formatDateTime } from "../iam/format";
+import { vimTableKeys } from "../iam/ListTable";
 import { usePrepare } from "../lib/changeLog";
 import { fuzzyKeep } from "../lib/fuzzy";
 import { k8sApi } from "./api";
@@ -34,7 +35,7 @@ export function ChangeLog({ target, onStart }: Props) {
       {q.isError && <p className="err">{errorMessage(q.error)}</p>}
       {q.isSuccess && entries.length === 0 && <p>{t.CHANGE_NO_LOG}</p>}
       {entries.length > 0 && listed.length === 0 && <p>{t.LIST_NO_MATCH}</p>}
-      <table className="k8s-table">
+      <table className="k8s-table" aria-label={t.CHANGE_LOG} tabIndex={0} onKeyDown={vimTableKeys}>
         <tbody>
           {listed.map((entry) => (
             <tr key={entry.id}>
