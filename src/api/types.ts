@@ -81,6 +81,8 @@ export interface Favorite {
 
 export interface Settings {
   enabledServices: string[];
+  /** 앱이 이미 보여 준 서비스. 백엔드가 새 서비스를 한 번 켤 때 쓰고, 화면은 읽지 않고 그대로 돌려 저장한다. */
+  knownServices?: string[];
   favorites: Favorite[];
   lastProfile: string | null;
   lastRegion: string | null;
