@@ -1,6 +1,6 @@
 import { useEffect, useRef, type MutableRefObject, type RefObject } from "react";
 import { eventKey, normalizeKey } from "./keys";
-import { KEYBINDINGS } from "./keybindings";
+import { KEYBINDINGS, type Keybinding } from "./keybindings";
 
 /**
  * 명령 처리기 등록과 키 디스패처(창 하나의 keydown). 화면은 `useCommand`로 "이 범위에서 이 명령"만 등록하고,
@@ -16,6 +16,8 @@ interface Entry {
 }
 
 const entries: Entry[] = [];
+/** 화면이 더하는 바인딩(사용자가 정의한 플러그인 키). 고정 표 뒤에서 찾는다 */
+const extraBindings: Keybinding[][] = [];
 /** 앱이 정하는 문맥 키(VS Code의 setContext). DOM으로 알 수 있는 키는 아래 builtin이 따진다 */
 const contexts: Record<string, boolean> = {};
 let lastPointer: Element | null = null;
@@ -103,7 +105,7 @@ export function dispatchKey(e: KeyboardEvent): boolean {
   if (e.defaultPrevented) return false;
   const key = eventKey(e);
   if (!key) return false;
-  for (const b of KEYBINDINGS) {
+  for (const b of [...KEYBINDINGS, ...extraBindings.flat()]) {
     if (b.handler !== "registry" || normalizeKey(b.key) !== key || !evalWhen(b.when, lookup)) continue;
     const entry = pick(b.command);
     if (!entry) continue;
@@ -151,9 +153,24 @@ export function useCommand(command: string, handler: () => void, options: { host
   }, [command, host]);
 }
 
+/**
+ * 고정 표 밖의 바인딩을 이 컴포넌트가 보이는 동안 더한다(사용자가 정의한 플러그인 키). 명령 처리기는 `useCommand`로 따로 등록한다.
+ * 표와 겹치는 키는 만들 때 막으므로(`pluginKeyError`) 여기서는 표가 먼저 찾는다. 배열은 바뀔 때만 새로 만들어 넘긴다(useMemo).
+ */
+export function useExtraBindings(bindings: Keybinding[]) {
+  useEffect(() => {
+    extraBindings.push(bindings);
+    return () => {
+      const i = extraBindings.indexOf(bindings);
+      if (i >= 0) extraBindings.splice(i, 1);
+    };
+  }, [bindings]);
+}
+
 /** 시험에서 모듈 상태를 비운다 */
 export function resetKeymap() {
   entries.splice(0, entries.length);
+  extraBindings.splice(0, extraBindings.length);
   for (const k of Object.keys(contexts)) delete contexts[k];
   lastPointer = null;
 }
