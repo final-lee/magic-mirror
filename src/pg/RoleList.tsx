@@ -1,3 +1,5 @@
+import { useRef } from "react";
+import { ListFind, useListFind } from "../components/ListFind";
 import { ListTable, type ListColumn } from "../iam/ListTable";
 import { BadgeList } from "./Badges";
 import { ROLE_KIND_LABEL, utcDay } from "./labels";
@@ -35,8 +37,6 @@ const COLUMNS: ListColumn<PgRoleSummary>[] = [
 
 interface Props {
   roles: PgRoleSummary[];
-  /** 툴바 필터. 이름에 적용한다 */
-  filter: string;
   /** 칩과 시스템 역할 토글의 상태. 상세를 보고 돌아와도 남도록 탭이 들고 있다 */
   kinds: RoleKindsValue;
   onKinds: (next: RoleKindsValue) => void;
@@ -51,11 +51,13 @@ interface Props {
   blockReason?: string | null;
 }
 
-export function RoleList({ roles, filter, kinds, onKinds, selectedId, onSelect, onClear, onOpen, onCreate, blockReason = null }: Props) {
-  // 툴바 필터는 이름에만 적용한다(대소문자 무시). 권한 표와 같은 규칙이다.
-  const rows = filterRoles(roles, kinds, filter);
+export function RoleList({ roles, kinds, onKinds, selectedId, onSelect, onClear, onOpen, onCreate, blockReason = null }: Props) {
+  const box = useRef<HTMLElement>(null);
+  const find = useListFind(box);
+  // ⌘F의 찾기는 이름에만 적용한다(대소문자 무시). 권한 표와 같은 규칙이다.
+  const rows = filterRoles(roles, kinds, find.query);
   return (
-    <section className="center">
+    <section className="center" ref={box}>
       <div className="pg-bar">
         <RoleKinds value={kinds} onChange={onKinds} />
         {onCreate && (
@@ -66,6 +68,7 @@ export function RoleList({ roles, filter, kinds, onKinds, selectedId, onSelect, 
           </span>
         )}
       </div>
+      <ListFind find={find} />
       <ListTable
         label="역할 목록"
         rows={rows}

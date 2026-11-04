@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
+import { findFor } from "../test/find";
 import { ROLES, alice, appOwner, appRead, bob, rdsSuperuser } from "./fixtures";
 import { RoleList } from "./RoleList";
 import { DEFAULT_KINDS, type RoleKindsValue } from "./RoleKinds";
@@ -10,7 +11,7 @@ type Props = React.ComponentProps<typeof RoleList>;
 function Harness(props: Partial<Props> & { initialKinds?: RoleKindsValue }) {
   const [kinds, setKinds] = useState(props.initialKinds ?? DEFAULT_KINDS);
   return (
-    <RoleList roles={ROLES} filter="" kinds={kinds} onKinds={setKinds} selectedId={null} onSelect={vi.fn()} onClear={() => {}} onOpen={vi.fn()} {...props} />
+    <RoleList roles={ROLES} kinds={kinds} onKinds={setKinds} selectedId={null} onSelect={vi.fn()} onClear={() => {}} onOpen={vi.fn()} {...props} />
   );
 }
 
@@ -61,20 +62,33 @@ test("a locked-out user (LOGIN off) is a 그룹, as PostgreSQL does not tell the
   expect(cells("locked_user")[1].textContent).toBe("그룹");
 });
 
-test("the toolbar filter matches names, ignoring case, and nothing else", () => {
-  const { rerender } = render(<Harness filter="APP" />);
+test("⌘F opens the find line (hidden until then); it matches names, ignoring case, and nothing else", () => {
+  render(<Harness />);
+  expect(screen.queryByRole("search")).toBeNull();
+  findFor("APP");
   expect(names()).toEqual(["app_owner", "app_read", "app_write"]);
-  rerender(<Harness filter="  iam_  " />);
+  findFor("  iam_  ");
   expect(names()).toEqual(["iam_admin"]); // 가장자리 공백은 무시한다
   // 주석("orders 스키마를 …")이나 배지 이름은 대상이 아니다
-  rerender(<Harness filter="orders" />);
+  findFor("orders");
   expect(screen.getByText("조건에 맞는 역할이 없어요")).toBeInTheDocument();
-  rerender(<Harness filter="관리자급" />);
+  findFor("관리자급");
   expect(screen.getByText("조건에 맞는 역할이 없어요")).toBeInTheDocument();
 });
 
-test("the filter also applies to the system roles that were switched on", () => {
-  render(<Harness filter="rds" initialKinds={{ ...DEFAULT_KINDS, system: true }} />);
+test("Esc in the find line shows every role again and closes the line", () => {
+  render(<Harness />);
+  const before = names();
+  const input = findFor("app_");
+  expect(names()).not.toEqual(before);
+  fireEvent.keyDown(input, { key: "Escape" });
+  expect(screen.queryByRole("search")).toBeNull();
+  expect(names()).toEqual(before);
+});
+
+test("the find line also applies to the system roles that were switched on", () => {
+  render(<Harness initialKinds={{ ...DEFAULT_KINDS, system: true }} />);
+  findFor("rds");
   expect(names()).toEqual(["rds_iam", "rds_superuser"]);
 });
 
@@ -135,8 +149,10 @@ test("arrow keys move the selection through the rows that are shown", () => {
 test("tells apart a cluster without roles from a filter that matches none", () => {
   const { rerender } = render(<Harness roles={[]} />);
   expect(screen.getByText("역할이 없어요")).toBeInTheDocument();
-  rerender(<Harness roles={[appOwner, appRead]} filter="zzz" />);
+  rerender(<Harness roles={[appOwner, appRead]} />);
+  const input = findFor("zzz");
   expect(screen.getByText("조건에 맞는 역할이 없어요")).toBeInTheDocument();
+  fireEvent.keyDown(input, { key: "Escape" }); // 검색어를 지우고 줄을 닫는다
   rerender(<Harness roles={[rdsSuperuser]} />);
   expect(screen.getByText("조건에 맞는 역할이 없어요")).toBeInTheDocument(); // 시스템 역할만 있으면 칩이 다 가린다
 });

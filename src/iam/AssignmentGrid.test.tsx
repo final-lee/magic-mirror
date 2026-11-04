@@ -1,6 +1,7 @@
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { act, createEvent, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { findFor } from "../test/find";
 import { renderWithClient } from "../test/utils";
 import { AssignmentsHarness, cellOf, columnHeads, grid, rowHeads, rowOf, tray } from "../test/assignmentsHarness";
 import { ROW_H, visibleRange } from "./AssignmentGrid";
@@ -562,7 +563,7 @@ describe("dragging", () => {
   test("a drag goes on when the rows change under it, and leaves out the cells that are no longer there", () => {
     setup();
     press(cellOf("ci-bot", "ReadOnlyAccess")); // 세 번째 행
-    fireEvent.change(screen.getByRole("textbox", { name: "툴바 필터" }), { target: { value: "al" } }); // 이제 행은 alice뿐이다
+    findFor("al"); // 이제 행은 alice뿐이다
     fireEvent.pointerEnter(cellOf("alice", "AdministratorAccess"), { buttons: 1 }); // ci-bot에서 여기까지 사이의 행은 없다
     fireEvent.pointerUp(window);
     expect(cellOf("alice", "AdministratorAccess")).toHaveAccessibleName("alice · AdministratorAccess: 붙일 예정");
@@ -870,20 +871,19 @@ describe("the keyboard", () => {
 });
 
 describe("when the rows on screen change", () => {
-  const toolbarFilter = () => screen.getByRole("textbox", { name: "툴바 필터" });
 
   test("an open row menu closes", () => {
     setup();
     fireEvent.click(screen.getByRole("button", { name: "bob 행 메뉴" }));
     expect(screen.getByRole("menu")).toBeInTheDocument();
-    fireEvent.change(toolbarFilter(), { target: { value: "alice" } });
+    findFor("alice");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
   test("an open note on an inherited cell closes", () => {
     setup();
     fireEvent.click(cellOf("alice", "app-deploy"));
-    fireEvent.change(toolbarFilter(), { target: { value: "ali" } });
+    findFor("ali");
     expect(screen.queryByText("dev-team 그룹에서 받아요")).not.toBeInTheDocument();
   });
 
@@ -892,7 +892,7 @@ describe("when the rows on screen change", () => {
     focusCell(cellOf("bob", "ReadOnlyAccess"));
     await userEvent.keyboard("{Shift>}{ArrowDown}{/Shift}");
     expect(within(grid()).queryAllByRole("gridcell", { selected: true })).toHaveLength(2);
-    fireEvent.change(toolbarFilter(), { target: { value: "o" } });
+    findFor("o");
     expect(within(grid()).queryAllByRole("gridcell", { selected: true })).toHaveLength(0);
   });
 
@@ -902,7 +902,7 @@ describe("when the rows on screen change", () => {
     const scroller = grid().closest(".asg-scroll") as HTMLElement;
     scroller.scrollTop = 200 * ROW_H;
     fireEvent.scroll(scroller);
-    fireEvent.change(toolbarFilter(), { target: { value: "user-005" } });
+    findFor("user-005");
     expect(screen.getByRole("button", { name: "user-005" })).toBeInTheDocument();
   });
 });

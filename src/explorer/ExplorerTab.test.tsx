@@ -1,7 +1,9 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { ExplorerTab } from "./ExplorerTab";
 import { explorerApi } from "./api";
 import { api } from "../api/client";
+import { dispatchKey } from "../keymap/registry";
+import { pressFind } from "../test/find";
 import { makeResource, renderWithClient, sampleServices } from "../test/utils";
 import type { TransferRequest } from "./types";
 
@@ -48,7 +50,6 @@ function setup(extra = {}) {
     profile: "prod",
     region: "ap-northeast-2",
     s3Service: sampleServices[1],
-    filter: "",
     active: true,
     initialLocalPath: "/home/me",
     onLocalPathChange: vi.fn(),
@@ -57,9 +58,22 @@ function setup(extra = {}) {
     onRefresh: vi.fn(),
     ...extra,
   };
-  renderWithClient(<ExplorerTab {...props} />);
+  // 보이지 않는 탭은 앱처럼 [hidden] 상자 안에 둔다(키맵은 보이는 상자만 본다)
+  renderWithClient(
+    <div hidden={!props.active}>
+      <ExplorerTab {...props} />
+    </div>,
+  );
   return props;
 }
+
+/** 키 하나를 키맵 디스패처에 보낸다(창의 keydown과 같다) */
+const press = (init: KeyboardEventInit) =>
+  act(() => {
+    dispatchKey(new KeyboardEvent("keydown", { cancelable: true, ...init }));
+  });
+const localPane = () => screen.getByTestId("pane-local");
+const s3Pane = () => screen.getByTestId("pane-s3");
 
 async function openBucket() {
   fireEvent.doubleClick(await screen.findByText("assets"));
@@ -229,7 +243,7 @@ test("drop while a confirm dialog is open is ignored with a notice", async () =>
 
 test("Finder listener is unlistened on unmount", async () => {
   const { unmount } = renderWithClient(
-    <ExplorerTab profile="prod" region="r" s3Service={sampleServices[1]} filter="" active initialLocalPath="/home/me" onLocalPathChange={vi.fn()} transfers={{ items: [], enqueue: vi.fn(), retry: vi.fn(), clearFinished: vi.fn() }} onOpenDiff={vi.fn()} onRefresh={vi.fn()} />,
+    <ExplorerTab profile="prod" region="r" s3Service={sampleServices[1]} active initialLocalPath="/home/me" onLocalPathChange={vi.fn()} transfers={{ items: [], enqueue: vi.fn(), retry: vi.fn(), clearFinished: vi.fn() }} onOpenDiff={vi.fn()} onRefresh={vi.fn()} />,
   );
   await waitFor(() => expect(dropHandler).not.toBeNull());
   await act(async () => {});
@@ -240,7 +254,7 @@ test("Finder listener is unlistened on unmount", async () => {
 test("unmount before listen resolves unlistens once it resolves", async () => {
   deferListen = true;
   const { unmount } = renderWithClient(
-    <ExplorerTab profile="prod" region="r" s3Service={sampleServices[1]} filter="" active initialLocalPath="/home/me" onLocalPathChange={vi.fn()} transfers={{ items: [], enqueue: vi.fn(), retry: vi.fn(), clearFinished: vi.fn() }} onOpenDiff={vi.fn()} onRefresh={vi.fn()} />,
+    <ExplorerTab profile="prod" region="r" s3Service={sampleServices[1]} active initialLocalPath="/home/me" onLocalPathChange={vi.fn()} transfers={{ items: [], enqueue: vi.fn(), retry: vi.fn(), clearFinished: vi.fn() }} onOpenDiff={vi.fn()} onRefresh={vi.fn()} />,
   );
   await waitFor(() => expect(resolveListen).not.toBeNull());
   unmount();
@@ -325,10 +339,19 @@ describe("navigation history", () => {
 
   test("meta+[ and meta+] navigate the focused pane; inactive tab ignores them", async () => {
     await enterTwo();
-    fireEvent.keyDown(window, { key: "[", metaKey: true });
+    press({ key: "[", metaKey: true });
     await screen.findByText("📁 d2");
-    fireEvent.keyDown(window, { key: "]", metaKey: true });
+    press({ key: "]", metaKey: true });
     await screen.findByText("📄 z.txt");
+  });
+
+  test("an inactive (hidden) tab ignores meta+[", async () => {
+    m.localList.mockImplementation(async (path: string) => dirs[path] ?? []);
+    setup({ active: false });
+    fireEvent.doubleClick(await screen.findByText("📁 d1"));
+    await screen.findByText("📁 d2");
+    press({ key: "[", metaKey: true });
+    expect(pathText("/home/me/d1")).toBeInTheDocument();
   });
 
   test("inactive tab ignores back button", async () => {
@@ -339,5 +362,93 @@ describe("navigation history", () => {
     fireEvent.mouseUp(screen.getByTestId("pane-local"), { button: 3 });
     expect(m.localList).not.toHaveBeenLastCalledWith("/home/me");
     expect(pathText("/home/me/d1")).toBeInTheDocument();
+  });
+});
+
+
+describe("keys through the registry", () => {
+  test("⌘F opens the find line in the pane that was pressed last and filters only that pane", async () => {
+    setup();
+    await openBucket();
+    expect(screen.queryByRole("search")).toBeNull();
+    // 로컬 칸이 처음부터 포커스 칸이다
+    const local = pressFind();
+    expect(localPane()).toContainElement(local);
+    fireEvent.change(local, { target: { value: "b" } });
+    expect(within(localPane()).queryByText("📄 a.txt")).toBeNull();
+    expect(within(localPane()).getByText("📄 b.txt")).toBeInTheDocument();
+    expect(within(s3Pane()).getByText("📄 a.txt")).toBeInTheDocument();
+    // S3 칸을 누르면 ⌘F는 그 칸으로 간다
+    fireEvent.mouseDown(s3Pane());
+    press({ key: "f", metaKey: true });
+    const s3Find = within(s3Pane()).getByRole("textbox", { name: "목록에서 찾기" });
+    expect(s3Find).toHaveFocus();
+    fireEvent.change(s3Find, { target: { value: "zzz" } });
+    expect(within(s3Pane()).queryByText("📄 a.txt")).toBeNull();
+    expect(within(localPane()).getByText("📄 b.txt")).toBeInTheDocument();
+    // Esc는 그 줄만 닫고 그 칸의 목록을 되살린다
+    fireEvent.keyDown(s3Find, { key: "Escape" });
+    expect(within(s3Pane()).getByText("📄 a.txt")).toBeInTheDocument();
+    expect(within(localPane()).getByRole("textbox", { name: "목록에서 찾기" })).toHaveValue("b");
+  });
+
+  test("Tab switches the focused pane, but not while typing in the find line", async () => {
+    setup();
+    await openBucket();
+    expect(localPane()).toHaveClass("focus");
+    press({ key: "Tab" });
+    expect(s3Pane()).toHaveClass("focus");
+    expect(localPane()).not.toHaveClass("focus");
+    const input = pressFind();
+    input.focus();
+    press({ key: "Tab" });
+    expect(s3Pane()).toHaveClass("focus");
+  });
+
+  test("Tab is left alone when the cursor is on something outside the tables", async () => {
+    setup();
+    await openBucket();
+    const button = screen.getByRole("button", { name: "+ 폴더" });
+    button.focus();
+    expect(button).toHaveFocus();
+    press({ key: "Tab" });
+    expect(localPane()).toHaveClass("focus");
+  });
+
+  test("⌘D compares the selected local and S3 file", async () => {
+    const p = setup();
+    await openBucket();
+    fireEvent.click(screen.getByText("📄 a.txt", { selector: "[data-pane=local] *" }));
+    fireEvent.click(screen.getByText("📄 a.txt", { selector: "[data-pane=s3] *" }));
+    press({ key: "d", metaKey: true });
+    expect(p.onOpenDiff).toHaveBeenCalledWith(
+      { source: "local", path: "/home/me/a.txt" },
+      { source: "s3", bucket: "assets", region: "us-west-2", key: "a.txt" },
+    );
+  });
+
+  test("⌘⌫ deletes only from the S3 pane, and asks first", async () => {
+    setup();
+    await openBucket();
+    fireEvent.mouseDown(localPane());
+    fireEvent.click(screen.getByText("📄 a.txt", { selector: "[data-pane=s3] *" }));
+    m.s3CountUnder.mockResolvedValue(1);
+    press({ key: "Backspace", metaKey: true });
+    expect(m.s3CountUnder).not.toHaveBeenCalled();
+    fireEvent.mouseDown(s3Pane());
+    press({ key: "Backspace", metaKey: true });
+    expect(await screen.findByText("객체 1개를 삭제할까요? 되돌릴 수 없어요.")).toBeInTheDocument();
+    expect(m.s3Delete).not.toHaveBeenCalled();
+  });
+
+  test("with a dialog open, the explorer keys do not fire", async () => {
+    const p = setup();
+    await openBucket();
+    fireEvent.click(screen.getByText("📄 a.txt", { selector: "[data-pane=local] *" }));
+    fireEvent.click(screen.getByText("📄 a.txt", { selector: "[data-pane=s3] *" }));
+    fireEvent.click(screen.getByRole("button", { name: "+ 폴더" }));
+    await screen.findByRole("dialog", { name: "새 폴더" });
+    press({ key: "d", metaKey: true });
+    expect(p.onOpenDiff).not.toHaveBeenCalled();
   });
 });

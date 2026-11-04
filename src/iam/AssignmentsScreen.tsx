@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ListFind, useListFind } from "../components/ListFind";
 import { fuzzyFilter, fuzzyKeep } from "../lib/fuzzy";
 import { groupColumns, policyColumns, type AssignmentTab, type DraftItem } from "./assignments";
 import { AssignmentGrid } from "./AssignmentGrid";
@@ -24,8 +25,6 @@ interface Props {
   onOpen: (route: IamRoute) => void;
   /** [미리보기]: 담긴 변경을 담긴 순서대로 넘긴다 */
   onPreview: (changes: IamChange[]) => void;
-  /** 툴바 필터. 행 이름에 적용한다 */
-  filter: string;
 }
 
 const TABS: { id: AssignmentTab; label: string }[] = [
@@ -50,7 +49,11 @@ const summaryOf = (items: DraftItem[]) => (items.length === 1 ? `변경 1개 · 
  * 파일 이름이 Assignments.tsx가 아닌 이유: assignments.ts(순수 로직)와 대소문자만 다르면, 대소문자를 가리지 않는
  * 파일 시스템(macOS)에서 "./Assignments"가 그 파일로 풀려 버린다.
  */
-export function Assignments({ profile, overview, draft, extra, onAddColumn, tab, onTab, onOpen, onPreview, filter }: Props) {
+export function Assignments({ profile, overview, draft, extra, onAddColumn, tab, onTab, onOpen, onPreview }: Props) {
+  const box = useRef<HTMLElement>(null);
+  // ⌘F의 찾기는 행 이름에 적용한다
+  const find = useListFind(box);
+  const filter = find.query;
   const [kinds, setKinds] = useState<Record<PrincipalKind, boolean>>({ user: true, group: true, role: true });
   const [adding, setAdding] = useState(false);
   /** "다른 주체와 같게"로 맞추는 대상의 ARN. 객체가 아니라 ARN으로 들고 지금의 개요에서 찾는다: 시트가 열려 있는 동안 개요를 다시 읽을 수 있다 */
@@ -81,7 +84,7 @@ export function Assignments({ profile, overview, draft, extra, onAddColumn, tab,
   }, [matching, target]);
 
   return (
-    <section className="center iam-asg">
+    <section className="center iam-asg" ref={box}>
       <div className="iam-tabs" role="tablist" aria-label="할당 종류">
         {TABS.map((t) => (
           <button key={t.id} role="tab" aria-selected={t.id === tab} className={`iam-tab${t.id === tab ? " on" : ""}`} onClick={() => onTab(t.id)}>
@@ -112,6 +115,7 @@ export function Assignments({ profile, overview, draft, extra, onAddColumn, tab,
           </button>
         </div>
       ))}
+      <ListFind find={find} />
       <AssignmentGrid overview={overview} tab={tab} rows={rows} columns={columns} draft={draft} grouped={tab === "policies"} onOpen={onOpen} onMatch={(row) => setMatching(row.arn)} />
       {draft.items.length > 0 && (
         <div className="asg-tray">

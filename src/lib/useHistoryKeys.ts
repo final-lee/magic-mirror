@@ -1,26 +1,17 @@
-import { useEffect } from "react";
+import { useEffect, type RefObject } from "react";
 import { onMouseNav } from "../explorer/api";
+import { useCommand } from "../keymap/registry";
 
 const hasOpenDialog = () => !!document.querySelector(".modal");
 
 /**
- * ⌘[ / ⌘]와 마우스 뒤로/앞으로 버튼으로 탭의 기록을 걷는다(IAM 탭과 PostgreSQL 탭이 함께 쓴다).
- * 보이는 탭(active)에서만 반응한다. 확인 창이 떠 있으면 둘 다, 글자를 입력하는 중이면 ⌘[ ⌘]를 건드리지 않는다.
+ * ⌘[ / ⌘](`tab.back` / `tab.forward`)와 마우스 뒤로/앞으로 버튼으로 탭의 기록을 걷는다(IAM 탭과 PostgreSQL 탭이 함께 쓴다).
+ * host는 탭의 뿌리 상자: 보이는 탭에서만 키에 반응한다. 확인 창이 떠 있거나 글자를 입력하는 중이면 키가 이 처리기까지 오지 않는다(keybindings.ts의 when).
+ * 마우스 버튼은 키맵이 모르는 입력이라 active(보이는 탭)로 직접 따지고, 확인 창이 떠 있으면 건드리지 않는다.
  */
-export function useHistoryKeys(active: boolean, back: () => void, forward: () => void) {
-  useEffect(() => {
-    if (!active) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (!e.metaKey || (e.key !== "[" && e.key !== "]")) return;
-      const tag = (document.activeElement as HTMLElement | null)?.tagName;
-      if (hasOpenDialog() || tag === "INPUT" || tag === "TEXTAREA") return;
-      e.preventDefault();
-      if (e.key === "[") back();
-      else forward();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [active, back, forward]);
+export function useHistoryKeys(host: RefObject<HTMLElement>, active: boolean, back: () => void, forward: () => void) {
+  useCommand("tab.back", back, { host });
+  useCommand("tab.forward", forward, { host });
 
   // 마우스 뒤로/앞으로 버튼. WKWebView는 3·4번 버튼을 DOM으로 넘기지 않아서 네이티브 "mouse-nav" 이벤트로 받는다.
   useEffect(() => {

@@ -501,6 +501,42 @@ describe("IAM 작업 공간 탭", () => {
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["리소스", IAM_TAB, "S3: assets"]);
   });
 
+  test("⌘F on the IAM tab opens the find line in the IAM list and filters only it; the hidden resources tab does not react", async () => {
+    // 리소스 탭에 Users 목록을 열어 둔 채 IAM 탭으로 간다
+    renderWithClient(<App />);
+    fireEvent.click(await screen.findByText("IAM"));
+    fireEvent.click(screen.getByText("Users"));
+    const resources = await screen.findByTestId("resource-table");
+    await within(resources).findByText("alice");
+    fireEvent.click(await screen.findByText("🔐 IAM 관리"));
+    fireEvent.click(within(await screen.findByRole("navigation", { name: "IAM 메뉴" })).getByRole("button", { name: /사용자/ }));
+    const list = await screen.findByTestId("iam-list");
+    await within(list).findByText("bob");
+    // 평소에는 어느 목록에도 찾기 줄이 없다
+    expect(screen.queryByRole("search")).toBeNull();
+    fireEvent.keyDown(window, { key: "f", metaKey: true });
+    const input = screen.getByRole("textbox", { name: "목록에서 찾기" });
+    expect(list.closest(".find-host")).toContainElement(input);
+    expect(input).toHaveFocus();
+    fireEvent.change(input, { target: { value: "bob" } });
+    expect(within(list).queryByText("alice")).not.toBeInTheDocument();
+    expect(within(list).getByText("bob")).toBeInTheDocument();
+    // 숨은 리소스 탭의 목록은 그대로다(줄도 없고 거르지도 않는다)
+    expect(within(resources).getByText("alice")).toBeInTheDocument();
+    expect(resources.closest("[hidden]")).not.toBeNull();
+    expect(resources.closest("section")!.querySelector(".list-find")).toBeNull();
+    // 탭을 옮겼다 돌아와도 그 목록의 검색은 그대로다. 리소스 탭에는 찾기 줄이 없다
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    expect(screen.queryByRole("search")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: IAM_TAB }));
+    expect(screen.getByRole("textbox", { name: "목록에서 찾기" })).toHaveValue("bob");
+    expect(within(screen.getByTestId("iam-list")).queryByText("alice")).not.toBeInTheDocument();
+    // Esc는 검색어를 지우고 줄을 닫는다
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "목록에서 찾기" }), { key: "Escape" });
+    expect(screen.queryByRole("search")).toBeNull();
+    expect(within(screen.getByTestId("iam-list")).getByText("alice")).toBeInTheDocument();
+  });
+
   test("⌘R rebuilds the IAM snapshot with a forced overview call", async () => {
     await openFromSidebar();
     await findingCards();
