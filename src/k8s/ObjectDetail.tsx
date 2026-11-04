@@ -18,6 +18,9 @@ import { NodeShellPane } from "./NodeShellPane";
 import { ShellTab } from "./ShellTab";
 import { YamlEdit } from "./YamlEdit";
 import { UsageGraphs } from "./UsageGraphs";
+import { XrayView } from "./xray/XrayView";
+import { hasRelations } from "./xray/logic";
+import { TAB_RELATIONS } from "./xray/text";
 import { JsonView, YamlView } from "./YamlView";
 import {
   BACK, CHILDREN_TRUNCATED, CLOSE, COL_NAME, COLUMN_LABELS, CREATED_AT, DETAIL_LABEL, H_IMAGE, H_KIND, H_LAST_TERMINATION, H_MESSAGE,
@@ -283,7 +286,7 @@ function prettyJson(value: string): string | null {
 /** 객체 하나의 상세(요약·YAML). 소유자·자식·노드 링크는 onOpen으로 상세 스택에 쌓는다. */
 export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose,
   onOpenIam, now, widthPct = DETAIL_PCT, onChange, rolloutProgress, appliedChange, shellNamespace, usageIndex }: Props) {
-  const [tab, setTab] = useState<"summary" | "yaml" | "logs" | "shell">("summary");
+  const [tab, setTab] = useState<"summary" | "yaml" | "logs" | "shell" | "relations">("summary");
   // 노드 셸: 변경 틀로 디버그 Pod를 만들고 나면 그 Pod에 들어가는 터미널을 연다
   const [nodeShell, setNodeShell] = useState<{ namespace: string; pod: string } | null>(null);
   const seenChange = useRef(appliedChange);
@@ -394,6 +397,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
         <button role="tab" aria-selected={tab === "yaml"} onClick={() => setTab("yaml")}>{TAB_YAML}</button>
         {(pod || workload) && <button role="tab" aria-selected={tab === "logs"} onClick={() => setTab("logs")}>{TAB_LOGS}</button>}
         {((pod && changes) || nodeShell) && <button role="tab" aria-selected={tab === "shell"} onClick={() => setTab("shell")}>{TAB_SHELL}</button>}
+        {hasRelations(objectRef.kind, q.data) && <button role="tab" data-tab="relations" aria-selected={tab === "relations"} onClick={() => setTab("relations")}>{TAB_RELATIONS}</button>}
       </div>
       <div className={`k8s-detail-body${tab === "logs" || shellTab ? " flush" : ""}`}>
         {/* 셸 세션은 다른 탭을 보는 동안에도 유지한다: 숨기기만 한다 */}
@@ -432,6 +436,8 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
           <PodLogs key={objectKey} target={target} ssoProfile={ssoProfile} live={live} namespace={objectRef.namespace} pod={objectRef.name} containers={logContainers} />
         ) : tab === "logs" && workload && objectRef.namespace ? (
           <WorkloadLogs key={objectKey} target={target} ssoProfile={ssoProfile} live={live} kind={objectRef.kind} namespace={objectRef.namespace} name={objectRef.name} containers={templateContainers} />
+        ) : tab === "relations" ? (
+          <XrayView key={objectKey} target={target} context={context} ssoProfile={ssoProfile} live={live} objectRef={objectRef} resourceVersion={resourceVersion} kinds={kinds} onOpen={onOpen} />
         ) : q.isError ? (
           <ErrorState error={q.error} profile={ssoProfile} compact onRetry={() => void q.refetch()} onLoggedIn={() => void q.refetch()} />
         ) : !q.data ? (

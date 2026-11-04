@@ -1968,3 +1968,20 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .argowf-workspace .k8s-log-bar input[type="number"] { width: 80px; }
 .awc-userinfo { grid-template-columns: 140px 1fr; }
 .awc-userinfo-acts { display: flex; align-items: center; gap: 10px; align-self: flex-start; }
+/* xray */
+.xray .k8s-toolbar { margin: -10px -12px 8px; }
+.xray-tree { list-style: none; margin: 0; padding: 0; }
+.xray-tree .xray-tree { margin-left: 7px; padding-left: 14px; border-left: 1px solid var(--line); }
+.xray-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 2px 0; min-width: 0; }
+.xray-kind { color: var(--dim); font-size: 11px; }
+.xray-current { font-weight: 600; }
+.xray-status { color: var(--dim); font-size: 11px; }
+.xray-hint { color: var(--dim); font-weight: 400; margin-left: 6px; }
+.xray-badge { border-radius: 9px; padding: 0 7px; font-size: 11px; white-space: nowrap; background: var(--surface-2); color: var(--dim); }
+.xray-badge.current { background: var(--accent-soft); color: var(--accent); }
+.xray-badge.role { background: var(--surface-2); color: var(--text); }
+.xray-badge.missing { background: var(--red-soft); color: var(--red); }
+.xray-badge.edge-owner { background: var(--surface-2); color: var(--dim); }
+.xray-badge.edge-reference { background: var(--accent-soft); color: var(--accent); }
+.xray-badge.edge-selector { background: var(--green-soft); color: var(--green-text); }
+.xray-badge.edge-target { background: var(--yellow-soft); color: var(--yellow); }
