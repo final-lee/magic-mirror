@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useModal } from "../iam/useModal";
 import { fuzzyKeep } from "../lib/fuzzy";
 import { COMMANDS, KEYBINDINGS, type KeyScope } from "./keybindings";
@@ -25,8 +25,8 @@ export function ShortcutsDialog({ onClose }: { onClose: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const { sheetRef, trapTab } = useModal(onClose);
   useEffect(() => inputRef.current?.focus(), []);
-  // 열 때 한 번: 어떤 명령을 지금 처리할 곳이 있는지
-  const usable = useMemo(() => new Set(KEYBINDINGS.filter((b) => b.handler === "registry" && canRun(b.command)).map((b) => b.command)), []);
+  // 어떤 명령을 지금 처리할 곳이 있는지
+  const usable = new Set(KEYBINDINGS.filter((b) => b.handler === "registry" && canRun(b.command)).map((b) => b.command));
   const rows = KEYBINDINGS.map((b) => ({ ...b, title: COMMANDS[b.command]?.title ?? b.command, label: keyLabel(b.key) }));
   const shown = fuzzyKeep(rows, query, (r) => [r.title, r.label, SCOPE_LABEL[r.scope]]);
   return (
