@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useRef } from "react";
+import { ListFind, useListFind } from "../components/ListFind";
 import { fuzzyFilter } from "../lib/fuzzy";
 import { LEVELS, LEVEL_LABEL } from "./labels";
 import type { MatrixCell } from "./route";
@@ -63,11 +64,13 @@ function Cell({ svc, level, selected, onSelect }: { svc: ServicePermissions; lev
 
 /** 서비스 × 접근 수준 표. 칸의 숫자는 허용된 작업 수 / 그 수준의 전체 작업 수이고, 칸을 누르면 실제 작업 목록을 연다. */
 export function PermissionMatrix({ services, adminLike, selected, onSelect }: Props) {
-  const [filter, setFilter] = useState("");
-  const rows = fuzzyFilter(services, filter, (s) => [s.name, s.prefix]);
+  const box = useRef<HTMLDivElement>(null);
+  // ⌘F의 찾기는 서비스 이름과 접두사에 적용한다. 표가 없으면(허용된 권한이 없음) ⌘F를 받지 않는다
+  const find = useListFind(box, { enabled: services.length > 0 });
+  const rows = fuzzyFilter(services, find.query, (s) => [s.name, s.prefix]);
 
   return (
-    <div className="mx">
+    <div className="mx" ref={box}>
       {adminLike && (
         <div className="iam-banner danger" role="status">
           <span aria-hidden="true">⚠</span> <b>모든 서비스의 모든 작업이 허용돼요</b>
@@ -77,18 +80,8 @@ export function PermissionMatrix({ services, adminLike, selected, onSelect }: Pr
         !adminLike && <div className="empty small">허용된 권한이 없어요</div>
       ) : (
         <>
+          <ListFind find={find} placeholder="서비스 이름으로 찾기" />
           <div className="mx-bar">
-            <input
-              type="search"
-              className="iam-filter"
-              placeholder="서비스 이름으로 필터"
-              aria-label="서비스 필터"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") setFilter("");
-              }}
-            />
             <span className="dim">서비스 {services.length}개</span>
           </div>
           {rows.length === 0 ? (

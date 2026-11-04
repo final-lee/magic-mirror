@@ -341,7 +341,7 @@ export default function App() {
         </div>
         {profile && iamTab && (
           <div className="tabpane" hidden={activeTab !== "iam"}>
-            <IamTab profile={profile} active={activeTab === "iam"} filter="" focus={iamTab.focus} nonce={iamTab.nonce} />
+            <IamTab profile={profile} active={activeTab === "iam"} focus={iamTab.focus} nonce={iamTab.nonce} />
           </div>
         )}
         {profile && costTab && (
@@ -366,7 +366,6 @@ export default function App() {
               region={region}
               s3Service={s3Service}
               initialLocation={t.location}
-              filter=""
               active={activeTab === t.id}
               initialLocalPath={settings.explorerLocalPath ?? null}
               onLocalPathChange={(path) => update({ explorerLocalPath: path })}
@@ -384,7 +383,7 @@ export default function App() {
           ))}
         {pgTabs.map((t) => (
           <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
-            <PgTab target={t.target} title={t.title} active={activeTab === t.id} filter="" />
+            <PgTab target={t.target} title={t.title} active={activeTab === t.id} />
           </div>
         ))}
         {k8sTabs.map((t) => (
@@ -398,7 +397,6 @@ export default function App() {
               profile={profile}
               left={t.left}
               right={t.right}
-              active={activeTab === t.id}
               transfers={transfers}
             />
           </div>

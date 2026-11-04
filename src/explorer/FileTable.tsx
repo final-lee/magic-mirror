@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { Column, Resource } from "../api/types";
 import { Cell } from "../components/Cell";
+import { ListFind, useListFind } from "../components/ListFind";
 import { DESELECT_DELAY_MS } from "../hooks/useToggleSelect";
 import { compareValues } from "../lib/format";
 import { fuzzyFilter, fuzzyKeep } from "../lib/fuzzy";
@@ -12,16 +13,21 @@ const NONE: SelectionState = { selected: [], anchor: null };
 interface Props {
   columns: Column[];
   rows: Resource[];
-  filter: string;
   selection: SelectionState;
   onSelectionChange: (s: SelectionState) => void;
   onOpen: (id: string) => void;
   onBack?: () => void;
   onDragStart?: (ids: string[], point: { clientX: number; clientY: number }) => void;
   emptyText?: string;
+  /** 두 칸 중 포커스를 가진(마지막으로 누른) 칸인가. 아니면 ⌘F를 받지 않는다 */
+  focused?: boolean;
 }
 
-export function FileTable({ columns, rows, filter, selection, onSelectionChange, onOpen, onBack, onDragStart, emptyText }: Props) {
+export function FileTable({ columns, rows, selection, onSelectionChange, onOpen, onBack, onDragStart, emptyText, focused = true }: Props) {
+  // ⌘F의 찾기는 이 표 하나에만 적용한다. 두 칸이면 포커스·마지막으로 누른 칸의 표가 받는다
+  const box = useRef<HTMLDivElement>(null);
+  const find = useListFind(box, { enabled: focused });
+  const filter = find.query;
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: columns[0]?.key ?? "", dir: 1 });
   const [sortedByUser, setSortedByUser] = useState(false);
   const press = useRef<{ id: string; x: number; y: number; started: boolean } | null>(null);
@@ -88,86 +94,89 @@ export function FileTable({ columns, rows, filter, selection, onSelectionChange,
   };
 
   return (
-    <div
-      className="tbl"
-      tabIndex={0}
-      onKeyDown={onKeyDown}
-      data-testid="file-table"
-      onPointerDown={(e) => {
-        // 행 밖에서 누른 경우: 이전 드래그(다른 패널에 놓은 경우 포함)의 흔적을 지운다.
-        if (!(e.target as Element).closest("tbody tr")) justDragged.current = false;
-      }}
-      onPointerUp={() => (press.current = null)}
-      onClick={(e) => {
-        const t = e.target as Element;
-        if (t.closest("tbody tr") || t.closest("thead")) return;
-        if (justDragged.current) {
-          justDragged.current = false;
-          return;
-        }
-        cancelDeselect();
-        if (selection.selected.length > 0) onSelectionChange(NONE);
-      }}
-    >
-      <table>
-        <thead>
-          <tr>
-            {columns.map((c) => (
-              <th
-                key={c.key}
-                onClick={() => {
-                  setSortedByUser(true);
-                  // 점수 순서에서 처음 누르면 화살표가 없었으니 오름차순부터 시작한다.
-                  setSort((s) => (!scoreOrder && s.key === c.key ? { key: c.key, dir: s.dir === 1 ? -1 : 1 } : { key: c.key, dir: 1 }));
-                }}
-              >
-                {c.label} {!scoreOrder && sort.key === c.key ? (sort.dir === 1 ? "▲" : "▼") : ""}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {visible.map((r) => {
-            const on = selection.selected.includes(r.id);
-            return (
-              <tr
-                key={r.id}
-                className={on ? "on" : undefined}
-                aria-selected={on}
-                onClick={(e) => {
-                  if (justDragged.current) {
-                    justDragged.current = false;
-                    return;
-                  }
-                  cancelDeselect();
-                  if (!e.metaKey && !e.shiftKey && e.detail === 1 && selection.selected.length === 1 && selection.selected[0] === r.id) {
-                    // 이미 선택된 행을 천천히 다시 클릭하면 해제한다. 더블클릭이면 dblclick에서 취소된다.
-                    deselectTimer.current = setTimeout(() => {
-                      deselectTimer.current = null;
-                      onSelectionChange(NONE);
-                    }, DESELECT_DELAY_MS);
-                    return;
-                  }
-                  onSelectionChange(nextSelection(selection, r.id, order, { meta: e.metaKey, shift: e.shiftKey }));
-                }}
-                onDoubleClick={() => {
-                  cancelDeselect();
-                  onOpen(r.id);
-                }}
-                onPointerDown={(e) => onPointerDown(r.id, e)}
-                onPointerMove={onPointerMove}
-              >
-                {columns.map((c) => (
-                  <td key={c.key}>
-                    <Cell kind={c.kind} value={r.values[c.key]} />
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {visible.length === 0 && <div className="empty small">{emptyText ?? "표시할 항목이 없어요"}</div>}
+    <div className="find-host" ref={box}>
+      <ListFind find={find} />
+      <div
+        className="tbl"
+        tabIndex={0}
+        onKeyDown={onKeyDown}
+        data-testid="file-table"
+        onPointerDown={(e) => {
+          // 행 밖에서 누른 경우: 이전 드래그(다른 패널에 놓은 경우 포함)의 흔적을 지운다.
+          if (!(e.target as Element).closest("tbody tr")) justDragged.current = false;
+        }}
+        onPointerUp={() => (press.current = null)}
+        onClick={(e) => {
+          const t = e.target as Element;
+          if (t.closest("tbody tr") || t.closest("thead")) return;
+          if (justDragged.current) {
+            justDragged.current = false;
+            return;
+          }
+          cancelDeselect();
+          if (selection.selected.length > 0) onSelectionChange(NONE);
+        }}
+      >
+        <table>
+          <thead>
+            <tr>
+              {columns.map((c) => (
+                <th
+                  key={c.key}
+                  onClick={() => {
+                    setSortedByUser(true);
+                    // 점수 순서에서 처음 누르면 화살표가 없었으니 오름차순부터 시작한다.
+                    setSort((s) => (!scoreOrder && s.key === c.key ? { key: c.key, dir: s.dir === 1 ? -1 : 1 } : { key: c.key, dir: 1 }));
+                  }}
+                >
+                  {c.label} {!scoreOrder && sort.key === c.key ? (sort.dir === 1 ? "▲" : "▼") : ""}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((r) => {
+              const on = selection.selected.includes(r.id);
+              return (
+                <tr
+                  key={r.id}
+                  className={on ? "on" : undefined}
+                  aria-selected={on}
+                  onClick={(e) => {
+                    if (justDragged.current) {
+                      justDragged.current = false;
+                      return;
+                    }
+                    cancelDeselect();
+                    if (!e.metaKey && !e.shiftKey && e.detail === 1 && selection.selected.length === 1 && selection.selected[0] === r.id) {
+                      // 이미 선택된 행을 천천히 다시 클릭하면 해제한다. 더블클릭이면 dblclick에서 취소된다.
+                      deselectTimer.current = setTimeout(() => {
+                        deselectTimer.current = null;
+                        onSelectionChange(NONE);
+                      }, DESELECT_DELAY_MS);
+                      return;
+                    }
+                    onSelectionChange(nextSelection(selection, r.id, order, { meta: e.metaKey, shift: e.shiftKey }));
+                  }}
+                  onDoubleClick={() => {
+                    cancelDeselect();
+                    onOpen(r.id);
+                  }}
+                  onPointerDown={(e) => onPointerDown(r.id, e)}
+                  onPointerMove={onPointerMove}
+                >
+                  {columns.map((c) => (
+                    <td key={c.key}>
+                      <Cell kind={c.kind} value={r.values[c.key]} />
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {visible.length === 0 && <div className="empty small">{emptyText ?? "표시할 항목이 없어요"}</div>}
+      </div>
     </div>
   );
 }

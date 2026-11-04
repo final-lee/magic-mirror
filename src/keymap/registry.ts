@@ -132,14 +132,14 @@ export function useKeymapListener() {
 
 /**
  * 명령 처리기를 등록한다. host를 주면 그 상자가 보일 때만, 여러 곳이 같은 명령을 등록했을 때는 포커스·마지막 누름으로 고른다.
- * enabled가 false면 이 처리기는 없는 것으로 본다(다른 처리기나 기본 동작으로 넘어간다).
+ * enabled가 false면 이 처리기는 없는 것으로 본다(다른 처리기나 기본 동작으로 넘어간다). 함수를 주면 키를 누를 때마다 따진다(커서 위치처럼 그때 DOM을 봐야 알 수 있는 조건).
  */
-export function useCommand(command: string, handler: () => void, options: { host?: RefObject<HTMLElement>; enabled?: boolean } = {}) {
+export function useCommand(command: string, handler: () => void, options: { host?: RefObject<HTMLElement>; enabled?: boolean | (() => boolean) } = {}) {
   const run = useRef(handler);
   run.current = handler;
   const on = options.enabled ?? true;
-  const enabled = useRef(() => on);
-  enabled.current = () => on;
+  const enabled = useRef<() => boolean>(() => true);
+  enabled.current = typeof on === "function" ? on : () => on;
   const host = options.host;
   useEffect(() => {
     const entry: Entry = { command, run, enabled, host };

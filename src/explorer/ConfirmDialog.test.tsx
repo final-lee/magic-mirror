@@ -80,3 +80,28 @@ test("Enter in input never falls back to a danger action", () => {
   fireEvent.keyDown(screen.getByLabelText("파일 이름"), { key: "Enter" });
   expect(onResult).not.toHaveBeenCalled();
 });
+
+test("Escape closes only the topmost dialog", () => {
+  const first = vi.fn();
+  const second = vi.fn();
+  render(
+    <>
+      <ConfirmDialog title="아래" actions={[{ label: "확인", value: "ok", primary: true }]} onResult={first} />
+      <ConfirmDialog title="위" actions={[{ label: "확인", value: "ok", primary: true }]} onResult={second} />
+    </>,
+  );
+  fireEvent.keyDown(document.body, { key: "Escape" });
+  expect(second).toHaveBeenCalledWith(null, "");
+  expect(first).not.toHaveBeenCalled();
+});
+
+test("a dialog inside a hidden tab does not react to Escape", () => {
+  const onResult = vi.fn();
+  render(
+    <div hidden>
+      <ConfirmDialog title="숨김" actions={[{ label: "확인", value: "ok", primary: true }]} onResult={onResult} />
+    </div>,
+  );
+  fireEvent.keyDown(document.body, { key: "Escape" });
+  expect(onResult).not.toHaveBeenCalled();
+});

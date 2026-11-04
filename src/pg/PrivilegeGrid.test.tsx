@@ -2,6 +2,7 @@ import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode, useState } from "react";
+import { findFor } from "../test/find";
 import { renderWithClient } from "../test/utils";
 import { pgApi } from "./api";
 import { ROLES, attributes, dbAspects, pgTarget, role, sampleCellDetail, sampleDatabaseView, sampleOverview, schemaAspects } from "./fixtures";
@@ -33,7 +34,6 @@ function Harness({ initialKinds = DEFAULT_KINDS, database: initialDatabase, onDa
         setDatabase(next);
         onDatabase?.(next);
       }}
-      filter=""
       kinds={kinds}
       onKinds={setKinds}
       {...rest}
@@ -244,17 +244,38 @@ describe("the rows", () => {
     expect(screen.queryByText("rds_superuser")).not.toBeInTheDocument();
   });
 
-  test("the toolbar filter matches the role names, ignoring case and the spaces around it", async () => {
-    const { update } = setup({ filter: "APP_" });
+  test("⌘F opens the find line (hidden until then); it matches the role names, ignoring case and the spaces around it", async () => {
+    setup();
     await loaded();
+    expect(screen.queryByRole("search")).toBeNull();
+    findFor("APP_");
     expect(rowHeads()).toEqual(["사용자 1", "app_owner", "그룹 2", "app_read", "app_write"]);
-    update({ filter: "  ali  " });
+    findFor("  ali  ");
     expect(rowHeads()).toEqual(["사용자 1", "alice"]);
   });
 
-  test("a filter that matches nothing says so, and keeps the chips and the picker", async () => {
-    setup({ filter: "zzz" });
+  test("Esc in the find line brings every role back and closes the line", async () => {
+    setup();
     await loaded();
+    const before = rowHeads();
+    fireEvent.keyDown(findFor("APP_"), { key: "Escape" });
+    expect(screen.queryByRole("search")).toBeNull();
+    expect(rowHeads()).toEqual(before);
+  });
+
+  test("the find query stays when another database is picked", async () => {
+    setup();
+    await loaded();
+    findFor("APP_");
+    fireEvent.change(picker(), { target: { value: "analytics" } });
+    await loaded();
+    expect(screen.getByRole("textbox", { name: "목록에서 찾기" })).toHaveValue("APP_");
+  });
+
+  test("a find that matches nothing says so, and keeps the chips and the picker", async () => {
+    setup();
+    await loaded();
+    findFor("zzz");
     expect(screen.getByText("조건에 맞는 역할이 없어요")).toBeInTheDocument();
     expect(within(grid()).queryAllByRole("rowheader")).toHaveLength(0);
     expect(screen.getByRole("checkbox", { name: "사용자" })).toBeInTheDocument();
@@ -609,16 +630,16 @@ describe("the detail of a cell", () => {
     expect(cellOf("alice", "app")).toBeInTheDocument();
   });
 
-  test("closes when a filter hides its role, and does not come back when the filter does", async () => {
-    const { update } = setup();
+  test("closes when the find hides its role, and does not come back when the find is cleared", async () => {
+    setup();
     await loaded();
     fireEvent.click(cellOf("alice", "app"));
     await screen.findByText("app.customers");
-    update({ filter: "bob" });
+    findFor("bob");
     expect(within(grid()).queryByRole("rowheader", { name: "alice" })).not.toBeInTheDocument();
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
     const reads = m.cell.mock.calls.length;
-    update({ filter: "" });
+    findFor("");
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
     expect(within(grid()).queryAllByRole("gridcell", { selected: true })).toHaveLength(0);
     expect(m.cell).toHaveBeenCalledTimes(reads); // 저절로 다시 열려 읽지도 않는다
@@ -676,15 +697,13 @@ describe("the detail of a cell", () => {
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
   });
 
-  test("typing in the toolbar filter while it is open does not take the focus from where it is", async () => {
-    const { update } = setup();
+  test("a find that still matches the role keeps the detail open while the cursor stays in the find line", async () => {
+    setup();
     await loaded();
     fireEvent.click(cellOf("alice", "app"));
     await screen.findByText("app.customers");
-    const close = screen.getByRole("button", { name: "닫기" });
-    close.focus();
-    update({ filter: "al" });
-    expect(close).toHaveFocus();
+    const input = findFor("al");
+    expect(input).toHaveFocus();
     expect(panel()).toHaveAccessibleName("alice · app");
   });
 
@@ -1157,12 +1176,12 @@ describe("tall grids", () => {
     expect(cellOf("user-003", "audit")).toHaveFocus();
   });
 
-  test("a filter that leaves few rows while scrolled far down shows them instead of an empty page", async () => {
-    const { update } = setup({ overview: bigOverview() });
+  test("a find that leaves few rows while scrolled far down shows them instead of an empty page", async () => {
+    setup({ overview: bigOverview() });
     await loaded();
     scroller().scrollTop = 200 * ROW_H;
     fireEvent.scroll(scroller());
-    update({ filter: "user-005" });
+    findFor("user-005");
     expect(within(grid()).getByRole("rowheader", { name: "user-005" })).toBeInTheDocument();
   });
 
