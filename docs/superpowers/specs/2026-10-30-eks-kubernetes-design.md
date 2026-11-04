@@ -45,8 +45,8 @@
 우선순위(매일 쓰는 빈도): ① 셸·port-forward·restart·scale·삭제 ② Pod CPU/메모리 열 ③ 트리에 내장 종류 추가 ④ 로그 K3 나머지 ⑤ Helm 읽기 전용.
 
 ### 탐색
-- 객체 상세의 describe 탭은 세션에서 고른 kubeconfig와 context로 로컬 `kubectl describe`만 실행한다. 로그인 PATH에서 실행 파일을 찾고 다른 클러스터로 새지 않도록 환경을 정리하며, 30초와 출력 4 MiB로 제한한다. 프로세스 실행 허용 목록에는 이 전용 러너만 추가하고 하위 명령을 외부에서 받지 않는다.
-- 실행하지 못하면 이유와 앱이 이미 읽은 요약·조건·컨테이너·이벤트를 대신 보인다. 수동 새로고침과 resourceVersion 변경 시 다시 읽기를 지원한다.
+- 객체 상세의 설명 탭은 연결 시 메모리에 고정한 kubeconfig와 context를 임시 파일로 써 로컬 `kubectl describe`만 실행하며 실행 뒤 파일을 지운다. 로그인 PATH에서 실행 파일을 찾고 다른 클러스터로 새지 않도록 환경을 정리하며, 30초와 출력 4 MiB로 제한한다.
+- 실행하지 못하면 이유와 앱이 이미 읽은 요약·조건·컨테이너·이벤트를 대신 보인다. 상단 도구 줄에서 수동으로 다시 읽으며 resourceVersion 변경에 따른 자동 읽기는 최소 10초 간격으로 묶는다. 관계 탭의 다시 읽기 역시 상단 도구 줄에 있다.
 - Secret은 서비스 계정 토큰이나 last-applied 값이 노출될 수 있어 kubectl 결과를 쓰지 않는다. 앱에서 가린 요약과 키·크기만 보여주고 이유를 표시한다.
 - 관계 트리(xray, 2026-11-04): 객체 상세의 "관계" 탭. 백엔드 `k8s/xray/`(`pool` 읽어 온 객체 더미, `refs` 본문에서 가리키는 곳 읽기, `graph` 트리 계산, `read` 읽기)와 읽기 전용 명령 `k8s_xray`, 프론트 `src/k8s/xray/`. 읽을 수 있는 목록만으로 계산한다: 네임스페이스 객체는 그 네임스페이스의 Pod·ReplicaSet·Deployment·StatefulSet·DaemonSet·Job·CronJob·Service·EndpointSlice·Ingress·NetworkPolicy·HPA·PDB·PVC와 메타데이터만 읽은 ConfigMap·Secret·ServiceAccount(Secret 값은 받지 않는다), 클러스터 범위 객체(Node·PV·StorageClass·PriorityClass)는 모든 네임스페이스의 Pod·워크로드·PVC·PV를 읽는다(Node는 `spec.nodeName`으로 좁힌다). Pod가 가리키는 Node·PV·StorageClass·PriorityClass는 이름으로 읽고(참조를 따라 최대 4단계), 읽은 결과가 없으면 그 종류를 끝까지 읽었을 때만 "없음"으로 보인다.
   - 네 묶음(노드마다 `edge`): **소유**(소유자 사슬을 위로, 자식을 아래로: Deployment → ReplicaSet → Pod, CronJob → Job → Pod), **참조**(Pod 사양·템플릿의 ServiceAccount·볼륨·환경 변수·imagePullSecrets·PriorityClass·Node, PVC → PV → StorageClass, Ingress TLS Secret, 그리고 거꾸로 ConfigMap·Secret·PVC·PV·StorageClass·Node 등을 쓰는 객체: 소유자도 쓰면 가장 위 소유자만), **선택**(Service·PDB·NetworkPolicy가 Pod 레이블을 고름: `matchLabels`·`matchExpressions` 모두, Service 셀렉터는 라벨 맵, 빈 셀렉터는 Service는 아무것도, PDB·NetworkPolicy는 모두 고른다. 선택자를 가진 객체에서는 고른 Pod), **대상**(Ingress → Service, HPA `scaleTargetRef` ↔ 워크로드, EndpointSlice ↔ Service·Pod, Service 아래 Ingress·EndpointSlice).

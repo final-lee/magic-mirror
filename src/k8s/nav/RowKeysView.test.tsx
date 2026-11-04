@@ -167,7 +167,7 @@ describe("tabs", () => {
     setup();
     await open("pods", [row("web-1")], "web-1");
     press({ key: "d" });
-    expect(tab("describe")).toHaveAttribute("aria-selected", "true");
+    expect(tab("상세 설명")).toHaveAttribute("aria-selected", "true");
     expect(note()).toBe("");
   });
 
