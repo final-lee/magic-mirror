@@ -2,6 +2,7 @@ import type { K8sPlugin } from "../../api/types";
 import { KEYBINDINGS } from "../../keymap/keybindings";
 import { normalizeKey } from "../../keymap/keys";
 import type { K8sKindRef, ObjectRef } from "../types";
+import { PLUGIN_TEMPLATE_SUBSTITUTION, PLUGIN_TEMPLATE_DOLLAR_QUOTE, PLUGIN_TEMPLATE_ESCAPE, PLUGIN_TEMPLATE_HEREDOC, PLUGIN_TEMPLATE_SYNTAX, PLUGIN_TEMPLATE_VARIABLE, PLUGIN_TEMPLATE_BOUNDARY, PLUGIN_TEMPLATE_UNCLOSED, PLUGIN_KEY_INVALID, PLUGIN_KEY_CONFLICT } from "./text";
 
 export interface PluginValues {
   NAMESPACE: string;
@@ -22,13 +23,14 @@ const BOUNDARY = /[\s;|&<>]/;
 /** 셸 문법을 완전히 해석하지 않으므로 안전하게 인용할 수 없는 템플릿은 거절한다. */
 export function pluginTemplateError(template: string): string | null {
   if (template.includes("$(") || template.includes("${") || template.includes("`")) {
-    return "명령 치환과 중괄호 변수는 사용할 수 없어요";
+    return PLUGIN_TEMPLATE_SUBSTITUTION;
   }
+  if (template.includes("$'") || template.includes('$"')) return PLUGIN_TEMPLATE_DOLLAR_QUOTE;
   let quote: "'" | '"' | null = null;
   for (let i = 0; i < template.length; i++) {
     const char = template[i];
     if (char === "\\" && quote !== "'") {
-      if (PLACEHOLDER.test(template.slice(i + 1))) return "변수 앞에 역슬래시를 쓸 수 없어요";
+      if (PLACEHOLDER.test(template.slice(i + 1))) return PLUGIN_TEMPLATE_ESCAPE;
       i++;
       continue;
     }
@@ -36,19 +38,19 @@ export function pluginTemplateError(template: string): string | null {
       quote = quote === null ? char : null;
       continue;
     }
-    if (quote === null && char === "<" && template[i + 1] === "<") return "here 문서는 사용할 수 없어요";
-    if (quote === null && (char === "(" || char === ")" || char === "#")) return "이 셸 구문에서는 변수를 사용할 수 없어요";
+    if (quote === null && char === "<" && template[i + 1] === "<") return PLUGIN_TEMPLATE_HEREDOC;
+    if (quote === null && (char === "(" || char === ")" || char === "#")) return PLUGIN_TEMPLATE_SYNTAX;
     const match = char === "$" ? template.slice(i).match(PLACEHOLDER) : null;
     if (!match) continue;
     const after = template[i + match[0].length];
-    if (after && /[A-Za-z0-9_]/.test(after)) return "변수 이름을 확인해 주세요";
+    if (after && /[A-Za-z0-9_]/.test(after)) return PLUGIN_TEMPLATE_VARIABLE;
     const before = template[i - 1];
     if (quote === null && ((before && !BOUNDARY.test(before)) || (after && !BOUNDARY.test(after)))) {
-      return "변수는 독립된 단어 또는 따옴표 안에 넣어 주세요";
+      return PLUGIN_TEMPLATE_BOUNDARY;
     }
     i += match[0].length - 1;
   }
-  return quote === null ? null : "닫히지 않은 따옴표가 있어요";
+  return quote === null ? null : PLUGIN_TEMPLATE_UNCLOSED;
 }
 
 export function expandPlugin(template: string, values: PluginValues): string {
@@ -106,11 +108,11 @@ export function pluginKeyError(key: string, otherKeys: readonly string[] = []): 
   const base = parts.pop() ?? "";
   const validMods = ["ctrl", "alt", "shift", "cmd"];
   if (!/^[a-z]$/.test(base) || parts.some((part) => !validMods.includes(part)) || new Set(parts).size !== parts.length) {
-    return "한 글자 또는 수식 키와 한 글자를 입력해 주세요";
+    return PLUGIN_KEY_INVALID;
   }
   const normalized = normalizeKey(key);
   if (KEYBINDINGS.some((binding) => normalizeKey(binding.key) === normalized) || otherKeys.some((other) => normalizeKey(other) === normalized)) {
-    return "이미 사용 중인 단축키예요";
+    return PLUGIN_KEY_CONFLICT;
   }
   return null;
 }

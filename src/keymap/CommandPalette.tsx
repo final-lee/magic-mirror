@@ -4,13 +4,13 @@ import { useModal } from "../iam/useModal";
 import { fuzzyRank, tokenize } from "../lib/fuzzy";
 import { COMMANDS, KEYBINDINGS } from "./keybindings";
 import { keyLabel } from "./keys";
-import { canRun } from "./registry";
+import { canRun, getExtraBindings } from "./registry";
 
 export const COMMAND_PALETTE_TITLE = "명령 팔레트";
 
 /** 명령에 묶인 키(디스패처가 처리하는 것만) */
 export function commandKeys(command: string): string[] {
-  return KEYBINDINGS.filter((b) => b.command === command && b.handler === "registry").map((b) => keyLabel(b.key));
+  return [...KEYBINDINGS, ...getExtraBindings()].filter((b) => b.command === command && b.handler === "registry").map((b) => keyLabel(b.key));
 }
 
 /**
@@ -26,7 +26,8 @@ export function CommandPalette({ onRun, onClose }: { onRun: (command: string) =>
   useEffect(() => inputRef.current?.focus(), []);
 
   // 이 화면에서 처리할 곳이 있는 명령만
-  const available = Object.entries(COMMANDS).filter(([id]) => id !== "app.commandPalette" && canRun(id)).map(([id, info]) => ({ id, title: info.title }));
+  const extra = getExtraBindings().filter((b) => b.title).map((b) => [b.command, { title: b.title!, scope: b.scope }] as const);
+  const available = [...Object.entries(COMMANDS), ...extra].filter(([id]) => id !== "app.commandPalette" && canRun(id)).map(([id, info]) => ({ id, title: info.title }));
   const tokens = tokenize(query);
   const shown = tokens.length === 0 ? available : fuzzyRank(available, query, (c) => [c.title, c.id]).map((r) => r.item);
   const active = shown[Math.min(activeIndex, shown.length - 1)];

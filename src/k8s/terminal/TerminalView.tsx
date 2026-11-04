@@ -51,7 +51,7 @@ export function TerminalView({ target, context, ssoProfile, visible, tabs, activ
         {/* 터미널은 다른 탭이나 화면을 보는 동안에도 유지한다: 숨기기만 한다 */}
         {tabs.map((tab) => (
           <div key={tab.id} className="k8s-shell-host" hidden={tab.id !== active}>
-            <LocalTerminal target={target} ssoProfile={ssoProfile} command={tab.command} title={tab.title} visible={visible && tab.id === active} onClose={() => onClose(tab.id)} />
+            <LocalTerminal target={target} ssoProfile={ssoProfile} command={tab.command} launch={tab.launch} title={tab.title} visible={visible && tab.id === active} onClose={() => onClose(tab.id)} />
           </div>
         ))}
         {tabs.length === 0 && (

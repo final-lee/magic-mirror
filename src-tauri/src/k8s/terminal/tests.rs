@@ -91,7 +91,7 @@ fn the_exec_profile_comes_from_the_pinned_contexts_user() {
 fn a_plugin_command_is_one_argument_and_a_terminal_is_a_login_shell() {
     assert_eq!(argv_of("/bin/zsh", None), ["/bin/zsh", "-l"]);
     let command = "kubectl -n 'a b' get 'x'\\''y'\nuptime";
-    assert_eq!(argv_of("/bin/zsh", Some(command)), ["/bin/zsh", "-lc", command]);
+    assert_eq!(argv_of("/bin/fish", Some(command)), ["/bin/sh", "-c", command]);
 }
 
 #[test]
@@ -118,6 +118,31 @@ fn the_pinned_kubeconfig_holds_only_this_context_and_is_private_and_removed_with
     drop(file);
     assert!(!path.exists());
     assert!(write_pinned(&config(), "missing").is_err());
+}
+
+#[test]
+fn sweep_removes_only_matching_owned_regular_files() {
+    use std::os::unix::fs::symlink;
+    let dir = tempfile::tempdir().unwrap();
+    let stale = dir.path().join("mm-kubeconfig-stale.yaml");
+    let live = dir.path().join(format!("mm-kubeconfig-{}-active.yaml", std::process::id()));
+    let dead = dir.path().join("mm-kubeconfig-2147483647-dead.yaml");
+    let other = dir.path().join("mm-kubeconfig-stale.txt");
+    let link = dir.path().join("mm-kubeconfig-link.yaml");
+    let folder = dir.path().join("mm-kubeconfig-dir.yaml");
+    std::fs::write(&stale, "secret").unwrap();
+    std::fs::write(&live, "keep").unwrap();
+    std::fs::write(&dead, "stale").unwrap();
+    std::fs::write(&other, "keep").unwrap();
+    symlink(&other, &link).unwrap();
+    std::fs::create_dir(&folder).unwrap();
+    sweep_pinned_in(dir.path());
+    assert!(live.exists());
+    assert!(!dead.exists());
+    assert!(!stale.exists());
+    assert!(other.exists());
+    assert!(link.is_symlink());
+    assert!(folder.is_dir());
 }
 
 fn temp_log(name: &str) -> PathBuf {
@@ -207,6 +232,7 @@ async fn the_shell_sees_only_the_pinned_kubeconfig_and_closing_the_target_remove
     // 이 대상의 터미널만 닫히고, 임시 파일이 지워지고, 닫은 시각이 남는다
     shells.close_target(&target("a"));
     shells.settle(Duration::from_secs(5)).await;
+    assert_eq!(screen.exit().await, Some((None, None)));
     assert!(!kubeconfig.exists());
     // 셸 프로세스도 죽는다
     for _ in 0..100 {
