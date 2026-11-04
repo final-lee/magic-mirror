@@ -37,7 +37,7 @@ test("forward rows move with vim keys without activating their actions", async (
   setup();
   const table = await screen.findByRole("table");
   fireEvent.keyDown(table, { key: "G", shiftKey: true });
-  expect(screen.getByText(forwardTarget(forward({ id: 2, name: "db" }))).closest("tr")).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByText(forwardTarget(forward({ id: 2, name: "db" }))).closest("tr")).toHaveFocus();
   expect(m.forwardClose).not.toHaveBeenCalled();
 });
 

@@ -34,24 +34,19 @@ const VIM_STEP: Record<string, Step | undefined> = { j: "next", k: "prev", g: "f
 
 /** 기존 표의 행을 같은 키로 이동한다. 선택 가능한 표는 행의 기존 클릭 동작을 쓴다. */
 export function vimTableKeys(e: KeyboardEvent<HTMLElement>, select = false) {
-  if (e.target !== e.currentTarget || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const target = e.target as HTMLElement;
+  if (target !== e.currentTarget && (select || !target.matches("tbody tr[tabindex='-1']"))) return;
   const step = ARROW_STEP[e.key] ?? VIM_STEP[e.key];
   if (!step) return;
   const rows = Array.from(e.currentTarget.querySelectorAll<HTMLTableRowElement>("tbody tr"));
   if (!rows.length) return;
   e.preventDefault();
-  const i = rows.findIndex((row) => row.getAttribute("aria-selected") === "true");
+  const i = rows.findIndex((row) => select ? row.getAttribute("aria-selected") === "true" : row === document.activeElement);
   const next = step === "first" ? 0 : step === "last" ? rows.length - 1 : step === "next" ? Math.min(rows.length - 1, i + 1) : Math.max(0, i - 1);
   if (next === i) return;
   if (select) rows[next].click();
-  else {
-    if (i >= 0) {
-      rows[i].removeAttribute("aria-selected");
-      rows[i].classList.remove("on");
-    }
-    rows[next].setAttribute("aria-selected", "true");
-    rows[next].classList.add("on");
-  }
+  else rows[next].focus();
   rows[next].scrollIntoView?.({ block: "nearest" });
 }
 

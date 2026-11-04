@@ -51,11 +51,11 @@ test("event rows support vim movement", async () => {
   const table = screen.getByRole("table");
   const rows = within(table).getAllByRole("row").slice(1);
   fireEvent.keyDown(table, { key: "j" });
-  expect(rows[0]).toHaveAttribute("aria-selected", "true");
-  fireEvent.keyDown(table, { key: "G", shiftKey: true });
-  expect(rows[1]).toHaveAttribute("aria-selected", "true");
-  fireEvent.keyDown(table, { key: "k" });
-  expect(rows[0]).toHaveAttribute("aria-selected", "true");
+  expect(rows[0]).toHaveFocus();
+  fireEvent.keyDown(rows[0], { key: "G", shiftKey: true });
+  expect(rows[1]).toHaveFocus();
+  fireEvent.keyDown(rows[1], { key: "k" });
+  expect(rows[0]).toHaveFocus();
 });
 
 test("Warning only", async () => {

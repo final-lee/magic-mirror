@@ -35,10 +35,10 @@ export function ChangeLog({ target, onStart }: Props) {
       {q.isError && <p className="err">{errorMessage(q.error)}</p>}
       {q.isSuccess && entries.length === 0 && <p>{t.CHANGE_NO_LOG}</p>}
       {entries.length > 0 && listed.length === 0 && <p>{t.LIST_NO_MATCH}</p>}
-      <table className="k8s-table" aria-label={t.CHANGE_LOG} tabIndex={0} onKeyDown={vimTableKeys}>
+      <table className="k8s-table k8s-vim-rows" aria-label={t.CHANGE_LOG} tabIndex={0} onKeyDown={vimTableKeys}>
         <tbody>
           {listed.map((entry) => (
-            <tr key={entry.id}>
+            <tr key={entry.id} tabIndex={-1}>
               <td>{formatDateTime(entry.at)}</td>
               <td>{entry.summary}</td>
               <td>{entry.ok ? t.CHANGE_SUCCESS : `${t.CHANGE_FAILED}: ${entry.error ?? ""}`}{entry.closedAt ? ` · ${t.SHELL_CLOSED_AT(formatDateTime(entry.closedAt))}` : ""}</td>

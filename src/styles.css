@@ -2027,3 +2027,6 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .k8s-plugin-item:hover, .k8s-plugin-item:focus-visible { background: var(--accent); color: var(--on-accent); outline: none; }
 .k8s-plugin-item kbd { font-size: 11px; opacity: .8; }
 .k8s-plugin-command { margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--terminal-bg); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; font-size: 12px; }
+
+/* 선택하지 않는 EKS 표의 키보드 포커스 */
+.k8s-vim-rows tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
