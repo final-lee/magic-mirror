@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { formatDateTime } from "../iam/format";
+import { findFor, pressFindKey } from "../test/find";
 import { renderWithClient } from "../test/utils";
 import { pgApi } from "./api";
 import { pgTarget, sampleSessions } from "./fixtures";
@@ -324,5 +325,41 @@ describe("끊기", () => {
     await loaded();
     expect(screen.queryByRole("button", { name: "끊기" })).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "조치" })).not.toBeInTheDocument();
+  });
+});
+
+describe("⌘F find line", () => {
+  test("nothing before ⌘F; ⌘F filters only the session table; Esc clears and closes", async () => {
+    setup();
+    await loaded();
+    expect(screen.queryByRole("search")).toBeNull();
+    expect(bodyRows()).toHaveLength(5);
+    const input = findFor("dbeaver");
+    expect(input).toHaveFocus();
+    expect(bodyRows()).toHaveLength(1);
+    expect(within(bodyRows()[0]).getByText("alice")).toBeInTheDocument();
+    // 역할 선택은 그대로다
+    expect(roleFilter()).toHaveValue("");
+    findFor("zzzz");
+    expect(screen.getByText("조건에 맞는 세션이 없어요")).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("search")).toBeNull();
+    expect(bodyRows()).toHaveLength(5);
+  });
+
+  test("works together with the role filter", async () => {
+    setup();
+    await loaded();
+    fireEvent.change(roleFilter(), { target: { value: "iam_admin" } });
+    expect(bodyRows()).toHaveLength(2);
+    findFor("analytics");
+    expect(bodyRows()).toHaveLength(1);
+  });
+
+  test("with no session table there is nothing to find in", async () => {
+    m.sessions.mockResolvedValue([]);
+    setup();
+    await screen.findByText("세션이 없어요");
+    expect(pressFindKey()).toBe(false);
   });
 });

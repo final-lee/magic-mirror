@@ -1,8 +1,10 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { desktop } from "../api/desktop";
+import { findFor, pressFindKey } from "../test/find";
 import { renderWithClient } from "../test/utils";
 import { iamApi } from "./api";
 import {
+  alice,
   bob,
   deactivateBobKey,
   finding,
@@ -314,5 +316,52 @@ describe("view state", () => {
     setup({ initialKind: "not-a-check" });
     await cardGroup();
     expect(card("rootNoMfa")).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+describe("⌘F find line", () => {
+  const two = () =>
+    sampleFindings({
+      groups: findingGroups({
+        consoleNoMfa: [finding(bob.arn, "bob", "콘솔 비밀번호를 쓰는데 MFA가 없어요"), finding(alice.arn, "alice", "콘솔 비밀번호를 쓰는데 MFA가 없어요, 꼭 켜세요")],
+      }),
+    });
+
+  test("nothing before ⌘F; ⌘F filters only the target table; Esc clears and closes", async () => {
+    m.findings.mockResolvedValue(two());
+    setup();
+    await cardGroup();
+    expect(screen.queryByRole("search")).toBeNull();
+    expect(rows()).toHaveLength(2);
+    const input = findFor("alice");
+    expect(input).toHaveFocus();
+    expect(rows()).toHaveLength(1);
+    expect(within(rows()[0]).getByText("alice")).toBeInTheDocument();
+    // 카드는 그대로다(찾기는 대상 표만 거른다)
+    expect(card("consoleNoMfa")).toHaveTextContent("2");
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("search")).toBeNull();
+    expect(rows()).toHaveLength(2);
+  });
+
+  test("says so when nothing matches", async () => {
+    m.findings.mockResolvedValue(two());
+    setup();
+    await cardGroup();
+    findFor("zzzz");
+    expect(screen.getByText("조건에 맞는 항목이 없어요")).toBeInTheDocument();
+  });
+
+  test("a hidden findings view does not take ⌘F", async () => {
+    m.findings.mockResolvedValue(two());
+    renderWithClient(
+      <div hidden>
+        <Findings profile="prod" overview={sampleOverview()} onOpen={vi.fn()} onFix={vi.fn()} />
+      </div>,
+    );
+    await act(async () => {});
+    await waitFor(() => expect(m.findings).toHaveBeenCalled());
+    await act(async () => {});
+    expect(pressFindKey()).toBe(false);
   });
 });

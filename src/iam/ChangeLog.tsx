@@ -1,7 +1,9 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { errorMessage } from "../api/errors";
 import { ErrorState } from "../components/ErrorState";
+import { ListFind, useListFind } from "../components/ListFind";
 import { arrange, batchKey, usePrepare } from "../lib/changeLog";
+import { fuzzyKeep } from "../lib/fuzzy";
 import { iamApi } from "./api";
 import { formatDateTime } from "./format";
 import { useChangeLog } from "./queries";
@@ -30,6 +32,15 @@ export function ChangeLog({ profile, accountId, onStart, onStartBatch }: Props) 
   const { busy, errors, prepare } = usePrepare();
   const entries = q.data;
   const lines = useMemo(() => arrange(entries ?? []), [entries]);
+  // ⌘F: 이 변경 기록 안에서만 찾는다. 평소에는 찾기 줄이 없다. 묶음 머리는 맞는 기록이 하나라도 있으면 남는다
+  const box = useRef<HTMLElement>(null);
+  const find = useListFind(box, { enabled: lines.length > 0 });
+  const found = useMemo(() => {
+    const hit = new Set(
+      fuzzyKeep(entries ?? [], find.query, (e) => [e.summary, e.error, e.profile, e.accountId, formatDateTime(e.at), e.ok ? "성공" : "실패"]).map((e) => e.id),
+    );
+    return lines.filter((line) => (line.kind === "batch" ? line.entries.some((e) => hit.has(e.id)) : hit.has(line.entry.id)));
+  }, [entries, lines, find.query]);
   /** 그 자리에서 되돌리기 준비가 실패한 이유. 없으면 빈 글이라 아무것도 그리지 않는다 */
   const failure = (key: string) => (key in errors ? errorMessage(errors[key]) : "");
 
@@ -54,8 +65,9 @@ export function ChangeLog({ profile, accountId, onStart, onStartBatch }: Props) 
   }
 
   return (
-    <section className="center iam-log">
+    <section className="center iam-log" ref={box}>
       {q.isError && <ErrorState compact error={q.error} profile={profile} onRetry={() => void q.refetch()} />}
+      <ListFind find={find} count={found.filter((line) => line.kind === "entry").length} />
       {entries.length === 0 ? (
         <div className="empty small">변경 기록이 없어요</div>
       ) : (
@@ -71,7 +83,7 @@ export function ChangeLog({ profile, accountId, onStart, onStartBatch }: Props) 
               </tr>
             </thead>
             <tbody>
-              {lines.map((line) => {
+              {found.map((line) => {
                 if (line.kind === "batch") {
                   const key = batchKey(line.batchId);
                   return (
@@ -112,6 +124,7 @@ export function ChangeLog({ profile, accountId, onStart, onStartBatch }: Props) 
               })}
             </tbody>
           </table>
+          {found.length === 0 && <div className="empty small">조건에 맞는 기록이 없어요</div>}
         </div>
       )}
     </section>
