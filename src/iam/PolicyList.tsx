@@ -1,3 +1,5 @@
+import { useRef } from "react";
+import { ListFind, useListFind } from "../components/ListFind";
 import { fuzzyFilter } from "../lib/fuzzy";
 import { BadgeList } from "./Badges";
 import { formatDay } from "./format";
@@ -27,7 +29,6 @@ export function filterPolicies(items: PolicySummary[], filter: string): PolicySu
 
 interface Props {
   items: PolicySummary[];
-  filter: string;
   selectedId: string | null;
   onSelect: (id: string) => void;
   /** 선택을 푼다(고른 행을 다시 누르거나 빈 곳) */
@@ -35,19 +36,24 @@ interface Props {
   onOpen: (id: string) => void;
 }
 
-export function PolicyList({ items, filter, selectedId, onSelect, onClear, onOpen }: Props) {
+export function PolicyList({ items, selectedId, onSelect, onClear, onOpen }: Props) {
+  const box = useRef<HTMLDivElement>(null);
+  const find = useListFind(box);
   return (
-    <ListTable
-      label="정책 목록"
-      rows={filterPolicies(items, filter)}
-      ranked={filter.trim() !== ""}
-      columns={COLUMNS}
-      rowKey={(p) => p.id}
-      selectedId={selectedId}
-      onSelect={onSelect}
-      onClear={onClear}
-      onOpen={onOpen}
-      empty={items.length === 0 ? "정책이 없어요" : "조건에 맞는 정책이 없어요"}
-    />
+    <div className="find-host" ref={box}>
+      <ListFind find={find} />
+      <ListTable
+        label="정책 목록"
+        rows={filterPolicies(items, find.query)}
+        ranked={find.query.trim() !== ""}
+        columns={COLUMNS}
+        rowKey={(p) => p.id}
+        selectedId={selectedId}
+        onSelect={onSelect}
+        onClear={onClear}
+        onOpen={onOpen}
+        empty={items.length === 0 ? "정책이 없어요" : "조건에 맞는 정책이 없어요"}
+      />
+    </div>
   );
 }

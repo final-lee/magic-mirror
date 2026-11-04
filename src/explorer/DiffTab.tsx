@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import { errorMessage } from "../api/errors";
 import { ErrorState } from "../components/ErrorState";
+import { shortcutTitle } from "../keymap/keybindings";
+import { useCommand } from "../keymap/registry";
 import { formatBytes, formatDate } from "../lib/format";
 import { explorerApi } from "./api";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -13,7 +15,6 @@ interface Props {
   profile: string | null;
   left: FileRef;
   right: FileRef;
-  active: boolean;
   transfers: Transfers;
 }
 
@@ -48,7 +49,7 @@ function RowView({ row }: { row: DiffRow }) {
   );
 }
 
-export function DiffTab({ profile, left, right, active, transfers }: Props) {
+export function DiffTab({ profile, left, right, transfers }: Props) {
   const q = useQuery<DiffResult>({
     queryKey: ["diff", profile, refKey(left), refKey(right)],
     queryFn: () => explorerApi.diffFiles(profile!, left, right),
@@ -60,6 +61,7 @@ export function DiffTab({ profile, left, right, active, transfers }: Props) {
   const [current, setCurrent] = useState(-1);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{ message: string; request: TransferRequest } | null>(null);
+  const root = useRef<HTMLDivElement>(null);
   const rowRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const hunks = q.data?.hunks ?? [];
 
@@ -69,19 +71,9 @@ export function DiffTab({ profile, left, right, active, transfers }: Props) {
     setCurrent(next);
     rowRefs.current.get(hunks[next])?.scrollIntoView?.({ block: "center" });
   };
-  const goRef = useRef(go);
-  goRef.current = go;
-
-  useEffect(() => {
-    if (!active) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "F7") return;
-      e.preventDefault();
-      goRef.current(e.shiftKey ? -1 : 1);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [active]);
+  // F7 / ⇧F7: 보이는 비교 탭(root)에서만 다음·이전 차이로 간다
+  useCommand("diff.next", () => go(1), { host: root });
+  useCommand("diff.prev", () => go(-1), { host: root });
 
   const localRef = left.source === "local" ? left : right.source === "local" ? right : null;
   const s3Ref = left.source === "s3" ? left : right.source === "s3" ? right : null;
@@ -109,17 +101,17 @@ export function DiffTab({ profile, left, right, active, transfers }: Props) {
   const sameText = d?.mode === "text" && d.stats.added + d.stats.removed + d.stats.changed === 0;
 
   return (
-    <div className="diff">
+    <div className="diff" ref={root}>
       <div className="diff-head">
         {d?.mode === "text" && (
           <span className="stats">
             +{d.stats.added} −{d.stats.removed} ~{d.stats.changed}
           </span>
         )}
-        <button className="btn small" disabled={hunks.length === 0} onClick={() => go(-1)}>
+        <button className="btn small" title={shortcutTitle("이전 차이", "diff.prev")} disabled={hunks.length === 0} onClick={() => go(-1)}>
           ▲ 이전
         </button>
-        <button className="btn small" disabled={hunks.length === 0} onClick={() => go(1)}>
+        <button className="btn small" title={shortcutTitle("다음 차이", "diff.next")} disabled={hunks.length === 0} onClick={() => go(1)}>
           ▼ 다음
         </button>
         <span className="sp">

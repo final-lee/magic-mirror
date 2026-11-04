@@ -10,7 +10,6 @@ import type { SelectionState } from "./selection";
 interface Props {
   path: string;
   onPathChange: (path: string) => void;
-  filter: string;
   selection: SelectionState;
   onSelectionChange: (s: SelectionState) => void;
   focused: boolean;
@@ -19,7 +18,7 @@ interface Props {
   dropActive: boolean;
 }
 
-export function LocalPane({ path, onPathChange, filter, selection, onSelectionChange, focused, onFocus, onDragStart, dropActive }: Props) {
+export function LocalPane({ path, onPathChange, selection, onSelectionChange, focused, onFocus, onDragStart, dropActive }: Props) {
   const q = useLocalList(path);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(path);
@@ -80,13 +79,13 @@ export function LocalPane({ path, onPathChange, filter, selection, onSelectionCh
         <FileTable
           columns={S3_COLUMNS}
           rows={entries.map(localEntryToRow)}
-          filter={filter}
           selection={selection}
           onSelectionChange={onSelectionChange}
           onOpen={open}
           onBack={() => onPathChange(parentDir(path))}
           onDragStart={onDragStart}
           emptyText="빈 폴더예요"
+          focused={focused}
         />
       )}
     </section>

@@ -1,6 +1,7 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { DiffTab } from "./DiffTab";
 import { explorerApi } from "./api";
+import { dispatchKey } from "../keymap/registry";
 import { renderWithClient } from "../test/utils";
 import type { DiffResult, DiffRow } from "./types";
 
@@ -39,9 +40,15 @@ const textResult: DiffResult = {
   eolOnly: false,
 };
 
+/** 키 하나를 키맵 디스패처에 보낸다(창의 keydown과 같다) */
+const press = (init: KeyboardEventInit) =>
+  act(() => {
+    dispatchKey(new KeyboardEvent("keydown", { cancelable: true, ...init }));
+  });
+
 function setup(extra = {}) {
   const transfers = { items: [], enqueue: vi.fn(), retry: vi.fn(), clearFinished: vi.fn() };
-  const props = { profile: "prod", left, right, active: true, transfers, ...extra };
+  const props = { profile: "prod", left, right, transfers, ...extra };
   renderWithClient(<DiffTab {...props} />);
   return props;
 }
@@ -70,11 +77,25 @@ test("next/previous change scrolls to hunk rows, also with F7", async () => {
   await screen.findByText("2.4");
   fireEvent.click(screen.getByRole("button", { name: "▼ 다음" }));
   expect(screen.getByTestId("drow-1")).toHaveClass("current");
-  fireEvent.keyDown(window, { key: "F7" });
+  press({ key: "F7" });
   expect(screen.getByTestId("drow-3")).toHaveClass("current");
-  fireEvent.keyDown(window, { key: "F7", shiftKey: true });
+  press({ key: "F7", shiftKey: true });
   expect(screen.getByTestId("drow-1")).toHaveClass("current");
   expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+});
+
+test("a diff tab that is not showing ignores F7", async () => {
+  vi.mocked(explorerApi.diffFiles).mockResolvedValue(textResult);
+  const transfers = { items: [], enqueue: vi.fn(), retry: vi.fn(), clearFinished: vi.fn() };
+  renderWithClient(
+    <div hidden>
+      <DiffTab profile="prod" left={left} right={right} transfers={transfers} />
+    </div>,
+  );
+  await waitFor(() => expect(explorerApi.diffFiles).toHaveBeenCalled());
+  await act(async () => {});
+  press({ key: "F7" });
+  expect(screen.queryByTestId("drow-1")).not.toHaveClass("current");
 });
 
 test("identical files show a same banner", async () => {
