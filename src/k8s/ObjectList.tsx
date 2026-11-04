@@ -82,6 +82,7 @@ export function ObjectList({ kind, rows, status, showNamespace, selectedUid, onS
           onClear={onClear}
           onOpen={(uid) => pick(uid, onOpen ?? onSelect)}
           empty={rows.length === 0 ? LIST_EMPTY : LIST_NO_MATCH}
+          vimKeys
         />
       )}
     </div>

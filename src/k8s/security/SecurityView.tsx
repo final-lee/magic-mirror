@@ -114,6 +114,7 @@ export function SecurityView({ target, context, ssoProfile, live, setting, onSet
       onClear={() => setSelectedId(null)}
       onOpen={setSelectedId}
       empty={visible.length === 0 ? ALL_CLEAR : NO_MATCH}
+      vimKeys
     />
   );
   const toggleGroup = (id: CheckId) =>

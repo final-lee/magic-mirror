@@ -18,8 +18,11 @@ pub mod k8s;
 mod k8s_access_commands;
 mod k8s_commands;
 mod k8s_network_commands;
+mod k8s_describe_commands;
+mod k8s_xray_commands;
 mod k8s_helm_commands;
 mod k8s_security_commands;
+mod k8s_terminal_commands;
 mod model;
 mod mouse_nav;
 mod pg;
@@ -148,6 +151,7 @@ pub fn run() {
             k8s_commands::k8s_unwatch,
             k8s_commands::k8s_kinds,
             k8s_commands::k8s_get,
+            k8s_describe_commands::k8s_describe,
             k8s_commands::k8s_metrics,
             k8s_commands::k8s_overview,
             k8s_commands::k8s_secret_value,
@@ -161,6 +165,7 @@ pub fn run() {
             k8s_commands::k8s_shell_input,
             k8s_commands::k8s_shell_resize,
             k8s_commands::k8s_shell_close,
+            k8s_terminal_commands::k8s_terminal_open,
             k8s_commands::k8s_forward_open,
             k8s_commands::k8s_forward_list,
             k8s_commands::k8s_forward_close,
@@ -171,6 +176,7 @@ pub fn run() {
             k8s_commands::k8s_change_log,
             k8s_commands::k8s_undo,
             k8s_network_commands::k8s_network,
+            k8s_xray_commands::k8s_xray,
             k8s_security_commands::k8s_findings,
             k8s_helm_commands::k8s_helm_tool,
             k8s_helm_commands::k8s_helm_releases,

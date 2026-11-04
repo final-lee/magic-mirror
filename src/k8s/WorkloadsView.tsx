@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { K8sPlugin } from "../api/types";
 import { K8sError } from "./K8sError";
 import { KindTree } from "./KindTree";
 import { DETAIL_PCT, LaneResizer, type Lane } from "./lanes";
@@ -6,6 +7,8 @@ import { CATEGORIES, PODS, customCategories, sameKind, servedCategories } from "
 import { ObjectDetail } from "./ObjectDetail";
 import { ObjectList } from "./ObjectList";
 import { useK8sMetrics } from "./queries";
+import { KeyNote, useKeyNote } from "./nav/useKeyNote";
+import { useRowKeys } from "./nav/useRowKeys";
 import { kindKey } from "./targets";
 import { CAT_CUSTOM, ROLLOUT_PROGRESS, ROLLOUT_WAITING } from "./text";
 import type { K8sChange, K8sKind, K8sKindRef, K8sTarget, ObjectRef } from "./types";
@@ -16,6 +19,13 @@ import { historyKey } from "./usageHistory";
 export interface WorkloadsFocus {
   ref: ObjectRef;
   /** 같은 객체를 다시 열 때도 바뀌는 값 */
+  nonce: number;
+}
+
+/** `:deploy` 같은 이동 명령이 고른 종류 */
+export interface WorkloadsGoto {
+  kind: K8sKindRef;
+  /** 같은 종류로 다시 이동할 때도 바뀌는 값 */
   nonce: number;
 }
 
@@ -32,9 +42,16 @@ interface Props {
   kinds: K8sKind[];
   discoveryAvailable?: boolean;
   focus: WorkloadsFocus | null;
+  /** `:` 명령 줄이 종류를 골랐다. nonce가 바뀔 때 그 종류의 목록으로 간다 */
+  goto?: WorkloadsGoto | null;
+  /** 한 글자 키 0: 모든 네임스페이스로 */
+  onAllNamespaces?: () => void;
   onOpenIam?: (arn: string) => void;
   onChange?: (change: K8sChange) => void;
   appliedChange?: K8sChange | null;
+  /** 설정의 플러그인과 그 명령을 이 탭의 새 터미널에서 실행하는 함수. 둘 다 있어야 상세에 플러그인 메뉴가 생긴다 */
+  plugins?: K8sPlugin[];
+  onRunPlugin?: (command: string, title: string) => void;
   /** 목록 위에 붙이는 알림(종류 발견 실패 등). 종류 트리와 기본 종류 탐색은 그대로 쓴다. */
   banner?: ReactNode;
   /** 북마크 화면: 이 종류만 보이고 종류 트리는 숨긴다 */
@@ -50,8 +67,8 @@ interface Props {
 }
 
 /** 종류 트리 + 감시 목록 + 상세 스택 */
-export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live, visible = true, namespace, kinds, focus, onOpenIam, banner,
-  fixedKind, bookmarked, onToggleBookmark, lanes, onChange, appliedChange, discoveryAvailable = false }: Props) {
+export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live, visible = true, namespace, kinds, focus, goto, onAllNamespaces, onOpenIam, banner,
+  fixedKind, bookmarked, onToggleBookmark, lanes, onChange, appliedChange, discoveryAvailable = false, plugins, onRunPlugin }: Props) {
   const [picked, setKind] = useState<K8sKindRef>(PODS);
   const kind = fixedKind ?? picked;
   const [stack, setStack] = useState<ObjectRef[]>([]);
@@ -67,7 +84,25 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus?.nonce]);
 
+  // 이동한 종류의 목록이 처음 그려지면 커서를 그 목록에 둔다(바로 j·k로 움직일 수 있다)
+  const focusAfterGoto = useRef(false);
+  useEffect(() => {
+    if (!goto) return;
+    setKind(goto.kind);
+    setStack([]);
+    focusAfterGoto.current = true;
+    // nonce가 바뀔 때만 간다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goto?.nonce]);
+
   const watch = useK8sWatch(target, context, sessionEpoch, ssoProfile, kind, kind.namespaced ? namespace : null, live);
+  useEffect(() => {
+    if (!focusAfterGoto.current || watch.status === "loading") return;
+    const table = pane.current?.querySelector<HTMLElement>('.tbl[tabindex="0"]');
+    if (!table) return;
+    focusAfterGoto.current = false;
+    table.focus();
+  }, [watch.status, kind]);
   const custom = useMemo(() => customCategories(kinds), [kinds]);
   const categories = useMemo(() => {
     const builtin = discoveryAvailable ? servedCategories(kinds) : CATEGORIES;
@@ -105,6 +140,9 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
     onChange?.(change);
   };
 
+  const keyNote = useKeyNote();
+  useRowKeys({ pane, object: top, kind, namespace, onAllNamespaces, enabled: visible, onNote: keyNote.show });
+
   const pickKind = (k: K8sKindRef) => {
     setKind(k);
     setStack([]);
@@ -136,6 +174,7 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
           onClear={() => setStack([])}
           onOpen={(r) => setStack([{ kind, namespace: r.namespace, name: r.name }])}
         />
+        <KeyNote note={keyNote.note} onDismiss={keyNote.clear} />
         {top && <LaneResizer lane="detailPct" onResize={lanes.resize} onCommit={lanes.commit} style={{ right: `${detailPct}%` }} />}
         {top && (
           <ObjectDetail
@@ -156,6 +195,9 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
             rolloutProgress={progress}
             appliedChange={appliedChange}
             shellNamespace={namespace ?? undefined}
+            plugins={plugins}
+            onRunPlugin={onRunPlugin}
+            pluginHost={pane}
             widthPct={detailPct}
           />
         )}

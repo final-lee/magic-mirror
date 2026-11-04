@@ -338,3 +338,26 @@
 - [ ] Reports: Cron 레이블을 고르면 실행별 걸린 시간·CPU·메모리 막대가 보이고 막대를 누르면 그 Workflow가 열린다
 - [ ] Argo Events: Argo Events가 없는 `stg-eks`에서 Event Sources·Sensors·Event Flow가 "이 클러스터에 Argo Events가 없어요"를 보인다. Event Bindings는 빈 목록
 - [ ] User Info: 신원과 그룹이 보이고 [토큰 복사]는 클립보드에만 들어간다. Plugins는 context 연결에서 ExecutorPlugin ConfigMap을 보인다(없으면 빈 목록)
+
+## EKS describe
+- [ ] 로컬 kind에서 Deployment와 클러스터 범위 객체의 describe 탭이 같은 context의 `kubectl describe` 출력과 맞고, 다시 읽기와 객체 갱신이 동작한다.
+- [ ] kubectl이 없거나 권한이 없을 때 이유와 요약·조건·컨테이너·이벤트 대체 출력이 보인다. 밝은 테마와 어두운 테마에서 확인한다.
+## EKS: k9s식 탐색 (`:` 이동·한 글자 키)
+- [ ] EKS 탭에서 `:`를 누르면 탭 맨 위에 입력줄이 열린다. `dep`를 치면 deployments 후보가 뜨고 Tab으로 채워 Enter하면 워크로드 화면에서 Deployment 목록이 열린다(종류 트리에 선택 표시). `:po`·`:svc`·`:no`·`:cm`·`:sec`·`:ing`·`:crd`와 `:deployments.apps`도 열린다
+- [ ] `:events`·`:helm`·`:access`·`:security`·`:network`·`:forwards`·`:terminal`(처음이면 셸 하나를 띄움)·`:changes`·`:overview`가 그 메뉴로 간다. `:depoy`는 "비슷한 것: deploy…"를 보이고 이동하지 않는다
+- [ ] `:ns <이름>`이 위쪽 네임스페이스를 바꾸고, `:ns ` 뒤 후보는 이 클러스터의 네임스페이스다. `:ns all`은 모두, 없는 이름은 거절한다. Esc는 닫고 커서를 돌려준다
+- [ ] 다시 `:`를 누르면 최근 명령이 보이고 ↑↓로 오간다. 앱을 껐다 켜도 남는다
+- [ ] 목록에 커서를 두고 j·k·g·G로 행을 옮기고 `/`가 찾기 줄을 연다. 입력칸(찾기 줄, 복제본 수 칸)에서는 글자가 그대로 입력된다. 셸 터미널 안에서는 어떤 키도 가로채지 않는다
+- [ ] Pod에서 y(YAML)·l(로그)·s(셸 탭, 방식 "셸")·a(셸 탭, 방식 attach, 세션은 확인을 거쳐 열림)·⇧F(포트포워딩 대상 포트로 커서)·e(YAML 편집). Deployment에서 s는 복제본 칸으로 가서 숫자 + Enter가 scale 미리보기, r은 restart 미리보기, ⌃D는 삭제 미리보기. 어느 것도 미리보기 없이 적용되지 않는다
+- [ ] 노드에서 c·u가 cordon·uncordon 미리보기를 연다(이미 그 상태면 안내만). 해당 없는 종류(ConfigMap에서 l, Pod에서 r, Deployment에서 a 등)와 행을 고르지 않았을 때는 목록 아래에 이유가 4초쯤 보인다. 권한이 없는 변경은 단추의 이유가 그대로 보인다
+- [ ] `0`이 모든 네임스페이스로 바꾼다(노드처럼 네임스페이스 없는 종류에서는 안내). 다른 탭이 앞에 있을 때는 어떤 키도 EKS 목록에 닿지 않는다. ⇧⌘P·⌘/에 이 키들이 EKS 범위로 보인다
+## EKS 관계 트리 (로컬 kind 또는 테스트 클러스터에서 확인한다)
+- [ ] Deployment 상세의 "관계" 탭이 소유(Deployment → ReplicaSet → Pod), 참조(ServiceAccount·ConfigMap·Secret·PVC·Node), 선택(Service·PDB·NetworkPolicy), 대상(HPA) 묶음으로 보이고, 노드를 누르면 그 객체 상세가 열린다. 밝은 테마와 어두운 테마에서 확인한다
+- [ ] Pod에서는 가장 위 소유자(Deployment)까지 올라가고, ConfigMap·Node·PVC에서는 그것을 쓰는 객체가 보인다(Pod와 ReplicaSet은 Deployment로 합쳐진다)
+- [ ] 없는 ConfigMap·Secret을 가리키면 "없음" 배지가 뜨고 눌리지 않는다. 권한이 없는 종류(예: Service 목록)는 안내 한 줄만 뜨고 나머지 관계는 그대로 보인다
+- [ ] Pod 수가 많은 Deployment(50개 넘게)에서 "일부만 보여요" 안내가 뜬다. Pod 상태가 바뀌면 관계 탭도 따라 바뀌고, [다시 읽기]가 동작한다
+
+## EKS 터미널·플러그인 (시험용 클러스터만)
+- [ ] 왼쪽 메뉴 [터미널]: 셸이 열리고 머리줄에 고정한 context가 보인다. `kubectl config get-contexts`에 그 context 하나만 나오고 `echo $KUBECONFIG`가 임시 파일이다. [새 터미널]로 탭을 더하고 ⌘⎋로 빠져나온다
+- [ ] 다른 화면을 봤다 와도 터미널이 그대로이고, 탭(클러스터 탭)을 닫으면 셸이 끝나고 `ls $TMPDIR/mm-kubeconfig-*`에 파일이 남지 않는다
+- [ ] 설정에서 플러그인을 추가(`kubectl describe $KIND $NAME`)하고 객체 상세 [플러그인] 메뉴에서 실행: 확장한 명령이 확인 창에 그대로 보이고, [실행] 뒤 새 터미널 탭에서 돈다. 변경 기록에 터미널 열기가 한 줄 남는다

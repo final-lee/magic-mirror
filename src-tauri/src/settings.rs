@@ -30,6 +30,38 @@ pub struct K8sSecurityChecks {
     pub include_system: bool,
 }
 
+/// 사용자가 정의한 로컬 kubectl 플러그인.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct K8sPlugin {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub kinds: Vec<K8sPluginKind>,
+    pub command: String,
+    #[serde(default = "plugin_confirm_default")]
+    pub confirm: bool,
+    #[serde(default)]
+    pub key: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum K8sPluginKind {
+    All(K8sPluginWildcard),
+    Kind(KindRef),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum K8sPluginWildcard {
+    #[serde(rename = "*")]
+    All,
+}
+
+fn plugin_confirm_default() -> bool {
+    true
+}
+
 /// ArgoCD API 서버의 표시 이름과 주소.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ArgocdServer {
@@ -104,6 +136,7 @@ pub struct Settings {
     pub k8s_bookmarks: Vec<KindRef>,
     pub k8s_lane_widths: K8sLaneWidths,
     pub k8s_security_checks: K8sSecurityChecks,
+    pub k8s_plugins: Vec<K8sPlugin>,
     /// ArgoCD 서버 목록. 토큰은 설정이 아니라 키체인에 저장한다.
     pub argocd_servers: Vec<ArgocdServer>,
     /// ArgoCD 서버 주소 → 그 서버 목록의 필터·묶기 상태
@@ -132,6 +165,7 @@ struct RawSettings {
     k8s_bookmarks: Vec<KindRef>,
     k8s_lane_widths: K8sLaneWidths,
     k8s_security_checks: K8sSecurityChecks,
+    k8s_plugins: Vec<K8sPlugin>,
     argocd_servers: Vec<ArgocdServer>,
     argocd_views: BTreeMap<String, ArgocdView>,
     argo_workflows_servers: Vec<ArgoWorkflowsServer>,
@@ -184,6 +218,7 @@ pub fn load(path: &Path, all_services: &[&str]) -> Settings {
                     k8s_bookmarks: raw.k8s_bookmarks,
                     k8s_lane_widths: raw.k8s_lane_widths,
                     k8s_security_checks: raw.k8s_security_checks,
+                    k8s_plugins: raw.k8s_plugins,
                     argocd_servers: raw.argocd_servers,
                     argocd_views: raw.argocd_views,
                     argo_workflows_servers: raw.argo_workflows_servers,
@@ -218,6 +253,18 @@ mod tests {
         assert_eq!(s.enabled_services, vec!["ec2", "s3"]);
         assert!(s.favorites.is_empty());
         assert_eq!(s.last_profile, None);
+    }
+
+    #[test]
+    fn k8s_plugins_roundtrip_and_default_to_confirmation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, r#"{"k8sPlugins":[{"name":"get","kinds":["*"],"command":"kubectl get $KIND $NAME"}]}"#).unwrap();
+        let settings = load(&path, &[]);
+        assert!(settings.k8s_plugins[0].confirm);
+        save(&path, &settings).unwrap();
+        assert_eq!(load(&path, &[]).k8s_plugins, settings.k8s_plugins);
+        assert!(load_text("{}").k8s_plugins.is_empty());
     }
 
     fn load_text(text: &str) -> Settings {

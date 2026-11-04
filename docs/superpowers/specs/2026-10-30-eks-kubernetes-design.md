@@ -44,6 +44,28 @@
 
 우선순위(매일 쓰는 빈도): ① 셸·port-forward·restart·scale·삭제 ② Pod CPU/메모리 열 ③ 트리에 내장 종류 추가 ④ 로그 K3 나머지 ⑤ Helm 읽기 전용.
 
+### 탐색
+- 객체 상세의 describe 탭은 세션에서 고른 kubeconfig와 context로 로컬 `kubectl describe`만 실행한다. 로그인 PATH에서 실행 파일을 찾고 다른 클러스터로 새지 않도록 환경을 정리하며, 30초와 출력 4 MiB로 제한한다. 프로세스 실행 허용 목록에는 이 전용 러너만 추가하고 하위 명령을 외부에서 받지 않는다.
+- 실행하지 못하면 이유와 앱이 이미 읽은 요약·조건·컨테이너·이벤트를 대신 보인다. 수동 새로고침과 resourceVersion 변경 시 다시 읽기를 지원한다.
+- Secret은 서비스 계정 토큰이나 last-applied 값이 노출될 수 있어 kubectl 결과를 쓰지 않는다. 앱에서 가린 요약과 키·크기만 보여주고 이유를 표시한다.
+- 관계 트리(xray, 2026-11-04): 객체 상세의 "관계" 탭. 백엔드 `k8s/xray/`(`pool` 읽어 온 객체 더미, `refs` 본문에서 가리키는 곳 읽기, `graph` 트리 계산, `read` 읽기)와 읽기 전용 명령 `k8s_xray`, 프론트 `src/k8s/xray/`. 읽을 수 있는 목록만으로 계산한다: 네임스페이스 객체는 그 네임스페이스의 Pod·ReplicaSet·Deployment·StatefulSet·DaemonSet·Job·CronJob·Service·EndpointSlice·Ingress·NetworkPolicy·HPA·PDB·PVC와 메타데이터만 읽은 ConfigMap·Secret·ServiceAccount(Secret 값은 받지 않는다), 클러스터 범위 객체(Node·PV·StorageClass·PriorityClass)는 모든 네임스페이스의 Pod·워크로드·PVC·PV를 읽는다(Node는 `spec.nodeName`으로 좁힌다). Pod가 가리키는 Node·PV·StorageClass·PriorityClass는 이름으로 읽고(참조를 따라 최대 4단계), 읽은 결과가 없으면 그 종류를 끝까지 읽었을 때만 "없음"으로 보인다.
+  - 네 묶음(노드마다 `edge`): **소유**(소유자 사슬을 위로, 자식을 아래로: Deployment → ReplicaSet → Pod, CronJob → Job → Pod), **참조**(Pod 사양·템플릿의 ServiceAccount·볼륨·환경 변수·imagePullSecrets·PriorityClass·Node, PVC → PV → StorageClass, Ingress TLS Secret, 그리고 거꾸로 ConfigMap·Secret·PVC·PV·StorageClass·Node 등을 쓰는 객체: 소유자도 쓰면 가장 위 소유자만), **선택**(Service·PDB·NetworkPolicy가 Pod 레이블을 고름: `matchLabels`·`matchExpressions` 모두, Service 셀렉터는 라벨 맵, 빈 셀렉터는 Service는 아무것도, PDB·NetworkPolicy는 모두 고른다. 선택자를 가진 객체에서는 고른 Pod), **대상**(Ingress → Service, HPA `scaleTargetRef` ↔ 워크로드, EndpointSlice ↔ Service·Pod, Service 아래 Ingress·EndpointSlice).
+  - 노드마다 종류 참조(group·version·kind), 네임스페이스, 이름, 상태 글(목록 줄과 같은 값), 이상 표시(목록과 같은 `problems`), 관계 모습(`roles`: 볼륨·환경 변수·사용 중 …), `presence`(찾음·없음·알 수 없음). 노드를 누르면 소유자·자식 링크와 같은 길(`onOpen`)로 그 객체 상세가 열린다.
+  - 한도: 트리 전체 300노드, 한 부모 아래 50개(참조는 종류마다 50개). 넘으면 응답의 `truncated`가 참이고 화면이 알린다. 목록이 쪽 수 한도(6쪽)에서 멈춘 종류는 `partial`로 알리고 "없음"으로 단정하지 않는다. 권한이 없거나(403) 읽지 못한 종류는 실패가 아니라 `gaps`(종류와 오류)로 돌려주고 나머지 관계는 그대로 보인다. 객체 자신을 읽지 못할 때만 명령이 실패한다.
+  - 탭은 관계를 계산하는 내장 종류(Pod·워크로드·Service·EndpointSlice·Ingress·NetworkPolicy·HPA·PDB·ConfigMap·Secret·ServiceAccount·PVC·PV·StorageClass·Node·PriorityClass)와, 상세가 이미 소유자나 자식을 가진 객체(사용자 정의 리소스 등)에 있다. 객체의 resourceVersion이 바뀌면 다시 읽고(목록 밖 객체는 30초), [다시 읽기] 단추가 있다.
+- 플러그인 설정은 `k8sPlugins`에 이름·설명·종류(`*` 또는 kind 참조)·명령·확인 여부·선택 단축키를 저장한다. 예전 설정은 빈 목록이고, 확인 여부를 생략한 항목은 확인을 기본으로 한다.
+- 설정 화면에서 추가·편집·삭제한다. 단축키는 한 글자 또는 수식 키와 한 글자로 적고 고정 키 표 및 다른 플러그인과의 충돌을 거절한다.
+- 명령의 `$NAMESPACE`, `$NAME`, `$CONTEXT`, `$KIND`, `$CONTAINER` 값은 셸 단일 인자로 인용한다. kubeconfig 축소는 선택한 context와 그 cluster·user만 남기며 선택한 context를 현재 context로 설정한다.
+- 안전하게 치환할 수 있도록 변수는 독립된 단어 또는 일반 따옴표 안에만 둔다. 명령 치환, 백틱, 중괄호 변수, here 문서 등은 저장할 때 거절한다. 따옴표 안의 변수도 따옴표를 잠시 닫아 단일 인자로 인용한다.
+- 지금 된 것(2026-11-04, 앱 안 터미널·플러그인 실행):
+  - PTY 크레이트 `portable-pty`(0.9): 표준 `Command`는 제어 터미널·창 크기(SIGWINCH)를 다루지 못해 셸이 대화형으로 동작하지 않는다. 쓰는 것은 PTY 열기·크기 변경·자식 종료뿐이고, `CommandBuilder::new`·`spawn_command`는 `k8s/terminal/pty.rs`에만 있게 hygiene 허용 목록에 올렸다(그 셸에서 `kubectl`이 클러스터를 바꿀 수 있어서 kube 쓰기 호출과 같은 취급).
+  - 고정: 탭이 연결한 context 하나만 남긴 임시 kubeconfig(`mm-kubeconfig-*.yaml`, 0600, 현재 context 설정)를 `KUBECONFIG`로 주고, 부모의 `KUBECONFIG`·`KUBE*`·`HELM_KUBE*`는 치운다. kubeconfig의 exec 플러그인이 쓰는 AWS 프로필이 있으면 `AWS_PROFILE`로 준다. PATH는 로그인 셸 PATH. 셸은 `$SHELL`(없으면 `/bin/zsh`)을 `-l`로 연다. 한계: 사용자의 rc 파일이 `KUBECONFIG`를 다시 내보내면 고정이 풀린다(플러그인 명령은 `-lc`라 대화형 rc를 읽지 않는다).
+  - 수명: 세션은 셸·attach와 같은 `Shells`가 쥔다(입력·크기·닫기는 `k8s_shell_*` 그대로, 열기는 `k8s_terminal_open`). 닫기·탭 닫기(`k8s_close`)·앱 끄기에서 프로세스를 죽이고 임시 파일을 지운다(`cleanup`을 `settle`이 기다린다). 열고 닫은 시각은 변경 기록에 `terminal` 한 줄(대상 이름이 context, 플러그인이면 명령)로 남고 입력·출력은 남기지 않는다.
+  - 화면: 왼쪽 메뉴 "터미널"(명령 `k8s.terminal`), 머리줄에 고정한 context, 안쪽 탭으로 여러 터미널, 다른 화면을 봐도 유지(숨기기만), xterm 설정은 `PodTerminal`과 공유(`terminal/xterm.ts`), ⌘⎋로 빠져나온다.
+  - 플러그인 실행: 상세 도구 줄 "플러그인" 메뉴(그 종류의 플러그인만, 없으면 이유와 함께 꺼짐). 고르면 확장한 명령을 그대로 보이는 확인 창(확인을 끈 플러그인은 바로)을 거쳐 새 터미널 탭에서 실행한다. 명령은 키 입력으로 흉내 내지 않고 `$SHELL -lc <명령>`의 인자 하나로 넘긴다(입력 경합·줄 편집기 해석 없이 확인한 문자열 그대로, 종료 코드를 알 수 있다). 끝난 플러그인 탭은 다시 열지 않고 닫는다. `$KIND`는 `복수형.그룹`, `$CONTAINER`는 Pod의 첫 컨테이너(워크로드는 템플릿의 첫 컨테이너). 플러그인 키는 `useExtraBindings`로 표 뒤에 더하고 목록·상세 상자(host)에서만, 입력칸·터미널·대화상자 밖에서만 받는다.
+  - 시험: Rust 환경·argv·임시 파일·수명(대상 닫기, 종료, 기록 실패)·실제 PTY, kind 시험 `k8s::live_tests::terminal`, 프런트 탭·플러그인 확인·키·K8sTab 연결.
+
+
 ## 대상과 탭
 - **EKS → Clusters** 행을 더블클릭하면 `☸️ <클러스터 이름>` 탭이 열린다. 이것이 유일한 진입점이고, 사이드바에 별도 메뉴(클러스터 선택 화면)는 두지 않는다.
 - 대상은 `{ profile, region, cluster }`. 같은 대상의 탭은 하나만 열린다.
@@ -338,13 +360,30 @@
 - **시험**: 순수 부분은 단위 시험(릴리스 해석·계산된 값·압축 폭탄, manifest 나누기·객체별 차이·Secret 가리기, 명령 인자·차트 위치 검증, helm 찾기·버전·환경 변수·시간 제한·오류 분류, 차트 되살리기와 경로 탈출 거절, 계획·재확인·values 비기록, 가짜 API 서버로 목록·ConfigMap 드라이버·권한·쪽 넘기기·캐시). 화면은 `src/k8s/helm/*.test.tsx`(목록·거르기·문제·상세·도구 모음 권한·helm 없음·리소스 열기·이력·변경 틀 미리보기·이름 입력·기록 되돌리기). kind 실제 시험은 `k8s::live_tests::helm`(`scripts/k8s-live/helm.sh`가 로컬 차트로 `flow`(리비전 둘)·`broken`(failed)·`cmrel`(ConfigMap 드라이버)을 helm으로 설치하고 로컬 차트 저장소를 띄운다): 목록·상세·이력을 helm 출력과 대조, 업그레이드(미리보기 뒤 외부 변경이면 낡음) → 기록(values 없음) → 되돌리기 → 롤백 → 삭제(이름 확인)를 helm·kubectl로 확인, 이력 유지 삭제와 롤백 복구, 로컬 경로·저장소 ref 설치와 저장소 차트로 업그레이드.
 - 남은 것·알려진 한계: Chart.yaml의 의존성 조건(`condition`·`tags`)은 저장된 서브차트를 그대로 쓰므로 values 편집으로 켜고 끌 수 없다(다른 차트로 업그레이드하면 된다). 로컬 경로 설치에서 의존 차트를 받지 않은 차트는 helm이 거절한 이유가 미리보기 오류로 보인다. 앱이 직접 `--wait`·`--atomic`은 쓰지 않는다(적용은 helm이 리소스를 제출하면 끝나고, 롤아웃 진행은 워크로드 상세에서 본다).
 
+### 탐색: `:` 이동과 한 글자 키 (k9s식, 2026-11-04)
+키보드만으로 종류·메뉴를 오가고 고른 행에 동작을 거는 부분이다. 모든 키는 키맵 레지스트리를 지나고(`keybindings.ts` 표 + `useCommand`, 설계: `2026-11-04-keymap-design.md`), 화면 코드는 `src/k8s/nav/`에 있다.
+
+- **종류 별칭(`k8s_kinds`)**: API 서버가 알려 주는 `shortNames`(`po`, `deploy`, `svc`)와 단수 이름(`singularName`)을 `K8sKind`에 더했다(`shortNames: string[]`, `singularName: string`). 집계 discovery(`/api`, `/apis`, 1.26+)의 `shortNames`·`singularResource`를 그룹마다 권장(맨 앞) 버전에서 읽고(`read/kinds.rs::discover_names`), kube의 `Discovery`가 버리는 값이라 같은 두 요청을 따로 한 번 더 보낸다(종류 읽기와 `join`). 별칭은 있으면 좋은 정보라서 이 요청이 실패·시간 초과여도 종류 목록은 그대로 나가고 별칭만 빈다.
+- **이름 풀이(`nav/aliases.ts`)**: `:` 뒤 이름 하나를 대소문자 없이 복수형·단수형·Kind·짧은 이름·그룹을 붙인 이름(`deployments.apps`, `widgets.v1.acme.io`)과 견준다. 서버가 주지 않는 k9s 별칭(`sec`, `dp`, `ro`·`rb`·`cr`·`crb` 등)만 표(`EXTRA`)로 더하고, 종류 목록을 아직 못 읽었으면 내장 종류가 이 표로 열린다. 같은 이름이 여럿이면 코어 그룹 > 내장 그룹 > 사용자 정의 순으로 이기고, 같은 우선순위에서 둘 이상(서로 다른 사용자 정의 그룹의 `wd`)이면 고르지 않고 어느 그룹들인지 보이며 "복수형.그룹으로 적어요"라고 한다. 모르는 이름은 퍼지(없으면 편집 거리 2 이내)로 가까운 이름을 곁들여 입력줄 아래 오류로 보인다.
+- **`:` 명령 줄(`k8s.goto`, `nav/GotoBar.tsx`)**: EKS 탭이 연결돼 있고 입력칸·터미널·대화상자에 커서가 없을 때 `:`로 탭 맨 위에 한 줄 입력줄이 열린다. 치는 대로 메뉴·종류 후보(퍼지, 최대 8개, 이름이 같은 메뉴와 종류는 메뉴 하나)와 대표 이름·그룹·다른 이름을 보이고, `Tab`·`⇧Tab`이 후보를 입력줄에 채워 돌고, `Enter`가 이동하고, `Esc`·✕·커서가 줄 밖으로 가면 닫는다(Esc는 원래 있던 자리로, 이동했으면 새 목록으로 커서를 돌린다). 정확히 맞는 이름만 이동하고 `de` 같은 일부는 짐작해서 가지 않는다(Tab으로 채워야 한다).
+  - 종류: 메뉴를 워크로드(All)로 바꾸고 그 종류의 목록을 연다(왼쪽 종류 트리에서 선택됨, 열려 있던 상세는 닫힘). 북마크 화면에서도 같은 길이다. 메뉴 항목을 직접 누르면 `:`가 고른 종류는 잊고 기본 종류(Pod)부터 시작한다.
+  - 메뉴: `overview`·`workloads`(all)·`events`(ev)·`network`(net)·`forwards`(pf)·`helm`·`permissions`(내 권한)·`access`·`security`·`changes`. 종류 별칭과 겹치는 이름(`events`)은 메뉴가 이긴다. ArgoCD·Argo Workflows는 EKS 탭 화면이 아니라서 넣지 않았다.
+  - 네임스페이스: `ns <이름>`(`namespace <이름>`)은 위쪽 네임스페이스 선택을 바꾸고(후보는 네임스페이스 watch가 아는 이름, `ns all`은 모든 네임스페이스), 없는 이름은 가까운 이름과 함께 거절한다. 인자 없는 `:ns`는 Namespace 종류 목록으로 간다(`ns`가 그 종류의 짧은 이름).
+  - 기록: 실행에 성공한 명령은 브라우저 저장소(`mm.k8s.goto-history`, 최근 20개, 같은 명령은 하나)에 남고, 빈 입력줄에 "최근 명령"으로 보이며 `↑`·`↓`이 기록을 오간다(`↓`로 치던 글자까지 돌아온다). 실패한 명령은 남기지 않는다.
+- **한 글자 키**(표: 키맵 설계 "EKS 목록의 k9s식 한 글자 키"): 목록 상자(`.k8s-list-pane`) 안에 커서가 있고 입력칸·터미널·대화상자가 아닐 때만 레지스트리가 보낸다(`when: k8sListFocus && !inputFocus && !terminalFocus && !dialogOpen`). 숨은 탭은 host 규칙으로 받지 않는다. 키는 상세 도구 줄의 **단추를 누르는 것**으로 일한다(`nav/rowKeys.ts`: 상세 안의 `data-tab`·`data-k8s-action` 단추를 찾아 `click()`). 그래서 종류별 적용 여부·권한(`can`)·상태(cordon 여부)·미리보기부터 여는 변경 틀이 단추와 같은 하나의 규칙이다.
+  - `j`·`k`·`g`·`G`(`ListTable`의 `vimKeys`, 목록 컴포넌트가 직접 처리: 워크로드·Helm·네트워크 로드밸런서·정책·보안 점검 목록), `/`는 ⌘F와 같다(EKS 본문 어디서나).
+  - `y` YAML 탭, `d` describe 탭(상세가 `data-tab="describe"` 탭을 내줄 때; 없으면 "이 상세에는 describe 보기가 없어요"), `e` YAML 편집(편집 단추), `l` 로그 탭(Pod·워크로드), `s` Pod는 셸 탭(방식 칸을 "셸"로) / Deployment·StatefulSet은 복제본 수 칸으로 커서를 옮기고 Enter로 scale 미리보기, `a` 셸 탭에서 방식을 attach로(세션은 평소처럼 확인 단계를 거쳐 연다), `⇧F` Pod·Service의 포트포워딩 줄(대상 포트 칸)로 커서, `r` rollout restart 미리보기(Deployment·StatefulSet·DaemonSet), `c`·`u` 노드 cordon·uncordon 미리보기(이미 그 상태면 안내만), `⌃D` 삭제 미리보기(모든 종류), `0` 모든 네임스페이스(네임스페이스가 있는 종류에서만).
+  - 하지 못하면 아무것도 하지 않고 목록 아래 상태 줄(`role="status"`, 4초 뒤 사라짐·✕로 닫음)에 이유를 보인다: 행을 아직 안 골랐다, 상세를 읽는 중이다, 이 종류에서는 쓸 수 없다(키마다 맞는 종류를 문장으로), 권한이 없다(단추의 `title`과 같은 문구), 이미 cordon된 노드·이미 모든 네임스페이스.
+  - 바꾸는 키는 어떤 것도 바로 적용하지 않는다. scale은 숫자를 고친 뒤 Enter(단추를 누른 것과 같다), 나머지는 단추를 누른 것과 같이 미리보기 창이 뜬다.
+- **지금 되지 않는 것**: 접근 탭의 표(신원·권한 표·누가 할 수 있나·워크로드 신원)와 이벤트·포트포워딩·변경 기록 표는 `ListTable`이 아니라서 `j`·`k`·`g`·`G`가 없다(⌘F·`/`는 된다). `d`는 describe 탭이 이 브랜치에 들어와야 동작한다.
+
 ## 계약 (Tauri 명령)
 ```ts
 type K8sTarget = { profile: string; region: string; cluster: string };
 k8s_open(target, context: string | null): K8sSession          // context 찾기·접속·신원. 후보가 여럿이면 후보를 돌려준다
 k8s_close(target): void
 k8s_overview(target): K8sOverview
-k8s_kinds(target): K8sKind[]                                    // API discovery
+k8s_kinds(target): K8sKind[]                                    // API discovery(+ shortNames·singularName)
 k8s_list(target, kind, namespace: string | null, selector: string | null): K8sList
 k8s_watch(target, kind, namespace, channel): WatchId            // 변경분을 채널로
 k8s_unwatch(watchId): void
