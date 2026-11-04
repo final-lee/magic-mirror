@@ -1,6 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { desktop } from "../api/desktop";
+import { dispatchKey } from "../keymap/registry";
 import { newQueryClient, renderWithClient } from "../test/utils";
 import { argowfApi } from "./api";
 import { CONN, wf } from "./catalogFixtures";
@@ -49,6 +50,22 @@ test("Argo Events가 없으면 안내한다", async () => {
   api.eventSources.mockRejectedValue("이 클러스터에 Argo Events가 없어요");
   renderWithClient(<EventSources conn={CONN} live namespace={null} links={[]} onTokenError={vi.fn()} />);
   expect(await screen.findByText("이 클러스터에 Argo Events가 없어요")).toBeInTheDocument();
+});
+
+test.each([
+  ["EventSource", EventSources],
+  ["Sensor", Sensors],
+] as const)("%s 목록에서 ⌘F와 Esc로 항목을 거른다", async (_kind, View) => {
+  api.eventSources.mockResolvedValue(["alpha", "beta"].map((name) => ({ namespace: "batch", name, types: [], eventNames: [], status: null, message: null, yaml: "" })));
+  api.sensors.mockResolvedValue(["alpha", "beta"].map((name) => ({ namespace: "batch", name, dependencies: [], triggers: [], status: null, message: null, yaml: "" })));
+  renderWithClient(<View conn={CONN} live namespace={null} links={[]} onTokenError={vi.fn()} />);
+  await screen.findByRole("button", { name: "alpha" });
+  act(() => { dispatchKey(new KeyboardEvent("keydown", { key: "f", metaKey: true })); });
+  const input = screen.getByRole("textbox", { name: "목록에서 찾기" });
+  fireEvent.change(input, { target: { value: "alpha" } });
+  expect(screen.queryByRole("button", { name: "beta" })).toBeNull();
+  fireEvent.keyDown(input, { key: "Escape" });
+  expect(screen.getByRole("button", { name: "beta" })).toBeInTheDocument();
 });
 
 test.each([

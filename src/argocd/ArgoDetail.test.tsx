@@ -272,7 +272,7 @@ describe("Sync", () => {
   });
 
   test("sends the chosen prune and dry run; cancel and Escape send nothing", async () => {
-    setup();
+    const { onClose } = setup();
     await loaded();
     fireEvent.click(screen.getByRole("button", { name: ARGO_SYNC }));
     fireEvent.click(screen.getByRole("button", { name: "취소" }));
@@ -280,6 +280,7 @@ describe("Sync", () => {
     fireEvent.click(screen.getByRole("button", { name: ARGO_SYNC }));
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: ARGO_SYNC }));
     fireEvent.click(screen.getByRole("checkbox", { name: ARGO_PRUNE }));
     fireEvent.click(screen.getByRole("checkbox", { name: ARGO_DRY_RUN }));
@@ -287,6 +288,22 @@ describe("Sync", () => {
     await waitFor(() => expect(m.sync).toHaveBeenCalledTimes(1));
     expect(m.sync).toHaveBeenCalledWith(URL, "argocd", "web", { prune: true, dryRun: true });
     await screen.findByText(ARGO_SYNC_DONE);
+  });
+
+  test("겹친 창이 있으면 Sync 창은 맨 위 창이 닫힐 때까지 유지한다", async () => {
+    const { onClose } = setup();
+    await loaded();
+    fireEvent.click(screen.getByRole("button", { name: ARGO_SYNC }));
+    const overlay = document.createElement("div");
+    overlay.className = "modal";
+    document.body.appendChild(overlay);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: ARGO_SYNC_TITLE })).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    overlay.remove();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: ARGO_SYNC_TITLE })).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   test("while an operation runs Sync is disabled and says why; Refresh stays", async () => {

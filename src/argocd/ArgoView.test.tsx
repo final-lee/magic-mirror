@@ -1,10 +1,11 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { dispatchKey } from "../keymap/registry";
 import { renderWithClient } from "../test/utils";
 import { argocdApi } from "./api";
 import { ArgoView } from "./ArgoView";
 import {
   ARGO_APPS_LABEL, ARGO_CLUSTER_FILTER, ARGO_ENV_GROUP, ARGO_ENV_SOURCE, ARGO_GROUP_BY, ARGO_GROUP_THEN, ARGO_HEALTH_GROUP, ARGO_IN_CLUSTER, ARGO_LABEL_FILTER, ARGO_NO_APPS,
-  ARGO_NO_CLUSTER, ARGO_NO_LABEL, ARGO_NO_MATCH, ARGO_PICK_CLEAR, ARGO_PROJECT, ARGO_SEARCH, ARGO_SYNC_GROUP, ARGO_UNGROUPED, LOADING, TOKEN_INVALID, TOKEN_MISSING,
+  ARGO_NO_CLUSTER, ARGO_NO_LABEL, ARGO_NO_MATCH, ARGO_PICK_CLEAR, ARGO_PROJECT, ARGO_SYNC_GROUP, ARGO_UNGROUPED, LOADING, TOKEN_INVALID, TOKEN_MISSING,
   argoAppCount, argoCaution, argoErrors, argoGenerators, argoLabelRemove, argoOk, argoOkApps, argoOutOfSync, ARGO_EXPAND_ALL, ARGO_FOLD_OK,
 } from "./text";
 import type { ArgoApp, ArgoAppRow, ArgoAppSetRow, ArgoViewState } from "./types";
@@ -57,6 +58,12 @@ const shownNames = () => Array.from(document.querySelectorAll("tr.argo-row")).ma
 const names = () => {
   expandAll();
   return shownNames();
+};
+const findInput = () => {
+  if (!screen.queryByRole("textbox", { name: "목록에서 찾기" })) {
+    act(() => { dispatchKey(new KeyboardEvent("keydown", { key: "f", metaKey: true })); });
+  }
+  return screen.getByRole("textbox", { name: "목록에서 찾기" });
 };
 const cards = () => Array.from(document.querySelectorAll<HTMLElement>("section.argo-card"));
 const headers = () => cards().map((c) => c.querySelector(".argo-band b")?.textContent);
@@ -208,7 +215,7 @@ describe("filtering", () => {
     fireEvent.click(msBox(ARGO_PROJECT, "prod"));
     expect([...names()].sort()).toEqual(["db", "web-a"]);
     expect(chip(ARGO_SYNC_GROUP, "OutOfSync")).toHaveTextContent("OutOfSync 0");
-    fireEvent.change(screen.getByRole("textbox", { name: ARGO_SEARCH }), { target: { value: "WEB-" } });
+    fireEvent.change(findInput(), { target: { value: "WEB-" } });
     expect(names()).toEqual(["web-a"]);
     expect(chip(ARGO_SYNC_GROUP, "Synced")).toHaveTextContent("Synced 1");
   });
@@ -306,9 +313,9 @@ describe("grouping by ApplicationSet", () => {
     expect(shownNames()).toEqual(["a2", "a1", "c1"]);
     fireEvent.click(chip(ARGO_HEALTH_GROUP, "Healthy"));
     expect(shownNames()).toEqual(["a2"]);
-    fireEvent.change(screen.getByRole("textbox", { name: ARGO_SEARCH }), { target: { value: "1" } });
+    fireEvent.change(findInput(), { target: { value: "1" } });
     expect(shownNames()).toEqual(["a1", "c1"]);
-    fireEvent.change(screen.getByRole("textbox", { name: ARGO_SEARCH }), { target: { value: "" } });
+    fireEvent.change(findInput(), { target: { value: "" } });
     fireEvent.click(within(cards()[1]).getByRole("button", { expanded: false }));
     fireEvent.click(chip(ARGO_HEALTH_GROUP, "Healthy"));
     fireEvent.click(chip(ARGO_HEALTH_GROUP, "Healthy"));
@@ -346,7 +353,7 @@ describe("grouping by ApplicationSet", () => {
     fireEvent.click(chip(ARGO_SYNC_GROUP, "OutOfSync"));
     expect(headers()).toEqual(["db"]);
     fireEvent.click(chip(ARGO_SYNC_GROUP, "OutOfSync"));
-    fireEvent.change(screen.getByRole("textbox", { name: ARGO_SEARCH }), { target: { value: "a" } });
+    fireEvent.change(findInput(), { target: { value: "a" } });
     expect(headers()).not.toContain("empty");
   });
 
@@ -407,6 +414,20 @@ describe("detail", () => {
     await ready([appRow("web")]);
     fireEvent.click(screen.getByText("web"));
     fireEvent.click(await screen.findByRole("button", { name: "닫기" }));
+    expect(screen.queryByRole("complementary")).toBeNull();
+  });
+
+  test("찾기에서 Esc는 상세를 유지하고 검색어를 지운 뒤, 목록의 Esc는 상세를 닫는다", async () => {
+    await ready([appRow("web"), appRow("db")]);
+    fireEvent.click(screen.getByText("web"));
+    const input = findInput();
+    fireEvent.click(input);
+    fireEvent.change(input, { target: { value: "web" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.getByRole("complementary")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "목록에서 찾기" })).toBeNull();
+    expect(names()).toContain("db");
+    fireEvent.keyDown(screen.getByText("web", { selector: "td" }), { key: "Escape" });
     expect(screen.queryByRole("complementary")).toBeNull();
   });
 
@@ -671,7 +692,7 @@ describe("environment, cluster, project and label filters", () => {
 
   test("the search also matches label values and the destination namespace", async () => {
     await ready([appRow("alpha", { destNamespace: "payments-dev" }, { team: "Platform" }), appRow("beta"), appRow("gamma", {}, { team: "data" })]);
-    const search = (q: string) => fireEvent.change(screen.getByRole("textbox", { name: ARGO_SEARCH }), { target: { value: q } });
+    const search = (q: string) => fireEvent.change(findInput(), { target: { value: q } });
     search("payments");
     expect(names()).toEqual(["alpha"]);
     search("PLATFORM");
@@ -898,7 +919,7 @@ describe("remembered filters and grouping", () => {
     const onSave = vi.fn();
     setup(rows, [], { onSave });
     await screen.findByRole("table", { name: ARGO_APPS_LABEL });
-    fireEvent.change(screen.getByRole("textbox", { name: ARGO_SEARCH }), { target: { value: "dev" } });
+    fireEvent.change(findInput(), { target: { value: "dev" } });
     expect(onSave).not.toHaveBeenCalled();
     fireEvent.click(chip(ARGO_HEALTH_GROUP, "Healthy"));
     addLabel("type=web");
