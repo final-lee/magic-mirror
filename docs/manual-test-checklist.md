@@ -338,3 +338,10 @@
 - [ ] Reports: Cron 레이블을 고르면 실행별 걸린 시간·CPU·메모리 막대가 보이고 막대를 누르면 그 Workflow가 열린다
 - [ ] Argo Events: Argo Events가 없는 `stg-eks`에서 Event Sources·Sensors·Event Flow가 "이 클러스터에 Argo Events가 없어요"를 보인다. Event Bindings는 빈 목록
 - [ ] User Info: 신원과 그룹이 보이고 [토큰 복사]는 클립보드에만 들어간다. Plugins는 context 연결에서 ExecutorPlugin ConfigMap을 보인다(없으면 빈 목록)
+
+## EKS 관계 트리 (로컬 kind 또는 테스트 클러스터에서 확인한다)
+- [ ] Deployment 상세의 "관계" 탭이 소유(Deployment → ReplicaSet → Pod), 참조(ServiceAccount·ConfigMap·Secret·PVC·Node), 선택(Service·PDB·NetworkPolicy), 대상(HPA) 묶음으로 보이고, 노드를 누르면 그 객체 상세가 열린다. 밝은 테마와 어두운 테마에서 확인한다
+- [ ] Pod에서는 가장 위 소유자(Deployment)까지 올라가고, ConfigMap·Node·PVC에서는 그것을 쓰는 객체가 보인다(Pod와 ReplicaSet은 Deployment로 합쳐진다)
+- [ ] 없는 ConfigMap·Secret을 가리키면 "없음" 배지가 뜨고 눌리지 않는다. 권한이 없는 종류(예: Service 목록)는 안내 한 줄만 뜨고 나머지 관계는 그대로 보인다
+- [ ] Pod 수가 많은 Deployment(50개 넘게)에서 "일부만 보여요" 안내가 뜬다. Pod 상태가 바뀌면 관계 탭도 따라 바뀌고, [다시 읽기]가 동작한다
+

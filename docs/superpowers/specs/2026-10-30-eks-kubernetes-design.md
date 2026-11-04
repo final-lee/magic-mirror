@@ -44,6 +44,13 @@
 
 우선순위(매일 쓰는 빈도): ① 셸·port-forward·restart·scale·삭제 ② Pod CPU/메모리 열 ③ 트리에 내장 종류 추가 ④ 로그 K3 나머지 ⑤ Helm 읽기 전용.
 
+### 탐색
+- 관계 트리(xray, 2026-11-04): 객체 상세의 "관계" 탭. 백엔드 `k8s/xray/`(`pool` 읽어 온 객체 더미, `refs` 본문에서 가리키는 곳 읽기, `graph` 트리 계산, `read` 읽기)와 읽기 전용 명령 `k8s_xray`, 프론트 `src/k8s/xray/`. 읽을 수 있는 목록만으로 계산한다: 네임스페이스 객체는 그 네임스페이스의 Pod·ReplicaSet·Deployment·StatefulSet·DaemonSet·Job·CronJob·Service·EndpointSlice·Ingress·NetworkPolicy·HPA·PDB·PVC와 메타데이터만 읽은 ConfigMap·Secret·ServiceAccount(Secret 값은 받지 않는다), 클러스터 범위 객체(Node·PV·StorageClass·PriorityClass)는 모든 네임스페이스의 Pod·워크로드·PVC·PV를 읽는다(Node는 `spec.nodeName`으로 좁힌다). Pod가 가리키는 Node·PV·StorageClass·PriorityClass는 이름으로 읽고(참조를 따라 최대 4단계), 읽은 결과가 없으면 그 종류를 끝까지 읽었을 때만 "없음"으로 보인다.
+  - 네 묶음(노드마다 `edge`): **소유**(소유자 사슬을 위로, 자식을 아래로: Deployment → ReplicaSet → Pod, CronJob → Job → Pod), **참조**(Pod 사양·템플릿의 ServiceAccount·볼륨·환경 변수·imagePullSecrets·PriorityClass·Node, PVC → PV → StorageClass, Ingress TLS Secret, 그리고 거꾸로 ConfigMap·Secret·PVC·PV·StorageClass·Node 등을 쓰는 객체: 소유자도 쓰면 가장 위 소유자만), **선택**(Service·PDB·NetworkPolicy가 Pod 레이블을 고름: `matchLabels`·`matchExpressions` 모두, Service 셀렉터는 라벨 맵, 빈 셀렉터는 Service는 아무것도, PDB·NetworkPolicy는 모두 고른다. 선택자를 가진 객체에서는 고른 Pod), **대상**(Ingress → Service, HPA `scaleTargetRef` ↔ 워크로드, EndpointSlice ↔ Service·Pod, Service 아래 Ingress·EndpointSlice).
+  - 노드마다 종류 참조(group·version·kind), 네임스페이스, 이름, 상태 글(목록 줄과 같은 값), 이상 표시(목록과 같은 `problems`), 관계 모습(`roles`: 볼륨·환경 변수·사용 중 …), `presence`(찾음·없음·알 수 없음). 노드를 누르면 소유자·자식 링크와 같은 길(`onOpen`)로 그 객체 상세가 열린다.
+  - 한도: 트리 전체 300노드, 한 부모 아래 50개(참조는 종류마다 50개). 넘으면 응답의 `truncated`가 참이고 화면이 알린다. 목록이 쪽 수 한도(6쪽)에서 멈춘 종류는 `partial`로 알리고 "없음"으로 단정하지 않는다. 권한이 없거나(403) 읽지 못한 종류는 실패가 아니라 `gaps`(종류와 오류)로 돌려주고 나머지 관계는 그대로 보인다. 객체 자신을 읽지 못할 때만 명령이 실패한다.
+  - 탭은 관계를 계산하는 내장 종류(Pod·워크로드·Service·EndpointSlice·Ingress·NetworkPolicy·HPA·PDB·ConfigMap·Secret·ServiceAccount·PVC·PV·StorageClass·Node·PriorityClass)와, 상세가 이미 소유자나 자식을 가진 객체(사용자 정의 리소스 등)에 있다. 객체의 resourceVersion이 바뀌면 다시 읽고(목록 밖 객체는 30초), [다시 읽기] 단추가 있다.
+
 ## 대상과 탭
 - **EKS → Clusters** 행을 더블클릭하면 `☸️ <클러스터 이름>` 탭이 열린다. 이것이 유일한 진입점이고, 사이드바에 별도 메뉴(클러스터 선택 화면)는 두지 않는다.
 - 대상은 `{ profile, region, cluster }`. 같은 대상의 탭은 하나만 열린다.

@@ -1971,7 +1971,7 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 /* xray */
 .xray .k8s-toolbar { margin: -10px -12px 8px; }
 .xray-tree { list-style: none; margin: 0; padding: 0; }
-.xray-tree .xray-tree { margin-left: 7px; padding-left: 14px; border-left: 1px solid var(--line); }
+.xray-tree .xray-tree { margin-left: 7px; padding-left: 14px; border-left: 1px solid var(--border-strong); }
 .xray-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 2px 0; min-width: 0; }
 .xray-kind { color: var(--dim); font-size: 11px; }
 .xray-current { font-weight: 600; }
