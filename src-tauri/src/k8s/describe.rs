@@ -21,10 +21,12 @@ fn plain(value: &str) -> bool {
 
 fn arguments(context: &str, kind: &KindRef, namespace: Option<&str>, name: &str) -> Result<Vec<String>, AppError> {
     // kubectl은 서비스 계정 토큰과 last-applied 어노테이션에 남은 Secret 값을 내보낼 수 있다.
-    if kind.group.is_empty() && (kind.plural == "secrets" || kind.plural == "secret" || kind.kind == "Secret") {
+    if kind.plural.eq_ignore_ascii_case("secrets") || kind.plural.eq_ignore_ascii_case("secret") || kind.kind.eq_ignore_ascii_case("secret") {
         return Err(AppError::other("Secret 값 보호를 위해 앱의 요약을 보여요"));
     }
-    if context.is_empty() || context.chars().any(char::is_control) || !plain(&kind.plural) || (!kind.group.is_empty() && !plain(&kind.group)) || !plain(name) || namespace.is_some_and(|n| !plain(n)) {
+    let resource_valid = !kind.plural.is_empty() && !kind.plural.starts_with('-') && kind.plural.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-');
+    let group_valid = kind.group.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-' || c == b'.');
+    if context.is_empty() || context.chars().any(char::is_control) || !resource_valid || !group_valid || !plain(name) || namespace.is_some_and(|n| !plain(n)) {
         return Err(AppError::other("객체 이름 또는 context가 올바르지 않아요"));
     }
     let resource = if kind.group.is_empty() { kind.plural.clone() } else { format!("{}.{}", kind.plural, kind.group) };
@@ -63,7 +65,7 @@ pub async fn describe(session: &Session, kind: &KindRef, namespace: Option<&str>
     let executable = path.split(':').filter(|d| !d.is_empty()).map(|d| Path::new(d).join("kubectl")).find(|p| {
         std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
     }).ok_or_else(|| AppError::other("kubectl을 찾지 못했어요"))?;
-    let config = std::env::join_paths(&session.kubeconfig_paths).map_err(|_| AppError::other("kubeconfig 경로가 올바르지 않아요"))?;
+    let config = crate::k8s::terminal::write_pinned(&session.kubeconfig, &session.context)?;
     let mut command = Command::new(executable);
     command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     for (key, _) in std::env::vars_os() {
@@ -72,7 +74,7 @@ pub async fn describe(session: &Session, kind: &KindRef, namespace: Option<&str>
             command.env_remove(key);
         }
     }
-    command.env("PATH", path).env("KUBECONFIG", config);
+    command.env("PATH", path).env("KUBECONFIG", config.path());
     let mut child = command.spawn().map_err(|_| AppError::other("kubectl을 실행하지 못했어요"))?;
     let stdout = child.stdout.take().ok_or_else(|| AppError::other("kubectl 출력을 열지 못했어요"))?;
     let stderr = child.stderr.take().ok_or_else(|| AppError::other("kubectl 오류 출력을 열지 못했어요"))?;

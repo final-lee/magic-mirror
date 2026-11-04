@@ -3,6 +3,7 @@ import { newQueryClient, ssoLoginStub, withClientAndSso } from "../test/utils";
 import { k8sApi } from "./api";
 import { CONFIGMAPS, CRONJOBS, DAEMONSETS, DEPLOYMENTS, JOBS, NODES, PODS, PVCS, REPLICASETS, SECRETS, SERVICES, SERVICE_ACCOUNTS, STATEFULSETS } from "./kinds";
 import { ObjectDetail } from "./ObjectDetail";
+import { xrayApi } from "./xray/api";
 import {
   ANNOTATION_FOLD_LABEL, BACK, CHILDREN_TRUNCATED, CLOSE, LOG_ALL_CONTAINERS, LOG_CONTAINER, NO_RECENT_EVENTS, NO_SECRET_PERMISSION, OPEN_IN_IAM, SEC_CHILDREN, SEC_OWNERS, SEC_USAGE, SHOW_VALUE,
   CHANGE_NODE_SHELL, CHANGE_NODE_SHELL_IMAGE, FORWARD_OPEN, FORWARD_PORT, SHELL_OPEN, TAB_LOGS, TAB_SHELL, TAB_YAML, YAML_SECRET_NOTE, H_CPU_USAGE, H_MEMORY_USAGE, USAGE_LIMIT, USAGE_REQUEST, forwardPortLabel, noStreamPermission, openNode,
@@ -12,6 +13,7 @@ import { buildUsageIndex } from "./usage";
 
 vi.mock("./api", () => ({ k8sApi: { get: vi.fn(), rules: vi.fn(), secretValue: vi.fn(), logs: vi.fn(), workloadLogs: vi.fn(), unwatch: vi.fn() } }));
 vi.mock("../api/client", () => ({ api: { ssoLogin: vi.fn() } }));
+vi.mock("./xray/api", () => ({ xrayApi: { get: vi.fn() } }));
 // 터미널(xterm)은 PodTerminal.test에서 본다
 const terminalProps: Record<string, unknown>[] = [];
 vi.mock("./DescribeView", () => ({ DescribeView: () => <div>describe output</div> }));
@@ -47,10 +49,25 @@ beforeEach(() => {
 test("describe tab opens for a custom object", async () => {
   m.get.mockResolvedValue(view({ kind: widgetKind }));
   setup({ objectRef: { kind: widgetKind, namespace: "prod", name: "w1" } });
-  const tab = await screen.findByRole("tab", { name: "describe" });
+  const tab = await screen.findByRole("tab", { name: "상세 설명" });
   fireEvent.click(tab);
   expect(tab).toHaveAttribute("aria-selected", "true");
   expect(await screen.findByText("describe output")).toBeInTheDocument();
+});
+
+test("relations refresh belongs to the detail toolbar, not the tab body", async () => {
+  m.get.mockResolvedValue(view());
+  vi.mocked(xrayApi.get).mockResolvedValue({ sections: [], gaps: [], partial: [], truncated: false, nodes: 0 });
+  setup();
+  fireEvent.click(await screen.findByRole("tab", { name: "관계" }));
+  await screen.findByText("이 객체와 이어진 객체가 없어요");
+  const button = screen.getByRole("button", { name: "다시 읽기" });
+  expect(button.closest(".k8s-toolbar")).not.toBeNull();
+  expect(button.closest(".k8s-detail-body")).toBeNull();
+  fireEvent.click(button);
+  await waitFor(() => expect(xrayApi.get).toHaveBeenCalledTimes(2));
+  fireEvent.click(screen.getByRole("tab", { name: "요약" }));
+  expect(screen.queryByRole("button", { name: "다시 읽기" })).not.toBeInTheDocument();
 });
 
 test("change actions are there without any switch when the detail can start changes", async () => {

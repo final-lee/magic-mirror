@@ -131,16 +131,11 @@ impl<'a> Builder<'a> {
     // ───── 소유 ─────
 
     /// 소유자 쪽 사슬. 컨트롤러 소유자를 먼저 따라 올라간다(여럿이면 첫 소유자만 사슬이 되고 나머지는 옆에 둔다).
-    fn owner_chain(&self, root: &Item) -> OwnerChain<'a> {
+    fn owner_chain(&mut self, root: &Item) -> OwnerChain<'a> {
         let pool = self.pool;
         let resolve = |child: &Item, o: &pool::OwnerRef| -> Linked<'a> {
             if let Some(found) = pool.by_uid(&o.uid) {
                 return Ok(found);
-            }
-            for namespace in [child.namespace.as_deref(), None] {
-                if let Some(found) = pool.get(&Key::new(&o.group, &o.kind, namespace, &o.name)) {
-                    return Ok(found);
-                }
             }
             let kind = crate::k8s::rows::KindRef { group: o.group.clone(), version: o.version.clone(), kind: o.kind.clone(), plural: String::new(), namespaced: child.namespace.is_some() };
             Err(Box::new(Ref { kind, namespace: child.namespace.clone(), name: o.name.clone(), roles: vec![] }))
@@ -151,13 +146,22 @@ impl<'a> Builder<'a> {
         let mut current: &Item = root;
         for _ in 0..OWNER_DEPTH_MAX {
             let Some(o) = pick(current) else { break };
+            if seen.contains(&o.uid) {
+                break;
+            }
             let linked = resolve(current, &o);
             let next = linked.as_ref().ok().copied();
             chain.push(linked);
             match next {
-                Some(item) if seen.insert(item.uid.clone()) => current = item,
-                _ => break,
+                Some(item) => {
+                    seen.insert(item.uid.clone());
+                    current = item;
+                }
+                None => break,
             }
+        }
+        if chain.len() == OWNER_DEPTH_MAX && chain.last().is_some_and(Result::is_ok) && pick(current).is_some_and(|o| !seen.contains(&o.uid)) {
+            self.truncated = true;
         }
         let first = pick(root);
         let others = root.owners.iter().filter(|o| first.as_ref().is_none_or(|f| f.uid != o.uid)).map(|o| resolve(root, o)).collect();
@@ -166,6 +170,9 @@ impl<'a> Builder<'a> {
 
     fn descendants(&mut self, item: &Item, depth: usize, seen: &mut HashSet<String>) -> Vec<XrayNode> {
         if depth >= CHILD_DEPTH_MAX {
+            if self.pool.children_of(&item.uid).iter().any(|k| !seen.contains(&k.uid)) {
+                self.truncated = true;
+            }
             return vec![];
         }
         let mut kids: Vec<&Item> = self.pool.children_of(&item.uid).into_iter().filter(|k| seen.insert(k.uid.clone())).collect();
@@ -192,7 +199,9 @@ impl<'a> Builder<'a> {
         let mut current = Self::node(root, Edge::Owner, vec![]);
         current.current = true;
         self.count += 1;
-        current.children = self.descendants(root, 0, &mut HashSet::from([root.uid.clone()]));
+        let mut seen = HashSet::from([root.uid.clone()]);
+        seen.extend(chain.iter().filter_map(|link| link.as_ref().ok().map(|item| item.uid.clone())));
+        current.children = self.descendants(root, 0, &mut seen);
         let mut top = current;
         for link in chain {
             if !self.spend() {
@@ -200,7 +209,13 @@ impl<'a> Builder<'a> {
             }
             let mut node = match &link {
                 Ok(item) => Self::node(item, Edge::Owner, vec![]),
-                Err(r) => self.absent(r, Edge::Owner, vec![]),
+                Err(r) => {
+                    let mut node = self.absent(r, Edge::Owner, vec![]);
+                    if node.presence == Presence::Found {
+                        node.presence = Presence::Missing;
+                    }
+                    node
+                }
             };
             node.children = vec![top];
             top = node;
@@ -212,7 +227,13 @@ impl<'a> Builder<'a> {
             }
             out.push(match &link {
                 Ok(item) => Self::node(item, Edge::Owner, vec![]),
-                Err(r) => self.absent(r, Edge::Owner, vec![]),
+                Err(r) => {
+                    let mut node = self.absent(r, Edge::Owner, vec![]);
+                    if node.presence == Presence::Found {
+                        node.presence = Presence::Missing;
+                    }
+                    node
+                }
             });
         }
         out
@@ -427,7 +448,8 @@ impl<'a> Builder<'a> {
             out.extend(self.service_targets(root));
         }
         if is(root, &pool::INGRESS) {
-            for name in ingress_services(root) {
+            let services = self.cap(ingress_services(root));
+            for name in services {
                 let r = service_ref(&name);
                 if let Some(mut node) = self.target(&r, Edge::Target, vec![]) {
                     if let Some(service) = self.pool.get(&r.key()) {
@@ -462,9 +484,32 @@ impl<'a> Builder<'a> {
         }
         let pods = slice_pods(root);
         let pods = self.cap(pods);
-        for pod in pods {
-            let r = Ref { kind: pool::POD.kind_ref(), namespace: ns.map(str::to_string), name: pod, roles: vec![] };
-            out.extend(self.target(&r, Edge::Target, vec![]));
+        for (namespace, pod) in pods {
+            let r = Ref { kind: pool::POD.kind_ref(), namespace, name: pod, roles: vec![] };
+            if let Some(mut node) = self.target(&r, Edge::Target, vec![]) {
+                if r.namespace != root.namespace && node.presence == Presence::Missing {
+                    node.presence = Presence::Unknown;
+                }
+                out.push(node);
+            }
+        }
+        if is(root, &pool::POD) {
+            let mut slices: Vec<&Item> = self.pool.of_kind(&pool::ENDPOINT_SLICE)
+                .filter(|slice| slice_pods(slice).iter().any(|(namespace, name)| *namespace == root.namespace && *name == root.name))
+                .collect();
+            slices.sort_by(|a, b| (&a.namespace, &a.name).cmp(&(&b.namespace, &b.name)));
+            let slices = self.cap(slices);
+            for slice in slices {
+                if !self.spend() {
+                    break;
+                }
+                let mut node = Self::node(slice, Edge::Target, vec![]);
+                if let Some(service) = slice_service(slice) {
+                    let r = Ref { kind: pool::SERVICE.kind_ref(), namespace: slice.namespace.clone(), name: service.to_string(), roles: vec![] };
+                    node.children.extend(self.target(&r, Edge::Target, vec![]));
+                }
+                out.push(node);
+            }
         }
         out
     }

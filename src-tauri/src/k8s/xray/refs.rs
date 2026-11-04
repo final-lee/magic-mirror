@@ -123,12 +123,16 @@ pub fn slice_service(item: &Item) -> Option<&str> {
     item.labels.get("kubernetes.io/service-name").map(String::as_str)
 }
 
-/// EndpointSlice의 끝점이 가리키는 Pod 이름
-pub fn slice_pods(item: &Item) -> Vec<String> {
+/// EndpointSlice의 끝점이 가리키는 Pod의 네임스페이스와 이름
+pub fn slice_pods(item: &Item) -> Vec<(Option<String>, String)> {
     if !is(item, &pool::ENDPOINT_SLICE) {
         return vec![];
     }
-    let mut out: Vec<String> = list(&item.data, "/endpoints").iter().filter(|e| text(e, "/targetRef/kind") == Some("Pod")).filter_map(|e| text(e, "/targetRef/name")).map(str::to_string).collect();
+    let mut out: Vec<_> = list(&item.data, "/endpoints").iter().filter(|e| text(e, "/targetRef/kind") == Some("Pod")).filter_map(|e| {
+        let name = text(e, "/targetRef/name")?;
+        let namespace = text(e, "/targetRef/namespace").or(item.namespace.as_deref()).map(str::to_string);
+        Some((namespace, name.to_string()))
+    }).collect();
     out.sort();
     out.dedup();
     out
