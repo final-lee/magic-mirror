@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { CodeEditor } from "../components/CodeEditor";
 import { ErrorState } from "../components/ErrorState";
 import { k8sApi } from "./api";
 import { targetKey } from "./targets";
@@ -53,6 +54,8 @@ export function SecretEdit({ target, ssoProfile, namespace, name, keys, canRead,
   const [errors, setErrors] = useState<Map<string, unknown>>(() => new Map());
   const [busy, setBusy] = useState<Set<string>>(() => new Set());
   const [newKey, setNewKey] = useState("");
+  // 값 편집기는 처음 값만 받는다: 버튼으로 값을 통째로 바꿀 때(새 값·그대로 두기)만 다시 만든다
+  const [revision, setRevision] = useState(0);
   const [newValue, setNewValue] = useState("");
   const generation = useRef(0);
 
@@ -97,6 +100,14 @@ export function SecretEdit({ target, ssoProfile, namespace, name, keys, canRead,
     const { [key]: _removed, ...values } = edits.values;
     onEdits({ ...edits, values });
   };
+  const replaceValue = (key: string, text: string) => {
+    onEdits({ ...edits, values: { ...edits.values, [key]: text } });
+    setRevision((r) => r + 1);
+  };
+  const restore = (key: string) => {
+    keep(key);
+    setRevision((r) => r + 1);
+  };
   const known = new Set([...keys.map((k) => k.key), ...edits.extra.map((e) => e.key)]);
   const addable = newKey.trim() !== "" && !known.has(newKey.trim());
   const add = () => {
@@ -131,11 +142,13 @@ export function SecretEdit({ target, ssoProfile, namespace, name, keys, canRead,
                 <td>{t.byteSize(size)}</td>
                 <td>
                   {editable && (
-                    <textarea
-                      className="mono k8s-secret-input"
-                      aria-label={t.SECRET_VALUE_LABEL(key)}
+                    <CodeEditor
+                      key={`${key}:${revision}`}
                       value={edits.values[key] ?? value?.text ?? ""}
-                      onChange={(e) => setValue(key, e.target.value)}
+                      onChange={(text) => setValue(key, text)}
+                      label={t.SECRET_VALUE_LABEL(key)}
+                      language="text"
+                      minHeight="48px"
                     />
                   )}
                   {!editable && value && (
@@ -150,12 +163,12 @@ export function SecretEdit({ target, ssoProfile, namespace, name, keys, canRead,
                     </button>
                   )}{" "}
                   {!editing && (
-                    <button className="btn tone-secondary" onClick={() => onEdits({ ...edits, values: { ...edits.values, [key]: "" } })}>
+                    <button className="btn tone-secondary" onClick={() => replaceValue(key, "")}>
                       {t.SECRET_NEW_VALUE}
                     </button>
                   )}
                   {editing && (
-                    <button className="btn tone-ghost" onClick={() => keep(key)}>
+                    <button className="btn tone-ghost" onClick={() => restore(key)}>
                       {t.SECRET_KEEP}
                     </button>
                   )}

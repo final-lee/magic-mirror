@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { CodeEditor } from "../components/CodeEditor";
 import { isSecret } from "./kinds";
 import { NO_SECRET_EDITS, SecretEdit, withSecretValues, type SecretEdits } from "./SecretEdit";
 import * as t from "./text";
 import type { K8sChange, K8sObjectView, K8sTarget, ObjectRef } from "./types";
 import { parseDocuments, yamlProblems, type YamlObject } from "./yamlDocs";
-import { YamlEditor } from "./YamlEditor";
 
 interface Props {
   target: K8sTarget;
@@ -56,7 +56,7 @@ export function YamlEdit({ target, ssoProfile, objectRef, view, canRead, onPrevi
     <div className="k8s-yaml-edit">
       <p className="dim">{t.YAML_EDIT_NOTE}</p>
       {secret && <p className="dim">{t.SECRET_EDIT_NOTE}</p>}
-      <YamlEditor value={view.editYaml} onChange={setText} />
+      <CodeEditor value={view.editYaml} onChange={setText} label={t.YAML_EDITOR_LABEL} />
       {problems.length > 0 && (
         <ul className="err" role="alert" aria-label={t.YAML_PROBLEMS}>
           {problems.map((problem, i) => (

@@ -75,10 +75,17 @@ pub struct ArgoWorkflowsView {
     pub mine: bool,
 }
 
+/// `knownServices`를 저장하기 전부터 있던 서비스. 이 키가 없는 예전 설정 파일은 이 서비스들을 이미 보여 준 것으로 본다.
+const SERVICES_BEFORE_KNOWN: [&str; 16] = [
+    "ec2", "s3", "lambda", "rds", "ecs", "eks", "vpc", "iam", "dynamodb", "logs", "cloudfront", "sqs", "sns", "ecr", "route53", "secretsmanager",
+];
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub enabled_services: Vec<String>,
+    /// 앱이 한 번이라도 보여 준 서비스. 여기 없는 새 서비스는 설정을 읽을 때 한 번 켜고, 사용자가 끈 서비스는 다시 켜지 않는다.
+    pub known_services: Vec<String>,
     pub favorites: Vec<Favorite>,
     pub last_profile: Option<String>,
     pub last_region: Option<String>,
@@ -111,6 +118,7 @@ pub struct Settings {
 #[serde(rename_all = "camelCase", default)]
 struct RawSettings {
     enabled_services: Option<Vec<String>>,
+    known_services: Option<Vec<String>>,
     favorites: Vec<Favorite>,
     last_profile: Option<String>,
     last_region: Option<String>,
@@ -131,41 +139,58 @@ struct RawSettings {
     resource_cache_ttl_minutes: Option<u32>,
 }
 
+fn owned(ids: &[&str]) -> Vec<String> {
+    ids.iter().map(|s| s.to_string()).collect()
+}
+
 fn defaults(all_services: &[&str]) -> Settings {
     Settings {
-        enabled_services: all_services.iter().map(|s| s.to_string()).collect(),
+        enabled_services: owned(all_services),
+        known_services: owned(all_services),
         ..Default::default()
     }
 }
 
 /// 파일이 없거나 깨져 있으면 기본값(모든 서비스 활성화)을 돌려준다.
+/// 앱이 아직 보여 준 적 없는 서비스(업데이트로 새로 생긴 것)는 켜진 목록에 더한다.
 pub fn load(path: &Path, all_services: &[&str]) -> Settings {
     match fs::read_to_string(path) {
         Ok(text) => match serde_json::from_str::<RawSettings>(&text) {
-            // enabledServices 키가 없으면 모든 서비스를 켠다. 빈 배열은 사용자가 모두 끈 상태다.
-            Ok(raw) => Settings {
-                enabled_services: raw
-                    .enabled_services
-                    .unwrap_or_else(|| all_services.iter().map(|s| s.to_string()).collect()),
-                favorites: raw.favorites,
-                last_profile: raw.last_profile,
-                last_region: raw.last_region,
-                explorer_local_path: raw.explorer_local_path,
-                diff_tool: raw.diff_tool,
-                diff_tool_command: raw.diff_tool_command,
-                theme: raw.theme,
-                pg_logins: raw.pg_logins,
-                k8s_contexts: raw.k8s_contexts,
-                kubeconfig_path: raw.kubeconfig_path,
-                k8s_bookmarks: raw.k8s_bookmarks,
-                k8s_lane_widths: raw.k8s_lane_widths,
-                k8s_security_checks: raw.k8s_security_checks,
-                argocd_servers: raw.argocd_servers,
-                argocd_views: raw.argocd_views,
-                argo_workflows_servers: raw.argo_workflows_servers,
-                argo_workflows_views: raw.argo_workflows_views,
-                resource_cache_ttl_minutes: raw.resource_cache_ttl_minutes,
-            },
+            Ok(raw) => {
+                let mut known = raw.known_services.unwrap_or_else(|| owned(&SERVICES_BEFORE_KNOWN));
+                // enabledServices 키가 없으면 모든 서비스를 켠다. 빈 배열은 사용자가 모두 끈 상태다.
+                let mut enabled = raw.enabled_services.unwrap_or_else(|| owned(all_services));
+                for id in all_services.iter().map(|s| s.to_string()) {
+                    if !known.contains(&id) {
+                        if !enabled.contains(&id) {
+                            enabled.push(id.clone());
+                        }
+                        known.push(id);
+                    }
+                }
+                Settings {
+                    enabled_services: enabled,
+                    known_services: known,
+                    favorites: raw.favorites,
+                    last_profile: raw.last_profile,
+                    last_region: raw.last_region,
+                    explorer_local_path: raw.explorer_local_path,
+                    diff_tool: raw.diff_tool,
+                    diff_tool_command: raw.diff_tool_command,
+                    theme: raw.theme,
+                    pg_logins: raw.pg_logins,
+                    k8s_contexts: raw.k8s_contexts,
+                    kubeconfig_path: raw.kubeconfig_path,
+                    k8s_bookmarks: raw.k8s_bookmarks,
+                    k8s_lane_widths: raw.k8s_lane_widths,
+                    k8s_security_checks: raw.k8s_security_checks,
+                    argocd_servers: raw.argocd_servers,
+                    argocd_views: raw.argocd_views,
+                    argo_workflows_servers: raw.argo_workflows_servers,
+                    argo_workflows_views: raw.argo_workflows_views,
+                    resource_cache_ttl_minutes: raw.resource_cache_ttl_minutes,
+                }
+            }
             Err(_) => defaults(all_services),
         },
         Err(_) => defaults(all_services),
@@ -370,6 +395,42 @@ mod tests {
             .is_empty());
     }
 
+    fn load_with(text: &str, all_services: &[&str]) -> Settings {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, text).unwrap();
+        load(&path, all_services)
+    }
+
+    #[test]
+    fn a_service_added_by_an_update_is_turned_on_once_for_old_settings_files() {
+        // knownServices가 없던 때의 파일: 그때 있던 16개는 본 것으로 치고, 사용자가 끈 sns는 그대로 꺼 둔다
+        let old = r#"{"enabledServices":["ec2","rds"]}"#;
+        let s = load_with(old, &["ec2", "rds", "elasticache", "sns"]);
+        assert_eq!(s.enabled_services, vec!["ec2", "rds", "elasticache"]);
+        assert_eq!(s.known_services, [SERVICES_BEFORE_KNOWN.as_slice(), &["elasticache"]].concat());
+    }
+
+    #[test]
+    fn a_known_service_the_user_turned_off_stays_off() {
+        let saved = r#"{"enabledServices":["ec2"],"knownServices":["ec2","elasticache"]}"#;
+        let s = load_with(saved, &["ec2", "elasticache"]);
+        assert_eq!(s.enabled_services, vec!["ec2"]);
+        assert_eq!(s.known_services, vec!["ec2", "elasticache"]);
+    }
+
+    #[test]
+    fn a_new_service_is_added_to_known_services_and_saved_from_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, r#"{"enabledServices":[],"knownServices":["ec2"]}"#).unwrap();
+        let first = load(&path, &["ec2", "elasticache"]);
+        assert_eq!(first.enabled_services, vec!["elasticache"]);
+        // 켠 뒤 사용자가 끄고 저장하면 다음에 읽어도 꺼져 있다
+        save(&path, &Settings { enabled_services: vec![], ..first }).unwrap();
+        assert!(load(&path, &["ec2", "elasticache"]).enabled_services.is_empty());
+    }
+
     #[test]
     fn corrupt_file_returns_defaults() {
         let dir = tempfile::tempdir().unwrap();
@@ -384,6 +445,7 @@ mod tests {
         let path = dir.path().join("nested").join("settings.json");
         let s = Settings {
             enabled_services: vec!["iam".into()],
+            known_services: vec!["ec2".into(), "iam".into()],
             favorites: vec![Favorite {
                 service: "ec2".into(),
                 type_id: "instances".into(),
