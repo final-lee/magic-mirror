@@ -14,6 +14,18 @@ fn builds_read_only_arguments() {
 }
 
 #[test]
+fn rejects_ambiguous_resources_and_secret_aliases() {
+    for plural in ["pods,secrets", "Secrets", "secret", "secrets", "pods.secrets", "-pods"] {
+        let kind = KindRef { plural: plural.into(), ..deployment() };
+        assert!(arguments("ctx", &kind, None, "name").is_err(), "{plural}");
+    }
+    let kind = KindRef { kind: "sEcReT".into(), ..deployment() };
+    assert!(arguments("ctx", &kind, None, "name").is_err());
+    let kind = KindRef { group: "apps,core".into(), ..deployment() };
+    assert!(arguments("ctx", &kind, None, "name").is_err());
+}
+
+#[test]
 fn failure_reports_reason_and_sso_expiry() {
     assert_eq!(failure(b""), AppError::other("kubectl이 실패했어요"));
     assert!(failure(b"permission denied").to_string().contains("permission denied"));
