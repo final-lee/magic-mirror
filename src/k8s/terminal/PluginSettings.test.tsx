@@ -13,6 +13,9 @@ test("adds, edits, validates and removes a plugin", () => {
   render(<Editor />);
   fireEvent.click(screen.getByRole("button", { name: "플러그인 추가" }));
   fireEvent.change(screen.getByLabelText("이름"), { target: { value: "보기" } });
+  fireEvent.change(screen.getByLabelText("명령"), { target: { value: "echo $(id) $NAME" } });
+  expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
+  expect(screen.getByText("명령 치환과 중괄호 변수는 사용할 수 없어요")).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("명령"), { target: { value: "kubectl get $KIND $NAME" } });
   fireEvent.change(screen.getByLabelText("단축키"), { target: { value: "cmd+f" } });
   expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();

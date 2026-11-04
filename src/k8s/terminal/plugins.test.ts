@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { expandPlugin, pluginKeyError, shellQuote, supportsKind } from "./plugins";
+import { expandPlugin, pluginKeyError, pluginTemplateError, shellQuote, supportsKind } from "./plugins";
 
 const pod = { group: "", version: "v1", kind: "Pod", plural: "pods", namespaced: true };
 
@@ -9,9 +9,15 @@ describe("EKS plugins", () => {
     expect(expandPlugin("kubectl -n $NAMESPACE get $KIND $NAME; echo $CONTEXT $CONTAINER", {
       NAMESPACE: "space name", KIND: "Pod", NAME: "a'$(bad)", CONTEXT: "$NAME", CONTAINER: "",
     })).toBe("kubectl -n 'space name' get 'Pod' 'a'\\''$(bad)'; echo '$NAME' ''");
-    expect(expandPlugin(`echo "$NAME" '$NAME' \\$NAME`, {
+    expect(expandPlugin(`echo "$NAME" '$NAME'`, {
       NAMESPACE: "", KIND: "", NAME: `a'"$(bad)`, CONTEXT: "", CONTAINER: "",
-    })).toBe(`echo "a'\\\"\\$(bad)" 'a'\\''"$(bad)' \\$NAME`);
+    })).toBe(`echo ""'a'\\''"$(bad)'"" '''a'\\''"$(bad)'''`);
+  });
+  it("rejects shell constructs and embedded unquoted placeholders", () => {
+    for (const command of ["echo $(id) $NAME", "echo `${NAME}`", "echo ${NAME}", "echo prefix$NAME", "echo $NAME/suffix", "cat <<EOF\n$NAME\nEOF", "echo \\$NAME"]) {
+      expect(pluginTemplateError(command)).not.toBeNull();
+    }
+    expect(pluginTemplateError(`echo "$NAME" '$NAME' $NAME`)).toBeNull();
   });
   it("accepts wildcard and exact kind references", () => {
     const plugin = { name: "x", command: "x", kinds: [pod] };
