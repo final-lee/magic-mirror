@@ -41,6 +41,9 @@ k8s-openapi = { version = "0.28", features = ["v1_33"] }
 # 보기용 YAML과 Secret 값 풀기. 둘 다 kube-client가 이미 쓰는 크레이트(같은 버전)라 새로 받는 것은 없다
 serde-saphyr = "0.0.29"
 base64 = "0.22"
+# Helm 릴리스(`release` 데이터는 base64 + gzip JSON)를 풀고, 업그레이드·설치할 때 만드는 임시 차트 폴더. 둘 다 이미 의존성 그래프에 있다
+flate2 = "1"
+tempfile = "3"
 aws-sdk-iam = "1"
 aws-sdk-route53 = "1"
 aws-sdk-cloudfront = "1"

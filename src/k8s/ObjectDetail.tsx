@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { errorMessage } from "../api/errors";
 import { ErrorState } from "../components/ErrorState";
+import { BindingActions } from "./rbac/BindingActions";
+import { isBinding } from "./rbac/changes";
 import { ChangeActions } from "./ChangeActions";
 import { can } from "./can";
 import { Percent, Problems, valueKeys } from "./columns";
@@ -367,6 +369,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
               {YAML_EDIT}
             </button>
           )}
+          {isBinding(objectRef.kind) && <BindingActions target={target} objectRef={objectRef} view={q.data} rules={rules.data} onStart={onChange} />}
           <ChangeActions target={target} ssoProfile={ssoProfile} objectRef={objectRef} view={q.data} rules={rules.data} shellNamespace={shellNamespace ?? "default"} onStart={onChange} />
         </div>
       )}

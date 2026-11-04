@@ -9,7 +9,7 @@ import { layoutTopology, type ChipLayout, type Layout, type SubnetLayout, type T
 import { C, CHIP_BADGE_COLOR, KIND_BADGE, stateColor, TIER_COLOR } from "./palette";
 import { topologyKey, useVpcTopology } from "./queries";
 import { svgToPng } from "./toPng";
-import type { VpcTopology } from "./types";
+import type { VpcHighlight, VpcTopology } from "./types";
 
 interface Props {
   profile: string;
@@ -17,6 +17,8 @@ interface Props {
   vpcId: string;
   name: string;
   active: boolean;
+  /** 강조할 리소스(없으면 평소 구조도). 바뀌면 다시 켠다 */
+  highlight?: VpcHighlight;
 }
 
 type Selection = { kind: "subnet" | "resource" | "chip"; id: string } | null;
@@ -31,13 +33,23 @@ const MAX_K = 3;
 const clampK = (k: number) => Math.min(MAX_K, Math.max(MIN_K, k));
 const FONT = "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif";
 const MONO = "ui-monospace, Menlo, monospace";
+/** 강조 막대 글: VPC 안에서 찾은 개수와 찾지 못한 개수 */
+function highlightText(h: VpcHighlight, topo: VpcTopology): string {
+  const found = h.ids.filter((id) => topo.resources.some((r) => r.id === id)).length;
+  const missing = h.ids.length - found;
+  return `${h.label} 강조 ${found}개${missing > 0 ? ` (이 구조도에 없는 ${missing}개)` : ""}`;
+}
 const short = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
-export function VpcMapTab({ profile, region, vpcId, name, active }: Props) {
+export function VpcMapTab({ profile, region, vpcId, name, active, highlight }: Props) {
   const qc = useQueryClient();
   const q = useVpcTopology(profile, region, vpcId);
   const topo = q.data;
-  const layout = useMemo(() => (topo ? layoutTopology(topo) : null), [topo]);
+  // 강조는 끌 수 있고, 새 강조가 오면 다시 켠다
+  const [highlightOn, setHighlightOn] = useState(true);
+  useEffect(() => setHighlightOn(true), [highlight]);
+  const highlightIds = useMemo(() => (highlight && highlightOn ? new Set(highlight.ids) : null), [highlight, highlightOn]);
+  const layout = useMemo(() => (topo ? layoutTopology(topo, highlightIds) : null), [topo, highlightIds]);
 
   const [selection, setSelection] = useState<Selection>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -200,6 +212,22 @@ export function VpcMapTab({ profile, region, vpcId, name, active }: Props) {
               {Math.round(view.k * 100)}%
             </span>
           </span>
+          {highlight && topo && (
+            <span className="vm-highlight" data-testid="vpc-highlight">
+              {highlightOn ? (
+                <>
+                  {highlightText(highlight, topo)}
+                  <button className="link" onClick={() => setHighlightOn(false)}>
+                    강조 끄기
+                  </button>
+                </>
+              ) : (
+                <button className="link" onClick={() => setHighlightOn(true)}>
+                  {highlight.label} 강조 켜기
+                </button>
+              )}
+            </span>
+          )}
           <span className="sp">
             {saveMsg && <span className={saveMsg.ok ? "ok" : "err"}>{saveMsg.text}</span>}
             <button className="btn small" onClick={refresh} disabled={q.isFetching}>
@@ -231,6 +259,7 @@ export function VpcMapTab({ profile, region, vpcId, name, active }: Props) {
                   layout={layout}
                   selection={selection}
                   focusId={focusId}
+                  highlightIds={highlightIds}
                   routeTargets={routeTargets}
                   onSelect={setSelection}
                   onHover={setHoverId}
@@ -250,12 +279,13 @@ interface DiagramProps {
   layout: Layout;
   selection: Selection;
   focusId: string | null;
+  highlightIds: ReadonlySet<string> | null;
   routeTargets: string[];
   onSelect: (s: Selection) => void;
   onHover: (id: string | null) => void;
 }
 
-function Diagram({ topo, layout, selection, focusId, routeTargets, onSelect, onHover }: DiagramProps) {
+function Diagram({ topo, layout, selection, focusId, highlightIds, routeTargets, onSelect, onHover }: DiagramProps) {
   const { vpc } = layout;
   return (
     <g fontFamily={FONT}>
@@ -294,6 +324,7 @@ function Diagram({ topo, layout, selection, focusId, routeTargets, onSelect, onH
             selected={!!t.resource && selection?.kind === "resource" && selection.id === t.resource.id}
             focused={!!t.resource && focusId === t.resource.id}
             routeTarget={!!t.resource && routeTargets.includes(t.resource.id)}
+            highlighted={!!t.resource && !!highlightIds?.has(t.resource.id)}
             onSelect={onSelect}
             onHover={onHover}
           />
@@ -371,11 +402,12 @@ const SubnetBox = memo(function SubnetBox({ s, selected, onSelect }: { s: Subnet
   );
 });
 
-const Tile = memo(function Tile({ t, selected, focused, routeTarget, onSelect, onHover }: {
+const Tile = memo(function Tile({ t, selected, focused, routeTarget, highlighted, onSelect, onHover }: {
   t: TileLayout;
   selected: boolean;
   focused: boolean;
   routeTarget: boolean;
+  highlighted: boolean;
   onSelect: (s: Selection) => void;
   onHover: (id: string | null) => void;
 }) {
@@ -394,10 +426,10 @@ const Tile = memo(function Tile({ t, selected, focused, routeTarget, onSelect, o
   const badge = KIND_BADGE[r.kind];
   const select = () => onSelect({ kind: "resource", id: r.id });
   const label = r.name || r.id;
-  const stroke = routeTarget ? C.route : selected ? C.accent : focused ? "var(--text)" : C.tileLine;
+  const stroke = routeTarget ? C.route : selected ? C.accent : highlighted ? C.highlight : focused ? "var(--text)" : C.tileLine;
   return (
     <g
-      className={`vm-tile${selected ? " selected" : ""}${focused ? " focused" : ""}${routeTarget ? " route-target" : ""}`}
+      className={`vm-tile${selected ? " selected" : ""}${focused ? " focused" : ""}${routeTarget ? " route-target" : ""}${highlighted ? " highlighted" : ""}`}
       data-id={r.id}
       role="button"
       tabIndex={0}
@@ -414,7 +446,8 @@ const Tile = memo(function Tile({ t, selected, focused, routeTarget, onSelect, o
     >
       <title>{`${label}\n${r.id} · ${r.state}`}</title>
       {routeTarget && <rect x={t.x - 3} y={t.y - 3} width={t.w + 6} height={t.h + 6} rx={9} fill="none" stroke={C.route} strokeOpacity={0.35} strokeWidth={4} />}
-      <rect x={t.x} y={t.y} width={t.w} height={t.h} rx={6} fill={C.tile} stroke={stroke} strokeWidth={routeTarget || selected || focused ? 2 : 1} />
+      {highlighted && <rect x={t.x - 4} y={t.y - 4} width={t.w + 8} height={t.h + 8} rx={10} fill="none" stroke={C.highlight} strokeOpacity={0.45} strokeWidth={5} />}
+      <rect x={t.x} y={t.y} width={t.w} height={t.h} rx={6} fill={C.tile} stroke={stroke} strokeWidth={routeTarget || selected || highlighted || focused ? 2 : 1} />
       <rect x={t.x + 10} y={t.y + 8} width={t.w - 20} height={24} rx={5} fill={badge.color} />
       <text x={t.x + t.w / 2} y={t.y + 24} fontSize={r.kind === "lambda" ? 15 : 10.5} fontWeight={700} textAnchor="middle" fill="var(--badge-text)">
         {badge.label}
