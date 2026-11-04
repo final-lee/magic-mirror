@@ -19,6 +19,7 @@ mod k8s_access_commands;
 mod k8s_commands;
 mod k8s_network_commands;
 mod k8s_describe_commands;
+mod k8s_xray_commands;
 mod k8s_helm_commands;
 mod k8s_security_commands;
 mod model;
@@ -173,6 +174,7 @@ pub fn run() {
             k8s_commands::k8s_change_log,
             k8s_commands::k8s_undo,
             k8s_network_commands::k8s_network,
+            k8s_xray_commands::k8s_xray,
             k8s_security_commands::k8s_findings,
             k8s_helm_commands::k8s_helm_tool,
             k8s_helm_commands::k8s_helm_releases,

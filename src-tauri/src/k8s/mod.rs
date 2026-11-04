@@ -24,6 +24,7 @@ pub mod shell;
 pub mod target;
 pub mod tls;
 pub mod watch;
+pub mod xray;
 
 #[cfg(test)]
 mod hygiene;

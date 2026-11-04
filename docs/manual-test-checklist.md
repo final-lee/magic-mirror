@@ -351,4 +351,9 @@
 - [ ] Pod에서 y(YAML)·l(로그)·s(셸 탭, 방식 "셸")·a(셸 탭, 방식 attach, 세션은 확인을 거쳐 열림)·⇧F(포트포워딩 대상 포트로 커서)·e(YAML 편집). Deployment에서 s는 복제본 칸으로 가서 숫자 + Enter가 scale 미리보기, r은 restart 미리보기, ⌃D는 삭제 미리보기. 어느 것도 미리보기 없이 적용되지 않는다
 - [ ] 노드에서 c·u가 cordon·uncordon 미리보기를 연다(이미 그 상태면 안내만). 해당 없는 종류(ConfigMap에서 l, Pod에서 r, Deployment에서 a 등)와 행을 고르지 않았을 때는 목록 아래에 이유가 4초쯤 보인다. 권한이 없는 변경은 단추의 이유가 그대로 보인다
 - [ ] `0`이 모든 네임스페이스로 바꾼다(노드처럼 네임스페이스 없는 종류에서는 안내). 다른 탭이 앞에 있을 때는 어떤 키도 EKS 목록에 닿지 않는다. ⇧⌘P·⌘/에 이 키들이 EKS 범위로 보인다
+## EKS 관계 트리 (로컬 kind 또는 테스트 클러스터에서 확인한다)
+- [ ] Deployment 상세의 "관계" 탭이 소유(Deployment → ReplicaSet → Pod), 참조(ServiceAccount·ConfigMap·Secret·PVC·Node), 선택(Service·PDB·NetworkPolicy), 대상(HPA) 묶음으로 보이고, 노드를 누르면 그 객체 상세가 열린다. 밝은 테마와 어두운 테마에서 확인한다
+- [ ] Pod에서는 가장 위 소유자(Deployment)까지 올라가고, ConfigMap·Node·PVC에서는 그것을 쓰는 객체가 보인다(Pod와 ReplicaSet은 Deployment로 합쳐진다)
+- [ ] 없는 ConfigMap·Secret을 가리키면 "없음" 배지가 뜨고 눌리지 않는다. 권한이 없는 종류(예: Service 목록)는 안내 한 줄만 뜨고 나머지 관계는 그대로 보인다
+- [ ] Pod 수가 많은 Deployment(50개 넘게)에서 "일부만 보여요" 안내가 뜬다. Pod 상태가 바뀌면 관계 탭도 따라 바뀌고, [다시 읽기]가 동작한다
 
