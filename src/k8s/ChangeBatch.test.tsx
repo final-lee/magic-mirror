@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { typeYaml } from "../test/codemirror";
+import { editorView, typeYaml } from "../test/codemirror";
 import { k8sApi } from "./api";
 import { BatchDialog, useK8sBatch } from "./ChangeBatch";
 import { ChangeDialog, useK8sChange } from "./ChangeFlow";
@@ -220,4 +220,20 @@ test("the preview says when the change cannot be undone", async () => {
   render(<Single change={{ kind: CONFIGMAPS, namespace: "team", name: "app", type: "apply", object: {}, force: false }} />);
   fireEvent.click(screen.getByText("start"));
   expect(await screen.findByText("되돌릴 수 없어요")).toBeInTheDocument();
+});
+
+test("in the YAML create dialog Tab indents inside the editor and Esc there does not close the dialog; Esc elsewhere does", () => {
+  render(<Harness />);
+  const box = screen.getByRole("textbox", { name: t.YAML_EDITOR_LABEL });
+  typeYaml("a:\nb: 1");
+  const view = editorView();
+  view.focus();
+  view.dispatch({ selection: { anchor: 3 } });
+  fireEvent.keyDown(box, { key: "Tab" });
+  expect(view.state.doc.toString()).toBe("a:\n  b: 1");
+  expect(box).toHaveFocus();
+  fireEvent.keyDown(box, { key: "Escape", keyCode: 27 });
+  expect(screen.getByRole("dialog", { name: t.YAML_CREATE })).toBeInTheDocument();
+  fireEvent.keyDown(screen.getByRole("button", { name: t.CHANGE_CANCEL }), { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: t.YAML_CREATE })).not.toBeInTheDocument();
 });

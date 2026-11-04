@@ -1,5 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { desktop } from "../api/desktop";
+import { editorView, typeYaml } from "../test/codemirror";
 import { renderWithClient } from "../test/utils";
 import { iamApi } from "./api";
 import {
@@ -522,13 +523,14 @@ describe("policy changes", () => {
   test("[편집] on an inline policy loads its document; the preview starts putInlinePolicy with the same name", async () => {
     const { props } = await openPolicies();
     fireEvent.click(within(rowOf("s3-scratch")).getByRole("button", { name: "s3-scratch 편집" }));
-    const editor = (await screen.findByRole("textbox", { name: "정책 JSON" })) as HTMLTextAreaElement;
+    await screen.findByRole("textbox", { name: "정책 JSON" });
+    const text = editorView("정책 JSON").state.doc.toString();
     expect(m.policy).toHaveBeenCalledWith("prod", scratchInline.id);
-    expect(JSON.parse(editor.value)).toEqual(JSON.parse(scratchInlineView().document));
+    expect(JSON.parse(text)).toEqual(JSON.parse(scratchInlineView().document));
     expect(screen.getByRole("button", { name: "미리보기" })).toBeDisabled(); // 바꾼 게 없다
 
-    const changed = editor.value.replace("s3:PutObject", "s3:PutObjectAcl");
-    fireEvent.change(editor, { target: { value: changed } });
+    const changed = text.replace("s3:PutObject", "s3:PutObjectAcl");
+    typeYaml(changed, "정책 JSON");
     fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
     expect(props.onFix).toHaveBeenCalledWith(
       { op: "putInlinePolicy", target: alice.arn, name: "s3-scratch", document: changed },
