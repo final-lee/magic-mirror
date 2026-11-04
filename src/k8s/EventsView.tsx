@@ -1,8 +1,10 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { ListFind, useListFind } from "../components/ListFind";
+import { fuzzyKeep } from "../lib/fuzzy";
 import { age } from "./format";
 import { K8sError } from "./K8sError";
 import { EVENTS } from "./kinds";
-import { H_COUNT, H_KIND, H_MESSAGE, H_OBJECT, H_REASON, H_TIME, LOADING, NAV_EVENTS, NO_EVENTS, WARNINGS_ONLY } from "./text";
+import { H_COUNT, H_KIND, H_MESSAGE, H_OBJECT, H_REASON, H_TIME, LIST_NO_MATCH, LOADING, NAV_EVENTS, NO_EVENTS, WARNINGS_ONLY } from "./text";
 import type { K8sTarget } from "./types";
 import { useK8sWatch } from "./useK8sWatch";
 
@@ -21,14 +23,22 @@ interface Props {
 export function EventsView({ target, context, sessionEpoch, ssoProfile, live, namespace, now }: Props) {
   const w = useK8sWatch(target, context, sessionEpoch, ssoProfile, EVENTS, namespace, live);
   const [warningsOnly, setWarningsOnly] = useState(false);
-  const rows = useMemo(
+  // ⌘F: 이 이벤트 표 안에서만 찾는다. 평소에는 찾기 줄이 없다
+  const box = useRef<HTMLDivElement>(null);
+  const find = useListFind(box);
+  const base = useMemo(
     () => w.rows.filter((r) => !warningsOnly || r.values.type === "Warning").sort((a, b) => (b.values.lastSeen ?? "").localeCompare(a.values.lastSeen ?? "")),
     [w.rows, warningsOnly],
   );
+  const rows = useMemo(
+    () => fuzzyKeep(base, find.query, (r) => [r.values.reason, r.values.type, r.values.object, r.values.message, r.namespace]),
+    [base, find.query],
+  );
   const at = now ?? Date.now();
   return (
-    <div className="k8s-events">
+    <div className="k8s-events" ref={box}>
       {w.error && <K8sError error={w.error} target={target} ssoProfile={ssoProfile} compact />}
+      <ListFind find={find} count={rows.length} />
       <div className="k8s-list-bar">
         <label className="k8s-check">
           <input type="checkbox" checked={warningsOnly} onChange={(e) => setWarningsOnly(e.target.checked)} />
@@ -38,7 +48,7 @@ export function EventsView({ target, context, sessionEpoch, ssoProfile, live, na
       {w.status === "loading" ? (
         <div className="empty">{LOADING}</div>
       ) : rows.length === 0 && !w.error ? (
-        <div className="empty">{NO_EVENTS}</div>
+        <div className="empty">{base.length === 0 ? NO_EVENTS : LIST_NO_MATCH}</div>
       ) : (
         <table className="k8s-table" aria-label={NAV_EVENTS}>
           <thead>

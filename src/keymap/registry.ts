@@ -65,14 +65,24 @@ function visible(e: Entry): boolean {
   return !!el && el.isConnected && !el.closest("[hidden]");
 }
 
-/** 명령을 처리할 등록 하나: 포커스가 든 host > 마지막으로 누른 host > 마지막에 등록한 것(숨은 host 제외) */
+/** 포개진 host(상세 안의 로그처럼 목록 상자 안에 또 하나)가 함께 후보면 가장 안쪽 것, 같으면 나중에 등록한 것 */
+function innermost(list: Entry[]): Entry | undefined {
+  return list.reduce<Entry | undefined>((best, e) => {
+    const b = best?.host?.current;
+    const h = e.host?.current;
+    if (!best || !b || !h) return e;
+    return h !== b && h.contains(b) ? best : e;
+  }, undefined);
+}
+
+/** 명령을 처리할 등록 하나: 포커스가 든 host(포개졌으면 가장 안쪽) > 마지막으로 누른 host > 마지막에 등록한 것(숨은 host 제외) */
 function pick(command: string): Entry | undefined {
   const candidates = entries.filter((e) => e.command === command && visible(e) && e.enabled.current());
   if (candidates.length === 0) return undefined;
   const active = document.activeElement;
   const within = (target: Element | null) => candidates.filter((e) => !!target && !!e.host?.current?.contains(target));
   const last = (list: Entry[]) => list[list.length - 1];
-  return last(within(active)) ?? last(within(lastPointer)) ?? last(candidates);
+  return innermost(within(active)) ?? innermost(within(lastPointer)) ?? last(candidates);
 }
 
 /** 명령을 실행한다(명령 팔레트·버튼). 처리할 곳이 없으면 false */

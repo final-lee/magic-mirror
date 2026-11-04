@@ -3,6 +3,7 @@ import { reportSsoExpired } from "../api/invoke";
 import { desktop } from "../api/desktop";
 import { errorMessage } from "../api/errors";
 import { ErrorState } from "../components/ErrorState";
+import { ListFind, type ListFindState } from "../components/ListFind";
 import { k8sApi } from "./api";
 import { JsonLogLine } from "./JsonLogLine";
 import { lineTone, type LogTone } from "./jsonLog";
@@ -242,13 +243,15 @@ interface ViewProps {
   pretty: boolean;
   showTime: boolean;
   wrap: boolean;
+  /** ⌘F로 여는 찾기 줄의 상태(로그 상자가 host). 검색어는 find.query */
+  find: ListFindState;
 }
 
 /**
  * 로그 보기: 출처 칩(여러 Pod·컨테이너를 합쳐 볼 때), 레벨 거르기(여러 개), 찾기, 일시정지, 복사·저장(보이는 줄 그대로), 맨 아래 따라가기.
  * 출처가 둘 이상이면 줄마다 출처 이름표를 앞에 붙이고, 칩으로 출처마다 보이거나 감춘다.
  */
-export function LogView({ target, ssoProfile, live, stream, options, pretty, showTime, wrap }: ViewProps) {
+export function LogView({ target, ssoProfile, live, stream, options, pretty, showTime, wrap, find }: ViewProps) {
   const [nonce, setNonce] = useState(0);
   const { buf, sources, notices, status, error } = useLogStream(target, ssoProfile, live, stream, options, nonce);
   const restart = () => setNonce((n) => n + 1);
@@ -262,7 +265,7 @@ export function LogView({ target, ssoProfile, live, stream, options, pretty, sho
     [sourceList, stream.kind === "workload" ? stream.name : ""],
   );
 
-  const [query, setQuery] = useState("");
+  const query = find.query;
   const [levels, setLevels] = useState<ReadonlySet<Level>>(new Set());
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const [paused, setPaused] = useState<LogBuffer | null>(null);
@@ -327,6 +330,7 @@ export function LogView({ target, ssoProfile, live, stream, options, pretty, sho
 
   return (
     <>
+      <ListFind find={find} placeholder={LOG_SEARCH} />
       {labels && (
         <div className="k8s-sources" role="group" aria-label={LOG_SOURCES}>
           {sources.map((s) => {
@@ -353,7 +357,6 @@ export function LogView({ target, ssoProfile, live, stream, options, pretty, sho
             </button>
           ))}
         </div>
-        <input type="search" className="k8s-filter" aria-label={LOG_SEARCH} placeholder={LOG_SEARCH} value={query} onChange={(e) => setQuery(e.target.value)} />
         {query && <span className="dim k8s-log-count">{logMatches(matches)}</span>}
         <button className="btn tone-secondary" aria-pressed={paused !== null} onClick={() => setPaused((p) => (p ? null : buf))}>
           {paused ? LOG_RESUME : LOG_PAUSE}

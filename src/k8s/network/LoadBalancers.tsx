@@ -1,4 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, type RefObject } from "react";
+import { ListFind, useListFind } from "../../components/ListFind";
+import { fuzzyKeep } from "../../lib/fuzzy";
 import { ListTable, type ListColumn } from "../../iam/ListTable";
 import { ErrorState } from "../../components/ErrorState";
 import { INGRESSES, SERVICES } from "../kinds";
@@ -8,7 +10,7 @@ import { healthCounts, listenersText, refOfLink, rowHighlight, rowKey, shortHost
 import {
   DASH, H_ACTION, H_ADDRESS, H_CONDITIONS, H_DEFAULT_ACTION, H_LINK, H_LISTENERS, H_LOAD_BALANCER, H_MATCH, H_PORT, H_PRIORITY, H_PROTOCOL_PORT, H_REASON,
   H_RULE_COUNT, H_SCHEME, H_SOURCE, H_STACK, H_STATE, H_TARGET, H_TARGET_HEALTH, H_TLS_POLICY, H_TYPE, H_ZONE, HEALTH_CHECK_OFF, L_CLASS, L_DNS, L_GROUP,
-  L_HEALTH_CHECK, L_HOSTNAMES, L_MATCH, L_NAME, L_PORTS, L_RULES, L_SCHEME, L_SECURITY_GROUPS, L_STATE, L_TYPE, L_VPC, L_ZONES, LB_EMPTY, LB_KIND_LABELS,
+  L_HEALTH_CHECK, L_HOSTNAMES, L_MATCH, L_NAME, L_PORTS, L_RULES, L_SCHEME, L_SECURITY_GROUPS, L_STATE, L_TYPE, L_VPC, L_ZONES, LB_EMPTY, LB_FILTER_PLACEHOLDER, LB_KIND_LABELS, NET_NO_MATCH,
   LB_TABLE_LABEL, MATCHED_BY_LABELS, NO_LISTENERS, NO_TARGET_GROUPS, NO_TARGETS, OPEN_IN_WORKLOADS, OPEN_LB_IN_VPC, OPEN_VPC_UNKNOWN, SEC_LISTENERS,
   SEC_LOAD_BALANCER, SEC_SUMMARY, SEC_TARGET_GROUPS, SOURCE_LABELS, STATE_LABELS, UNCLAIMED_NOTE, UNCLAIMED_TITLE, UNMATCHED_LABELS, UNMATCHED_SHORT,
   gapLine, healthCheckText, healthSummary, openLink, ruleCount, targetGroupTitle,
@@ -69,6 +71,8 @@ interface ListProps {
   selected: string | null;
   onSelect: (key: string) => void;
   onClear: () => void;
+  /** ⌘F를 받는 상자: 이 목록과 위에 뜨는 상세를 감싼 네트워크 화면 */
+  host: RefObject<HTMLElement>;
 }
 
 function UnclaimedTable({ items }: { items: UnclaimedLb[] }) {
@@ -97,12 +101,22 @@ function UnclaimedTable({ items }: { items: UnclaimedLb[] }) {
 }
 
 /** Service(LoadBalancer)·Ingress 목록. 행을 고르면 오른쪽에 로드 밸런서 상세가 뜬다. */
-export function LoadBalancers({ network, namespace, selected, onSelect, onClear }: ListProps) {
+export function LoadBalancers({ network, namespace, selected, onSelect, onClear, host }: ListProps) {
   const cols = useMemo(columns, []);
-  const rows = (network.loadBalancers ?? []).filter((r) => namespace === null || r.namespace === namespace);
+  const find = useListFind(host);
+  const scoped = (network.loadBalancers ?? []).filter((r) => namespace === null || r.namespace === namespace);
+  const rows = fuzzyKeep(scoped, find.query, (r) => [
+    sourceText(r),
+    SOURCE_LABELS[r.kind],
+    ...r.hostnames,
+    ...r.ips,
+    r.loadBalancer?.name,
+    r.loadBalancer?.kind ? LB_KIND_LABELS[r.loadBalancer.kind] : null,
+  ]);
   if (network.loadBalancers === null) return null;
   return (
     <div className="net-content">
+      <ListFind find={find} placeholder={LB_FILTER_PLACEHOLDER} count={rows.length} />
       <ListTable
         label={LB_TABLE_LABEL}
         rows={rows}
@@ -112,7 +126,7 @@ export function LoadBalancers({ network, namespace, selected, onSelect, onClear 
         onSelect={onSelect}
         onClear={onClear}
         onOpen={onSelect}
-        empty={LB_EMPTY}
+        empty={scoped.length === 0 ? LB_EMPTY : NET_NO_MATCH}
       />
       {network.unclaimed.length > 0 && <UnclaimedTable items={network.unclaimed} />}
     </div>
