@@ -1,5 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { ListFind, useListFind } from "../components/ListFind";
 import { formatDateTime } from "../iam/format";
+import { fuzzyKeep } from "../lib/fuzzy";
 import { DASH, collate } from "./labels";
 import { PgError } from "./PgError";
 import { usePgSessions } from "./queries";
@@ -59,8 +61,13 @@ function TerminateButton({ session, role, terminate }: { session: PgSession; rol
  */
 export function SessionTable({ sessions, withRole = false, terminate }: TableProps) {
   const columns = [...(withRole ? ["역할"] : []), ...DETAIL_COLUMNS, ...(terminate ? ["조치"] : [])];
+  // ⌘F: 이 세션 표 안에서만 찾는다. 평소에는 찾기 줄이 없다
+  const box = useRef<HTMLDivElement>(null);
+  const find = useListFind(box);
+  const listed = fuzzyKeep(sessions, find.query, (s) => [s.role, s.database, s.clientAddr, s.applicationName, s.state, s.waitEvent, formatDateTime(s.backendStart), String(s.pid)]);
   return (
-    <>
+    <div ref={box}>
+      <ListFind find={find} count={listed.length} />
       <table className="pg-sessions" aria-label="세션 목록">
         <thead>
           <tr>
@@ -72,7 +79,7 @@ export function SessionTable({ sessions, withRole = false, terminate }: TablePro
           </tr>
         </thead>
         <tbody>
-          {sessions.map((s) => (
+          {listed.map((s) => (
             <tr key={s.pid}>
               {withRole && <td>{s.role ?? DASH}</td>}
               <td>{s.database ?? DASH}</td>
@@ -89,12 +96,13 @@ export function SessionTable({ sessions, withRole = false, terminate }: TablePro
           ))}
         </tbody>
       </table>
+      {listed.length === 0 && <div className="empty small">조건에 맞는 세션이 없어요</div>}
       {sessions.some(detailsHidden) && (
         <p className="pg-footnote" role="note">
           {SESSIONS_FOOTNOTE}
         </p>
       )}
-    </>
+    </div>
   );
 }
 

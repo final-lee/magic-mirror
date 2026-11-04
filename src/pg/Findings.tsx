@@ -1,4 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
+import { ListFind, useListFind } from "../components/ListFind";
+import { fuzzyKeep } from "../lib/fuzzy";
 import { DASH, TRUNCATED_TEXT, objectName } from "./labels";
 import { PgError } from "./PgError";
 import { usePgFindings } from "./queries";
@@ -41,12 +43,26 @@ export function Findings({ target, overview, onOpenRole, onOpenSchema }: Props) 
   // 백엔드가 이미 심각도 순으로 주지만, 순서를 믿지 않고 한 번 더 맞춘다. 같은 수준 안에서는 받은 순서 그대로다.
   const groups = useMemo(() => [...(data?.groups ?? [])].sort((a, b) => LEVEL_RANK[a.level] - LEVEL_RANK[b.level]), [data]);
 
+  // ⌘F: 점검 화면 안에서만 찾는다(역할, 데이터베이스, 객체, 내용). 평소에는 찾기 줄이 없다. 맞는 항목이 없는 묶음은 접힌다
+  const box = useRef<HTMLElement>(null);
+  const find = useListFind(box, { enabled: groups.length > 0 || (data?.skipped.length ?? 0) > 0 });
+  const found = useMemo(
+    () =>
+      groups
+        .map((g) => ({ ...g, items: fuzzyKeep(g.items, find.query, (i) => [i.role, i.database, i.object ? objectName(i.object) : null, i.detail]) }))
+        .filter((g) => g.items.length > 0),
+    [groups, find.query],
+  );
+  const skipped = useMemo(() => fuzzyKeep(data?.skipped ?? [], find.query, (s) => [s.database, s.reason]), [data, find.query]);
+  const matches = found.reduce((n, g) => n + g.items.length, 0) + skipped.length;
+
   if (!data) {
     return <section className="center">{q.isError ? <PgError error={q.error} target={target} /> : <div className="empty">점검하는 중…</div>}</section>;
   }
 
   return (
-    <section className="center fx">
+    <section className="center fx" ref={box}>
+      <ListFind find={find} count={matches} />
       {q.isError && <PgError compact error={q.error} target={target} />}
       {data.truncated.length > 0 && (
         <div className="notice" role="note">
@@ -55,10 +71,12 @@ export function Findings({ target, overview, onOpenRole, onOpenSchema }: Props) 
       )}
       {groups.length === 0 ? (
         <div className="empty small">발견된 문제가 없어요</div>
+      ) : found.length === 0 && skipped.length === 0 ? (
+        <div className="empty small">조건에 맞는 항목이 없어요</div>
       ) : (
-        groups.map((group) => <Group key={group.kind} group={group} overview={overview} onOpenRole={onOpenRole} onOpenSchema={onOpenSchema} />)
+        found.map((group) => <Group key={group.kind} group={group} overview={overview} onOpenRole={onOpenRole} onOpenSchema={onOpenSchema} />)
       )}
-      {data.skipped.length > 0 && <Skipped skipped={data.skipped} />}
+      {skipped.length > 0 && <Skipped skipped={skipped} />}
       <p className="pg-footnote">{FINDINGS_FOOTNOTE}</p>
     </section>
   );

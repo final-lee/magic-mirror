@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { desktop } from "../api/desktop";
 import { ErrorState } from "../components/ErrorState";
+import { ListFind, useListFind } from "../components/ListFind";
+import { fuzzyKeep } from "../lib/fuzzy";
 import { formatDateTime } from "./format";
 import { useFindings } from "./queries";
 import { routeForFocus, type IamRoute } from "./route";
@@ -135,11 +137,16 @@ function Card({ group, selected, unchecked, onPick }: { group: FindingGroup; sel
 }
 
 function Items({ group, overview, onOpen, onFix }: { group: FindingGroup; overview: IamOverview } & Pick<Props, "onOpen" | "onFix">) {
+  // ⌘F: 고른 점검 항목의 대상 표 안에서만 찾는다(대상 이름, 내용, CLI). 평소에는 찾기 줄이 없다
+  const box = useRef<HTMLDivElement>(null);
+  const find = useListFind(box);
+  const items = fuzzyKeep(group.items, find.query, (item) => [item.targetName, item.detail, item.cli]);
   return (
-    <div className="fx-items">
+    <div className="fx-items" ref={box}>
       <h3 className="fx-items-title">
         {group.title} <span className="dim">{group.items.length}건</span>
       </h3>
+      <ListFind find={find} count={items.length} />
       <table aria-label="점검 대상">
         <thead>
           <tr>
@@ -149,7 +156,7 @@ function Items({ group, overview, onOpen, onFix }: { group: FindingGroup; overvi
           </tr>
         </thead>
         <tbody>
-          {group.items.map((item, i) => {
+          {items.map((item, i) => {
             const route = targetRoute(overview, group.kind, item);
             return (
               <tr key={`${item.targetArn}|${i}`}>
@@ -183,6 +190,7 @@ function Items({ group, overview, onOpen, onFix }: { group: FindingGroup; overvi
           })}
         </tbody>
       </table>
+      {items.length === 0 && <div className="empty small">조건에 맞는 항목이 없어요</div>}
     </div>
   );
 }
