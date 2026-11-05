@@ -62,7 +62,7 @@ pub fn run() {
             app.manage(iam_commands::IamState::new(dir.join("iam-changes.jsonl")));
             app.manage(k8s_commands::K8sState::new(dir.join("k8s-changes.jsonl")));
             app.manage(k8s_access_commands::AccessState::default());
-            app.manage(argocd::ArgocdState::default());
+            app.manage(argocd::ArgocdState::new(dir.clone()));
             app.manage(tailscale::TailscaleState::new(dir.join("tailscale-changes.jsonl")));
             app.manage(argowf::client::State::new(dir.join("settings.json")));
             app.manage(pg_commands::PgState::new(dir.join("db-changes.jsonl")));

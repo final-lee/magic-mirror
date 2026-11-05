@@ -26,8 +26,9 @@ impl TokenStore for MemoryStore {
 
 #[test]
 fn argocd_url_and_errors() {
-    let url = request_url("https://example.test/base/", &["api", "v1", "applications", "a/b"], Some("name space"), Some("hard")).unwrap();
+    let url = request_url("https://example.test/base/", &["api", "v1", "applications", "a/b"], &[("appNamespace", "name space"), ("refresh", "hard")]).unwrap();
     assert_eq!(url.as_str(), "https://example.test/base/api/v1/applications/a%2Fb?appNamespace=name+space&refresh=hard");
+    assert_eq!(request_url("https://example.test", &["api", "version"], &[]).unwrap().as_str(), "https://example.test/api/version");
     assert_eq!(response_error(StatusCode::UNAUTHORIZED, &json!({"message":"ignored"})), AppError::other(ARGOCD_TOKEN_INVALID));
     assert_eq!(response_error(StatusCode::CONFLICT, &json!({"message":"busy"})), AppError::other("busy"));
     assert_eq!(response_error(StatusCode::BAD_REQUEST, &Value::Null), AppError::other("400 Bad Request"));
@@ -51,14 +52,8 @@ async fn argocd_token_store_validates_before_saving() {
     });
     let store = MemoryStore::default();
     let contents = store.0.clone();
-    crate::k8s::tls::install_crypto_provider();
-    let state = ArgocdState {
-        client: Client::new(),
-        tokens: Mutex::new(HashMap::new()),
-        store: Arc::new(store),
-        store_lock: tokio::sync::Mutex::new(()),
-    };
-    assert_eq!(state.api(&url, Method::GET, &["api"], None, None, None).await.unwrap_err(), AppError::other(ARGOCD_TOKEN_MISSING));
+    let state = ArgocdState::with_store(Arc::new(store), std::env::temp_dir());
+    assert_eq!(state.api(&url, Method::GET, &["api"], &[], None).await.unwrap_err(), AppError::other(ARGOCD_TOKEN_MISSING));
     assert!(state.session(&url).await.unwrap().is_none());
     assert!(state.set_token(&url, "invalid".into()).await.is_err());
     assert!(contents.lock().unwrap().is_empty());
@@ -89,13 +84,7 @@ impl TokenStore for FailingStore {
 
 #[tokio::test]
 async fn argocd_store_failure_does_not_cache() {
-    crate::k8s::tls::install_crypto_provider();
-    let state = ArgocdState {
-        client: Client::new(),
-        tokens: Mutex::new(HashMap::new()),
-        store: Arc::new(FailingStore),
-        store_lock: tokio::sync::Mutex::new(()),
-    };
+    let state = ArgocdState::with_store(Arc::new(FailingStore), std::env::temp_dir());
     assert!(state.save_token("https://example.test/", Token("secret".into())).await.is_err());
     assert!(state.tokens.lock().unwrap().is_empty());
 }

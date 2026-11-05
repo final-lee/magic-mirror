@@ -27,28 +27,28 @@ pub async fn argocd_session(state: State<'_, ArgocdState>, url: String) -> Resul
 #[tauri::command]
 /// Application 목록을 읽는다.
 pub async fn argocd_apps(state: State<'_, ArgocdState>, url: String) -> Result<Vec<ArgoAppRow>, AppError> {
-    let body = state.api(&url, Method::GET, &["api", "v1", "applications"], None, None, None).await?;
+    let body = state.api(&url, Method::GET, &["api", "v1", "applications"], &[], None).await?;
     Ok(argocd::list(&body, "/items").iter().map(argocd::app_row).collect())
 }
 
 #[tauri::command]
 /// ApplicationSet 목록을 읽는다.
 pub async fn argocd_appsets(state: State<'_, ArgocdState>, url: String) -> Result<Vec<ArgoAppSetRow>, AppError> {
-    let body = state.api(&url, Method::GET, &["api", "v1", "applicationsets"], None, None, None).await?;
+    let body = state.api(&url, Method::GET, &["api", "v1", "applicationsets"], &[], None).await?;
     Ok(argocd::list(&body, "/items").iter().map(argocd::appset_row).collect())
 }
 
 #[tauri::command]
 /// Application 상세를 읽는다.
 pub async fn argocd_app(state: State<'_, ArgocdState>, url: String, namespace: String, name: String) -> Result<ArgoApp, AppError> {
-    let body = state.api(&url, Method::GET, &["api", "v1", "applications", &name], Some(&namespace), None, None).await?;
+    let body = state.api(&url, Method::GET, &["api", "v1", "applications", &name], &[("appNamespace", &namespace)], None).await?;
     Ok(argocd::argo_app_of(&body))
 }
 
 #[tauri::command]
 /// Application 리소스 트리를 읽는다.
 pub async fn argocd_tree(state: State<'_, ArgocdState>, url: String, namespace: String, name: String) -> Result<Vec<ArgoTreeNode>, AppError> {
-    let body = state.api(&url, Method::GET, &["api", "v1", "applications", &name, "resource-tree"], Some(&namespace), None, None).await?;
+    let body = state.api(&url, Method::GET, &["api", "v1", "applications", &name, "resource-tree"], &[("appNamespace", &namespace)], None).await?;
     Ok(argocd::list(&body, "/nodes").iter().chain(argocd::list(&body, "/orphanedNodes")).map(argocd::tree_node).collect())
 }
 
@@ -60,7 +60,7 @@ pub async fn argocd_refresh(state: State<'_, ArgocdState>, url: String, namespac
     } else {
         "normal"
     };
-    state.api(&url, Method::GET, &["api", "v1", "applications", &name], Some(&namespace), Some(refresh), None).await?;
+    state.api(&url, Method::GET, &["api", "v1", "applications", &name], &[("appNamespace", &namespace), ("refresh", refresh)], None).await?;
     Ok(())
 }
 
@@ -68,6 +68,6 @@ pub async fn argocd_refresh(state: State<'_, ArgocdState>, url: String, namespac
 /// 서버에 동기화를 요청한다.
 pub async fn argocd_sync(state: State<'_, ArgocdState>, url: String, namespace: String, name: String, options: ArgoSyncOptions) -> Result<(), AppError> {
     let body: Value = json!({ "appNamespace": namespace, "prune": options.prune, "dryRun": options.dry_run });
-    state.api(&url, Method::POST, &["api", "v1", "applications", &name, "sync"], None, None, Some(&body)).await?;
+    state.api(&url, Method::POST, &["api", "v1", "applications", &name, "sync"], &[], Some(&body)).await?;
     Ok(())
 }
