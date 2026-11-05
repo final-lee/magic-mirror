@@ -61,23 +61,34 @@ interface Props {
   children: ReactNode;
   /** 툴바 오른쪽에 더하는 것(범례, 방향 …) */
   extra?: ReactNode;
-  /** 캔버스 높이. 기본 360px */
-  frameHeight?: number | string;
+  /** 캔버스의 가장 작은 높이(px). 기본 220 */
+  minHeight?: number;
+  /** 캔버스의 가장 큰 높이: 창 높이에 대한 비율. 기본 0.75 */
+  maxHeight?: number;
+  /** 부모(세로 flex)의 남은 자리를 모두 채운다. 높이를 그림에 맞추지 않는다 */
+  fill?: boolean;
   className?: string;
 }
 
 /**
  * 그래프를 그리는 SVG 캔버스: 확대·축소(버튼·휠), 끌어서 옮기기, [맞춤](그림 전체를 화면에), [100%].
- * 색은 모두 CSS 변수(테마)로 칠하니 밝은 테마와 어두운 테마를 따라간다. 그림이 바뀌면(크기가 달라지면) 다시 맞춘다.
+ * 색은 모두 CSS 변수(테마)로 칠하니 밝은 테마와 어두운 테마를 따라간다.
+ * 높이는 그림을 캔버스 너비에 맞췄을 때의 높이를 따르되 minHeight와 창 높이 × maxHeight 사이로 둔다(fill이면 부모를 채운다).
+ * 그림이나 캔버스의 크기가 바뀌면 다시 맞춘다. 다만 손으로 옮기거나 확대한 뒤에는 캔버스 크기가 바뀌어도 그대로 둔다.
  */
-export function GraphCanvas({ width, height, label, children, extra, frameHeight = 360, className = "" }: Props) {
+export function GraphCanvas({ width, height, label, children, extra, minHeight = 220, maxHeight = 0.75, fill = false, className = "" }: Props) {
   const id = useId().replace(/:/g, "");
   const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
+  const [box, setBox] = useState({ w: 0, h: 0 });
+  const [windowHeight, setWindowHeight] = useState(() => window.innerHeight);
   const frame = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; y: number; moved: number } | null>(null);
   const moved = useRef(false);
+  /** 손으로 옮기거나 확대했다(맞춤을 누를 때까지 저절로 다시 맞추지 않는다) */
+  const touched = useRef(false);
 
   const fit = () => {
+    touched.current = false;
     const el = frame.current;
     if (!el || el.clientWidth === 0 || el.clientHeight === 0 || width === 0 || height === 0) return;
     const zoom = clamp(Math.min(MAX_FIT, (el.clientWidth - FIT_PAD) / width, (el.clientHeight - FIT_PAD) / height));
@@ -86,6 +97,33 @@ export function GraphCanvas({ width, height, label, children, extra, frameHeight
   // 그림의 크기가 바뀌면 다시 맞춘다
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useLayoutEffect(fit, [width, height]);
+  // 캔버스의 크기가 바뀌면(창 크기, 높이 조절) 손대지 않았을 때만 다시 맞춘다
+  useLayoutEffect(() => {
+    if (!touched.current) fit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [box.w, box.h]);
+
+  useLayoutEffect(() => {
+    const el = frame.current;
+    if (!el) return;
+    const measure = () => setBox((b) => (b.w === el.clientWidth && b.h === el.clientHeight ? b : { w: el.clientWidth, h: el.clientHeight }));
+    const resize = () => setWindowHeight(window.innerHeight);
+    measure();
+    window.addEventListener("resize", resize);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(el);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", resize);
+    };
+  }, []);
+
+  /** 그림을 캔버스 너비에 맞췄을 때의 높이(위아래 한계 안) */
+  const frameHeight = () => {
+    if (box.w === 0 || width === 0) return minHeight;
+    const natural = height * Math.min(MAX_FIT, (box.w - FIT_PAD) / width) + FIT_PAD;
+    return Math.round(Math.min(Math.max(minHeight, natural), Math.max(minHeight, windowHeight * maxHeight)));
+  };
 
   // 휠은 확대·축소다. 화면이 같이 스크롤되지 않게 passive가 아닌 리스너로 붙인다
   useEffect(() => {
@@ -93,6 +131,7 @@ export function GraphCanvas({ width, height, label, children, extra, frameHeight
     if (!el) return;
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
+      touched.current = true;
       const rect = el.getBoundingClientRect();
       const px = e.clientX - rect.left;
       const py = e.clientY - rect.top;
@@ -107,6 +146,7 @@ export function GraphCanvas({ width, height, label, children, extra, frameHeight
   }, []);
 
   const zoomBy = (factor: number) => {
+    touched.current = true;
     const el = frame.current;
     const cx = (el?.clientWidth ?? 0) / 2;
     const cy = (el?.clientHeight ?? 0) / 2;
@@ -117,6 +157,9 @@ export function GraphCanvas({ width, height, label, children, extra, frameHeight
   };
 
   const down = (e: MouseEvent) => {
+    if (e.button !== 0) return;
+    // 끄는 동안 둘레의 글이 선택되지 않게 한다
+    e.preventDefault();
     drag.current = { x: e.clientX, y: e.clientY, moved: 0 };
     moved.current = false;
   };
@@ -126,7 +169,7 @@ export function GraphCanvas({ width, height, label, children, extra, frameHeight
     const dx = e.clientX - from.x;
     const dy = e.clientY - from.y;
     from.moved += Math.abs(dx) + Math.abs(dy);
-    if (from.moved > DRAG_SLOP) moved.current = true;
+    if (from.moved > DRAG_SLOP) moved.current = touched.current = true;
     drag.current = { ...from, x: e.clientX, y: e.clientY };
     setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
   };
@@ -135,7 +178,7 @@ export function GraphCanvas({ width, height, label, children, extra, frameHeight
   };
 
   return (
-    <div className={`kvg ${className}`}>
+    <div className={`kvg${fill ? " fill" : ""} ${className}`}>
       <div className="kvg-bar">
         <button type="button" className="btn small" aria-label="확대" onClick={() => zoomBy(1.25)}>
           ＋
@@ -146,7 +189,14 @@ export function GraphCanvas({ width, height, label, children, extra, frameHeight
         <button type="button" className="btn small" onClick={fit}>
           맞춤
         </button>
-        <button type="button" className="btn small" onClick={() => setView({ zoom: 1, x: 0, y: 0 })}>
+        <button
+          type="button"
+          className="btn small"
+          onClick={() => {
+            touched.current = true;
+            setView({ zoom: 1, x: 0, y: 0 });
+          }}
+        >
           100%
         </button>
         <span className="dim kvg-zoom">{Math.round(view.zoom * 100)}%</span>
@@ -155,7 +205,7 @@ export function GraphCanvas({ width, height, label, children, extra, frameHeight
       <div
         ref={frame}
         className="kvg-frame"
-        style={{ height: frameHeight }}
+        style={fill ? { minHeight } : { height: frameHeight() }}
         onMouseDown={down}
         onMouseMove={move}
         onMouseUp={end}

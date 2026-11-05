@@ -78,7 +78,7 @@ export function TransitionsPanel({ target, prefix, name, counts }: Props) {
               {n!.kind === "trimmed" ? t.TRANSITIONS_TRIMMED(n!.minutes) : n!.kind === "truncated" ? t.TRANSITIONS_TRUNCATED(formatCount(n!.events)) : t.TRANSITIONS_EMPTY}
             </p>
           ))}
-          <GraphCanvas width={layout.width} height={layout.height} label={t.TRANSITIONS_TITLE} frameHeight={250}>
+          <GraphCanvas width={layout.width} height={layout.height} label={t.TRANSITIONS_TITLE} minHeight={200}>
             {layout.edges.map((e) => {
               const edge = model!.edges.find((x) => x.id === e.id)!;
               const from = TRANSITION_NODES.find((n) => n.id === edge.from)!.label;

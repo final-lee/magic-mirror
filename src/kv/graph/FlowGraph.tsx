@@ -10,9 +10,8 @@ interface Props {
   flow: KvBullFlow;
   /** 노드를 누르면 그 작업을 연다(다른 큐여도). 사라진(missing) 작업은 누를 수 없다 */
   onOpen: (queue: string, id: string) => void;
-  /** 크게 보기(화면을 채운다) */
+  /** 크게 보기(부모의 남은 자리를 채운다) */
   big?: boolean;
-  frameHeight?: number;
 }
 
 const LEGEND = (
@@ -41,14 +40,14 @@ const LEGEND = (
  * 작업 흐름 그래프: 부모 → 자식(왼쪽 → 오른쪽). 노드는 작업 이름과 `큐 · #id`, 상태, 자식 수를 보이고 지금 보는 작업은 파랑 테두리다.
  * 간선은 자식의 상태로 모양이 다르다(끝남 초록 실선, 실패 빨강, 기다림 점선, 무시된 실패 흐린 점선).
  */
-export function FlowGraph({ flow, onOpen, big = false, frameHeight = 280 }: Props) {
+export function FlowGraph({ flow, onOpen, big = false }: Props) {
   const layout = useMemo(() => layoutFlow(flow), [flow]);
   const nodes = new Map(flow.nodes.map((n) => [n.key, n]));
   const placed = new Map(layout.nodes.map((n) => [n.id, n]));
   const status = new Map(flow.edges.map((e) => [`${e.parent}>${e.child}`, e.status]));
   return (
     <div className="kvg-flow">
-      <GraphCanvas width={layout.width} height={layout.height} label="작업 흐름 그래프" extra={LEGEND} frameHeight={frameHeight} className={big ? "big" : ""}>
+      <GraphCanvas width={layout.width} height={layout.height} label="작업 흐름 그래프" extra={LEGEND} fill={big}>
         {layout.edges.map((e) => {
           const s = flowEdgeStyle(status.get(e.id) ?? "pending");
           return <GraphEdgeLine key={e.id} path={e.path} {...s} title={`${nodes.get(e.from)?.name} → ${nodes.get(e.to)?.name}`} />;

@@ -181,7 +181,7 @@ export function BullQueues({ target, prefix, onPrefix, onOpenQueue, active }: Pr
           <div className="empty">{bt.SEARCHING}</div>
         )
       ) : (
-        <div className="kv-pane">
+        <div className={`kv-pane${mode === "map" && queues.length > 0 ? " kv-pane-map" : ""}`}>
           {q.isError && <KvError compact error={q.error} target={target} />}
           {mode === "map" && queues.length > 0 ? (
             <QueueMap target={target} prefix={prefix} attention={attention} onOpenQueue={onOpenQueue} />

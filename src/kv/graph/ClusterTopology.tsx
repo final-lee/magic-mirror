@@ -88,7 +88,7 @@ export function ClusterTopology({ overview, clients, note }: Props) {
   return (
     <div className="kv-topology">
       {note && <p className="kvg-note">{note}</p>}
-      <GraphCanvas width={geo.width} height={geo.height} label={t.TOPOLOGY_TITLE} frameHeight={560}>
+      <GraphCanvas width={geo.width} height={geo.height} label={t.TOPOLOGY_TITLE} minHeight={320}>
         {geo.groups.map((g) => (
           <g key={g.id} className="kvg-group" transform={`translate(${g.x},${g.y})`} role="group" aria-label={g.label}>
             <rect width={g.w} height={g.h} rx={10} />

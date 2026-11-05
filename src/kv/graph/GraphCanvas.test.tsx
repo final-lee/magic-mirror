@@ -53,6 +53,48 @@ test("dragging pans the drawing", () => {
   expect(group().getAttribute("transform")).toBe("translate(30,-10) scale(1)");
 });
 
+test("pressing to drag does not start a text selection, other buttons are left alone", () => {
+  setup();
+  const frame = screen.getByRole("img", { name: "시험 그래프" }).parentElement!;
+  // fireEvent는 기본 동작이 막혔으면 false를 돌려준다
+  expect(fireEvent.mouseDown(frame, { button: 0 })).toBe(false);
+  expect(fireEvent.mouseDown(frame, { button: 2 })).toBe(true);
+});
+
+test("the frame grows with the drawing at the frame's width, between the minimum and 3/4 of the window", () => {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(816);
+  vi.spyOn(window, "innerHeight", "get").mockReturnValue(1000);
+  try {
+    const frameOf = (label: string) => screen.getByRole("img", { name: label }).parentElement!;
+    render(
+      <>
+        {/* 맞춤 1.25배(최대)라 200 × 1.25 + 16 = 266 */}
+        <GraphCanvas width={400} height={200} label="보통">
+          <g />
+        </GraphCanvas>
+        {/* 800/1600 = 0.5배라 100 × 0.5 + 16 = 66 → 최소 220 */}
+        <GraphCanvas width={1600} height={100} label="납작">
+          <g />
+        </GraphCanvas>
+        {/* 1.25 × 2000 → 창 높이의 3/4 = 750 */}
+        <GraphCanvas width={400} height={2000} label="길쭉">
+          <g />
+        </GraphCanvas>
+        <GraphCanvas width={400} height={2000} label="채움" fill minHeight={300}>
+          <g />
+        </GraphCanvas>
+      </>,
+    );
+    expect(frameOf("보통").style.height).toBe("266px");
+    expect(frameOf("납작").style.height).toBe("220px");
+    expect(frameOf("길쭉").style.height).toBe("750px");
+    expect(frameOf("채움").style.height).toBe("");
+    expect(frameOf("채움").style.minHeight).toBe("300px");
+  } finally {
+    vi.restoreAllMocks();
+  }
+});
+
 test("a click is a click, but letting go of a drag over a node is not", () => {
   const { onClick } = setup();
   const frame = screen.getByRole("img", { name: "시험 그래프" }).parentElement!;

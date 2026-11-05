@@ -73,7 +73,7 @@ export function QueueMap({ target, prefix, attention, onOpenQueue }: Props) {
         {t.MAP_SAMPLED(formatCount(q.data.sampled))}
         {!map.workersKnown && ` · ${t.MAP_NO_WORKERS}`}
       </p>
-      <GraphCanvas width={layout.width} height={layout.height} label={bt.BULL_TITLE + " " + t.MAP_MAP} extra={LEGEND} frameHeight={460}>
+      <GraphCanvas width={layout.width} height={layout.height} label={bt.BULL_TITLE + " " + t.MAP_MAP} extra={LEGEND} fill minHeight={360}>
         {layout.edges.map((e) => {
           const edge = edgeOf.get(e.id)!;
           const link = edge.kind === "link";

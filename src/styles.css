@@ -2307,14 +2307,16 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .kv-flow-big .kvg-flow { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .kv-flow-big-head { display: flex; align-items: center; gap: 10px; }
 .kv-flow-big-head h3 { margin: 0; flex: 1; font-size: 15px; }
-.kvg.big { flex: 1; min-height: 0; }
-.kvg.big .kvg-frame { height: auto !important; flex: 1; min-height: 0; }
+.kvg.fill { flex: 1; min-height: 0; }
+.kvg.fill .kvg-frame { flex: 1; }
 .kvg-meter-bg { fill: var(--neutral-alpha-12) !important; stroke: none !important; }
 .kvg-meter-ok { fill: var(--accent) !important; stroke: none !important; }
 .kvg-meter-warm { fill: var(--yellow) !important; stroke: none !important; }
 .kvg-meter-hot { fill: var(--red) !important; stroke: none !important; }
 .kvg-flow { display: flex; flex-direction: column; gap: 4px; }
 .kv-view-seg { margin-left: 8px; }
-.kv-qmap { display: flex; flex-direction: column; gap: 6px; padding: 10px 16px 16px; }
+/* 지도는 큐 목록 칸의 남은 높이를 모두 채운다 */
+.kv-pane.kv-pane-map { display: flex; flex-direction: column; }
+.kv-qmap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 10px 16px 16px; }
 .kv-topology { display: flex; flex-direction: column; gap: 6px; }
 .kv-transitions { margin-top: 4px; }
