@@ -5,10 +5,10 @@
 //! Valkey·Redis는 명령을 한 스레드에서 하나씩 처리한다. 수십만 키를 재는 동안 운영 명령이 밀리지 않게 나눠서 간다.
 //! - SCAN 한 번에 5만 개를 받아 한꺼번에(파이프라인) 잰다. 서버는 받은 요청을 16KB씩 읽어 처리하고 그 사이에 다른 클라이언트를 받으므로,
 //!   5만 개를 한꺼번에 보내도 한 번에 붙잡는 시간은 짧다. 길게 붙잡는 것은 `SCAN … COUNT 50000` 한 번(운영 ElastiCache에서 약 44ms)뿐이다.
-//! - 5만 개를 재고 나면 걸린 시간만큼(최소 0.5초) 쉬고, 그때까지의 상위 키를 중간 결과로 보낸다. 이 작업이 서버 시간을 절반 넘게 쓰지 않는다.
+//! - 5만 개를 재고 나면 0.5초 쉬고, 그때까지의 상위 키를 중간 결과로 보낸다.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::value::concurrently;
 
@@ -23,13 +23,8 @@ use crate::error::AppError;
 
 /// SCAN 한 번의 COUNT이자 한꺼번에 재는 키 수. fred가 한 연결에서 파이프라인하므로 왕복 한 번으로 잰다
 pub const BATCH: usize = 50_000;
-/// 한 번 재고 나서 쉬는 가장 짧은 시간
-const MIN_GAP: Duration = Duration::from_millis(500);
-
-/// 한 번 재는 데 `spent`가 걸렸을 때 다음까지 쉬는 시간: 걸린 만큼, 최소 0.5초
-pub fn gap_after(spent: Duration) -> Duration {
-    spent.max(MIN_GAP)
-}
+/// 한 번 재고 나서 쉬는 시간
+const PAUSE: Duration = Duration::from_millis(500);
 
 /// 크기 순 상위 `limit`개만 남긴다(같은 크기는 먼저 잰 것이 앞)
 fn keep_top(sized: &mut Vec<(u64, Vec<u8>, Option<KvType>)>, limit: usize) {
@@ -85,7 +80,6 @@ pub async fn bigkeys(conn: &Connected, limit: usize, stop: &AtomicBool, mut prog
             stopped = true;
             break;
         }
-        let started = Instant::now();
         let Some(batch) = scanner.step().await? else { break };
         scanned += batch.len() as u64;
         let sizes = concurrently(batch.iter(), BATCH, |key| size_of(conn, key, basis)).await;
@@ -95,12 +89,11 @@ pub async fn bigkeys(conn: &Connected, limit: usize, stop: &AtomicBool, mut prog
             }
         }
         keep_top(&mut top, limit);
-        let spent = started.elapsed();
         if scanner.cursor().is_none() {
             break;
         }
         progress(KvBigKeysMessage::Progress { scanned, total: total.max(scanned), keys: Some(typed(conn, &top).await?) });
-        tokio::time::sleep(gap_after(spent)).await;
+        tokio::time::sleep(PAUSE).await;
     }
     keep_top(&mut top, limit);
     let keys = typed(conn, &top).await?;
