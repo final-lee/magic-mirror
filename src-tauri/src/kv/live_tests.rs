@@ -110,9 +110,9 @@ async fn reads_every_value_type_and_server_status() {
     let list = clients::clients(&conn).await.unwrap();
     assert!(list.iter().any(|c| c.own), "앱 자신의 연결이 표시돼야 해요");
     let stop = AtomicBool::new(false);
-    match bigkeys::bigkeys(&conn, 5, &stop, |_, _| {}).await.unwrap() {
-        super::model::KvBigKeysMessage::Done { keys, .. } => assert!(!keys.is_empty()),
-        other => panic!("{other:?}"),
+    match bigkeys::bigkeys(&conn, 5, &stop, |_| {}).await {
+        Ok(report) => assert!(!report.keys.is_empty() && !report.stopped),
+        Err(e) => panic!("{e:?}"),
     }
     conn.close().await;
 }

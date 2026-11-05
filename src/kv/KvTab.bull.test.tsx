@@ -19,6 +19,7 @@ vi.mock("./api", () => ({
     clients: vi.fn(),
     bigkeys: vi.fn(),
     bigkeysStop: vi.fn(),
+    bigkeysReport: vi.fn(async () => null),
     close: vi.fn(),
     forgetPassword: vi.fn(),
     bullQueues: vi.fn(),

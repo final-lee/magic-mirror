@@ -174,9 +174,17 @@ export interface KvBigKey {
   type: KvType;
   size: number;
 }
-export type KvBigKeysMessage =
-  | { type: "progress"; scanned: number; total: number }
-  | { type: "done"; basis: "memory" | "length"; keys: KvBigKey[]; scanned: number; stopped: boolean };
+/** 끝난 큰 키 찾기의 결과. 대상·DB마다 저장되어 다음 찾기 전까지 다시 보인다 */
+export interface KvBigKeysReport {
+  basis: "memory" | "length";
+  keys: KvBigKey[];
+  scanned: number;
+  stopped: boolean;
+  /** 끝난 시각(Unix ms) */
+  generatedAt: number;
+}
+/** 진행(5만 개마다 그때까지의 상위 키가 keys로 붙는다)과 끝 */
+export type KvBigKeysMessage = { type: "progress"; scanned: number; total: number; keys?: KvBigKey[] } | ({ type: "done" } & KvBigKeysReport);
 
 // 🐂 Bull 큐(BullMQ와 옛 Bull v3). 큐 상태를 Redis 키로 읽어 보인다(읽기만).
 export type KvBullFlavor = "bullmq" | "bull";

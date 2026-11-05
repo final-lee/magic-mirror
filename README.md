@@ -340,7 +340,7 @@ Double-click a Valkey or Redis OSS row in **ElastiCache → Replication Groups**
 
 - **📊 개요**: memory against `maxmemory`, peak and fragmentation, hit ratio, commands per second, clients, evicted and expired keys, uptime, and replication lag, plus a node table (role, shard, slots) and the keyspace per DB.
 - **Topology graph** (in 📊 개요): shards as groups, primary → replica edges labelled with replication lag, slot ranges, memory and commands per node, and the client hosts (top 20 by connections, the rest folded) linked to the nodes they use.
-- **🐢 Slow log** (`COMMANDLOG` on Valkey 8.1+, else `SLOWLOG`), **👥 클라이언트** (`CLIENT LIST`, with the app's own connections marked), and **🐘 큰 키**: samples up to 5,000 keys and ranks the 50 largest by `MEMORY USAGE`, with progress and **중단**.
+- **🐢 Slow log** (`COMMANDLOG` on Valkey 8.1+, else `SLOWLOG`), **👥 클라이언트** (`CLIENT LIST`, with the app's own connections marked), and **🐘 큰 키**: measures every key with `MEMORY USAGE` and ranks the 50 largest. It takes 50,000 keys per `SCAN` and measures them in one pipelined round trip; the server reads a pipeline 16 KB at a time and serves other clients in between, so only the `SCAN` itself holds it for long (about 44 ms on an ElastiCache node). After each batch it pauses 0.5 s and shows the top keys so far. A progress bar shows keys done out of the total, the estimated time left, and **중단**. The finished report is kept per cache and DB number and shown again — after reconnecting or restarting the app — until **다시 찾기** makes a new one.
 - **👥 클라이언트** has **표 | 지도**: the map links client hosts to connection names, and on to the nodes when there are several. Bull and BullMQ connections (`<prefix>:<base64 queue name>`) are shown by queue name, so producers and workers of one queue share a box. The search filters both.
 - Serverless caches block `SLOWLOG`, `CLIENT LIST`, `MEMORY`, and `OBJECT`: those screens are turned off with the reason, and big keys are ranked by length instead.
 
@@ -449,6 +449,7 @@ Under `~/Library/Application Support/dev.finallee.magicmirror/`:
 | `settings.json` | Enabled services and the services the app has already shown, favorites, the sidebar order you dragged, last profile and region, theme, diff tool, kubeconfig path, cache TTL, the explorer's local folder, PostgreSQL sign-in users, ElastiCache sign-in ways and users, DB numbers, and Bull prefixes, EKS contexts, bookmarks, lane widths, and security checks turned off, ArgoCD and Argo Workflows servers and their list filters | Until changed |
 | `resource-index.json` | The ⌘K index: names, IDs, column values, tags. No raw JSON or detail fields. Readable only by you | 7 days; wiped by ⌘⇧R |
 | `cost-cache.json` | Cost Explorer answers and the monthly request counter | Answers for 6 hours |
+| `kv-bigkeys.json` | The last 🐘 큰 키 report per ElastiCache cache and DB number: key names, types, sizes, when it was made. No values | Until the next report for that cache and DB |
 | `iam-changes.jsonl` | IAM changes applied from the app, with undo state | Until deleted |
 | `db-changes.jsonl` | PostgreSQL changes, with the DB user and SQL (never passwords) | Until deleted |
 | `k8s-changes.jsonl` | EKS changes, and when shells and node shells opened and closed (never their input or output, never Secret values) | Until deleted |

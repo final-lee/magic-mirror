@@ -177,15 +177,19 @@ export const CLIENT_MAP_LEGEND = "호스트 → 연결 이름(🐂 Bull 큐) · 
 export const CLIENT_MAP_LEGEND_NODES = "호스트 → 연결 이름(🐂 Bull 큐) → 노드 · 선 굵기는 연결 수";
 
 // 큰 키
-export const BIGKEYS_INTRO = "SCAN으로 최대 5,000개 키를 훑으며 키마다 메모리를 재서 상위 50개를 찾아요. 서버에 부담이 가지 않게 샘플링해요";
+export const BIGKEYS_INTRO = "모든 키를 SCAN으로 훑으며 키마다 메모리를 재서 상위 50개를 찾아요. 서버는 명령을 한 번에 하나씩 처리하므로 5만 개씩 재고 0.5초 쉬어 가며, 그때마다 중간 결과를 보여요";
 export const BIGKEYS_FIND = "찾기";
+export const BIGKEYS_REFIND = "다시 찾기";
 export const BIGKEYS_STOP = "중단";
 export const BIGKEYS_RUNNING = (scanned: number, total: number) => (total > 0 ? `${scanned.toLocaleString("ko-KR")} / ${total.toLocaleString("ko-KR")}개 훑는 중…` : `${scanned.toLocaleString("ko-KR")}개 훑는 중…`);
+export const BIGKEYS_LEFT = (duration: string) => `약 ${duration} 남음`;
 export const BIGKEYS_STOPPING = "중단하는 중…";
-export const BIGKEYS_DONE = (scanned: number) => `${scanned.toLocaleString("ko-KR")}개를 훑었어요`;
+export const BIGKEYS_PARTIAL = (scanned: number) => `중간 결과: ${scanned.toLocaleString("ko-KR")}개까지 훑은 상위 키`;
+export const BIGKEYS_DONE = (scanned: number) => `${scanned.toLocaleString("ko-KR")}개를 모두 훑었어요`;
 export const BIGKEYS_STOPPED = (scanned: number) => `${scanned.toLocaleString("ko-KR")}개를 훑고 중단했어요`;
+export const BIGKEYS_MADE = (ago: string, at: string) => `${ago} 전(${at})에 만든 결과예요. [다시 찾기]를 누르기 전까지 이 결과를 보여요`;
 export const BIGKEYS_BASIS_LENGTH = "서버리스는 MEMORY를 쓸 수 없어 길이(원소 수·바이트)로 대신했어요";
-export const BIGKEYS_BASIS_MEMORY = "MEMORY USAGE 기준(샘플링)";
+export const BIGKEYS_BASIS_MEMORY = "MEMORY USAGE 기준";
 export const BIGKEYS_EMPTY = "찾은 키가 없어요";
 export const BIGKEYS_LABEL = "큰 키 목록";
 export const BIGKEYS_COLS = { rank: "순위", key: "키", type: "타입", size: "크기" };
