@@ -12,6 +12,7 @@ test("errorMessage", () => {
   expect(errorMessage({ kind: "throttled" })).toBe("요청이 너무 많아요. 잠시 후 다시 시도하세요");
   expect(errorMessage({ kind: "network", message: "timeout" })).toBe("네트워크 오류: timeout");
   expect(errorMessage({ kind: "other", message: "bad" })).toBe("bad");
+  expect(errorMessage({ kind: "loginRequired", message: "비밀번호가 맞지 않아요" })).toBe("비밀번호가 맞지 않아요");
   expect(errorMessage(new Error("plain"))).toBe("plain");
   expect(errorMessage("text")).toBe("text");
 });

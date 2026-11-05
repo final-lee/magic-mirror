@@ -16,6 +16,9 @@ pub enum AppError {
     Network { message: String },
     #[error("{message}")]
     Other { message: String },
+    /// KV 탭: 로그인이 필요하다(인증 실패, 저장된 비밀번호 없음, 방식이 맞지 않음). 화면은 `message`와 함께 로그인 창을 띄운다
+    #[error("{message}")]
+    LoginRequired { message: String },
 }
 
 impl AppError {

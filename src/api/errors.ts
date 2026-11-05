@@ -13,6 +13,8 @@ export function errorMessage(e: unknown): string {
         return `권한 없음 (${e.action})`;
       case "throttled":
         return "요청이 너무 많아요. 잠시 후 다시 시도하세요";
+      case "loginRequired":
+        return e.message;
       case "network":
         return `네트워크 오류: ${e.message}`;
       case "other":
