@@ -182,6 +182,24 @@ test("on a namespaced list, :ns picks that list's namespace instead of opening t
   await vi.waitFor(() => expect(m.watch).toHaveBeenCalledWith(target, expect.objectContaining({ plural: "deployments" }), "kube-system", expect.anything(), expect.any(Function)));
 });
 
+test("picking the ns suggestion with the arrows and Enter shows the namespaces of the list", async () => {
+  setup();
+  await connected();
+  submit("deploy");
+  press(":", { shiftKey: true });
+  fireEvent.change(prompt()!, { target: { value: "n" } });
+  const options = within(screen.getByRole("listbox", { name: "이동 후보" })).getAllByRole("option");
+  const at = options.findIndex((o) => o.textContent?.startsWith("ns"));
+  expect(at).toBeGreaterThanOrEqual(0);
+  for (let i = 0; i <= at; i++) fireEvent.keyDown(prompt()!, { key: "ArrowDown" });
+  expect(prompt()!.value).toBe("ns");
+  fireEvent.keyDown(prompt()!, { key: "Enter" });
+  expect(prompt()!.value).toBe("ns ");
+  const picker = screen.getByRole("listbox", { name: "Deployment 목록의 네임스페이스" });
+  expect(within(picker).getByText("kube-system")).toBeInTheDocument();
+  expect(within(screen.getByRole("navigation", { name: KIND_TREE_LABEL })).getByRole("button", { name: "Deployment" })).toHaveAttribute("aria-current", "page");
+});
+
 test("away from a list, :ns still opens the Namespace list", async () => {
   setup();
   await connected();

@@ -13,6 +13,7 @@ export const GOTO_GROUP_NS = "네임스페이스";
 export const GOTO_NS_ALL = "모든 네임스페이스";
 export const GOTO_NS_CURRENT = "지금 보는 곳";
 export const gotoNamespaceLabel = (kind: string) => `${kind} 목록의 네임스페이스`;
+export const gotoNamespacePick = (kind: string) => `${kind} 목록의 네임스페이스 바꾸기`;
 export const gotoNamespaceHint = (kind: string) => `${kind} 목록의 네임스페이스 바꾸기 · ↑↓ 고르기 · Enter 바꾸기 · Esc 닫기`;
 
 /** 알 수 없는 별칭. 가까운 것을 같이 보인다 */

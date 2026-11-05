@@ -51,7 +51,7 @@ export function GotoBar({ ctx, onGo, onClose }: Props) {
 
   const run = (text: string, selected?: Goto) => {
     if (!selected && opensNamespacePicker(text, ctx)) {
-      // 이동하지 않고 네임스페이스 고르기로: 입력을 `ns `로 채워 후보를 그대로 보인다
+      // 이동하지 않고 네임스페이스 고르기로: 입력을 `ns `로 채워 네임스페이스 후보를 보인다(이어서 쳐서 좁힌다)
       edit(`${text.trim().replace(/^:/, "").trim()} `);
       return;
     }

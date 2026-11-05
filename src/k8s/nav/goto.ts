@@ -10,7 +10,7 @@ import { NAV_TERMINAL } from "../terminal/text";
 import type { K8sKind, K8sKindRef } from "../types";
 import { closestNames, resolveKind, suggestKinds } from "./aliases";
 import {
-  GOTO_GROUP_KIND, GOTO_GROUP_NS, GOTO_GROUP_VIEW, GOTO_NS_ALL, GOTO_NS_CURRENT, GOTO_NS_USAGE, gotoAmbiguous, gotoUnknown, gotoUnknownNamespace,
+  GOTO_GROUP_KIND, GOTO_GROUP_NS, GOTO_GROUP_VIEW, GOTO_NS_ALL, GOTO_NS_CURRENT, GOTO_NS_USAGE, gotoNamespacePick, gotoAmbiguous, gotoUnknown, gotoUnknownNamespace,
 } from "./text";
 
 /** EKS 탭의 메뉴 화면과 `:` 뒤에 적는 이름들(첫째가 대표 이름). 종류 별칭과 겹치면 메뉴가 먼저다(`:events`) */
@@ -148,9 +148,20 @@ export function completions(input: string, ctx: GotoContext): Completion[] {
     goto: { type: "kind", kind: h.kind },
     score: h.score,
   }));
+  // 목록을 보는 중이면 `ns`·`namespace`는 Namespace 종류가 아니라 이 목록의 네임스페이스 고르기다(고르면 네임스페이스 후보가 열린다)
+  const current = ctx.current;
+  const pickers = current && tokens.length > 0
+    ? fuzzyRank(NS_PICK_WORDS, text, (n) => [n]).slice(0, 1).map(({ item, score }): Completion & { score: number } => ({
+      text: item,
+      title: item,
+      hint: gotoNamespacePick(current.kind.kind),
+      group: GOTO_GROUP_NS,
+      score,
+    }))
+    : [];
   // 이름이 같은 메뉴와 종류(events)는 메뉴만 보인다. 점수가 높은 것부터, 같으면 메뉴가 먼저
-  const taken = new Set(views.map((c) => c.text));
-  return [...views, ...kinds.filter((c) => !taken.has(c.text))]
+  const taken = new Set([...views, ...pickers].map((c) => c.text));
+  return [...views, ...pickers, ...kinds.filter((c) => !taken.has(c.text) && !(current && NS_PICK_WORDS.includes(c.text)))]
     .sort((a, b) => b.score - a.score)
     .slice(0, MAX_COMPLETIONS)
     .map(({ score: _score, ...c }) => c);

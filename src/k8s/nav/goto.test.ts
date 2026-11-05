@@ -106,6 +106,14 @@ describe("completions", () => {
     expect(completions("ns", { ...ctx, current: { kind: pods, namespace: "" } })[0]).toMatchObject({ title: "all", hint: "모든 네임스페이스 · 지금 보는 곳" });
   });
 
+  test("while a namespaced list is shown, the ns suggestion is that list's namespace picker, not the Namespace kind", () => {
+    const deployments = ctx.kinds.find((k) => k.plural === "deployments")!;
+    const shown = { ...ctx, current: { kind: deployments, namespace: "prod" } };
+    const ns = completions("n", shown).filter((c) => c.text === "ns");
+    expect(ns).toEqual([{ text: "ns", title: "ns", hint: "Deployment 목록의 네임스페이스 바꾸기", group: "네임스페이스" }]);
+    expect(completions("n", ctx).some((c) => c.group === "네임스페이스")).toBe(false);
+  });
+
   test("a kind name followed by anything else has no completions", () => {
     expect(completions("pods x", ctx)).toEqual([]);
   });
