@@ -74,6 +74,8 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
   const [gotoKind, setGotoKind] = useState<WorkloadsGoto | null>(null);
   // 목록 화면이 지금 보이는 종류(`:ns`가 그 목록의 네임스페이스를 바꾸는지 정한다)
   const [shownKind, setShownKind] = useState<K8sKindRef | null>(null);
+  // 목록에서 `:ns`로 네임스페이스를 바꾸면 늘어난다: 다시 읽은 목록에 커서를 둔다
+  const [listFocus, setListFocus] = useState(0);
   const beforeGoto = useRef<Element | null>(null);
   const terminals = useTerminals();
   // 터미널 화면을 처음 열면 셸을 하나 띄운다(터미널은 다른 화면을 보는 동안에도 유지된다)
@@ -143,22 +145,32 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
     },
     { host: root, enabled: connected && !gotoOpen },
   );
+  // 종류 이동과 목록에서의 네임스페이스 바꾸기는 목록이 다시 그려진 뒤 WorkloadsView가 커서를 목록에 둔다
+  const listTakesFocus = useRef(false);
   const goto = (g: Goto) => {
     if (g.type === "kind") {
       setFocus(null);
       setGotoKind((k) => ({ kind: g.kind, nonce: (k?.nonce ?? 0) + 1 }));
       setView("workloads");
+      listTakesFocus.current = true;
     } else if (g.type === "view") {
       selectView(g.view);
     } else {
       setUserNs(g.namespace);
+      if (listView) {
+        setListFocus((n) => n + 1);
+        listTakesFocus.current = true;
+      }
     }
   };
-  // 닫으면 커서를 돌려 놓는다: 이동했으면 새 화면의 목록으로, 아니면 열기 전 자리로
+  // 닫으면 커서를 돌려 놓는다: 목록이 맡지 않은 이동이면 새 화면의 첫 칸으로(레인 크기 조절 막대는 빼고), 이동하지 않았으면 열기 전 자리로
   const closeGoto = (went: boolean) => {
     setGotoOpen(false);
+    const byList = went && listTakesFocus.current;
+    listTakesFocus.current = false;
+    if (byList) return;
     setTimeout(() => {
-      const next = went ? root.current?.querySelector<HTMLElement>(".k8s-body [tabindex=\"0\"]") : beforeGoto.current;
+      const next = went ? root.current?.querySelector<HTMLElement>(".k8s-body [tabindex=\"0\"]:not([role=\"separator\"])") : beforeGoto.current;
       (next as HTMLElement | null)?.focus?.();
     }, 0);
   };
@@ -291,6 +303,7 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
               focus={focus}
               goto={gotoKind}
               onKindShown={setShownKind}
+              listFocus={listFocus}
               onAllNamespaces={() => setUserNs(ALL)}
               onOpenIam={onOpenIam}
               onChange={change.start}

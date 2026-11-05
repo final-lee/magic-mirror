@@ -46,6 +46,8 @@ interface Props {
   goto?: WorkloadsGoto | null;
   /** 지금 목록이 보이는 종류가 바뀌면 알린다(`:ns`가 이 목록의 네임스페이스를 바꾸는지 정한다) */
   onKindShown?: (kind: K8sKindRef) => void;
+  /** 바뀌면 다시 읽은 목록에 커서를 둔다(`:ns`로 네임스페이스를 바꾼 뒤) */
+  listFocus?: number;
   /** 한 글자 키 0: 모든 네임스페이스로 */
   onAllNamespaces?: () => void;
   onOpenIam?: (arn: string) => void;
@@ -69,7 +71,7 @@ interface Props {
 }
 
 /** 종류 트리 + 감시 목록 + 상세 스택 */
-export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live, visible = true, namespace, kinds, focus, goto, onKindShown, onAllNamespaces, onOpenIam, banner,
+export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live, visible = true, namespace, kinds, focus, goto, onKindShown, listFocus = 0, onAllNamespaces, onOpenIam, banner,
   fixedKind, bookmarked, onToggleBookmark, lanes, onChange, appliedChange, discoveryAvailable = false, plugins, onRunPlugin }: Props) {
   const [picked, setKind] = useState<K8sKindRef>(PODS);
   const kind = fixedKind ?? picked;
@@ -96,6 +98,9 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
     // nonce가 바뀔 때만 간다
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [goto?.nonce]);
+  useEffect(() => {
+    if (listFocus > 0) focusAfterGoto.current = true;
+  }, [listFocus]);
 
   useEffect(() => {
     onKindShown?.(kind);
@@ -110,7 +115,7 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
     if (!table) return;
     focusAfterGoto.current = false;
     table.focus();
-  }, [watch.status, kind]);
+  }, [watch.status, kind, namespace, listFocus, goto?.nonce]);
   const custom = useMemo(() => customCategories(kinds), [kinds]);
   const categories = useMemo(() => {
     const builtin = discoveryAvailable ? servedCategories(kinds) : CATEGORIES;
