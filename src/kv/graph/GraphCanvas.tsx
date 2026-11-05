@@ -59,6 +59,8 @@ interface Props {
   height: number;
   label: string;
   children: ReactNode;
+  /** 툴바에서 확대·축소 단추 앞에 두는 것(창 고르기 …) */
+  lead?: ReactNode;
   /** 툴바 오른쪽에 더하는 것(범례, 방향 …) */
   extra?: ReactNode;
   /** 캔버스의 가장 작은 높이(px). 기본 220 */
@@ -76,7 +78,7 @@ interface Props {
  * 높이는 그림을 캔버스 너비에 맞췄을 때의 높이를 따르되 minHeight와 창 높이 × maxHeight 사이로 둔다(fill이면 부모를 채운다).
  * 그림이나 캔버스의 크기가 바뀌면 다시 맞춘다. 다만 손으로 옮기거나 확대한 뒤에는 캔버스 크기가 바뀌어도 그대로 둔다.
  */
-export function GraphCanvas({ width, height, label, children, extra, minHeight = 220, maxHeight = 0.75, fill = false, className = "" }: Props) {
+export function GraphCanvas({ width, height, label, children, lead, extra, minHeight = 220, maxHeight = 0.75, fill = false, className = "" }: Props) {
   const id = useId().replace(/:/g, "");
   const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
   const [box, setBox] = useState({ w: 0, h: 0 });
@@ -180,6 +182,7 @@ export function GraphCanvas({ width, height, label, children, extra, minHeight =
   return (
     <div className={`kvg${fill ? " fill" : ""} ${className}`}>
       <div className="kvg-bar">
+        {lead}
         <button type="button" className="btn small" aria-label="확대" onClick={() => zoomBy(1.25)}>
           ＋
         </button>

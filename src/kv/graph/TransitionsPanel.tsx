@@ -48,37 +48,46 @@ export function TransitionsPanel({ target, prefix, name, counts }: Props) {
   const max = Math.max(0, ...(model?.edges.map((e) => e.count) ?? []));
   const notes = data ? windowNotes(data) : [];
 
+  const controls = (
+    <>
+      <div className="kv-seg" role="group" aria-label={t.TRANSITIONS_WINDOW}>
+        {WINDOWS.map((w) => (
+          <button key={w.minutes} type="button" className={`kv-seg-btn${minutes === w.minutes ? " on" : ""}`} aria-pressed={minutes === w.minutes} onClick={() => setMinutes(w.minutes)}>
+            {w.label}
+          </button>
+        ))}
+      </div>
+      <button type="button" className="btn small" disabled={q.isFetching} onClick={() => void q.refetch()}>
+        {q.isFetching ? t.READING : t.REREAD}
+      </button>
+      {data && <span className="dim">{t.TRANSITIONS_EVENTS(formatCount(data.events), formatCount(model?.moves ?? 0))}</span>}
+    </>
+  );
+
   return (
     <div className="kv-transitions" role="group" aria-label={t.TRANSITIONS_TITLE}>
       <h4 className="kv-section">{t.TRANSITIONS_TITLE}</h4>
-      <div className="kvg-bar">
-        <div className="kv-seg" role="group" aria-label={t.TRANSITIONS_WINDOW}>
-          {WINDOWS.map((w) => (
-            <button key={w.minutes} type="button" className={`kv-seg-btn${minutes === w.minutes ? " on" : ""}`} aria-pressed={minutes === w.minutes} onClick={() => setMinutes(w.minutes)}>
-              {w.label}
-            </button>
-          ))}
-        </div>
-        <button type="button" className="btn small" disabled={q.isFetching} onClick={() => void q.refetch()}>
-          {q.isFetching ? t.READING : t.REREAD}
-        </button>
-        {data && <span className="dim">{t.TRANSITIONS_EVENTS(formatCount(data.events), formatCount(model?.moves ?? 0))}</span>}
-      </div>
       {!data ? (
-        q.isError ? (
-          <KvError error={q.error} target={target} />
-        ) : (
-          <div className="empty small">{t.LOADING}</div>
-        )
+        <>
+          <div className="kvg-bar">{controls}</div>
+          {q.isError ? <KvError error={q.error} target={target} /> : <div className="empty small">{t.LOADING}</div>}
+        </>
       ) : (
         <>
           {q.isError && <KvError compact error={q.error} target={target} />}
-          {notes.map((n) => (
-            <p key={n!.kind} className={`kvg-note${n!.kind === "empty" ? "" : " warn"}`} role="note">
-              {n!.kind === "trimmed" ? t.TRANSITIONS_TRIMMED(n!.minutes) : n!.kind === "truncated" ? t.TRANSITIONS_TRUNCATED(formatCount(n!.events)) : t.TRANSITIONS_EMPTY}
-            </p>
-          ))}
-          <GraphCanvas width={layout.width} height={layout.height} label={t.TRANSITIONS_TITLE} minHeight={200}>
+          {/* 창 고르기·다시 읽기·확대 단추·알림을 한 줄에 둔다 */}
+          <GraphCanvas
+            width={layout.width}
+            height={layout.height}
+            label={t.TRANSITIONS_TITLE}
+            minHeight={200}
+            lead={controls}
+            extra={notes.map((n) => (
+              <span key={n!.kind} className={`kvg-note${n!.kind === "empty" ? "" : " warn"}`} role="note">
+                {n!.kind === "trimmed" ? t.TRANSITIONS_TRIMMED(n!.minutes) : n!.kind === "truncated" ? t.TRANSITIONS_TRUNCATED(formatCount(n!.events)) : t.TRANSITIONS_EMPTY}
+              </span>
+            ))}
+          >
             {layout.edges.map((e) => {
               const edge = model!.edges.find((x) => x.id === e.id)!;
               const from = TRANSITION_NODES.find((n) => n.id === edge.from)!.label;
