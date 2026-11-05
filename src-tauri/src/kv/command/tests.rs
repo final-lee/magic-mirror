@@ -42,7 +42,7 @@ const SPEC: [&str; 33] = [
 ];
 
 /// 🐂 Bull 화면이 더한 읽기 명령
-const BULL: [&str; 8] = ["ZCOUNT", "ZREVRANGE", "HGET", "HMGET", "LINDEX", "EXISTS", "ZSCORE", "SISMEMBER"];
+const BULL: [&str; 9] = ["ZCOUNT", "ZREVRANGE", "HGET", "HMGET", "LINDEX", "EXISTS", "ZSCORE", "SISMEMBER", "LPOS"];
 
 #[test]
 fn every_command_of_the_design_is_allowed() {

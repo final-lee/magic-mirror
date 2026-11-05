@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { FlowFull } from "./graph/FlowFull";
+import { TransitionsPanel } from "./graph/TransitionsPanel";
 import { BULL_STATES, defaultJobState, formatMs, progressPercent, rebin, STATE_LABEL } from "./bull";
 import { Histogram, ThroughputChart } from "./BullCharts";
 import { BullJob } from "./BullJob";
@@ -151,6 +153,8 @@ interface Props {
  */
 export function BullQueue({ target, prefix, name, state, jobId, onBack, onState, onOpenJob, onCloseJob, active }: Props) {
   const [auto, setAuto] = useState(true);
+  // 작업 상세의 흐름 그래프를 이 큐 화면 전체에 크게 보는 중이면 그 작업
+  const [bigFlow, setBigFlow] = useState<{ queue: string; id: string } | null>(null);
   const q = useKvBullQueue(target, prefix, name, auto && active);
   const view = q.data;
   const jobs = useRef<HTMLDivElement>(null);
@@ -337,6 +341,8 @@ export function BullQueue({ target, prefix, name, state, jobId, onBack, onState,
             </div>
           </div>
 
+          <TransitionsPanel target={target} prefix={prefix} name={name} counts={view.queue.counts} />
+
           <div ref={jobs}>
             <h4 className="kv-section">
               {bt.JOBS_TITLE} · {shown ? STATE_LABEL[shown] : ""}
@@ -345,7 +351,20 @@ export function BullQueue({ target, prefix, name, state, jobId, onBack, onState,
           </div>
         </div>
       )}
-      {jobId && <BullJob key={`${name}:${jobId}`} target={target} prefix={prefix} queue={name} id={jobId} onClose={onCloseJob} onOpenJob={onOpenJob} />}
+      {jobId && <BullJob key={`${name}:${jobId}`} target={target} prefix={prefix} queue={name} id={jobId} onClose={onCloseJob} onOpenJob={onOpenJob} onBigFlow={(fq, fid) => setBigFlow({ queue: fq, id: fid })} />}
+      {bigFlow && (
+        <FlowFull
+          target={target}
+          prefix={prefix}
+          queue={bigFlow.queue}
+          id={bigFlow.id}
+          onClose={() => setBigFlow(null)}
+          onOpen={(nq, nid) => {
+            setBigFlow(null);
+            onOpenJob(nq, nid);
+          }}
+        />
+      )}
     </section>
   );
 }

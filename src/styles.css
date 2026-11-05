@@ -2269,3 +2269,52 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .kv-tl-gap { z-index: 1; }
 .kv-jfail { margin-top: 10px; padding: 8px 10px; background: var(--red-soft); color: var(--red); border-radius: 6px; font-size: 12px; overflow-wrap: anywhere; }
 .kv-flow { margin: 0 0 6px; font-size: 12px; }
+
+/* 그래프(작업 흐름·상태 전이·큐 지도·토폴로지): 색은 모두 테마 변수라 밝은·어두운 테마를 따라간다 */
+.kvg { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.kvg-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; font-size: 12px; }
+.kvg-bar .btn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.kvg-zoom { min-width: 36px; }
+.kvg-legend { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; color: var(--dim); font-size: 11px; }
+.kvg-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; border: 1.5px solid var(--border-strong); background: var(--panel); }
+.kvg-frame { position: relative; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); overflow: hidden; cursor: grab; user-select: none; }
+.kvg-frame:active { cursor: grabbing; }
+.kvg-edge path { fill: none; stroke: var(--tone-8e8e93, var(--dim)); }
+.kvg-edge .kvg-edge-label rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; }
+.kvg-edge .kvg-edge-label text { fill: var(--text); font-size: 10px; font-variant-numeric: tabular-nums; stroke: none; }
+.kvg-tone-good path { stroke: var(--green); } .kvg-tone-bad path { stroke: var(--red); } .kvg-tone-warn path { stroke: var(--yellow); } .kvg-tone-accent path { stroke: var(--accent); }
+.kvg-arrow path { fill: var(--tone-8e8e93, var(--dim)); stroke: none; }
+.kvg-arrow.kvg-tone-good path { fill: var(--green); } .kvg-arrow.kvg-tone-bad path { fill: var(--red); } .kvg-arrow.kvg-tone-warn path { fill: var(--yellow); } .kvg-arrow.kvg-tone-accent path { fill: var(--accent); }
+.kvg-node rect { fill: var(--panel); stroke: var(--border-strong); stroke-width: 1.3; }
+.kvg-node[role="button"] { cursor: pointer; }
+.kvg-node[role="button"]:hover rect { fill: var(--hover-strong); }
+.kvg-node:focus-visible rect { stroke: var(--accent); stroke-width: 2.4; outline: none; }
+.kvg-node.focus rect { stroke: var(--accent); stroke-width: 2.6; fill: var(--accent-soft); }
+.kvg-node.good rect { stroke: var(--green); } .kvg-node.warn rect { stroke: var(--yellow); } .kvg-node.bad rect { stroke: var(--red); fill: var(--red-soft); }
+.kvg-node.accent rect { stroke: var(--accent); } .kvg-node.mute rect { stroke-dasharray: 4 3; opacity: .75; }
+.kvg-node.warn.fill rect { fill: var(--yellow-soft); }
+.kvg-node text { pointer-events: none; fill: var(--text); font-size: 12px; }
+.kvg-node text.sub { fill: var(--dim); font-size: 10px; }
+.kvg-node text.num { font-variant-numeric: tabular-nums; }
+.kvg-group rect { fill: var(--neutral-alpha-05); stroke: var(--line); stroke-dasharray: 5 4; }
+.kvg-group text { fill: var(--dim); font-size: 11px; font-weight: 600; }
+.kvg-badge rect { stroke: none; }
+.kvg-badge text { font-size: 10px; font-weight: 600; fill: var(--on-accent); }
+.kvg-badge.bad rect { fill: var(--red); } .kvg-badge.warn rect { fill: var(--yellow); } .kvg-badge.warn text { fill: #000; }
+.kvg-note { margin: 0; font-size: 12px; color: var(--dim); }
+.kvg-note.warn { color: var(--yellow); }
+.kv-flow-big { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; background: var(--panel); }
+.kv-flow-big .kvg-flow { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.kv-flow-big-head { display: flex; align-items: center; gap: 10px; }
+.kv-flow-big-head h3 { margin: 0; flex: 1; font-size: 15px; }
+.kvg.big { flex: 1; min-height: 0; }
+.kvg.big .kvg-frame { height: auto !important; flex: 1; min-height: 0; }
+.kvg-meter-bg { fill: var(--neutral-alpha-12) !important; stroke: none !important; }
+.kvg-meter-ok { fill: var(--accent) !important; stroke: none !important; }
+.kvg-meter-warm { fill: var(--yellow) !important; stroke: none !important; }
+.kvg-meter-hot { fill: var(--red) !important; stroke: none !important; }
+.kvg-flow { display: flex; flex-direction: column; gap: 4px; }
+.kv-view-seg { margin-left: 8px; }
+.kv-qmap { display: flex; flex-direction: column; gap: 6px; padding: 10px 16px 16px; }
+.kv-topology { display: flex; flex-direction: column; gap: 6px; }
+.kv-transitions { margin-top: 4px; }

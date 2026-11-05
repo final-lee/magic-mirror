@@ -9,7 +9,8 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
 use rustls::RootCertStore;
 
-use super::bull::{jobs, model::KvBullState, queue};
+use super::bull::model::{KvBullEdgeStatus, KvBullFlowState, KvBullState};
+use super::bull::{events, flow, jobs, queue, topology};
 use super::connect::{connect_with, tls_config_with, Auth, Connected, Plan, Secret};
 use super::model::{KvKeyName, KvKind, KvMode, KvNode, KvRole, KvTargetInfo, KvType, KvValue};
 use super::target::Resolved;
@@ -190,5 +191,98 @@ async fn a_bullmq_shaped_dataset_is_drawn_from_plain_keys() {
     assert_eq!(job.row.state, KvBullState::Failed);
     assert!(job.data.contains("to"));
     assert!(!job.stacktrace.is_empty());
+    conn.close().await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn a_bullmq_flow_across_two_queues_is_walked_from_any_node() {
+    let conn = open(port("KV_LIVE_PLAIN"), Auth::None, false).await.unwrap();
+    // 자식에서 열어도 부모(다른 큐)가 뿌리다
+    let from_child = flow::flow(&conn, "bull", "fulfil", "c1").await.unwrap();
+    assert_eq!((from_child.root.as_str(), from_child.focus.as_str(), from_child.truncated), ("bull:orders:p1", "bull:fulfil:c1", false));
+    let state = |key: &str| from_child.nodes.iter().find(|n| n.key == key).map(|n| n.state);
+    assert_eq!(state("bull:orders:p1"), Some(KvBullFlowState::WaitingChildren));
+    assert_eq!(state("bull:fulfil:c1"), Some(KvBullFlowState::Wait));
+    assert_eq!(state("bull:fulfil:c2"), Some(KvBullFlowState::Completed));
+    assert_eq!(state("bull:fulfil:c3"), Some(KvBullFlowState::Failed));
+    assert_eq!(state("bull:fulfil:c4"), Some(KvBullFlowState::Unknown));
+    assert_eq!(from_child.nodes.len(), 5);
+    let status = |child: &str| from_child.edges.iter().find(|e| e.child == child).map(|e| e.status);
+    assert_eq!(status("bull:fulfil:c1"), Some(KvBullEdgeStatus::Pending));
+    assert_eq!(status("bull:fulfil:c2"), Some(KvBullEdgeStatus::Done));
+    assert_eq!(status("bull:fulfil:c3"), Some(KvBullEdgeStatus::Failed));
+    assert_eq!(status("bull:fulfil:c4"), Some(KvBullEdgeStatus::Ignored));
+    let parent = from_child.nodes.iter().find(|n| n.key == "bull:orders:p1").unwrap();
+    assert_eq!((parent.pending, parent.done, parent.failed), (1, 1, 2));
+    assert_eq!(from_child.nodes.iter().find(|n| n.key == "bull:fulfil:c3").unwrap().failed_reason.as_deref(), Some("no stock"));
+    // 부모에서 열어도 같은 그래프다
+    let from_parent = flow::flow(&conn, "bull", "orders", "p1").await.unwrap();
+    assert_eq!(from_parent.nodes.len(), 5);
+    assert_eq!(from_parent.focus, "bull:orders:p1");
+    // 없는 작업
+    assert!(flow::flow(&conn, "bull", "orders", "nope").await.is_err());
+    conn.close().await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn the_events_stream_gives_transition_pairs_and_the_window_cut() {
+    let conn = open(port("KV_LIVE_PLAIN"), Auth::None, false).await.unwrap();
+    let t = events::transitions(&conn, "bull", "fulfil", 15).await.unwrap();
+    assert_eq!((t.events, t.truncated), (7, false));
+    assert!(t.first_at.is_some_and(|at| at >= t.from));
+    let count = |prev: Option<&str>, event: &str| t.pairs.iter().find(|p| p.prev.as_deref() == prev && p.event == event).map(|p| p.count);
+    assert_eq!(count(Some("waiting"), "active"), Some(2));
+    assert_eq!(count(Some("active"), "completed"), Some(1));
+    assert_eq!(count(Some("active"), "failed"), Some(1));
+    assert_eq!(count(None, "added"), Some(1));
+    assert_eq!(count(None, "stalled"), Some(1));
+    assert_eq!(count(None, "retries-exhausted"), Some(1));
+    // 1분 창은 마지막 두 항목만 본다
+    let recent = events::transitions(&conn, "bull", "fulfil", 1).await.unwrap();
+    assert_eq!(recent.events, 2);
+    assert_eq!(recent.pairs.len(), 2);
+    // 이벤트를 안 남기는 큐는 빈 결과다
+    let none = events::transitions(&conn, "bull", "legacy", 15).await.unwrap();
+    assert_eq!((none.events, none.first_at, none.pairs.len()), (0, None, 0));
+    conn.close().await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn the_queue_map_links_parent_queues_to_child_queues_and_lists_workers() {
+    let conn = open(port("KV_LIVE_PLAIN"), Auth::None, false).await.unwrap();
+    let map = topology::topology(&conn, "bull").await.unwrap();
+    let names: Vec<&str> = map.queues.iter().map(|q| q.name.as_str()).collect();
+    for expected in ["emails", "legacy", "orders", "fulfil"] {
+        assert!(names.contains(&expected), "{names:?}");
+    }
+    assert!(map.sampled >= 3);
+    let link = map.links.iter().find(|l| l.from == "orders" && l.to == "fulfil").expect("orders → fulfil");
+    assert!(link.jobs >= 2, "{link:?}");
+    let workers = map.workers.expect("CLIENT LIST를 쓸 수 있어요");
+    let packer = workers.iter().find(|w| w.queue == "fulfil" && w.name == "packer").expect("packer 워커");
+    assert!(!packer.host.is_empty() && !packer.host.contains(':'));
+    conn.close().await;
+}
+
+/// Bull 3은 `completed`·`failed`가 정렬 셋이다: 작업 표·상태·흐름이 셋으로만 가정하면 WRONGTYPE으로 실패했다
+#[tokio::test]
+#[ignore]
+async fn a_bull3_queue_with_sorted_finished_sets_lists_and_locates_jobs() {
+    let conn = open(port("KV_LIVE_PLAIN"), Auth::None, false).await.unwrap();
+    let completed = jobs::jobs_page(&conn, "bull", "bull3", KvBullState::Completed, 0, 50).await.unwrap();
+    assert_eq!((completed.total, completed.jobs.len()), (1, 1));
+    assert_eq!(completed.jobs[0].id, "2");
+    let failed = jobs::jobs_page(&conn, "bull", "bull3", KvBullState::Failed, 0, 50).await.unwrap();
+    assert_eq!(failed.jobs[0].failed_reason.as_deref(), Some("boom"));
+    assert_eq!(jobs::job(&conn, "bull", "bull3", "2").await.unwrap().row.state, KvBullState::Completed);
+    assert_eq!(jobs::job(&conn, "bull", "bull3", "3").await.unwrap().row.state, KvBullState::Failed);
+    let f = flow::flow(&conn, "bull", "bull3", "3").await.unwrap();
+    assert_eq!(f.nodes[0].state, KvBullFlowState::Failed);
+    // 오래된 Bull의 셋은 그대로 읽힌다
+    let set = jobs::jobs_page(&conn, "bull", "legacy", KvBullState::Completed, 0, 50).await.unwrap();
+    assert_eq!(set.total, 1);
     conn.close().await;
 }

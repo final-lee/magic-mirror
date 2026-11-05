@@ -236,7 +236,7 @@ export function KvTab({ target, active }: Props) {
             ) : route.view === "bull" ? (
               <BullQueues target={target} prefix={bullPrefix} onPrefix={saveBullPrefix} onOpenQueue={(queue) => navigate({ view: "bull", queue })} active={active} />
             ) : route.view === "overview" ? (
-              <Overview overview={o} />
+              <Overview target={target} overview={o} />
             ) : route.view === "slowlog" ? (
               <Slowlog target={target} overview={o} active={active} />
             ) : route.view === "clients" ? (

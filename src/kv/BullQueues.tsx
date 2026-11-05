@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { QueueMap } from "./graph/QueueMap";
 import { ListFind, useListFind } from "../components/ListFind";
 import { fuzzyKeep } from "../lib/fuzzy";
 import { BACKLOG_WARN, BULL_OPEN_STATES, orderQueues, RECENT_MINUTES, STATE_LABEL, type QueueHealth } from "./bull";
@@ -103,6 +104,8 @@ export function BullQueues({ target, prefix, onPrefix, onOpenQueue, active }: Pr
   const box = useRef<HTMLElement>(null);
   const find = useListFind(box, { enabled: active });
   const [auto, setAuto] = useState(true);
+  // 카드(기본)와 지도(큐·부모→자식 연결·워커 호스트의 그래프)
+  const [mode, setMode] = useState<"cards" | "map">("cards");
   const [input, setInput] = useState(prefix);
   const q = useKvBullQueues(target, prefix, auto && active);
   const pages = q.data?.pages;
@@ -113,6 +116,8 @@ export function BullQueues({ target, prefix, onPrefix, onOpenQueue, active }: Pr
   }, [pages]);
   const kept = useMemo(() => fuzzyKeep(queues, find.query, (queue) => [queue.name]), [queues, find.query]);
   const ordered = useMemo(() => orderQueues(kept), [kept]);
+  // 지도가 카드와 같은 건강 상태 색을 쓰게 넘긴다
+  const attention = useMemo(() => new Map(orderQueues(queues).map((o) => [o.queue.name, o.health.attention])), [queues]);
   const last = pages?.[pages.length - 1];
   const scanned = pages?.reduce((n, p) => n + p.scanned, 0) ?? 0;
   const tooBig = (pages?.[0]?.scanned ?? 0) > BULL_AUTO_SCAN_LIMIT;
@@ -143,6 +148,13 @@ export function BullQueues({ target, prefix, onPrefix, onOpenQueue, active }: Pr
             {bt.QUEUE_COUNT(queues.length)} · {bt.SCANNED(scanned)}
           </span>
         )}
+        <div className="kv-seg kv-view-seg" role="group" aria-label={t.MAP_VIEW}>
+          {(["cards", "map"] as const).map((m) => (
+            <button key={m} type="button" className={`kv-seg-btn${mode === m ? " on" : ""}`} aria-pressed={mode === m} onClick={() => setMode(m)}>
+              {m === "cards" ? t.MAP_CARDS : t.MAP_MAP}
+            </button>
+          ))}
+        </div>
         <span className="kv-bar-end">
           <label className="kv-check" title={tooBig ? bt.AUTO_OFF_BIG : undefined}>
             <input type="checkbox" checked={auto && !tooBig} disabled={tooBig} onChange={(e) => setAuto(e.target.checked)} />
@@ -171,7 +183,9 @@ export function BullQueues({ target, prefix, onPrefix, onOpenQueue, active }: Pr
       ) : (
         <div className="kv-pane">
           {q.isError && <KvError compact error={q.error} target={target} />}
-          {ordered.length === 0 ? (
+          {mode === "map" && queues.length > 0 ? (
+            <QueueMap target={target} prefix={prefix} attention={attention} onOpenQueue={onOpenQueue} />
+          ) : ordered.length === 0 ? (
             <div className="empty small">{queues.length === 0 ? bt.NO_QUEUES(prefix) : t.KEYS_NO_MATCH}</div>
           ) : (
             <div className="kv-qgrid">

@@ -4,11 +4,14 @@ import { kvApi } from "./api";
 import { keyId } from "./route";
 import { targetKey } from "./targets";
 import type {
+  KvBullFlow,
   KvBullJob,
   KvBullJobsPage,
   KvBullQueueView,
   KvBullQueuesPage,
   KvBullState,
+  KvBullTopology,
+  KvBullTransitions,
   KvClient,
   KvKeyName,
   KvKeyView,
@@ -50,6 +53,9 @@ export const kvKeys = {
   bullQueue: (t: KvTarget, prefix: string, name: string) => ["kv", targetKey(t), "bull", "queue", prefix, name] as const,
   bullJobs: (t: KvTarget, prefix: string, name: string, state: KvBullState) => ["kv", targetKey(t), "bull", "jobs", prefix, name, state] as const,
   bullJob: (t: KvTarget, prefix: string, name: string, id: string) => ["kv", targetKey(t), "bull", "job", prefix, name, id] as const,
+  bullFlow: (t: KvTarget, prefix: string, name: string, id: string) => ["kv", targetKey(t), "bull", "flow", prefix, name, id] as const,
+  bullTransitions: (t: KvTarget, prefix: string, name: string, minutes: number) => ["kv", targetKey(t), "bull", "transitions", prefix, name, minutes] as const,
+  bullTopology: (t: KvTarget, prefix: string) => ["kv", targetKey(t), "bull", "topology", prefix] as const,
 };
 
 /** 큐 목록·큐 상세를 자동으로 다시 읽는 간격 */
@@ -186,6 +192,38 @@ export function useKvBullJob(target: KvTarget, prefix: string, name: string, id:
     queryKey: id ? kvKeys.bullJob(target, prefix, name, id) : ["kv", targetKey(target), "bull", "job", null],
     queryFn: () => kvApi.bullJob(target, prefix, name, id!),
     enabled: !!id,
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+/** 🐂 작업 흐름 그래프. enabled가 false면(흐름이 없는 작업) 읽지 않는다. */
+export function useKvBullFlow(target: KvTarget, prefix: string, name: string, id: string, enabled: boolean) {
+  return useQuery<KvBullFlow, AppError>({
+    queryKey: kvKeys.bullFlow(target, prefix, name, id),
+    queryFn: () => kvApi.bullFlow(target, prefix, name, id),
+    enabled,
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+/** 🐂 상태 전이. 구간(minutes)마다 따로 읽고, 큐 상세를 다시 읽을 때(5초 주기)는 따라가지 않는다: 이벤트를 수천 개 읽는 일이라 사용자가 [다시 읽기]를 누를 때만 갱신한다. */
+export function useKvBullTransitions(target: KvTarget, prefix: string, name: string, minutes: number) {
+  return useQuery<KvBullTransitions, AppError>({
+    queryKey: kvKeys.bullTransitions(target, prefix, name, minutes),
+    queryFn: () => kvApi.bullTransitions(target, prefix, name, minutes),
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+/** 🐂 큐 지도. 지도를 켰을 때만 읽는다. 큐를 다 찾는 일이라 자동으로 다시 읽지 않는다. */
+export function useKvBullTopology(target: KvTarget, prefix: string, enabled: boolean) {
+  return useQuery<KvBullTopology, AppError>({
+    queryKey: kvKeys.bullTopology(target, prefix),
+    queryFn: () => kvApi.bullTopology(target, prefix),
+    enabled,
     staleTime: Infinity,
     retry: false,
   });

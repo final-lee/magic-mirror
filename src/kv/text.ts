@@ -186,3 +186,27 @@ export const BIGKEYS_COLS = { rank: "순위", key: "키", type: "타입", size: 
 export const BIGKEYS_ELEMENTS = (n: number) => `${n.toLocaleString("ko-KR")}개`;
 export const EMPTY_LABEL = "(빈 이름)";
 export const BIGKEYS_IDLE = "[찾기]를 누르면 시작해요";
+
+// 🐂 그래프
+export const TRANSITIONS_TITLE = "상태 전이";
+export const TRANSITIONS_WINDOW = "구간";
+export const TRANSITIONS_EVENTS = (events: string, moves: string) => `이벤트 ${events}개 · 전이 ${moves}회`;
+export const TRANSITIONS_TRIMMED = (minutes: number) => `스트림에 남은 최근 ${minutes}분만 보여요`;
+export const TRANSITIONS_TRUNCATED = (events: string) => `이벤트가 많아 앞쪽 ${events}개만 읽었어요. 가장 최근 쪽이 빠졌을 수 있어요`;
+export const TRANSITIONS_EMPTY = "이 구간에 이벤트가 없어요. events 스트림이 꺼져 있거나 비어 있을 수 있어요";
+export const TRANSITIONS_NEW_SUB = "추가된 작업";
+export const TRANSITIONS_NOW = (n: string, label: string) => `지금 ${label} ${n}`;
+export const TRANSITIONS_OTHER = "그 밖의 이벤트";
+export const FLOW_GRAPH = "흐름 그래프";
+export const FLOW_BIG = "크게 보기";
+export const FLOW_CLOSE = "닫기";
+export const MAP_CARDS = "카드";
+export const MAP_MAP = "지도";
+export const MAP_VIEW = "보기 방식";
+export const MAP_LOADING = "큐 지도를 그리는 중이에요…";
+export const MAP_SAMPLED = (n: string) => `작업 ${n}개의 부모 키를 읽어 큐를 이었어요`;
+export const MAP_NO_WORKERS = "워커를 읽을 수 없어 워커 호스트는 그리지 않아요";
+export const MAP_EMPTY = "그릴 큐가 없어요";
+export const TOPOLOGY_TITLE = "토폴로지";
+export const TOPOLOGY_LOADING_CLIENTS = "클라이언트를 읽는 중이에요…";
+export const TOPOLOGY_NO_CLIENTS = "클라이언트 목록을 읽지 못해 클라이언트 호스트는 그리지 않아요";

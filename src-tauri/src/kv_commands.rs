@@ -15,9 +15,8 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::commands::AppState;
 use crate::error::AppError;
-use crate::kv::bull::jobs;
-use crate::kv::bull::model::{KvBullJob, KvBullJobsPage, KvBullQueueView, KvBullQueuesPage, KvBullState};
-use crate::kv::bull::queue;
+use crate::kv::bull::model::{KvBullFlow, KvBullJob, KvBullJobsPage, KvBullQueueView, KvBullQueuesPage, KvBullState, KvBullTopology, KvBullTransitions};
+use crate::kv::bull::{events, flow, jobs, queue, topology};
 use crate::kv::connect::{self, Connected};
 use crate::kv::login::plan_for;
 use crate::kv::model::{
@@ -269,6 +268,30 @@ pub async fn kv_bull_job(app: State<'_, AppState>, kv: State<'_, KvState>, targe
     need_prefix(&prefix)?;
     let (conn, _) = kv.connection(&app, &target).await?;
     jobs::job(&conn, &prefix, &name, &id).await
+}
+
+/// 작업의 흐름 그래프(부모 쪽으로 뿌리까지, 아래로 자식들)
+#[tauri::command]
+pub async fn kv_bull_flow(app: State<'_, AppState>, kv: State<'_, KvState>, target: KvTarget, prefix: String, name: String, id: String) -> Result<KvBullFlow, AppError> {
+    need_prefix(&prefix)?;
+    let (conn, _) = kv.connection(&app, &target).await?;
+    flow::flow(&conn, &prefix, &name, &id).await
+}
+
+/// 큐의 상태 전이(`events` 스트림의 지난 `minutes`분)
+#[tauri::command]
+pub async fn kv_bull_transitions(app: State<'_, AppState>, kv: State<'_, KvState>, target: KvTarget, prefix: String, name: String, minutes: u64) -> Result<KvBullTransitions, AppError> {
+    need_prefix(&prefix)?;
+    let (conn, _) = kv.connection(&app, &target).await?;
+    events::transitions(&conn, &prefix, &name, minutes).await
+}
+
+/// 큐 지도: 큐, 큐 사이의 부모→자식 연결, 워커
+#[tauri::command]
+pub async fn kv_bull_topology(app: State<'_, AppState>, kv: State<'_, KvState>, target: KvTarget, prefix: String) -> Result<KvBullTopology, AppError> {
+    need_prefix(&prefix)?;
+    let (conn, _) = kv.connection(&app, &target).await?;
+    topology::topology(&conn, &prefix).await
 }
 
 /// 보관함에서 10분 넘게 안 쓴 연결을 1분마다 닫는다. 앱이 시작할 때 한 번 띄운다.

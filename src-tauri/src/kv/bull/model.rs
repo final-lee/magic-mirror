@@ -206,3 +206,129 @@ pub struct KvBullJob {
     pub parent: Option<KvBullParent>,
     pub children: Vec<KvBullChild>,
 }
+
+/// 흐름 그래프의 작업 상태: 큐 상태에 더해 어디에서도 못 찾았으면 `unknown`, 작업 해시가 없으면 `missing`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum KvBullFlowState {
+    Wait,
+    Active,
+    Delayed,
+    Prioritized,
+    WaitingChildren,
+    Paused,
+    Completed,
+    Failed,
+    Unknown,
+    Missing,
+}
+
+impl From<KvBullState> for KvBullFlowState {
+    fn from(state: KvBullState) -> Self {
+        match state {
+            KvBullState::Wait => KvBullFlowState::Wait,
+            KvBullState::Active => KvBullFlowState::Active,
+            KvBullState::Delayed => KvBullFlowState::Delayed,
+            KvBullState::Prioritized => KvBullFlowState::Prioritized,
+            KvBullState::WaitingChildren => KvBullFlowState::WaitingChildren,
+            KvBullState::Paused => KvBullFlowState::Paused,
+            KvBullState::Completed => KvBullFlowState::Completed,
+            KvBullState::Failed => KvBullFlowState::Failed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KvBullFlowNode {
+    /// 작업의 전체 키 `<prefix>:<queue>:<id>`
+    pub key: String,
+    pub prefix: String,
+    pub queue: String,
+    pub id: String,
+    pub name: String,
+    pub state: KvBullFlowState,
+    pub timestamp: Option<i64>,
+    pub finished_on: Option<i64>,
+    pub failed_reason: Option<String>,
+    pub pending: u64,
+    pub done: u64,
+    pub failed: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum KvBullEdgeStatus {
+    Pending,
+    Done,
+    Failed,
+    Ignored,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct KvBullFlowEdge {
+    pub parent: String,
+    pub child: String,
+    pub status: KvBullEdgeStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct KvBullFlow {
+    pub root: String,
+    pub focus: String,
+    pub nodes: Vec<KvBullFlowNode>,
+    pub edges: Vec<KvBullFlowEdge>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct KvBullTransitionPair {
+    pub prev: Option<String>,
+    pub event: String,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KvBullTransitions {
+    pub from: i64,
+    pub to: i64,
+    pub first_at: Option<i64>,
+    pub events: u64,
+    pub truncated: bool,
+    pub pairs: Vec<KvBullTransitionPair>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct KvBullTopologyLink {
+    pub from: String,
+    pub to: String,
+    pub jobs: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct KvBullTopologyWorker {
+    pub queue: String,
+    pub name: String,
+    pub addr: String,
+    /// `addr`에서 포트를 뗀 주소
+    pub host: String,
+    pub age: i64,
+    pub idle: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct KvBullTopologyQueue {
+    pub name: String,
+    pub flavor: KvBullFlavor,
+    pub paused: bool,
+    pub counts: KvBullCounts,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct KvBullTopology {
+    pub queues: Vec<KvBullTopologyQueue>,
+    pub links: Vec<KvBullTopologyLink>,
+    pub workers: Option<Vec<KvBullTopologyWorker>>,
+    pub sampled: u64,
+}

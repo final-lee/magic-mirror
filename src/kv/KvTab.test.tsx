@@ -26,6 +26,9 @@ vi.mock("./api", () => ({
     bullQueue: vi.fn(),
     bullJobs: vi.fn(),
     bullJob: vi.fn(),
+    bullFlow: vi.fn(),
+    bullTransitions: vi.fn(),
+    bullTopology: vi.fn(),
   },
 }));
 vi.mock("../api/client", () => ({ api: { getSettings: vi.fn(), saveSettings: vi.fn(), ssoLogin: vi.fn() } }));

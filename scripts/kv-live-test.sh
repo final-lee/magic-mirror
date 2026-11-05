@@ -63,6 +63,10 @@ wait_ready() { # wait_ready <컨테이너> <valkey-cli 인자…>
   exit 1
 }
 
+# 시험을 먼저 빌드한다: events 스트림은 지금 시각 기준으로 심으므로, 심은 뒤 빌드에 시간이 걸리면 1분 창 시험이 어긋난다
+echo "시험을 빌드해요…"
+(cd "$root/src-tauri" && cargo test --lib --no-run -q)
+
 echo "서버를 띄워요…"
 docker run -d --name "${names[0]}" -p 127.0.0.1:56379:6379 "$image" >/dev/null
 docker run -d --name "${names[1]}" -p 127.0.0.1:56380:6379 "$image" valkey-server --requirepass rootpass >/dev/null
@@ -112,15 +116,51 @@ now=$(( $(date +%s) * 1000 ))
   echo "HSET bull:emails:31 name reminder data '{}' timestamp $now delay 3600000"
   echo "ZADD bull:emails:delayed $(( (now + 3600000) * 4096 + 1 )) 31"
   echo "RPUSH bull:emails:31:logs started"
-  # 옛 Bull 모양: meta가 없고 completed가 셋이다
+  # 오래된 Bull 모양: meta가 없고 completed가 셋이다
   echo "SET bull:legacy:id 3"
   echo "LPUSH bull:legacy:wait 1"
   echo "HSET bull:legacy:1 name old timestamp $now"
   echo "SADD bull:legacy:completed 2"
+  # Bull 3 모양(OptimalBits/bull의 moveToFinished): meta가 없고 completed·failed가 끝난 시각 점수의 정렬 셋이다
+  echo "SET bull:bull3:id 3"
+  echo "HSET bull:bull3:2 name done timestamp $((now - 9000)) processedOn $((now - 8000)) finishedOn $((now - 7000))"
+  echo "ZADD bull:bull3:completed $((now - 7000)) 2"
+  echo "HSET bull:bull3:3 name broken timestamp $((now - 6000)) processedOn $((now - 5000)) finishedOn $((now - 4000)) failedReason boom"
+  echo "ZADD bull:bull3:failed $((now - 4000)) 3"
+  # BullMQ 흐름: orders 큐의 부모 p1(자식 기다림)과 fulfil 큐의 자식 c1(대기)·c2(처리됨)·c3(실패)·c4(무시됨)
+  echo "HSET bull:orders:meta version bullmq:5.12.0"
+  echo "HSET bull:fulfil:meta version bullmq:5.12.0"
+  echo "HSET bull:orders:p1 name order timestamp $((now - 400000))"
+  echo "ZADD bull:orders:waiting-children $((now - 400000)) p1"
+  echo "SADD bull:orders:p1:dependencies bull:fulfil:c1"
+  echo "HSET bull:orders:p1:processed bull:fulfil:c2 '\"packed\"'"
+  echo "HSET bull:orders:p1:failed bull:fulfil:c3 'no stock'"
+  echo "ZADD bull:orders:p1:unsuccessful 1 bull:fulfil:c4"
+  for c in c1 c2 c3 c4; do
+    echo "HSET bull:fulfil:$c name pack timestamp $((now - 390000)) parentKey bull:orders:p1 parent '{\"id\":\"p1\",\"queueKey\":\"bull:orders\"}'"
+  done
+  echo "LPUSH bull:fulfil:wait c1"
+  echo "ZADD bull:fulfil:completed $((now - 290000)) c2"
+  echo "ZADD bull:fulfil:failed $((now - 280000)) c3"
+  echo "HSET bull:fulfil:c3 failedReason 'no stock'"
+  # fulfil 큐의 events 스트림: added, active(prev waiting) 2, completed·failed(prev active), stalled, retries-exhausted
+  echo "XADD bull:fulfil:events $((now - 600000))-0 event added jobId c1 name pack"
+  echo "XADD bull:fulfil:events $((now - 300000))-0 event active jobId c1 prev waiting"
+  echo "XADD bull:fulfil:events $((now - 299000))-0 event active jobId c2 prev waiting"
+  echo "XADD bull:fulfil:events $((now - 290000))-0 event completed jobId c2 prev active returnvalue packed"
+  echo "XADD bull:fulfil:events $((now - 280000))-0 event failed jobId c3 prev active failedReason 'no stock'"
+  echo "XADD bull:fulfil:events $((now - 5000))-0 event stalled jobId c1"
+  echo "XADD bull:fulfil:events $((now - 3000))-0 event retries-exhausted jobId c3 attemptsMade 3"
   echo "SLOWLOG RESET"
 } | cli "${names[0]}" >/dev/null
 # 바이트 이름의 키(UTF-8이 아니다)
 docker exec "${names[0]}" sh -c 'printf "SET bin\377key v\r\n" | valkey-cli' >/dev/null
+
+
+# 워커 연결 하나(fulfil 큐의 packer): 이름만 붙이고 열어 둔다. 컨테이너가 지워지면 같이 끝난다
+worker_name="bull:$(printf fulfil | base64):w:packer"
+(docker exec -i "${names[0]}" sh -c "(printf 'CLIENT SETNAME $worker_name\\r\\n'; sleep 300) | valkey-cli >/dev/null" >/dev/null 2>&1 &)
+sleep 1
 
 # 인증 서버: 기본 사용자는 requirepass, ACL 사용자는 읽기 전용(+연결에 필요한 명령)
 cli "${names[1]}" -a rootpass SET str hello >/dev/null 2>&1

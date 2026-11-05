@@ -1,9 +1,11 @@
 import type { ReactNode } from "react";
 import { formatBytes } from "../lib/format";
 import { formatCount, formatDuration, formatPercent } from "./format";
+import { ClusterTopology } from "./graph/ClusterTopology";
+import { useKvClients } from "./queries";
 import { keyspaceTotals, summarize } from "./stats";
 import * as t from "./text";
-import type { KvOverview } from "./types";
+import type { KvOverview, KvTarget } from "./types";
 
 /** bar: 0~1. usage면 90% 이상이 빨강·75% 이상이 노랑(차 가는 양), 아니면 늘 한 색(히트율처럼 높을수록 좋은 값) */
 function Card({ title, value, sub, bar, usage = false }: { title: string; value: ReactNode; sub?: ReactNode; bar?: number | null; usage?: boolean }) {
@@ -25,7 +27,9 @@ function Card({ title, value, sub, bar, usage = false }: { title: string; value:
  * 개요: 노드별 INFO를 모은 카드(메모리·히트율·초당 명령·연결·키·축출·가동 시간·복제 지연)와 노드 표, 키스페이스.
  * 합계는 기본 노드만 더한다(stats.ts). 서버리스는 노드 하나로 보인다.
  */
-export function Overview({ overview }: { overview: KvOverview }) {
+export function Overview({ target, overview }: { target: KvTarget; overview: KvOverview }) {
+  const noClients = overview.unsupported.includes("clients");
+  const clients = useKvClients(target, !noClients);
   const s = summarize(overview);
   const keyspace = keyspaceTotals(overview);
   const infoOf = new Map(overview.info.map((i) => [i.node, i]));
@@ -112,6 +116,12 @@ export function Overview({ overview }: { overview: KvOverview }) {
           </table>
         </>
       )}
+      <h4 className="kv-section">{t.TOPOLOGY_TITLE}</h4>
+      <ClusterTopology
+        overview={overview}
+        clients={clients.data ?? null}
+        note={noClients ? t.UNSUPPORTED.clients : clients.isError ? t.TOPOLOGY_NO_CLIENTS : clients.isPending ? t.TOPOLOGY_LOADING_CLIENTS : undefined}
+      />
     </section>
   );
 }

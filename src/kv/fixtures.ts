@@ -2,6 +2,10 @@
 import type {
   KvBigKey,
   KvBullCounts,
+  KvBullFlow,
+  KvBullFlowNode,
+  KvBullTopology,
+  KvBullTransitions,
   KvBullJob,
   KvBullQueue,
   KvBullQueueView,
@@ -228,6 +232,75 @@ export function sampleBullJob(over: Partial<KvBullJob> = {}): KvBullJob {
     logs: ["connecting to smtp", "retrying in 2s"],
     parent: null,
     children: [],
+    ...over,
+  };
+}
+
+// 🐂 그래프: 흐름 place-order(orders) → send-receipt(emails)·charge-card(payments, 실패)·ship(shipping, 기다리는 중)
+const flowNode = (queue: string, id: string, name: string, over: Partial<KvBullFlowNode> = {}): KvBullFlowNode => ({
+  key: `bull:${queue}:${id}`, prefix: "bull", queue, id, name, state: "completed", timestamp: BULL_NOW - 600_000, finishedOn: BULL_NOW - 590_000, failedReason: null, pending: 0, done: 0, failed: 0, ...over,
+});
+export function sampleBullFlow(over: Partial<KvBullFlow> = {}): KvBullFlow {
+  return {
+    root: "bull:orders:77",
+    focus: "bull:emails:185",
+    nodes: [
+      flowNode("orders", "77", "place-order", { state: "waitingChildren", pending: 1, done: 1, failed: 1 }),
+      flowNode("emails", "185", "send-receipt"),
+      flowNode("payments", "301", "charge-card", { state: "failed", failedReason: "card_declined" }),
+      flowNode("shipping", "412", "ship", { state: "wait", finishedOn: null }),
+    ],
+    edges: [
+      { parent: "bull:orders:77", child: "bull:emails:185", status: "done" },
+      { parent: "bull:orders:77", child: "bull:payments:301", status: "failed" },
+      { parent: "bull:orders:77", child: "bull:shipping:412", status: "pending" },
+    ],
+    truncated: false,
+    ...over,
+  };
+}
+
+export function sampleBullTransitions(over: Partial<KvBullTransitions> = {}): KvBullTransitions {
+  return {
+    from: BULL_NOW - 3_600_000,
+    to: BULL_NOW,
+    firstAt: BULL_NOW - 3_600_000,
+    events: 5_000,
+    truncated: false,
+    pairs: [
+      { prev: null, event: "added", count: 1000 },
+      { prev: null, event: "waiting", count: 940 },
+      { prev: null, event: "delayed", count: 60 },
+      { prev: "delayed", event: "waiting", count: 55 },
+      { prev: "waiting", event: "active", count: 990 },
+      { prev: "active", event: "completed", count: 930 },
+      { prev: "active", event: "failed", count: 40 },
+      { prev: "failed", event: "waiting", count: 0 },
+      { prev: "active", event: "delayed", count: 20 },
+      { prev: null, event: "stalled", count: 3 },
+      { prev: null, event: "retries-exhausted", count: 6 },
+      { prev: "active", event: "progress", count: 700 },
+    ],
+    ...over,
+  };
+}
+
+export function sampleBullTopology(over: Partial<KvBullTopology> = {}): KvBullTopology {
+  const c = (over: Partial<KvBullCounts> = {}): KvBullCounts => ({ wait: 0, active: 0, delayed: 0, prioritized: 0, waitingChildren: 0, paused: 0, completed: 100, failed: 0, ...over });
+  const worker = (queue: string, host: string, i: number) => ({ queue, name: `bull:${queue}:w:${i}`, addr: `${host}:${50000 + i}`, host, age: 3600, idle: 1 });
+  return {
+    queues: [
+      { name: "orders", flavor: "bullmq", paused: false, counts: c({ waitingChildren: 4, active: 2 }) },
+      { name: "emails", flavor: "bullmq", paused: false, counts: c({ wait: 3 }) },
+      { name: "payments", flavor: "bullmq", paused: false, counts: c({ wait: 12, failed: 4 }) },
+      { name: "reports", flavor: "bullmq", paused: false, counts: c({ wait: 220 }) },
+    ],
+    links: [
+      { from: "orders", to: "emails", jobs: 40 },
+      { from: "orders", to: "payments", jobs: 40 },
+    ],
+    workers: [worker("orders", "10.0.4.7", 1), worker("orders", "10.0.4.8", 2), worker("emails", "10.0.4.8", 3), worker("payments", "10.0.5.2", 4)],
+    sampled: 120,
     ...over,
   };
 }

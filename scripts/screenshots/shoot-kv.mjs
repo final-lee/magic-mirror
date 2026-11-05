@@ -32,21 +32,53 @@ export async function shootKv(page, out) {
   await page.getByRole('table', { name: '노드' }).waitFor();
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${out}/kv-overview.png` });
+  // 토폴로지 그래프: 샤드·복제 노드와 클라이언트 호스트
+  await page.getByRole('img', { name: '토폴로지' }).waitFor();
+  await page.getByRole('group', { name: /클라이언트 기타/ }).waitFor();
+  await page.getByRole('img', { name: '토폴로지' }).scrollIntoViewIfNeeded();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `${out}/kv-topology.png` });
 
   // 🐂 Bull: 큐 목록, 큐 상세(처리량·시간·실패 이유·작업 표), 실패한 작업 상세
   await nav.getByRole('button', { name: 'Bull', exact: true }).click();
   await page.getByRole('button', { name: 'webhooks 개요' }).waitFor();
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${out}/kv-bull.png` });
+  // 큐 지도: 큐·부모→자식 연결·워커 호스트
+  await page.getByRole('button', { name: '지도', exact: true }).click();
+  await page.getByRole('img', { name: /큐 지도/ }).waitFor();
+  await page.getByRole('group', { name: '워커 호스트 10.20.8.4' }).waitFor();
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: `${out}/kv-bull-map.png` });
+  await page.getByRole('button', { name: '카드', exact: true }).click();
   await page.getByRole('button', { name: 'webhooks 개요' }).click();
   await page.getByRole('table', { name: '작업 표' }).waitFor();
   await page.getByRole('img', { name: /최근 24시간/ }).waitFor();
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${out}/kv-bull-queue.png` });
+  // 상태 전이: 6시간 구간은 스트림이 잘려 있어 그 안내가 붙는다
+  await page.getByRole('group', { name: '구간' }).getByRole('button', { name: '6시간' }).click();
+  await page.getByRole('img', { name: '상태 전이' }).waitFor();
+  await page.getByText(/스트림에 남은 최근/).waitFor();
+  await page.locator('.kv-transitions').evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `${out}/kv-bull-transitions.png` });
   await page.getByRole('table', { name: '작업 표' }).getByRole('button', { name: '90412' }).click();
   await page.getByRole('complementary', { name: '상세' }).getByRole('list', { name: '시간선' }).waitFor();
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${out}/kv-bull-job.png` });
+
+  // 작업 흐름: notifications 큐의 자식을 기다리는 작업에서 [크게 보기]
+  await page.getByRole('button', { name: /큐 목록/ }).click();
+  await page.getByRole('button', { name: 'notifications 개요' }).click();
+  await page.getByRole('group', { name: '상태별 작업 수' }).getByRole('button', { name: /^자식 기다림/ }).click();
+  await page.getByRole('table', { name: '작업 표' }).getByRole('button').first().click();
+  const flowButton = page.getByRole('button', { name: '크게 보기' });
+  await flowButton.scrollIntoViewIfNeeded();
+  await flowButton.click();
+  await page.getByRole('dialog', { name: /흐름 그래프/ }).getByRole('img', { name: '작업 흐름 그래프' }).waitFor();
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: `${out}/kv-bull-flow.png` });
 
   // ⚡ rate-limit: 기억한 로그인이 없어 사용자 목록이 있는 로그인 화면이 뜬다
   await openRow(page, 'rate-limit');

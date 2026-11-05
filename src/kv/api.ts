@@ -1,6 +1,6 @@
 import { Channel } from "@tauri-apps/api/core";
 import { invoke } from "../api/invoke";
-import type { KvBigKeysMessage, KvBullJob, KvBullJobsPage, KvBullQueueView, KvBullQueuesPage, KvBullState, KvClient, KvKeyName, KvKeyView, KvLogin, KvOverview, KvScanPage, KvSlowEntry, KvTarget, KvTargetInfo, KvType } from "./types";
+import type { KvBigKeysMessage, KvBullFlow, KvBullJob, KvBullJobsPage, KvBullQueueView, KvBullQueuesPage, KvBullState, KvBullTopology, KvBullTransitions, KvClient, KvKeyName, KvKeyView, KvLogin, KvOverview, KvScanPage, KvSlowEntry, KvTarget, KvTargetInfo, KvType } from "./types";
 
 // 명령 이름과 인자 이름은 계약(local://kv-contract.md)과 같아야 한다(Tauri가 camelCase 인자를 snake_case로 바꿔 준다).
 // 모든 명령은 target을 객체 하나로 받는다. invoke가 SSO 만료를 알릴 때 그 안의 profile을 읽으므로(src/api/invoke.ts) 풀어서 넘기지 않는다.
@@ -29,6 +29,12 @@ export const kvApi = {
   bullJobs: (target: KvTarget, prefix: string, name: string, state: KvBullState, start: number, count: number) =>
     invoke<KvBullJobsPage>("kv_bull_jobs", { target, prefix, name, state, start, count }),
   bullJob: (target: KvTarget, prefix: string, name: string, id: string) => invoke<KvBullJob>("kv_bull_job", { target, prefix, name, id }),
+  /** 🐂 작업 흐름(부모·자식 그래프). 위로 루트까지, 아래로 자식까지 걷는다 */
+  bullFlow: (target: KvTarget, prefix: string, name: string, id: string) => invoke<KvBullFlow>("kv_bull_flow", { target, prefix, name, id }),
+  /** 🐂 상태 전이: events 스트림의 (prev, event) 쌍을 센 것. minutes는 지금부터 거슬러 올라가는 구간 */
+  bullTransitions: (target: KvTarget, prefix: string, name: string, minutes: number) => invoke<KvBullTransitions>("kv_bull_transitions", { target, prefix, name, minutes }),
+  /** 🐂 큐 지도: 큐, 부모→자식 큐 연결, 워커 호스트 */
+  bullTopology: (target: KvTarget, prefix: string) => invoke<KvBullTopology>("kv_bull_topology", { target, prefix }),
   /** 이 대상의 연결을 닫는다. 탭을 닫을 때 부른다. */
   close: (target: KvTarget) => invoke<null>("kv_close", { target }),
   /** 키체인에 저장해 둔 이 사용자의 비밀번호를 지운다 */

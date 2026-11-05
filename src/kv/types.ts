@@ -259,3 +259,74 @@ export interface KvBullJob extends KvBullJobRow {
   /** 남은 자식(dependencies)과 끝난 자식(processed, 반환값) */
   children: { key: string; done: boolean; result: string | null }[];
 }
+
+// 🐂 그래프: 작업 흐름(flow), 상태 전이(events 스트림), 큐 지도(topology)
+export type KvBullFlowState = KvBullState | "unknown" | "missing";
+export interface KvBullFlowNode {
+  /** 작업 키 전체 `<prefix>:<queue>:<id>` */
+  key: string;
+  prefix: string;
+  queue: string;
+  id: string;
+  name: string;
+  state: KvBullFlowState;
+  timestamp: number | null;
+  finishedOn: number | null;
+  failedReason: string | null;
+  /** 자식 수: dependencies / processed / failed+unsuccessful */
+  pending: number;
+  done: number;
+  failed: number;
+}
+export interface KvBullFlowEdge {
+  parent: string;
+  child: string;
+  status: "pending" | "done" | "failed" | "ignored";
+}
+export interface KvBullFlow {
+  root: string;
+  focus: string;
+  nodes: KvBullFlowNode[];
+  edges: KvBullFlowEdge[];
+  truncated: boolean;
+}
+
+export interface KvBullTransitionPair {
+  prev: string | null;
+  event: string;
+  count: number;
+}
+export interface KvBullTransitions {
+  /** 요청한 구간(ms epoch) */
+  from: number;
+  to: number;
+  /** 실제로 읽은 가장 오래된 이벤트. from보다 크면 스트림이 잘렸거나 구간이 잘렸다 */
+  firstAt: number | null;
+  events: number;
+  /** 읽기 한도(20,000개)에 걸렸다 */
+  truncated: boolean;
+  pairs: KvBullTransitionPair[];
+}
+
+export interface KvBullTopologyLink {
+  from: string;
+  to: string;
+  jobs: number;
+}
+export interface KvBullTopologyWorker {
+  queue: string;
+  name: string;
+  addr: string;
+  /** 포트를 뺀 주소 */
+  host: string;
+  age: number;
+  idle: number;
+}
+export interface KvBullTopology {
+  queues: { name: string; flavor: KvBullFlavor; paused: boolean; counts: KvBullCounts }[];
+  links: KvBullTopologyLink[];
+  /** CLIENT LIST를 못 쓰면 null */
+  workers: KvBullTopologyWorker[] | null;
+  /** parentKey를 읽은 작업 수 */
+  sampled: number;
+}

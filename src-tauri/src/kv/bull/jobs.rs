@@ -3,7 +3,7 @@
 
 use crate::kv::value::concurrently;
 
-use super::io::{flavor_of, hmget, hscan_limited, llen, lrange, scard, sscan_limited, zcard, zrange_ids, zrange_scored};
+use super::io::{flavor_of, hmget, hscan_limited, is_set, llen, lrange, scard, sscan_limited, zcard, zrange_ids, zrange_scored};
 use super::keys::{job_key, queue_key, state_suffix};
 use super::model::{KvBullChild, KvBullFlavor, KvBullJob, KvBullJobRow, KvBullJobsPage, KvBullState};
 use super::stats;
@@ -55,6 +55,8 @@ pub fn row_of(id: &str, state: KvBullState, fields: &[Option<String>], delay_unt
 /// 상태 하나의 (작업 ID, 지연 예정 시각)들과 전체 수. 완료·실패는 최신순, 나머지는 줄(점수) 순서다.
 async fn page_ids(conn: &Connected, key: &str, state: KvBullState, flavor: KvBullFlavor, start: i64, count: i64) -> Result<(Vec<(String, Option<i64>)>, u64), AppError> {
     let stop = start + count - 1;
+    // 옛 Bull 3은 `completed`·`failed`를 끝난 시각 점수의 정렬 셋에 두고(BullMQ와 같다), 그보다 오래된 판은 셋에 둔다: 키의 종류로 고른다
+    let unordered = flavor == KvBullFlavor::Bull && matches!(state, KvBullState::Completed | KvBullState::Failed) && is_set(conn, key).await?;
     match state {
         KvBullState::Wait | KvBullState::Active | KvBullState::Paused => {
             let ids = lrange(conn, key, start, stop).await?;
@@ -64,8 +66,8 @@ async fn page_ids(conn: &Connected, key: &str, state: KvBullState, flavor: KvBul
             let rows = zrange_scored(conn, key, start, stop, false).await?;
             Ok((rows.into_iter().map(|(id, score)| (id, Some(stats::delayed_at(score, flavor)))).collect(), zcard(conn, key).await?))
         }
-        KvBullState::Completed | KvBullState::Failed if flavor == KvBullFlavor::Bull => {
-            // 옛 Bull의 `completed`·`failed`는 순서 없는 셋이다: 앞에서부터 읽어 쪽을 자른다
+        KvBullState::Completed | KvBullState::Failed if unordered => {
+            // 셋은 순서가 없다: 앞에서부터 읽어 쪽을 자른다
             let all = sscan_limited(conn, key, SET_SCAN_LIMIT).await?;
             let total = scard(conn, key).await?;
             let page = all.into_iter().skip(start as usize).take(count as usize).map(|id| (id, None)).collect();
@@ -97,7 +99,7 @@ pub async fn jobs_page(conn: &Connected, prefix: &str, queue: &str, state: KvBul
 async fn state_of(conn: &Connected, prefix: &str, queue: &str, id: &str, flavor: KvBullFlavor, paused: bool) -> Result<(KvBullState, Option<i64>), AppError> {
     for state in [KvBullState::Completed, KvBullState::Failed, KvBullState::Delayed, KvBullState::Prioritized, KvBullState::WaitingChildren] {
         let key = queue_key(prefix, queue, state_suffix(state, flavor));
-        if flavor == KvBullFlavor::Bull && matches!(state, KvBullState::Completed | KvBullState::Failed) {
+        if flavor == KvBullFlavor::Bull && matches!(state, KvBullState::Completed | KvBullState::Failed) && is_set(conn, &key).await? {
             if int(&conn.data(cmd("SISMEMBER").arg(key.as_str()).arg(id)).await?) == Some(1) {
                 return Ok((state, None));
             }

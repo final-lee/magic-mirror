@@ -4,7 +4,7 @@ import { api } from "../api/client";
 import type { Settings } from "../api/types";
 import { renderWithClient } from "../test/utils";
 import { kvApi } from "./api";
-import { ARN, BULL_NOW, kvTarget, sampleBullJob, sampleBullQueue, sampleBullQueueView, sampleOverview, sampleTargetInfo, serverlessOverview } from "./fixtures";
+import { ARN, BULL_NOW, kvTarget, sampleBullFlow, sampleBullJob, sampleBullQueue, sampleBullQueueView, sampleBullTopology, sampleBullTransitions, sampleOverview, sampleTargetInfo, serverlessOverview } from "./fixtures";
 import { KvTab } from "./KvTab";
 import type { KvBullJobRow, KvBullQueue } from "./types";
 
@@ -25,6 +25,9 @@ vi.mock("./api", () => ({
     bullQueue: vi.fn(),
     bullJobs: vi.fn(),
     bullJob: vi.fn(),
+    bullFlow: vi.fn(),
+    bullTransitions: vi.fn(),
+    bullTopology: vi.fn(),
   },
 }));
 vi.mock("../api/client", () => ({ api: { getSettings: vi.fn(), saveSettings: vi.fn(), ssoLogin: vi.fn() } }));
@@ -72,6 +75,9 @@ beforeEach(() => {
   m.bullQueue.mockImplementation(async (_t, _p, name) => sampleBullQueueView({ queue: { ...emails, name } }));
   m.bullJobs.mockImplementation(async (_t, _p, _n, state) => ({ jobs: [job("184", state), job("183", state, { progress: '{"step":2}', failedReason: null })], total: 2 }));
   m.bullJob.mockImplementation(async (_t, _p, _n, id) => sampleBullJob({ id }));
+  m.bullFlow.mockResolvedValue(sampleBullFlow());
+  m.bullTransitions.mockResolvedValue(sampleBullTransitions());
+  m.bullTopology.mockResolvedValue(sampleBullTopology());
 });
 
 describe("menu", () => {

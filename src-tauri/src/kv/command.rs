@@ -68,6 +68,7 @@ pub const ALLOWED: &[Allowed] = &[
     key("EXISTS"),
     key("ZSCORE"),
     key("SISMEMBER"),
+    key("LPOS"),
     any("SLOWLOG GET"),
     any("CLIENT LIST"),
     any("CLIENT ID"),

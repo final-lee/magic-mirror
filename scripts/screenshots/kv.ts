@@ -3,7 +3,7 @@
 // 목록의 행은 demo.tsx의 RESOURCES(elasticache/*)에 이미 있다. 여기서는 새 행을 더하지 않는다(kvResources는 비어 있다).
 import { appUsers, bytes, name, nodeInfo, sampleOverview, sampleTargetInfo, serverlessOverview } from "../../src/kv/fixtures";
 import type {
-  KvBigKeysMessage, KvBullCounts, KvBullJob, KvBullJobRow, KvBullQueue, KvBullQueueView, KvBullState, KvClient, KvKeyRow, KvKeyView, KvNode, KvNodeInfo, KvOverview, KvSlowEntry,
+  KvBigKeysMessage, KvBullCounts, KvBullFlow, KvBullFlowNode, KvBullFlowEdge, KvBullTopology, KvBullTransitions, KvBullJob, KvBullJobRow, KvBullQueue, KvBullQueueView, KvBullState, KvClient, KvKeyRow, KvKeyView, KvNode, KvNodeInfo, KvOverview, KvSlowEntry,
   KvTargetInfo, KvType, KvUser, KvValue,
 } from "../../src/kv/types";
 
@@ -213,8 +213,28 @@ const slowlog = (): KvSlowEntry[] => {
   ];
   return rows.map(([args, micros, client, n], i) => ({ node: "10.0.1.10:6379", id: 400 - i, time: t - i * 190, micros, args, client, name: n }));
 };
-const clients = (): KvClient[] =>
-  Array.from({ length: 14 }, (_, i) => ({
+/** cart(샤드 3개): 클라이언트 호스트 26개가 기본 노드에 주로, 일부는 읽기 복제 노드에 붙는다 */
+function cartClients(): KvClient[] {
+  const r = rng(23);
+  const nodes = clusterOverview().nodes;
+  const primaries = nodes.filter((n) => n.role === "primary");
+  const replicas = nodes.filter((n) => n.role === "replica");
+  const apps = ["orders-api", "web-session", "cart-service", "worker", "ranking", "search-sync"];
+  const out: KvClient[] = [];
+  for (let h = 0; h < 26; h++) {
+    const host = `10.20.${4 + (h % 6)}.${10 + h * 3}`;
+    const weight = h < 4 ? 14 : h < 12 ? 7 : 2;
+    for (let i = 0; i < weight; i++) {
+      const readOnly = r() < 0.12;
+      const pool = readOnly ? replicas : primaries;
+      const node = pool[(h + i) % pool.length];
+      out.push({ node: node.address, id: `${h}-${i}`, addr: `${host}:${40000 + i * 13 + h}`, name: h === 25 && i === 0 ? "magic-mirror" : apps[h % apps.length], user: "cart-app", db: 0, age: between(r, 60, 400_000), idle: between(r, 0, 30), cmd: ["get", "hgetall", "hset", "expire", "mget"][i % 5], flags: readOnly ? "r" : "N", own: h === 25 && i === 0 });
+    }
+  }
+  return out;
+}
+const clients = (id: string): KvClient[] =>
+  id === "cart" ? cartClients() : Array.from({ length: 14 }, (_, i) => ({
     node: "10.0.1.10:6379", id: String(9000 + i), addr: i === 3 ? "10.0.9.9:40000" : `10.0.${4 + (i % 3)}.${7 + i}:${51000 + i * 14}`, name: i === 3 ? "magic-mirror" : ["orders-api", "web-session", "ranking", "worker"][i % 4],
     user: i === 3 ? "app-reader" : ["app-writer", "app-reader"][i % 2], db: 0, age: 3600 * (1 + (i % 7)) + i * 61, idle: i % 5, cmd: ["get", "hgetall", "zadd", "expire", "client|list"][i % 5], flags: "N", own: i === 3,
   }));
@@ -323,6 +343,91 @@ function job(a: Args): KvBullJob {
   };
 }
 
+// ───────────────────────── 🐂 그래프 ─────────────────────────
+const jobKey = (queue: string, id: string) => `{bull}:${queue}:${id}`;
+const fnode = (queue: string, id: string, name: string, state: KvBullFlowNode["state"], over: Partial<KvBullFlowNode> = {}): KvBullFlowNode => ({
+  key: jobKey(queue, id), prefix: "{bull}", queue, id, name, state, timestamp: NOW0 - 14 * MIN, finishedOn: state === "completed" || state === "failed" ? NOW0 - 9 * MIN : null, failedReason: null, pending: 0, done: 0, failed: 0, ...over,
+});
+
+/** 주문 하나가 큐 여럿을 건너는 흐름: place-order(orders) → 결제·재고·알림·배송, 배송은 라벨 인쇄를 다시 자식으로 둔다 */
+function flowFor(queue: string, id: string): KvBullFlow {
+  const nid = queue === "notifications" ? id : "7710";
+  const nodes: KvBullFlowNode[] = [
+    fnode("orders", "55120", "place-order", "waitingChildren", { pending: 3, done: 3, failed: 1 }),
+    fnode("payments", "30118", "charge-card", "failed", { failedReason: "card_declined: insufficient funds" }),
+    fnode("inventory", "20877", "reserve-stock", "completed"),
+    fnode("emails", "88140", "send-receipt", "completed"),
+    fnode("notifications", nid, "push-notify", "waitingChildren", { pending: 1, done: 1 }),
+    fnode("shipping", "41207", "ship", "waitingChildren", { pending: 1, done: 0 }),
+    fnode("labels", "9021", "print-label", "wait"),
+    fnode("webhooks", "90413", "deliver-webhook", "active"),
+    fnode("analytics", "6603", "track-order", "completed"),
+    fnode("fraud", "1180", "score-order", "missing"),
+  ];
+  const edge = (parent: string, child: string, status: KvBullFlowEdge["status"]): KvBullFlowEdge => ({ parent, child, status });
+  const k = (n: number) => nodes[n].key;
+  const edges: KvBullFlowEdge[] = [
+    edge(k(0), k(1), "failed"), edge(k(0), k(2), "done"), edge(k(0), k(3), "done"), edge(k(0), k(4), "pending"), edge(k(0), k(5), "pending"), edge(k(0), k(9), "ignored"),
+    edge(k(4), k(7), "pending"), edge(k(4), k(8), "done"), edge(k(5), k(6), "pending"),
+  ];
+  const focus = nodes.find((n) => n.queue === queue && n.id === id)?.key ?? nodes[0].key;
+  return { root: nodes[0].key, focus, nodes, edges, truncated: false };
+}
+
+/** 큐마다 events 스트림에서 센 전이. 일은 큐의 처리량에 비례하고, webhooks는 정체와 재시도 소진이 있다 */
+function transitionsFor(queueName: string, minutes: number): KvBullTransitions {
+  const queue = QUEUES.find((q) => q.name === queueName) ?? QUEUES[0];
+  const rate = Math.max(1, queue.recent.completed.reduce((a, b) => a + b, 0) / 60);
+  const bad = queueName === "webhooks";
+  const n = Math.round(rate * minutes);
+  const failed = bad ? Math.round(n * 0.22) : Math.round(n * 0.003);
+  const done = Math.round(n * 0.97) - failed;
+  const delayed = Math.round(n * 0.06);
+  const retried = bad ? Math.round(failed * 0.7) : Math.round(failed * 0.5);
+  const pairs = [
+    { prev: null, event: "added", count: n + delayed },
+    { prev: null, event: "waiting", count: n },
+    { prev: null, event: "delayed", count: delayed },
+    { prev: "delayed", event: "waiting", count: Math.round(delayed * 0.9) },
+    { prev: "waiting", event: "active", count: n + retried },
+    { prev: "active", event: "completed", count: done },
+    { prev: "active", event: "failed", count: failed },
+    { prev: "active", event: "delayed", count: retried },
+    { prev: "active", event: "waiting", count: Math.round(retried * 0.2) },
+    { prev: null, event: "stalled", count: bad ? 7 : 1 },
+    { prev: null, event: "retries-exhausted", count: bad ? Math.round(failed * 0.3) : 0 },
+    { prev: "active", event: "progress", count: n * 3 },
+    { prev: null, event: "drained", count: 12 },
+  ].filter((p) => p.count > 0);
+  const events = pairs.reduce((a, p) => a + p.count, 0);
+  // 6시간 구간은 스트림(maxLen)이 잘려 있어 앞쪽이 비어 있다
+  const trimmed = minutes >= 360;
+  return { from: NOW0 - minutes * MIN, to: NOW0, firstAt: trimmed ? NOW0 - 214 * MIN : NOW0 - minutes * MIN + 2_000, events, truncated: false, pairs };
+}
+
+function topology(): KvBullTopology {
+  const hosts = ["10.20.4.12", "10.20.5.15", "10.20.6.18", "10.20.7.21", "10.20.8.4"];
+  const w = (queue: string, host: string, i: number) => ({ queue, name: `{bull}:${btoa(queue)}:w:${queue}-${i}`, addr: `${host}:${50100 + i * 7}`, host, age: 7_200 + i * 600, idle: i % 3 });
+  const workers = [
+    ...[0, 0, 0, 1, 1, 1].map((h, i) => w("orders", hosts[h], i + 1)),
+    ...[1, 2, 2].map((h, i) => w("emails", hosts[h], i + 1)),
+    ...[3, 3].map((h, i) => w("webhooks", hosts[h], i + 1)),
+    ...[4, 4].map((h, i) => w("image-resize", hosts[h], i + 1)),
+    ...[2, 2, 3, 3].map((h, i) => w("notifications", hosts[h], i + 1)),
+    w("billing-sync", hosts[4], 1),
+    w("legacy-sync", hosts[4], 1),
+  ];
+  return {
+    queues: QUEUES.map((q) => ({ name: q.name, flavor: q.flavor, paused: q.paused, counts: q.counts })),
+    links: [
+      { from: "orders", to: "notifications", jobs: 2_210 }, { from: "orders", to: "emails", jobs: 2_210 }, { from: "notifications", to: "webhooks", jobs: 960 },
+      { from: "billing-sync", to: "emails", jobs: 310 }, { from: "billing-sync", to: "reports", jobs: 120 },
+    ],
+    workers,
+    sampled: 400,
+  };
+}
+
 export const KV_DEMO_NOW = NOW0;
 
 /** kv_* 명령에 답한다. 모르는 명령이면 undefined */
@@ -333,13 +438,16 @@ export function kvMock(cmd: string, a: Args): unknown {
     case "kv_scan": return scan(a);
     case "kv_key": return keyView(a);
     case "kv_slowlog": return slowlog();
-    case "kv_clients": return clients();
+    case "kv_clients": return clients((a.target as { id: string }).id);
     case "kv_bigkeys": return bigkeys(a);
     case "kv_bigkeys_stop": case "kv_close": case "kv_forget_password": return null;
     case "kv_bull_queues": return a.prefix === "{bull}" ? { queues: QUEUES, scanned: 41_280, truncated: false, cursor: null } : { queues: [], scanned: 3_120, truncated: false, cursor: null };
     case "kv_bull_queue": return queueView(a.name);
     case "kv_bull_jobs": return jobsPage(a);
     case "kv_bull_job": return job(a);
+    case "kv_bull_flow": return flowFor(a.name, a.id);
+    case "kv_bull_transitions": return transitionsFor(a.name, a.minutes);
+    case "kv_bull_topology": return a.prefix === "{bull}" ? topology() : { queues: [], links: [], workers: [], sampled: 0 };
     default: return undefined;
   }
 }

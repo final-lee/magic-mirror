@@ -26,7 +26,7 @@ pub async fn exists(conn: &Connected, key: &str) -> Result<bool, AppError> {
     Ok(count_of(&conn.data(cmd("EXISTS").arg(key)).await?) > 0)
 }
 
-/// 종류를 보고 개수를 센다(옛 Bull의 `completed`·`failed`는 셋이고 BullMQ는 정렬 셋이다). 없는 키는 0
+/// 종류를 보고 개수를 센다(BullMQ와 옛 Bull 3의 `completed`·`failed`는 정렬 셋이고, 그보다 오래된 Bull은 셋이다). 없는 키는 0
 pub async fn card_any(conn: &Connected, key: &str) -> Result<u64, AppError> {
     match text(&conn.data(cmd("TYPE").arg(key)).await?).as_deref() {
         Some("zset") => zcard(conn, key).await,
@@ -34,6 +34,11 @@ pub async fn card_any(conn: &Connected, key: &str) -> Result<u64, AppError> {
         Some("list") => llen(conn, key).await,
         _ => Ok(0),
     }
+}
+
+/// 키가 셋인가. 옛 Bull의 `completed`·`failed`가 셋(오래된 판)인지 정렬 셋(Bull 3)인지 가른다
+pub async fn is_set(conn: &Connected, key: &str) -> Result<bool, AppError> {
+    Ok(text(&conn.data(cmd("TYPE").arg(key)).await?).as_deref() == Some("set"))
 }
 
 /// 해시의 필드들(없는 필드는 `None`). 글은 깨진 글자로 바꿔 읽는다

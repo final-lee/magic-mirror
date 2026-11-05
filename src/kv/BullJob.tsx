@@ -5,7 +5,8 @@ import { formatMs, parseJobKey, parseQueueKey, progressPercent, STATE_LABEL } fr
 import * as bt from "./bullText";
 import { formatUnix } from "./format";
 import { KvError } from "./KvError";
-import { useKvBullJob } from "./queries";
+import { FlowGraph } from "./graph/FlowGraph";
+import { useKvBullFlow, useKvBullJob } from "./queries";
 import * as t from "./text";
 import type { KvBullJob, KvTarget } from "./types";
 import { StringValue } from "./ValueViewer";
@@ -57,15 +58,20 @@ interface Props {
   onClose: () => void;
   /** 흐름의 부모·자식으로 건너간다(큐가 다를 수 있다) */
   onOpenJob: (queue: string, id: string) => void;
+  /** 흐름 그래프를 큐 상세의 화면 전체에 크게 연다 */
+  onBigFlow?: (queue: string, id: string) => void;
 }
 
 /**
  * 🐂 작업 상세(목록의 70%를 덮는 오른쪽 상세): 시간선, 시도 횟수, 진행률, 데이터·옵션·반환값(JSON 정리), 스택(시도별), 로그, 흐름(부모·자식으로 이동).
  * 값은 화면과 쿼리 캐시에만 있다.
  */
-export function BullJob({ target, prefix, queue, id, onClose, onOpenJob }: Props) {
+export function BullJob({ target, prefix, queue, id, onClose, onOpenJob, onBigFlow }: Props) {
   const q = useKvBullJob(target, prefix, queue, id);
   const job = q.data;
+  // 부모나 자식이 있는 작업만 흐름 그래프를 읽는다(flow 명령은 위·아래로 걸으며 키를 여럿 읽는다)
+  const hasFlow = !!job && (job.parent !== null || job.children.length > 0);
+  const flow = useKvBullFlow(target, prefix, queue, id, hasFlow);
   const detail: DetailData = {
     title: bt.JOB_TITLE(id, job?.name ?? ""),
     subtitle: bt.JOB_SUBTITLE(queue, job ? STATE_LABEL[job.state] : t.LOADING),
@@ -144,6 +150,20 @@ export function BullJob({ target, prefix, queue, id, onClose, onOpenJob }: Props
           )}
           {(job.parent || job.children.length > 0) && (
             <Section title={bt.FLOW}>
+              {flow.data ? (
+                <>
+                  <FlowGraph flow={flow.data} onOpen={onOpenJob} />
+                  {onBigFlow && (
+                    <button type="button" className="btn small kv-flow-open" onClick={() => onBigFlow(queue, id)}>
+                      {t.FLOW_BIG}
+                    </button>
+                  )}
+                </>
+              ) : flow.isError ? (
+                <KvError compact error={flow.error} target={target} />
+              ) : (
+                <div className="empty small">{t.LOADING}</div>
+              )}
               {job.parent && (
                 <p className="kv-flow">
                   <span className="dim">{bt.PARENT}</span>{" "}
