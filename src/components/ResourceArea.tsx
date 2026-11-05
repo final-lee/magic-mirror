@@ -4,6 +4,8 @@ import type { ResourceType, ServiceInfo } from "../api/types";
 import { useCopyShortcut } from "../hooks/useCopyShortcut";
 import { resourceDetail } from "../lib/detail";
 import type { S3Location } from "../lib/s3";
+import { NOT_KV, kvTargetOf } from "../kv/targets";
+import type { KvTarget } from "../kv/types";
 import { NOT_POSTGRES, pgTargetOf } from "../pg/targets";
 import type { K8sTarget } from "../k8s/types";
 import { ClusterDetailSummary } from "../k8s/ClusterDetailSummary";
@@ -31,6 +33,8 @@ interface Props {
   onOpenPg?: (target: PgTarget) => void;
   /** EKS 클러스터를 열 때 Kubernetes 탭으로 보낸다. */
   onOpenK8s?: (target: K8sTarget) => void;
+  /** ElastiCache의 Valkey·Redis OSS 캐시를 열 때 키 탐색 탭으로 보낸다. Memcached면 부르지 않고 안내만 띄운다. */
+  onOpenKv?: (target: KvTarget) => void;
   onRefresh: () => void;
   active: boolean;
   /** ⌘K에서 고른 리소스. nonce가 바뀔 때마다 그 행을 고르고 보이게 한다 */
@@ -48,7 +52,7 @@ const NOTICE_MS = 5000;
 /** ⌘K에서 고른 리소스가 다시 읽은 목록에 없을 때 */
 export const FOCUS_GONE = "찾던 리소스가 지금 목록에 없어요. 지워졌을 수 있어요";
 
-export function ResourceArea({ service, type, profile, region, account, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onRefresh, active, focus = null }: Props) {
+export function ResourceArea({ service, type, profile, region, account, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onOpenKv, onRefresh, active, focus = null }: Props) {
   const q = useResources(profile, region, service, type.id);
   // ⌘F: 이 목록 안에서만 찾는다(평소에는 찾기 줄이 없다)
   const listBox = useRef<HTMLElement>(null);
@@ -102,6 +106,10 @@ export function ResourceArea({ service, type, profile, region, account, onOpenBu
       const target = pgTargetOf(item, type.id);
       if (target) onOpenPg?.({ profile, region, ...target });
       else showNotice(NOT_POSTGRES);
+    } else if (service.id === "elasticache" && (type.id === "replication-groups" || type.id === "cache-clusters" || type.id === "serverless-caches")) {
+      const target = kvTargetOf(item, type.id);
+      if (target) onOpenKv?.({ profile, region, ...target });
+      else showNotice(NOT_KV);
     }
   };
 

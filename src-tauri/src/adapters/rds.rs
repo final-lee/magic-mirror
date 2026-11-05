@@ -24,22 +24,22 @@ impl ResourceAdapter for Rds {
     fn resource_types(&self) -> Vec<ResourceType> {
         vec![
             ResourceType {
+                id: "db-clusters",
+                name: "DB Clusters",
+                columns: vec![
+                    col("name", "Identifier", Text),
+                    col("engine", "Engine", Text),
+                    col("status", "Status", State),
+                    col("endpoint", "Endpoint", Mono),
+                ],
+            },
+            ResourceType {
                 id: "db-instances",
                 name: "DB Instances",
                 columns: vec![
                     col("name", "Identifier", Text),
                     col("engine", "Engine", Text),
                     col("class", "Class", Text),
-                    col("status", "Status", State),
-                    col("endpoint", "Endpoint", Mono),
-                ],
-            },
-            ResourceType {
-                id: "db-clusters",
-                name: "DB Clusters",
-                columns: vec![
-                    col("name", "Identifier", Text),
-                    col("engine", "Engine", Text),
                     col("status", "Status", State),
                     col("endpoint", "Endpoint", Mono),
                 ],

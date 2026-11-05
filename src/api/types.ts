@@ -1,4 +1,5 @@
 import type { K8sKindRef } from "../k8s/types";
+import type { KvLoginSaved } from "../kv/types";
 import type { ArgocdServer, ArgoViewState } from "../argocd/types";
 import type { ArgoWfServer, ArgoWfViewState } from "../argowf/types";
 
@@ -94,6 +95,10 @@ export interface Settings {
   /** 앱이 이미 보여 준 서비스. 백엔드가 새 서비스를 한 번 켤 때 쓰고, 화면은 읽지 않고 그대로 돌려 저장한다. */
   knownServices?: string[];
   favorites: Favorite[];
+  /** 첫 열에서 끌어 바꾼 서비스 순서. 비어 있으면 백엔드가 주는 순서이고, 여기 없는 서비스는 뒤에 붙는다. */
+  sidebarServiceOrder?: string[];
+  /** 서비스 ID → 그 서비스 아래 줄(리소스 종류 ID, `@`로 시작하는 바로가기)의 끌어 바꾼 순서 */
+  sidebarTypeOrder?: Record<string, string[]>;
   lastProfile: string | null;
   lastRegion: string | null;
   explorerLocalPath?: string | null;
@@ -119,6 +124,10 @@ export interface Settings {
   argocdViews?: Record<string, ArgoViewState>;
   argoWorkflowsServers?: ArgoWfServer[];
   argoWorkflowsViews?: Record<string, ArgoWfViewState>;
+  /** ElastiCache 대상 ARN → 그 대상에 마지막으로 연 로그인(방식·사용자·DB 번호). 비밀번호는 넣지 않는다(키체인에 있다). */
+  kvLogins?: Record<string, KvLoginSaved>;
+  /** ElastiCache 대상 ARN → 그 대상에서 Bull 큐를 찾는 prefix. 비어 있으면 "bull" */
+  kvBullPrefixes?: Record<string, string>;
   /** 리소스 목록 캐시가 오래됐다고 보는 시간(분). 비어 있으면 기본값(15분), 0이면 무제한 */
   resourceCacheTtlMinutes?: number | null;
 }
@@ -155,4 +164,5 @@ export type AppError =
   | { kind: "accessDenied"; action: string }
   | { kind: "throttled" }
   | { kind: "network"; message: string }
+  | { kind: "loginRequired"; message: string }
   | { kind: "other"; message: string };

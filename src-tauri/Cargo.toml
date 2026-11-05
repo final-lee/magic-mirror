@@ -64,6 +64,13 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 aws-sdk-elasticloadbalancingv2 = "1"
 tauri-plugin-dialog = "2"
+# KV 탭(ElastiCache Valkey·Redis OSS, 읽기 전용): Redis 클라이언트. 명령은 전부 `kv::command`의 허용 목록 관문을 거쳐 `custom`으로만 보내므로 i-* 명령 모음은 켜지 않는다.
+# TLS는 앱의 다른 곳처럼 rustls + aws-lc-rs만 쓴다(`enable-rustls`는 ring을 켜지 않는다)
+fred = { version = "10.1", default-features = false, features = ["enable-rustls", "credential-provider"] }
+# KV 탭: 시스템 루트 인증서, IAM 토큰 서명(SigV4)과 그 URL 쓰기. 셋 다 이미 의존성 그래프에 있다(같은 버전)
+rustls-native-certs = "0.8"
+aws-sigv4 = "1"
+url = "2"
 aws-sdk-accessanalyzer = "1"
 tokio-postgres = "0.7"
 tokio-postgres-rustls = "0.14"

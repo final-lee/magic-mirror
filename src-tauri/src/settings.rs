@@ -5,6 +5,7 @@ use std::path::Path;
 
 use crate::error::AppError;
 use crate::k8s::rows::KindRef;
+use crate::kv::model::KvLoginSaved;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Favorite {
@@ -119,6 +120,10 @@ pub struct Settings {
     /// 앱이 한 번이라도 보여 준 서비스. 여기 없는 새 서비스는 설정을 읽을 때 한 번 켜고, 사용자가 끈 서비스는 다시 켜지 않는다.
     pub known_services: Vec<String>,
     pub favorites: Vec<Favorite>,
+    /// 첫 열(서비스 목록)에서 사용자가 끌어 바꾼 서비스 순서. 비어 있으면 어댑터 순서. 여기 없는 서비스는 뒤에 붙는다.
+    pub sidebar_service_order: Vec<String>,
+    /// 서비스 ID → 그 서비스 아래 줄(리소스 종류 ID와 `@`로 시작하는 바로가기)의 끌어 바꾼 순서
+    pub sidebar_type_order: BTreeMap<String, Vec<String>>,
     pub last_profile: Option<String>,
     pub last_region: Option<String>,
     pub explorer_local_path: Option<String>,
@@ -128,6 +133,10 @@ pub struct Settings {
     pub theme: Option<String>,
     /// PostgreSQL 탭의 로그인 사용자: 대상(클러스터·인스턴스) ARN → DB 사용자 이름
     pub pg_logins: BTreeMap<String, String>,
+    /// KV 탭(ElastiCache Valkey·Redis OSS)이 기억하는 로그인(비밀 없음): 대상 ARN → 방식·사용자·데이터베이스. 비밀번호는 키체인에만 둔다
+    pub kv_logins: BTreeMap<String, KvLoginSaved>,
+    /// KV 탭 🐂 Bull 화면이 기억하는 prefix: 대상 ARN → prefix. 없으면 `bull`
+    pub kv_bull_prefixes: BTreeMap<String, String>,
     /// EKS 탭이 접속할 kubeconfig context: 클러스터 ARN → context 이름
     pub k8s_contexts: BTreeMap<String, String>,
     /// kubeconfig 경로. 비우면 KUBECONFIG 또는 ~/.kube/config
@@ -153,6 +162,8 @@ struct RawSettings {
     enabled_services: Option<Vec<String>>,
     known_services: Option<Vec<String>>,
     favorites: Vec<Favorite>,
+    sidebar_service_order: Vec<String>,
+    sidebar_type_order: BTreeMap<String, Vec<String>>,
     last_profile: Option<String>,
     last_region: Option<String>,
     explorer_local_path: Option<String>,
@@ -160,6 +171,8 @@ struct RawSettings {
     diff_tool_command: Option<String>,
     theme: Option<String>,
     pg_logins: BTreeMap<String, String>,
+    kv_logins: BTreeMap<String, KvLoginSaved>,
+    kv_bull_prefixes: BTreeMap<String, String>,
     k8s_contexts: BTreeMap<String, String>,
     kubeconfig_path: Option<String>,
     k8s_bookmarks: Vec<KindRef>,
@@ -206,6 +219,8 @@ pub fn load(path: &Path, all_services: &[&str]) -> Settings {
                     enabled_services: enabled,
                     known_services: known,
                     favorites: raw.favorites,
+                    sidebar_service_order: raw.sidebar_service_order,
+                    sidebar_type_order: raw.sidebar_type_order,
                     last_profile: raw.last_profile,
                     last_region: raw.last_region,
                     explorer_local_path: raw.explorer_local_path,
@@ -213,6 +228,8 @@ pub fn load(path: &Path, all_services: &[&str]) -> Settings {
                     diff_tool_command: raw.diff_tool_command,
                     theme: raw.theme,
                     pg_logins: raw.pg_logins,
+                    kv_logins: raw.kv_logins,
+                    kv_bull_prefixes: raw.kv_bull_prefixes,
                     k8s_contexts: raw.k8s_contexts,
                     kubeconfig_path: raw.kubeconfig_path,
                     k8s_bookmarks: raw.k8s_bookmarks,
@@ -245,6 +262,7 @@ pub fn save(path: &Path, settings: &Settings) -> Result<(), AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kv::model::KvAuthMode;
 
     #[test]
     fn missing_file_returns_defaults() {
@@ -253,6 +271,25 @@ mod tests {
         assert_eq!(s.enabled_services, vec!["ec2", "s3"]);
         assert!(s.favorites.is_empty());
         assert_eq!(s.last_profile, None);
+    }
+
+    #[test]
+    fn sidebar_order_roundtrips_and_is_empty_in_old_files() {
+        let old = load_text(r#"{"favorites":[]}"#);
+        assert!(old.sidebar_service_order.is_empty() && old.sidebar_type_order.is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let s = Settings {
+            sidebar_service_order: vec!["eks".into(), "rds".into()],
+            sidebar_type_order: BTreeMap::from([("eks".into(), vec!["@argocd".into(), "clusters".into()])]),
+            ..Default::default()
+        };
+        save(&path, &s).unwrap();
+        let back = load(&path, &[]);
+        assert_eq!(back.sidebar_service_order, s.sidebar_service_order);
+        assert_eq!(back.sidebar_type_order, s.sidebar_type_order);
+        let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(json["sidebarTypeOrder"]["eks"][0], "@argocd");
     }
 
     #[test]
@@ -549,6 +586,64 @@ mod tests {
     #[test]
     fn pg_logins_of_the_wrong_shape_make_the_file_corrupt_like_any_other_wrong_field() {
         assert!(load_text(r#"{"pgLogins":["iam_admin"]}"#).pg_logins.is_empty());
+    }
+
+    const CACHE_ARN: &str = "arn:aws:elasticache:ap-northeast-2:123456789012:replicationgroup:sessions";
+
+    #[test]
+    fn kv_logins_and_bull_prefixes_roundtrip_and_an_old_file_without_them_still_loads() {
+        // KV 탭이 생기기 전에 저장한 파일에는 `kvLogins`·`kvBullPrefixes`가 없다
+        let old = load_text(r#"{"enabledServices":["ec2"],"lastProfile":"p"}"#);
+        assert!(old.kv_logins.is_empty());
+        assert!(old.kv_bull_prefixes.is_empty());
+        assert_eq!(old.last_profile.as_deref(), Some("p"));
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let login = KvLoginSaved { mode: KvAuthMode::Iam, user: "reader".into(), database: 3 };
+        let s = Settings {
+            kv_logins: BTreeMap::from([(CACHE_ARN.to_string(), login.clone())]),
+            kv_bull_prefixes: BTreeMap::from([(CACHE_ARN.to_string(), "{bull}".to_string())]),
+            ..old
+        };
+        save(&path, &s).unwrap();
+        assert_eq!(load(&path, &["ec2", "s3"]), s);
+        let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(json["kvLogins"][CACHE_ARN], serde_json::json!({ "mode": "iam", "user": "reader", "database": 3 }));
+        assert_eq!(json["kvBullPrefixes"][CACHE_ARN], "{bull}");
+    }
+
+    #[test]
+    fn a_file_with_kv_logins_keeps_them_through_a_load_and_a_save() {
+        // 프런트엔드가 `save_settings`로 보낸 모양 그대로다: 대상 ARN → { mode, user, database }
+        let text = format!(
+            r#"{{"enabledServices":["ec2"],"kvLogins":{{"{CACHE_ARN}":{{"mode":"user","user":"app","database":2}},"arn:aws:elasticache:us-east-1:123456789012:serverlesscache:s":{{"mode":"none","user":"","database":0}}}}}}"#
+        );
+        let loaded = load_text(&text);
+        assert_eq!(loaded.kv_logins.len(), 2);
+        assert_eq!(loaded.kv_logins.get(CACHE_ARN), Some(&KvLoginSaved { mode: KvAuthMode::User, user: "app".into(), database: 2 }));
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        save(&path, &loaded).unwrap();
+        let again = load(&path, &["ec2", "s3"]);
+        assert_eq!(again.kv_logins, loaded.kv_logins);
+        // 설정 화면의 다른 값을 바꿔 저장해도 로그인은 남는다
+        let changed = Settings { last_profile: Some("prod".into()), ..again };
+        save(&path, &changed).unwrap();
+        assert_eq!(load(&path, &["ec2", "s3"]).kv_logins, loaded.kv_logins);
+    }
+
+    #[test]
+    fn a_kv_login_missing_fields_still_loads_with_defaults() {
+        let loaded = load_text(&format!(r#"{{"kvLogins":{{"{CACHE_ARN}":{{"mode":"password"}}}}}}"#));
+        assert_eq!(loaded.kv_logins.get(CACHE_ARN), Some(&KvLoginSaved { mode: KvAuthMode::Password, user: String::new(), database: 0 }));
+    }
+
+    #[test]
+    fn kv_logins_of_the_wrong_shape_make_the_file_corrupt_like_any_other_wrong_field() {
+        assert!(load_text(r#"{"kvLogins":["iam_admin"]}"#).kv_logins.is_empty());
+        assert!(load_text(r#"{"kvBullPrefixes":["bull"]}"#).kv_bull_prefixes.is_empty());
     }
 
     #[test]

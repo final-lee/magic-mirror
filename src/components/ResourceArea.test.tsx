@@ -1,6 +1,6 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 import { ResourceArea } from "./ResourceArea";
-import { dbRow, eksService, makeResource, rdsService, renderWithClient, sampleServices } from "../test/utils";
+import { cacheRow, dbRow, eksService, elasticacheService, makeResource, rdsService, renderWithClient, sampleServices } from "../test/utils";
 import { api } from "../api/client";
 
 vi.mock("../api/client", () => ({ api: { listResources: vi.fn(), ssoLogin: vi.fn() } }));
@@ -243,5 +243,65 @@ describe("EKS entry", () => {
     renderWithClient(<ResourceArea {...props} onOpenK8s={onOpenK8s} service={eksService} type={typeOf("node-groups")} />);
     fireEvent.doubleClick(await screen.findByText("workers"));
     expect(onOpenK8s).not.toHaveBeenCalled();
+  });
+});
+
+describe("ElastiCache entry", () => {
+  const typeOf = (id: string) => elasticacheService.types.find((t) => t.id === id)!;
+  const mockRows = (...items: ReturnType<typeof cacheRow>[]) => vi.mocked(api.listResources).mockResolvedValue({ items, truncated: false });
+  const target = (kind: string, id: string) => ({ profile: "prod", region: "ap-northeast-2", kind, id });
+  const NOT_KV = "Valkey·Redis OSS 캐시만 열 수 있어요";
+
+  test.each(["valkey", "redis"])("double clicking a %s replication group opens it", async (engine) => {
+    mockRows(cacheRow("sessions", engine));
+    const onOpenKv = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenKv={onOpenKv} service={elasticacheService} type={typeOf("replication-groups")} />);
+    fireEvent.doubleClick(await screen.findByText("sessions"));
+    expect(onOpenKv).toHaveBeenCalledTimes(1);
+    expect(onOpenKv).toHaveBeenCalledWith(target("replicationGroup", "sessions"));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  test("double clicking a serverless cache opens it", async () => {
+    mockRows(cacheRow("feature-flags", "valkey"));
+    const onOpenKv = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenKv={onOpenKv} service={elasticacheService} type={typeOf("serverless-caches")} />);
+    fireEvent.doubleClick(await screen.findByText("feature-flags"));
+    expect(onOpenKv).toHaveBeenCalledWith(target("serverlessCache", "feature-flags"));
+  });
+
+  test("a cache cluster in a replication group opens the group", async () => {
+    mockRows(cacheRow("sessions-001", "valkey", { group: "sessions" }));
+    const onOpenKv = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenKv={onOpenKv} service={elasticacheService} type={typeOf("cache-clusters")} />);
+    fireEvent.doubleClick(await screen.findByText("sessions-001"));
+    expect(onOpenKv).toHaveBeenCalledWith(target("replicationGroup", "sessions"));
+  });
+
+  test("a single-node Redis cluster without a group opens itself", async () => {
+    mockRows(cacheRow("solo", "redis", { group: "" }));
+    const onOpenKv = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenKv={onOpenKv} service={elasticacheService} type={typeOf("cache-clusters")} />);
+    fireEvent.doubleClick(await screen.findByText("solo"));
+    expect(onOpenKv).toHaveBeenCalledWith(target("cacheCluster", "solo"));
+  });
+
+  test("Enter on the selected row opens it too", async () => {
+    mockRows(cacheRow("sessions", "valkey"));
+    const onOpenKv = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenKv={onOpenKv} service={elasticacheService} type={typeOf("replication-groups")} />);
+    fireEvent.click(await screen.findByText("sessions"));
+    fireEvent.keyDown(screen.getByTestId("resource-table"), { key: "Enter" });
+    expect(onOpenKv).toHaveBeenCalledWith(target("replicationGroup", "sessions"));
+  });
+
+  test("a Memcached cluster shows the notice instead of opening", async () => {
+    mockRows(cacheRow("catalog-mc", "memcached", { group: "" }));
+    const onOpenKv = vi.fn();
+    renderWithClient(<ResourceArea {...props} onOpenKv={onOpenKv} service={elasticacheService} type={typeOf("cache-clusters")} />);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    fireEvent.doubleClick(await screen.findByText("catalog-mc"));
+    expect(screen.getByRole("status")).toHaveTextContent(NOT_KV);
+    expect(onOpenKv).not.toHaveBeenCalled();
   });
 });
