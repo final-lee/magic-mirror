@@ -15,7 +15,8 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::commands::AppState;
 use crate::error::AppError;
-use crate::kv::bull::model::{KvBullFlow, KvBullJob, KvBullJobsPage, KvBullQueueView, KvBullQueuesPage, KvBullState, KvBullTopology, KvBullTransitions};
+use crate::kv::bull::keys::normalize_prefix;
+use crate::kv::bull::model::{KvBullFlow, KvBullJob, KvBullJobsPage, KvBullQueue, KvBullQueueView, KvBullQueuesPage, KvBullState, KvBullTopology, KvBullTransitions};
 use crate::kv::bull::{events, flow, jobs, queue, topology};
 use crate::kv::connect::{self, Connected};
 use crate::kv::login::plan_for;
@@ -225,25 +226,31 @@ pub async fn kv_forget_password(app: State<'_, AppState>, kv: State<'_, KvState>
     kv.passwords.delete(&arn, user.trim()).await
 }
 
-fn need_prefix(prefix: &str) -> Result<(), AppError> {
-    if prefix.trim().is_empty() {
-        return Err(AppError::other("prefix를 입력해 주세요(기본값은 bull이에요)"));
-    }
-    Ok(())
+/// 큐를 찾는 prefix. 앞뒤 공백과 끝의 `:`는 뗀다(`bull:`로 넣어도 `bull:<큐>:…` 키를 찾는다)
+fn bull_prefix(prefix: &str) -> Result<&str, AppError> {
+    normalize_prefix(prefix).ok_or_else(|| AppError::other("prefix를 입력해 주세요(기본값은 bull이에요)"))
 }
 
 #[tauri::command]
 pub async fn kv_bull_queues(app: State<'_, AppState>, kv: State<'_, KvState>, target: KvTarget, prefix: String, cursor: Option<String>) -> Result<KvBullQueuesPage, AppError> {
-    need_prefix(&prefix)?;
+    let prefix = bull_prefix(&prefix)?;
     let (conn, _) = kv.connection(&app, &target).await?;
-    queue::queues(&conn, &prefix, cursor.as_deref()).await
+    queue::queues(&conn, prefix, cursor.as_deref()).await
+}
+
+/// 이미 찾은 큐들의 요약만 다시 읽는다(키 공간을 다시 훑지 않는다). 자동으로 다시 읽을 때 쓴다
+#[tauri::command]
+pub async fn kv_bull_queue_summaries(app: State<'_, AppState>, kv: State<'_, KvState>, target: KvTarget, prefix: String, names: Vec<String>) -> Result<Vec<KvBullQueue>, AppError> {
+    let prefix = bull_prefix(&prefix)?;
+    let (conn, _) = kv.connection(&app, &target).await?;
+    queue::summaries(&conn, prefix, &names).await
 }
 
 #[tauri::command]
 pub async fn kv_bull_queue(app: State<'_, AppState>, kv: State<'_, KvState>, target: KvTarget, prefix: String, name: String) -> Result<KvBullQueueView, AppError> {
-    need_prefix(&prefix)?;
+    let prefix = bull_prefix(&prefix)?;
     let (conn, _) = kv.connection(&app, &target).await?;
-    queue::queue_view(&conn, &prefix, &name).await
+    queue::queue_view(&conn, prefix, &name).await
 }
 
 #[tauri::command]
@@ -258,40 +265,40 @@ pub async fn kv_bull_jobs(
     start: u64,
     count: u64,
 ) -> Result<KvBullJobsPage, AppError> {
-    need_prefix(&prefix)?;
+    let prefix = bull_prefix(&prefix)?;
     let (conn, _) = kv.connection(&app, &target).await?;
-    jobs::jobs_page(&conn, &prefix, &name, state, start, count).await
+    jobs::jobs_page(&conn, prefix, &name, state, start, count).await
 }
 
 #[tauri::command]
 pub async fn kv_bull_job(app: State<'_, AppState>, kv: State<'_, KvState>, target: KvTarget, prefix: String, name: String, id: String) -> Result<KvBullJob, AppError> {
-    need_prefix(&prefix)?;
+    let prefix = bull_prefix(&prefix)?;
     let (conn, _) = kv.connection(&app, &target).await?;
-    jobs::job(&conn, &prefix, &name, &id).await
+    jobs::job(&conn, prefix, &name, &id).await
 }
 
 /// 작업의 흐름 그래프(부모 쪽으로 뿌리까지, 아래로 자식들)
 #[tauri::command]
 pub async fn kv_bull_flow(app: State<'_, AppState>, kv: State<'_, KvState>, target: KvTarget, prefix: String, name: String, id: String) -> Result<KvBullFlow, AppError> {
-    need_prefix(&prefix)?;
+    let prefix = bull_prefix(&prefix)?;
     let (conn, _) = kv.connection(&app, &target).await?;
-    flow::flow(&conn, &prefix, &name, &id).await
+    flow::flow(&conn, prefix, &name, &id).await
 }
 
 /// 큐의 상태 전이(`events` 스트림의 지난 `minutes`분)
 #[tauri::command]
 pub async fn kv_bull_transitions(app: State<'_, AppState>, kv: State<'_, KvState>, target: KvTarget, prefix: String, name: String, minutes: u64) -> Result<KvBullTransitions, AppError> {
-    need_prefix(&prefix)?;
+    let prefix = bull_prefix(&prefix)?;
     let (conn, _) = kv.connection(&app, &target).await?;
-    events::transitions(&conn, &prefix, &name, minutes).await
+    events::transitions(&conn, prefix, &name, minutes).await
 }
 
 /// 큐 지도: 큐, 큐 사이의 부모→자식 연결, 워커
 #[tauri::command]
 pub async fn kv_bull_topology(app: State<'_, AppState>, kv: State<'_, KvState>, target: KvTarget, prefix: String) -> Result<KvBullTopology, AppError> {
-    need_prefix(&prefix)?;
+    let prefix = bull_prefix(&prefix)?;
     let (conn, _) = kv.connection(&app, &target).await?;
-    topology::topology(&conn, &prefix).await
+    topology::topology(&conn, prefix).await
 }
 
 /// 보관함에서 10분 넘게 안 쓴 연결을 1분마다 닫는다. 앱이 시작할 때 한 번 띄운다.

@@ -45,11 +45,6 @@ impl<'a> Scanner<'a> {
         }
     }
 
-
-    /// 처음부터 훑는 커서(모든 노드가 0)
-    pub fn initial_cursor(conn: &Connected) -> ScanCursor {
-        ScanCursor { nodes: Self::targets(conn).into_iter().map(|n| (n, "0".to_string())).collect() }
-    }
     fn normalize(pattern: &str) -> Option<String> {
         (!pattern.is_empty() && pattern != "*").then(|| pattern.to_string())
     }

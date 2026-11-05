@@ -24,6 +24,7 @@ use fred::types::{Builder, Value};
 use rustls::{ClientConfig, RootCertStore};
 use tokio::sync::Mutex;
 
+use super::bull::cache::BullCache;
 use super::command::{self, cmd, Cmd, KvCallError, Route};
 use super::failure::{self, Ctx};
 use super::iam::{IamCredentials, IamSigner};
@@ -204,6 +205,8 @@ pub struct Connected {
     /// 연결이 끊기거나 응답이 없었다. 이 연결은 더 쓰지 않는다
     broken: AtomicBool,
     ctx: Ctx,
+    /// Bull 화면의 읽기 캐시. 연결과 함께 버려진다
+    bull: BullCache,
 }
 
 /// 대상에 연결한다. TLS 루트는 시스템 저장소다.
@@ -240,7 +243,7 @@ pub async fn connect_with(plan: Plan, tls: Option<ClientConfig>) -> Result<Conne
         }
         _ => None,
     };
-    let mut connected = Connected { plan, mode, tls, primary, reader, nodes: Vec::new(), peers: Mutex::new(HashMap::new()), broken: AtomicBool::new(false), ctx };
+    let mut connected = Connected { plan, mode, tls, primary, reader, nodes: Vec::new(), peers: Mutex::new(HashMap::new()), broken: AtomicBool::new(false), ctx, bull: BullCache::default() };
     match connected.discover().await {
         Ok(nodes) => connected.nodes = nodes,
         Err(e) => {
@@ -262,6 +265,10 @@ impl Connected {
 
     pub fn nodes(&self) -> &[KvNode] {
         &self.nodes
+    }
+
+    pub fn bull_cache(&self) -> &BullCache {
+        &self.bull
     }
 
     /// 접속 계획의 기본 엔드포인트 `호스트:포트`

@@ -3,15 +3,13 @@ use super::*;
 #[test]
 fn the_discovery_cursor_round_trips() {
     let scan = ScanCursor { nodes: vec![("-".into(), "123".into())] };
-    let text = encode_cursor(1, &scan);
-    let (phase, back) = decode_cursor(&text).unwrap();
-    assert_eq!(phase, 1);
-    assert_eq!(back, scan);
+    assert_eq!(decode_cursor(&encode_cursor(&scan)).unwrap(), scan);
 }
 
 #[test]
 fn a_bad_discovery_cursor_is_refused() {
-    for bad in ["", "b1", "b1.0", "b1.2.s1.W10", "x.0.s1.W10", "b1.0.garbage"] {
+    // `b1.`은 두 번 훑던 예전 찾기의 커서다
+    for bad in ["", "b2", "b2.", "b1.0.s1.W10", "x.s1.W10", "b2.garbage"] {
         assert!(decode_cursor(bad).is_err(), "{bad:?}");
     }
 }

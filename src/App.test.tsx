@@ -66,7 +66,7 @@ vi.mock("./pg/api", () => ({
   },
 }));
 vi.mock("./kv/api", () => ({
-  kvApi: { target: vi.fn(), open: vi.fn(), overview: vi.fn(), scan: vi.fn(), key: vi.fn(), slowlog: vi.fn(), clients: vi.fn(), bigkeys: vi.fn(), bigkeysStop: vi.fn(), close: vi.fn(async () => null), forgetPassword: vi.fn(), bullQueues: vi.fn(), bullQueue: vi.fn(), bullJobs: vi.fn(), bullJob: vi.fn(), bullFlow: vi.fn(), bullTransitions: vi.fn(), bullTopology: vi.fn() },
+  kvApi: { target: vi.fn(), open: vi.fn(), overview: vi.fn(), scan: vi.fn(), key: vi.fn(), slowlog: vi.fn(), clients: vi.fn(), bigkeys: vi.fn(), bigkeysStop: vi.fn(), close: vi.fn(async () => null), forgetPassword: vi.fn(), bullQueues: vi.fn(), bullQueueSummaries: vi.fn(), bullQueue: vi.fn(), bullJobs: vi.fn(), bullJob: vi.fn(), bullFlow: vi.fn(), bullTransitions: vi.fn(), bullTopology: vi.fn() },
 }));
 // 터미널(xterm)은 k8s/PodTerminal.test에서 본다
 vi.mock("./k8s/PodTerminal", () => ({ PodTerminal: () => null }));

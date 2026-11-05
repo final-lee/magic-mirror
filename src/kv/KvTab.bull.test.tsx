@@ -22,6 +22,7 @@ vi.mock("./api", () => ({
     close: vi.fn(),
     forgetPassword: vi.fn(),
     bullQueues: vi.fn(),
+    bullQueueSummaries: vi.fn(),
     bullQueue: vi.fn(),
     bullJobs: vi.fn(),
     bullJob: vi.fn(),
@@ -168,42 +169,55 @@ describe("queue list", () => {
     expect(await screen.findByText("NOPERM scan")).toBeInTheDocument();
   });
 
-  test("re-reads every 5 seconds while it is showing, and the toggle turns that off", async () => {
+  test("every 5 seconds it re-reads only the queues it found, never the keyspace, and the toggle turns that off", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
+      m.bullQueueSummaries.mockResolvedValue([{ ...emails, workers: null }, reports, webhooks]);
       setup();
       await openBull();
       await screen.findByText("webhooks");
-      expect(m.bullQueues).toHaveBeenCalledTimes(1);
       await act(async () => {
         await vi.advanceTimersByTimeAsync(5100);
       });
-      expect(m.bullQueues).toHaveBeenCalledTimes(2);
+      expect(m.bullQueueSummaries).toHaveBeenCalledTimes(1);
+      expect(m.bullQueueSummaries).toHaveBeenCalledWith(kvTarget, "bull", ["emails", "reports", "webhooks"]);
+      expect(await screen.findByRole("button", { name: "emails 개요" })).toHaveTextContent("워커 알 수 없음");
       fireEvent.click(screen.getByRole("checkbox", { name: "5초마다 다시 읽기" }));
       await act(async () => {
         await vi.advanceTimersByTimeAsync(12_000);
       });
+      expect(m.bullQueueSummaries).toHaveBeenCalledTimes(1);
+      expect(m.bullQueues).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("[다시 읽기] sweeps the keyspace again and its result replaces the timer's", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      m.bullQueueSummaries.mockResolvedValue([emails, reports, webhooks]);
+      setup();
+      await openBull();
+      await screen.findByText("webhooks");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5100);
+      });
+      m.bullQueues.mockResolvedValue({ queues: [emails, reports, webhooks, sampleBullQueue({ name: "invoices" })], scanned: 1600, truncated: false, cursor: null });
+      fireEvent.click(within(screen.getByRole("region", { name: "Bull 큐" })).getByRole("button", { name: "다시 읽기" }));
+      expect(await screen.findByText("invoices")).toBeInTheDocument();
       expect(m.bullQueues).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  test("does not re-read on a timer after a long scan (it would sweep the keyspace again and again)", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      m.bullQueues.mockResolvedValue({ queues: [emails], scanned: 400_000, truncated: false, cursor: null });
-      setup();
-      await openBull();
-      await screen.findByText("emails");
-      expect(screen.getByRole("checkbox", { name: "5초마다 다시 읽기" })).toBeDisabled();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(11_000);
-      });
-      expect(m.bullQueues).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.useRealTimers();
-    }
+  test("a first sweep cut short before any queue turned up says to keep looking, not that the prefix is wrong", async () => {
+    m.bullQueues.mockResolvedValue({ queues: [], scanned: 5_000_000, truncated: true, cursor: "c1" });
+    setup();
+    await openBull();
+    expect(await screen.findByText("아직 키의 일부만 훑었어요. [이어서 찾기]로 나머지를 찾아 주세요")).toBeInTheDocument();
+    expect(screen.queryByText(/에서 큐를 찾지 못했어요/)).not.toBeInTheDocument();
   });
 });
 

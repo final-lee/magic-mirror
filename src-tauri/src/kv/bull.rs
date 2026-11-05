@@ -7,7 +7,9 @@
 //! - `io`: 키를 읽는 얇은 도구들
 //! - `queue`: 큐 찾기(SCAN), 큐 요약, 큐 상세
 //! - `jobs`: 작업 표와 작업 상세
+//! - `cache`: 연결 하나 동안 쓰는 읽기 캐시(지나간 분의 처리량, 끝난 작업의 시각·실패 이유)
 
+pub mod cache;
 pub mod events;
 pub mod flow;
 pub mod io;

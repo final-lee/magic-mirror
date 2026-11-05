@@ -158,6 +158,7 @@ pub fn run() {
             kv_commands::kv_close,
             kv_commands::kv_forget_password,
             kv_commands::kv_bull_queues,
+            kv_commands::kv_bull_queue_summaries,
             kv_commands::kv_bull_queue,
             kv_commands::kv_bull_jobs,
             kv_commands::kv_bull_job,

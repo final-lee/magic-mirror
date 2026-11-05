@@ -7,7 +7,7 @@ import { Sparkline } from "./BullCharts";
 import * as bt from "./bullText";
 import { formatCount } from "./format";
 import { KvError } from "./KvError";
-import { BULL_AUTO_SCAN_LIMIT, useKvBullQueues } from "./queries";
+import { useKvBullQueues, useKvBullSummaries } from "./queries";
 import * as t from "./text";
 import type { KvBullQueue, KvTarget } from "./types";
 
@@ -98,7 +98,8 @@ interface Props {
 
 /**
  * 🐂 큐 목록: prefix 아래의 큐를 카드로 보인다. 실패가 늘거나 대기가 쌓였는데 워커가 없는 큐가 위로 가고 노랑·빨강 테두리가 붙는다.
- * 5초마다 다시 읽는다(끌 수 있고, 화면이 보일 때만). 큐를 찾는 SCAN이 길어지면 이어서 찾는다.
+ * 큐는 [찾기]·[다시 읽기] 때만 키 공간을 훑어 찾고, 5초마다(끌 수 있고, 화면이 보일 때만) 찾은 큐의 요약만 다시 읽는다.
+ * 큐를 찾는 SCAN이 길어지면 이어서 찾는다.
  */
 export function BullQueues({ target, prefix, onPrefix, onOpenQueue, active }: Props) {
   const box = useRef<HTMLElement>(null);
@@ -107,20 +108,23 @@ export function BullQueues({ target, prefix, onPrefix, onOpenQueue, active }: Pr
   // 카드(기본)와 지도(큐·부모→자식 연결·워커 호스트의 그래프)
   const [mode, setMode] = useState<"cards" | "map">("cards");
   const [input, setInput] = useState(prefix);
-  const q = useKvBullQueues(target, prefix, auto && active);
+  const q = useKvBullQueues(target, prefix);
   const pages = q.data?.pages;
-  const queues = useMemo(() => {
+  const found = useMemo(() => {
     const seen = new Map<string, KvBullQueue>();
     for (const p of pages ?? []) for (const queue of p.queues) seen.set(`${queue.prefix}:${queue.name}`, queue);
     return [...seen.values()];
   }, [pages]);
+  const live = useKvBullSummaries(target, prefix, found, q.dataUpdatedAt, auto && active);
+  // 찾기를 다시 하면 그 결과가 더 새것이다
+  const queues = live.dataUpdatedAt > q.dataUpdatedAt ? live.data : found;
   const kept = useMemo(() => fuzzyKeep(queues, find.query, (queue) => [queue.name]), [queues, find.query]);
   const ordered = useMemo(() => orderQueues(kept), [kept]);
   // 지도가 카드와 같은 건강 상태 색을 쓰게 넘긴다
   const attention = useMemo(() => new Map(orderQueues(queues).map((o) => [o.queue.name, o.health.attention])), [queues]);
   const last = pages?.[pages.length - 1];
+  const partial = last !== undefined && last.cursor !== null;
   const scanned = pages?.reduce((n, p) => n + p.scanned, 0) ?? 0;
-  const tooBig = (pages?.[0]?.scanned ?? 0) > BULL_AUTO_SCAN_LIMIT;
 
   return (
     <section className="center kv-screen kv-bull" ref={box} aria-label={bt.BULL_TITLE}>
@@ -156,8 +160,8 @@ export function BullQueues({ target, prefix, onPrefix, onOpenQueue, active }: Pr
           ))}
         </div>
         <span className="kv-bar-end">
-          <label className="kv-check" title={tooBig ? bt.AUTO_OFF_BIG : undefined}>
-            <input type="checkbox" checked={auto && !tooBig} disabled={tooBig} onChange={(e) => setAuto(e.target.checked)} />
+          <label className="kv-check">
+            <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
             {bt.AUTO_REFRESH}
           </label>
           <button className="btn small" onClick={() => void q.refetch()} disabled={q.isFetching}>
@@ -165,7 +169,7 @@ export function BullQueues({ target, prefix, onPrefix, onOpenQueue, active }: Pr
           </button>
         </span>
       </div>
-      {last && last.cursor !== null && (
+      {partial && (
         <div className="notice kv-partial" role="status">
           <span>{bt.PARTIAL}</span>
           <button className="btn small" disabled={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>
@@ -182,11 +186,11 @@ export function BullQueues({ target, prefix, onPrefix, onOpenQueue, active }: Pr
         )
       ) : (
         <div className={`kv-pane${mode === "map" && queues.length > 0 ? " kv-pane-map" : ""}`}>
-          {q.isError && <KvError compact error={q.error} target={target} />}
+          {(q.isError || live.isError) && <KvError compact error={q.error ?? live.error} target={target} />}
           {mode === "map" && queues.length > 0 ? (
             <QueueMap target={target} prefix={prefix} attention={attention} onOpenQueue={onOpenQueue} />
           ) : ordered.length === 0 ? (
-            <div className="empty small">{queues.length === 0 ? bt.NO_QUEUES(prefix) : t.KEYS_NO_MATCH}</div>
+            <div className="empty small">{queues.length > 0 ? t.KEYS_NO_MATCH : partial ? bt.NO_QUEUES_YET : bt.NO_QUEUES(prefix)}</div>
           ) : (
             <div className="kv-qgrid">
               {ordered.map(({ queue, health }) => (
