@@ -21,11 +21,12 @@ use crate::kv::bull::{events, flow, jobs, queue, topology};
 use crate::kv::connect::{self, Connected};
 use crate::kv::login::plan_for;
 use crate::kv::model::{
-    KvBigKeysMessage, KvClient, KvKeyName, KvKeyView, KvLogin, KvLoginSaved, KvOverview, KvScanPage, KvSlowEntry, KvTarget, KvTargetInfo, KvType,
+    KvBigKeysMessage, KvBigKeysReport, KvClient, KvKeyName, KvKeyView, KvLogin, KvLoginSaved, KvOverview, KvScanPage, KvSlowEntry, KvTarget, KvTargetInfo, KvType,
 };
 use crate::kv::password::Passwords;
 use crate::kv::pool::{Pool, NOT_OPENED};
 use crate::kv::target::{resolve as resolve_target, Resolved};
+use crate::kv::reports::{report_key, BigKeysReports};
 use crate::kv::{bigkeys, clients, key, overview, scan, slowlog};
 
 /// 연결 보관함에서 오래 안 쓴 연결을 닫는 주기
@@ -46,13 +47,14 @@ struct Session {
 }
 
 /// 읽어 둔 값들. 앱이 시작할 때 한 번 `manage`한다.
-#[derive(Default)]
 pub struct KvState {
     pub pool: Pool<Connected>,
     sessions: Mutex<HashMap<KvTarget, Arc<Session>>>,
     passwords: Passwords,
     /// 큰 키 찾기를 도는 대상의 중단 표시
     bigkeys: Mutex<HashMap<KvTarget, Arc<AtomicBool>>>,
+    /// 대상·DB마다 마지막 큰 키 찾기 결과(디스크)
+    reports: BigKeysReports,
 }
 
 /// 키체인 계정에 쓰는 사용자 이름: AUTH 토큰은 사용자가 없다
@@ -64,6 +66,11 @@ fn secret_user(login: &KvLoginSaved) -> &str {
 }
 
 impl KvState {
+    /// `reports`는 큰 키 결과를 두는 파일(`kv-bigkeys.json`)
+    pub fn new(reports: std::path::PathBuf) -> KvState {
+        KvState { pool: Pool::default(), sessions: Mutex::default(), passwords: Passwords::default(), bigkeys: Mutex::default(), reports: BigKeysReports::load(reports) }
+    }
+
     fn session(&self, target: &KvTarget) -> Result<Arc<Session>, AppError> {
         locked(&self.sessions).get(target).cloned().ok_or_else(not_opened)
     }
@@ -174,7 +181,7 @@ pub async fn kv_clients(app: State<'_, AppState>, kv: State<'_, KvState>, target
     clients::clients(&conn).await
 }
 
-/// 큰 키 찾기: 진행은 채널로 알리고 끝나면 `done` 메시지를 채널로 보낸다
+/// 큰 키 찾기(모든 키): 진행은 채널로 알리고, 끝나면 결과를 대상·DB마다 디스크에 남긴 뒤 `done` 메시지로 보낸다
 #[tauri::command]
 pub async fn kv_bigkeys(
     app: State<'_, AppState>,
@@ -183,12 +190,12 @@ pub async fn kv_bigkeys(
     limit: usize,
     on_progress: Channel<KvBigKeysMessage>,
 ) -> Result<(), AppError> {
-    let (conn, _) = kv.connection(&app, &target).await?;
+    let (conn, session) = kv.connection(&app, &target).await?;
     let stop = Arc::new(AtomicBool::new(false));
     locked(&kv.bigkeys).insert(target.clone(), stop.clone());
     let progress = on_progress.clone();
-    let result = bigkeys::bigkeys(&conn, limit.clamp(1, 200), &stop, move |scanned, total| {
-        let _ = progress.send(KvBigKeysMessage::Progress { scanned, total });
+    let result = bigkeys::bigkeys(&conn, limit.clamp(1, 200), &stop, move |message| {
+        let _ = progress.send(message);
     })
     .await;
     // 같은 대상에서 새로 시작한 찾기의 표시를 지우지 않는다
@@ -197,9 +204,20 @@ pub async fn kv_bigkeys(
         flags.remove(&target);
     }
     drop(flags);
-    let done = result?;
-    let _ = on_progress.send(done);
+    let report = result?;
+    // 남기지 못해도 결과는 보인다(다음에 다시 열 때만 없다)
+    if let Err(e) = kv.reports.put(&report_key(&session.resolved.info.arn, session.login.database), report.clone()) {
+        eprintln!("큰 키 결과를 저장하지 못했어요: {e}");
+    }
+    let _ = on_progress.send(KvBigKeysMessage::Done(report));
     Ok(())
+}
+
+/// 이 대상·DB의 마지막 큰 키 찾기 결과. 찾은 적이 없으면 `None`
+#[tauri::command]
+pub fn kv_bigkeys_report(kv: State<'_, KvState>, target: KvTarget) -> Result<Option<KvBigKeysReport>, AppError> {
+    let session = kv.session(&target)?;
+    Ok(kv.reports.get(&report_key(&session.resolved.info.arn, session.login.database)))
 }
 
 #[tauri::command]

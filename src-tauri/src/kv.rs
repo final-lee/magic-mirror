@@ -30,6 +30,7 @@ pub mod model;
 pub mod overview;
 pub mod password;
 pub mod pool;
+pub mod reports;
 pub mod scan;
 pub mod slowlog;
 pub mod login;

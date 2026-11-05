@@ -65,7 +65,7 @@ pub fn run() {
             app.manage(argocd::ArgocdState::default());
             app.manage(argowf::client::State::new(dir.join("settings.json")));
             app.manage(pg_commands::PgState::new(dir.join("db-changes.jsonl")));
-            app.manage(kv_commands::KvState::default());
+            app.manage(kv_commands::KvState::new(dir.join("kv-bigkeys.json")));
             app.manage(cost_commands::CostState::new(dir.join("cost-cache.json")));
             app.manage(resource_index::ResourceIndexState::new(dir.join("resource-index.json")));
             pg_commands::spawn_sweeper(app.handle().clone());
@@ -155,6 +155,7 @@ pub fn run() {
             kv_commands::kv_clients,
             kv_commands::kv_bigkeys,
             kv_commands::kv_bigkeys_stop,
+            kv_commands::kv_bigkeys_report,
             kv_commands::kv_close,
             kv_commands::kv_forget_password,
             kv_commands::kv_bull_queues,

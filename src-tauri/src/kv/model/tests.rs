@@ -72,10 +72,13 @@ fn bytes_that_are_not_utf8_have_no_text() {
 fn rows_and_messages_use_the_contract_field_names() {
     let row = serde_json::to_value(KvKeyRow { name: KvKeyName::from_bytes(b"k"), kind: KvType::Hash, ttl_ms: Some(1500) }).unwrap();
     assert_eq!(row, json!({ "name": { "text": "k", "base64": null }, "type": "hash", "ttlMs": 1500 }));
-    let done = serde_json::to_value(KvBigKeysMessage::Done { basis: KvBigKeysBasis::Length, keys: vec![], scanned: 10, stopped: true }).unwrap();
-    assert_eq!(done, json!({ "type": "done", "basis": "length", "keys": [], "scanned": 10, "stopped": true }));
-    let progress = serde_json::to_value(KvBigKeysMessage::Progress { scanned: 1, total: 2 }).unwrap();
+    let done = serde_json::to_value(KvBigKeysMessage::Done(KvBigKeysReport { basis: KvBigKeysBasis::Length, keys: vec![], scanned: 10, stopped: true, generated_at: 7 })).unwrap();
+    assert_eq!(done, json!({ "type": "done", "basis": "length", "keys": [], "scanned": 10, "stopped": true, "generatedAt": 7 }));
+    // 중간 결과가 없으면 keys를 보내지 않는다
+    let progress = serde_json::to_value(KvBigKeysMessage::Progress { scanned: 1, total: 2, keys: None }).unwrap();
     assert_eq!(progress, json!({ "type": "progress", "scanned": 1, "total": 2 }));
+    let partial = serde_json::to_value(KvBigKeysMessage::Progress { scanned: 50_000, total: 90_000, keys: Some(vec![]) }).unwrap();
+    assert_eq!(partial, json!({ "type": "progress", "scanned": 50_000, "total": 90_000, "keys": [] }));
     assert_eq!(serde_json::to_value([KvFeature::Slowlog, KvFeature::Encoding]).unwrap(), json!(["slowlog", "encoding"]));
     assert_eq!(serde_json::to_value(KvMode::Serverless).unwrap(), json!("serverless"));
 }

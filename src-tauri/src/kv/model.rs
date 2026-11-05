@@ -378,7 +378,7 @@ pub struct KvClient {
     pub own: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KvBigKey {
     pub name: KvKeyName,
@@ -388,7 +388,7 @@ pub struct KvBigKey {
 }
 
 /// 큰 키의 크기를 잰 기준
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum KvBigKeysBasis {
     Memory,
@@ -398,8 +398,26 @@ pub enum KvBigKeysBasis {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum KvBigKeysMessage {
-    Progress { scanned: u64, total: u64 },
-    Done { basis: KvBigKeysBasis, keys: Vec<KvBigKey>, scanned: u64, stopped: bool },
+    /// 진행. 5만 개를 훑을 때마다 그때까지의 상위 키(`keys`)가 붙는다
+    Progress {
+        scanned: u64,
+        total: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        keys: Option<Vec<KvBigKey>>,
+    },
+    Done(KvBigKeysReport),
+}
+
+/// 끝난 큰 키 찾기의 결과. 대상·DB마다 디스크에 남겨 다음 찾기 전까지 다시 보인다
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KvBigKeysReport {
+    pub basis: KvBigKeysBasis,
+    pub keys: Vec<KvBigKey>,
+    pub scanned: u64,
+    pub stopped: bool,
+    /// 끝난 시각(Unix ms)
+    pub generated_at: i64,
 }
 
 #[cfg(test)]

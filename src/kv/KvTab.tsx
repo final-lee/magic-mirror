@@ -133,6 +133,13 @@ export function KvTab({ target, active }: Props) {
   useHistoryKeys(root, active, back, forward);
   const bigKeys = useBigKeys(target);
   const [notice, setNotice] = useState<string | null>(null);
+  // 연결되면(로그인·DB를 바꿔 다시 연결해도) 그 대상·DB의 저장한 큰 키 결과를 불러온다
+  const connectedDb = ov ? ov.database : null;
+  const attempt = connect?.attempt;
+  const { loadSaved } = bigKeys;
+  useEffect(() => {
+    if (connectedDb !== null) loadSaved();
+  }, [connectedDb, attempt, loadSaved]);
 
   // 연결에 성공하면 로그인(방식·사용자·DB 번호)을 설정에 기억하고, 보낸 비밀번호는 메모리에서 지운다(이후 연결은 키체인의 것을 쓴다).
   const remembered = useRef<string | null>(null);

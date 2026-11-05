@@ -10,7 +10,7 @@ import type { KvClient, KvNode } from "./types";
 
 vi.mock("./api", () => ({
   kvApi: {
-    target: vi.fn(), open: vi.fn(), overview: vi.fn(), scan: vi.fn(), key: vi.fn(), slowlog: vi.fn(), clients: vi.fn(), bigkeys: vi.fn(), bigkeysStop: vi.fn(), close: vi.fn(), forgetPassword: vi.fn(),
+    target: vi.fn(), open: vi.fn(), overview: vi.fn(), scan: vi.fn(), key: vi.fn(), slowlog: vi.fn(), clients: vi.fn(), bigkeys: vi.fn(), bigkeysStop: vi.fn(), bigkeysReport: vi.fn(async () => null), close: vi.fn(), forgetPassword: vi.fn(),
     bullQueues: vi.fn(), bullQueueSummaries: vi.fn(), bullQueue: vi.fn(), bullJobs: vi.fn(), bullJob: vi.fn(), bullFlow: vi.fn(), bullTransitions: vi.fn(), bullTopology: vi.fn(),
   },
 }));

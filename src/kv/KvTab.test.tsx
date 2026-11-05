@@ -7,6 +7,7 @@ import { renderWithClient } from "../test/utils";
 import { kvApi } from "./api";
 import { ARN, bigKeys, clientRows, kvTarget, name, sampleKeys, sampleKeyView, sampleOverview, sampleTargetInfo, serverlessOverview, slowEntries } from "./fixtures";
 import { KvTab } from "./KvTab";
+import { secondsLeft } from "./BigKeys";
 import type { KvBigKeysMessage, KvLoginSaved } from "./types";
 
 vi.mock("./api", () => ({
@@ -20,6 +21,7 @@ vi.mock("./api", () => ({
     clients: vi.fn(),
     bigkeys: vi.fn(),
     bigkeysStop: vi.fn(),
+    bigkeysReport: vi.fn(async () => null),
     close: vi.fn(),
     forgetPassword: vi.fn(),
     bullQueues: vi.fn(),
@@ -508,7 +510,7 @@ describe("big keys", () => {
       expect(limit).toBe(50);
       onMessage({ type: "progress", scanned: 100, total: 1000 });
       await new Promise<void>((resolve) => (finish = resolve));
-      onMessage({ type: "done", basis: "memory", keys: bigKeys, scanned: 700, stopped: true });
+      onMessage({ type: "done", basis: "memory", keys: bigKeys, scanned: 700, stopped: true, generatedAt: Date.now() });
       return null;
     });
     setup();
@@ -524,12 +526,56 @@ describe("big keys", () => {
     const table = await screen.findByRole("table", { name: "큰 키 목록" });
     expect(within(table).getAllByRole("row")[1]).toHaveTextContent("1leaderboardzset18.0 MB");
     expect(screen.getByText(/700개를 훑고 중단했어요/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "찾기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "다시 찾기" })).toBeInTheDocument();
+  });
+
+  test("every 50,000 keys the top keys so far show under the progress bar", async () => {
+    let finish: () => void = () => {};
+    m.bigkeys.mockImplementation(async (_t, _l, onMessage: (m: KvBigKeysMessage) => void) => {
+      onMessage({ type: "progress", scanned: 50_000, total: 390_000, keys: bigKeys });
+      onMessage({ type: "progress", scanned: 51_000, total: 390_000 });
+      await new Promise<void>((resolve) => (finish = resolve));
+      return null;
+    });
+    setup();
+    await connected();
+    openMenu("큰 키");
+    fireEvent.click(screen.getByRole("button", { name: "찾기" }));
+    expect(await screen.findByText(/51,000 \/ 390,000개 훑는 중…/)).toBeInTheDocument();
+    // 중간 결과는 그 결과를 만든 때(5만 개)를 밝힌다
+    expect(screen.getByText("중간 결과: 50,000개까지 훑은 상위 키")).toBeInTheDocument();
+    expect(within(screen.getByRole("table", { name: "큰 키 목록" })).getAllByRole("row")[1]).toHaveTextContent("leaderboard");
+    await act(async () => finish());
+  });
+
+  test("a saved report shows on connect, without searching again, until [다시 찾기]; another DB reads its own", async () => {
+    m.bigkeysReport.mockResolvedValue({ basis: "memory", keys: bigKeys, scanned: 390_000, stopped: false, generatedAt: Date.now() - 2 * 3600_000 });
+    m.open.mockResolvedValueOnce(sampleOverview()).mockResolvedValueOnce(sampleOverview({ database: 1 }));
+    setup();
+    await connected();
+    openMenu("큰 키");
+    expect(await screen.findByRole("table", { name: "큰 키 목록" })).toBeInTheDocument();
+    expect(screen.getByText(/390,000개를 모두 훑었어요/)).toBeInTheDocument();
+    expect(screen.getByText(/^2시간 전\(.+\)에 만든 결과예요/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "다시 찾기" })).toBeInTheDocument();
+    expect(m.bigkeys).not.toHaveBeenCalled();
+    expect(m.bigkeysReport).toHaveBeenCalledTimes(1);
+    m.bigkeysReport.mockResolvedValue(null);
+    fireEvent.change(topBar().getByRole("combobox", { name: "DB 번호" }), { target: { value: "1" } });
+    await waitFor(() => expect(m.bigkeysReport).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("[찾기]를 누르면 시작해요")).toBeInTheDocument();
+  });
+
+  test("the time left is estimated from the pace so far", () => {
+    expect(secondsLeft(0, 1000, 5000)).toBeNull();
+    expect(secondsLeft(1000, 1000, 5000)).toBeNull();
+    // 10초에 1/4을 훑었으면 남은 3/4은 30초
+    expect(secondsLeft(250, 1000, 10_000)).toBe(30);
   });
 
   test("a result by length (serverless) says it is by length and counts elements", async () => {
     m.bigkeys.mockImplementation(async (_t, _l, onMessage: (m: KvBigKeysMessage) => void) => {
-      onMessage({ type: "done", basis: "length", keys: [{ name: name("queue:emails"), type: "list", size: 40_000 }, { name: name("blob"), type: "string", size: 2048 }], scanned: 5000, stopped: false });
+      onMessage({ type: "done", basis: "length", keys: [{ name: name("queue:emails"), type: "list", size: 40_000 }, { name: name("blob"), type: "string", size: 2048 }], scanned: 5000, stopped: false, generatedAt: Date.now() });
       return null;
     });
     setup();
@@ -544,7 +590,7 @@ describe("big keys", () => {
 
   test("a key in the result opens its value in the keys screen", async () => {
     m.bigkeys.mockImplementation(async (_t, _l, onMessage: (m: KvBigKeysMessage) => void) => {
-      onMessage({ type: "done", basis: "memory", keys: bigKeys, scanned: 10, stopped: false });
+      onMessage({ type: "done", basis: "memory", keys: bigKeys, scanned: 10, stopped: false, generatedAt: Date.now() });
       return null;
     });
     m.key.mockResolvedValue(sampleKeyView({ name: name("leaderboard"), type: "zset" }));
@@ -559,7 +605,7 @@ describe("big keys", () => {
 
   test("the result stays when you look at another screen and come back", async () => {
     m.bigkeys.mockImplementation(async (_t, _l, onMessage: (m: KvBigKeysMessage) => void) => {
-      onMessage({ type: "done", basis: "memory", keys: bigKeys, scanned: 10, stopped: false });
+      onMessage({ type: "done", basis: "memory", keys: bigKeys, scanned: 10, stopped: false, generatedAt: Date.now() });
       return null;
     });
     setup();
