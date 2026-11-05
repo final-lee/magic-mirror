@@ -184,3 +184,21 @@ async fn a_failed_connection_keeps_nothing() {
     assert_eq!(error, AppError::other("연결 실패"));
     assert!(!rig.pool.holds(&t));
 }
+
+/// `kv_close`는 동기 명령이라 Tauri가 Tokio 실행기 밖(메인 스레드)에서 부른다. 거기서 닫아도 멈추지 않고 연결이 닫혀야 한다
+#[test]
+fn closing_outside_a_runtime_still_closes_the_connection() {
+    let rig = Rig::new();
+    let t = target("a");
+    tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(async {
+        rig.get(&t, Instant::now(), SystemTime::now()).await.unwrap();
+    });
+    assert!(tokio::runtime::Handle::try_current().is_err());
+    rig.pool.close_target(&t);
+    assert!(!rig.pool.holds(&t));
+    let deadline = Instant::now() + std::time::Duration::from_secs(2);
+    while rig.closed.load(Ordering::Relaxed) == 0 && Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(rig.closed.load(Ordering::Relaxed), 1);
+}

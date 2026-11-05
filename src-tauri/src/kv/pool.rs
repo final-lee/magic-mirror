@@ -77,9 +77,18 @@ fn lock<T>(mutex: &StdMutex<T>) -> MutexGuard<'_, T> {
 }
 
 /// 보관함에서 빠진 연결들을 백그라운드에서 닫는다. 쓰는 중인 호출이 있으면 그 호출은 `Arc`로 연결을 쥐고 있어 끝까지 간다.
+/// 동기 명령(`kv_close`)은 Tauri가 메인 스레드에서 부르므로 Tokio 실행기 밖일 수 있다. 그때는 Tauri의 실행기에 맡긴다.
 fn retire<C: Pooled>(conns: Vec<Arc<C>>) {
     for conn in conns {
-        tokio::spawn(async move { conn.close().await });
+        let close = async move { conn.close().await };
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                handle.spawn(close);
+            }
+            Err(_) => {
+                tauri::async_runtime::spawn(close);
+            }
+        }
     }
 }
 
