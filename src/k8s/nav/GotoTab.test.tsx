@@ -200,6 +200,19 @@ test("picking the ns suggestion with the arrows and Enter shows the namespaces o
   expect(within(screen.getByRole("navigation", { name: KIND_TREE_LABEL })).getByRole("button", { name: "Deployment" })).toHaveAttribute("aria-current", "page");
 });
 
+test("after :ns on a list the cursor goes back to the list, not to the lane resizer", async () => {
+  setup();
+  await connected();
+  submit("deploy");
+  act(() => emits.get("deployments")!({ type: "reset", rows: [row("web")] }));
+  await waitFor(() => expect(screen.getByTestId("iam-list")).toHaveFocus());
+  submit("ns kube-system");
+  await vi.waitFor(() => expect(m.watch).toHaveBeenCalledWith(target, expect.objectContaining({ plural: "deployments" }), "kube-system", expect.anything(), expect.any(Function)));
+  act(() => emits.get("deployments")!({ type: "reset", rows: [row("dns")] }));
+  await waitFor(() => expect(screen.getByTestId("iam-list")).toHaveFocus());
+  expect(document.activeElement).not.toHaveAttribute("role", "separator");
+});
+
 test("away from a list, :ns still opens the Namespace list", async () => {
   setup();
   await connected();
