@@ -21,13 +21,9 @@ use crate::kv::command::cmd;
 use crate::kv::connect::Connected;
 use crate::kv::cursor::ScanCursor;
 use crate::kv::model::KvClient;
-use crate::kv::scan::Scanner;
+use crate::kv::scan::{Scanner, SCAN_COUNT};
 use crate::kv::value::{int, text};
 
-/// 큐를 찾는 SCAN의 COUNT. 대부분이 작업 해시인 수십만 키를 원격(왕복 수십 ms)으로 훑으므로 크게 잡아 왕복 수를 줄인다.
-/// 크게 잡을수록 한 번의 SCAN이 서버를 오래 붙잡는다(단일 스레드라 그동안 워커의 명령이 기다린다).
-/// 운영 ElastiCache(Redis 7.1)에서 잰 값: 1만 개에 약 20ms, 5만 개에 약 44ms, 10만 개에 약 104ms. 50ms 안쪽인 5만으로 둔다.
-const DISCOVERY_COUNT: usize = 50_000;
 /// 한 번의 찾기에서 쓰는 시간과 훑는 키 수(근사: SCAN 횟수 × COUNT)의 한도
 const DISCOVERY_TIME: Duration = Duration::from_secs(20);
 const DISCOVERY_KEYS: u64 = 5_000_000;
@@ -59,8 +55,8 @@ fn decode_cursor(text: &str) -> Result<ScanCursor, AppError> {
 async fn discover(conn: &Connected, prefix: &str, cursor: Option<&str>) -> Result<(BTreeSet<String>, u64, bool, Option<String>), AppError> {
     let pattern = discovery_pattern(prefix);
     let mut scanner = match cursor {
-        Some(text) => Scanner::resume(conn, &pattern, None, DISCOVERY_COUNT, decode_cursor(text)?)?,
-        None => Scanner::start(conn, &pattern, None, DISCOVERY_COUNT),
+        Some(text) => Scanner::resume(conn, &pattern, None, SCAN_COUNT, decode_cursor(text)?)?,
+        None => Scanner::start(conn, &pattern, None, SCAN_COUNT),
     };
     let started = Instant::now();
     let mut names = BTreeSet::new();
@@ -68,12 +64,12 @@ async fn discover(conn: &Connected, prefix: &str, cursor: Option<&str>) -> Resul
     while let Some(batch) = scanner.step().await? {
         calls += 1;
         names.extend(batch.iter().filter_map(|key| discovered_queue(prefix, &String::from_utf8_lossy(key))));
-        if calls * DISCOVERY_COUNT as u64 >= DISCOVERY_KEYS || started.elapsed() >= DISCOVERY_TIME {
+        if calls * SCAN_COUNT as u64 >= DISCOVERY_KEYS || started.elapsed() >= DISCOVERY_TIME {
             let next = scanner.cursor().map(|scan| encode_cursor(&scan));
-            return Ok((names, calls * DISCOVERY_COUNT as u64, next.is_some(), next));
+            return Ok((names, calls * SCAN_COUNT as u64, next.is_some(), next));
         }
     }
-    Ok((names, calls * DISCOVERY_COUNT as u64, false, None))
+    Ok((names, calls * SCAN_COUNT as u64, false, None))
 }
 
 /// 워커 후보: 이 큐의 워커로 보이는 연결들

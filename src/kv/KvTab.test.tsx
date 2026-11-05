@@ -205,7 +205,7 @@ describe("keys", () => {
     setup();
     await connected();
     await screen.findByRole("tree", { name: "키 목록" });
-    expect(m.scan).toHaveBeenCalledWith(kvTarget, "*", null, null, 1000);
+    expect(m.scan).toHaveBeenCalledWith(kvTarget, "*", null, null, 50_000);
     const labels = tree().getAllByRole("treeitem").map((e) => e.textContent);
     expect(labels).toEqual(["▸cache2", "▸queue1", "▸ratelimit1", "▸session3", "leaderboardzset—", "standalonestring—"]);
     expect(screen.getByText("읽은 키 9개 / 전체 약 1,240,000개")).toBeInTheDocument();
@@ -282,13 +282,13 @@ describe("keys", () => {
     await connected();
     await screen.findByRole("tree", { name: "키 목록" });
     await user.click(screen.getByRole("button", { name: "hash" }));
-    await waitFor(() => expect(m.scan).toHaveBeenLastCalledWith(kvTarget, "*", "hash", null, 1000));
+    await waitFor(() => expect(m.scan).toHaveBeenLastCalledWith(kvTarget, "*", "hash", null, 50_000));
     expect(screen.getByRole("button", { name: "hash" })).toHaveAttribute("aria-pressed", "true");
     await user.clear(screen.getByRole("textbox", { name: "패턴" }));
     await user.type(screen.getByRole("textbox", { name: "패턴" }), "session:*{Enter}");
-    await waitFor(() => expect(m.scan).toHaveBeenLastCalledWith(kvTarget, "session:*", "hash", null, 1000));
+    await waitFor(() => expect(m.scan).toHaveBeenLastCalledWith(kvTarget, "session:*", "hash", null, 50_000));
     await user.click(screen.getByRole("button", { name: "hash" }));
-    await waitFor(() => expect(m.scan).toHaveBeenLastCalledWith(kvTarget, "session:*", null, null, 1000));
+    await waitFor(() => expect(m.scan).toHaveBeenLastCalledWith(kvTarget, "session:*", null, null, 50_000));
   });
 
   test("the delimiter regroups the keys on the client, and empty means a flat list", async () => {
@@ -309,7 +309,7 @@ describe("keys", () => {
     await connected();
     expect(await screen.findByText("읽은 키 3개 / 전체 약 1,240,000개")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "더 읽기" }));
-    await waitFor(() => expect(m.scan).toHaveBeenLastCalledWith(kvTarget, "*", null, "c1", 1000));
+    await waitFor(() => expect(m.scan).toHaveBeenLastCalledWith(kvTarget, "*", null, "c1", 50_000));
     // 같은 키가 다시 와도 한 번만 센다
     expect(await screen.findByText("읽은 키 4개 / 전체 약 1,240,000개")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "더 읽기" })).not.toBeInTheDocument();
@@ -629,7 +629,7 @@ describe("refreshing", () => {
     fireEvent.click(topBar().getByRole("button", { name: "다시 읽기" }));
     await waitFor(() => expect(m.overview).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(m.scan).toHaveBeenCalledTimes(2));
-    expect(m.scan).toHaveBeenLastCalledWith(kvTarget, "*", null, null, 1000);
+    expect(m.scan).toHaveBeenLastCalledWith(kvTarget, "*", null, null, 50_000);
     expect(m.open).toHaveBeenCalledTimes(1);
   });
 

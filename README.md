@@ -331,7 +331,7 @@ Double-click a Valkey or Redis OSS row in **ElastiCache → Replication Groups**
 
 **Keys and values**
 
-- **🔑 키**: keys read with `SCAN` a page at a time across every shard, grouped into a tree by a delimiter (`:` by default), with folder counts, type badges, and TTLs. Filter by `SCAN` pattern and type; **더 읽기** continues. The top line shows how many keys were read out of about how many in total.
+- **🔑 키**: keys read with `SCAN` 50,000 at a time across every shard (the same `SCAN` count as 🐘 큰 키 and the Bull queue search), grouped into a tree by a delimiter (`:` by default), with folder counts, type badges, and TTLs. Each page's `TYPE` and `PTTL` lookups go out in one pipeline. Filter by `SCAN` pattern and type; **더 읽기** continues with the next 50,000. The top line shows how many keys were read out of about how many in total.
 - A key's detail shows its type, TTL with the expiry time, length, memory (`MEMORY USAGE`), and encoding. Strings are read up to 1 MiB and shown as text, a collapsible JSON tree, or hex and Base64 for binary data. Hashes, sets, and sorted sets come 200 at a time, lists from the front, streams with a summary and 100 entries, and RedisJSON values as JSON. Binary key names work too. Values stay in memory; nothing is written to disk.
 
 ![Key tree with a hash open](docs/screenshots/kv-keys.png)

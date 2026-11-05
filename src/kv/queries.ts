@@ -25,8 +25,8 @@ import type {
   KvType,
 } from "./types";
 
-/** 한 번에 보여 주는 키 수. 백엔드가 노드마다 SCAN COUNT 500씩 읽어 이만큼 모아 돌려준다 */
-export const KEY_PAGE = 1000;
+/** 한 번에 읽는 키 수. 백엔드의 SCAN COUNT(`kv/scan.rs` SCAN_COUNT)와 같은 5만으로, 키를 읽는 화면이 모두 5만 개씩 읽는다 */
+export const KEY_PAGE = 50_000;
 
 /**
  * 연결 시도. 로그인을 보낼 때마다 attempt가 올라가서 같은 로그인으로 다시 보내도 새로 연결한다(kv_open).

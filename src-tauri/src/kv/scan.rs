@@ -14,10 +14,13 @@ use super::model::{KvKeyName, KvKeyRow, KvMode, KvRole, KvScanPage, KvType};
 use super::value::{bytes, int, items, text};
 use crate::error::AppError;
 
-/// SCAN 한 번의 COUNT(설계: 노드마다 500씩)
-pub const SCAN_COUNT: usize = 500;
-/// 키 하나의 TYPE·PTTL을 동시에 묻는 수. fred가 같은 연결에서 자동으로 파이프라인한다
-const LOOKUP_CONCURRENCY: usize = 64;
+/// SCAN 한 번의 COUNT. 키를 읽는 화면(키 목록, 큰 키, Bull 큐 찾기)이 모두 이 값으로 읽는다.
+/// 크게 잡을수록 원격(왕복 수십 ms)에서 왕복 수가 줄지만, 한 번의 SCAN이 서버를 오래 붙잡는다(단일 스레드라 그동안 다른 명령이 기다린다).
+/// 운영 ElastiCache(Redis 7.1)에서 잰 값: 1만 개에 약 20ms, 5만 개에 약 44ms, 10만 개에 약 104ms. 50ms 안쪽인 5만으로 둔다.
+pub const SCAN_COUNT: usize = 50_000;
+/// 키마다 TYPE·PTTL을 동시에 묻는 수. SCAN 한 번이 돌려준 키를 한꺼번에 보낸다: fred가 한 연결에서 파이프라인하고,
+/// 서버는 파이프라인을 16KB씩 읽어 처리하며 그 사이에 다른 클라이언트를 받으므로 한 번에 오래 붙잡지 않는다
+const LOOKUP_CONCURRENCY: usize = SCAN_COUNT;
 /// 한 번의 호출에서 SCAN을 부르는 최대 횟수와 시간. 드문 패턴은 끝없이 돌 수 있어서 넘으면 거기까지 돌려주고 커서를 준다
 const MAX_CALLS: usize = 400;
 const MAX_TIME: Duration = Duration::from_secs(8);

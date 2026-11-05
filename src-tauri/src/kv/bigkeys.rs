@@ -3,7 +3,7 @@
 //! 명령 제한 시간은 30초다.
 //!
 //! Valkey·Redis는 명령을 한 스레드에서 하나씩 처리한다. 수십만 키를 재는 동안 운영 명령이 밀리지 않게 나눠서 간다.
-//! - SCAN 한 번에 5만 개를 받아 한꺼번에(파이프라인) 잰다. 서버는 받은 요청을 16KB씩 읽어 처리하고 그 사이에 다른 클라이언트를 받으므로,
+//! - SCAN 한 번에 `SCAN_COUNT`(5만) 개를 받아 한꺼번에(파이프라인) 잰다. 서버는 받은 요청을 16KB씩 읽어 처리하고 그 사이에 다른 클라이언트를 받으므로,
 //!   5만 개를 한꺼번에 보내도 한 번에 붙잡는 시간은 짧다. 길게 붙잡는 것은 `SCAN … COUNT 50000` 한 번(운영 ElastiCache에서 약 44ms)뿐이다.
 //! - 5만 개를 재고 나면 0.5초 쉬고, 그때까지의 상위 키를 중간 결과로 보낸다.
 
@@ -17,12 +17,10 @@ use super::connect::{Connected, BIGKEYS_TIMEOUT};
 use super::key::length_command;
 use super::model::{KvBigKey, KvBigKeysBasis, KvBigKeysMessage, KvBigKeysReport, KvKeyName, KvMode, KvType};
 use super::overview::dbsize;
-use super::scan::Scanner;
+use super::scan::{Scanner, SCAN_COUNT};
 use super::value::{int, text};
 use crate::error::AppError;
 
-/// SCAN 한 번의 COUNT이자 한꺼번에 재는 키 수. fred가 한 연결에서 파이프라인하므로 왕복 한 번으로 잰다
-pub const BATCH: usize = 50_000;
 /// 한 번 재고 나서 쉬는 시간
 const PAUSE: Duration = Duration::from_millis(500);
 
@@ -56,7 +54,7 @@ async fn size_of(conn: &Connected, key: &[u8], basis: KvBigKeysBasis) -> Result<
 
 /// 상위 키에 종류를 붙인다(메모리 기준은 종류를 따로 묻는다)
 async fn typed(conn: &Connected, top: &[(u64, Vec<u8>, Option<KvType>)]) -> Result<Vec<KvBigKey>, AppError> {
-    let types = concurrently(top.iter(), BATCH, |(_, key, kind)| async move {
+    let types = concurrently(top.iter(), SCAN_COUNT, |(_, key, kind)| async move {
         Ok::<_, AppError>(match kind {
             Some(kind) => *kind,
             None => type_of(conn, key).await?.unwrap_or(KvType::Other),
@@ -71,7 +69,7 @@ async fn typed(conn: &Connected, top: &[(u64, Vec<u8>, Option<KvType>)]) -> Resu
 pub async fn bigkeys(conn: &Connected, limit: usize, stop: &AtomicBool, mut progress: impl FnMut(KvBigKeysMessage)) -> Result<KvBigKeysReport, AppError> {
     let basis = if conn.mode() == KvMode::Serverless { KvBigKeysBasis::Length } else { KvBigKeysBasis::Memory };
     let total = dbsize(conn).await?;
-    let mut scanner = Scanner::start(conn, "*", None, BATCH);
+    let mut scanner = Scanner::start(conn, "*", None, SCAN_COUNT);
     let mut top: Vec<(u64, Vec<u8>, Option<KvType>)> = Vec::new();
     let mut scanned: u64 = 0;
     let mut stopped = false;
@@ -82,7 +80,7 @@ pub async fn bigkeys(conn: &Connected, limit: usize, stop: &AtomicBool, mut prog
         }
         let Some(batch) = scanner.step().await? else { break };
         scanned += batch.len() as u64;
-        let sizes = concurrently(batch.iter(), BATCH, |key| size_of(conn, key, basis)).await;
+        let sizes = concurrently(batch.iter(), SCAN_COUNT, |key| size_of(conn, key, basis)).await;
         for (key, size) in batch.into_iter().zip(sizes) {
             if let Some((size, kind)) = size? {
                 top.push((size, key, kind));
