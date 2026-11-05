@@ -37,7 +37,7 @@ function setup(props: Partial<Parameters<typeof XrayView>[0]> = {}) {
   const onOpen = vi.fn();
   const view = (extra: Partial<Parameters<typeof XrayView>[0]> = {}) =>
     withClientAndSso(
-      <XrayView target={T} context="ctx" ssoProfile="p" live objectRef={{ kind: DEPLOYMENTS, namespace: "prod", name: "web" }} resourceVersion="1" kinds={[]} onOpen={onOpen} {...props} {...extra} />,
+      <XrayView target={T} context="ctx" ssoProfile="p" live objectRef={{ kind: DEPLOYMENTS, namespace: "prod", name: "web" }} resourceVersion="1" kinds={[]} onOpen={onOpen} toolbar={document.body} {...props} {...extra} />,
       qc,
       ssoLoginStub(),
     );
@@ -117,6 +117,6 @@ test("shows the failure with a retry when the object cannot be read", async () =
   get.mockRejectedValueOnce({ kind: "other", message: "연결이 끊겼어요" }).mockResolvedValueOnce(world);
   setup();
   expect(await screen.findByText(/연결이 끊겼어요/)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: /다시/ }));
+  fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
   expect(await screen.findByRole("region", { name: "소유" })).toBeInTheDocument();
 });

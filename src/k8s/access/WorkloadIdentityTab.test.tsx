@@ -42,6 +42,18 @@ test("each service account shows its IRSA and Pod Identity roles with the result
   expect(within(etl).getByText("ServiceAccount 없음")).toBeInTheDocument();
 });
 
+test("vim keys select workload identities and open their detail", async () => {
+  m.workloadIdentity.mockResolvedValue(view([item({ serviceAccount: "api" }), item({ serviceAccount: "worker" })]));
+  setup();
+  const row = (await screen.findByText("payments/api")).closest("tr")!;
+  const host = row.closest(".tbl")!;
+  fireEvent.keyDown(host, { key: "j" });
+  expect(row).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByRole("complementary", { name: "워크로드 신원 상세" })).toHaveTextContent("payments/api");
+  fireEvent.keyDown(host, { key: "G", shiftKey: true });
+  expect(screen.getByRole("complementary", { name: "워크로드 신원 상세" })).toHaveTextContent("payments/worker");
+});
+
 test("only broken connections can be filtered, and ⌘F matches names and roles", async () => {
   m.workloadIdentity.mockResolvedValue(
     view([

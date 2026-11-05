@@ -13,7 +13,7 @@ use crate::k8s_commands::K8sState;
 
 pub const EMPTY_COMMAND: &str = "실행할 명령이 비어 있어요";
 
-/// 이 탭의 클러스터에 고정된 로컬 터미널을 연다. `command`가 없으면 로그인 셸이고, 있으면(확인을 거친 플러그인 명령) `-lc`로 그 명령을 실행한다.
+/// 이 탭의 클러스터에 고정된 로컬 터미널을 연다. 플러그인 명령은 POSIX 셸의 `-c`로 실행한다.
 /// 출력은 채널로 오고 반환값의 번호로 입력·크기·닫기를 한다. 열고 닫은 시각은 변경 기록에 남는다.
 #[tauri::command]
 pub async fn k8s_terminal_open(
@@ -35,7 +35,7 @@ pub async fn k8s_terminal_open(
         config: &session.kubeconfig,
         command,
         shell: terminal::shell_of(std::env::var("SHELL").ok().as_deref()),
-        parent_env: std::env::vars().collect(),
+        parent_env: std::env::vars_os().filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?))).collect(),
         path: login_path().await.to_string(),
         cwd: std::env::var_os("HOME").map(PathBuf::from),
         cols,

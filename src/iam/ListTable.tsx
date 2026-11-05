@@ -32,6 +32,24 @@ const ARROW_STEP: Record<string, Step | undefined> = { ArrowDown: "next", ArrowU
 /** EKS 목록의 k9s식 이동 키 */
 const VIM_STEP: Record<string, Step | undefined> = { j: "next", k: "prev", g: "first", G: "last" };
 
+/** 기존 표의 행을 같은 키로 이동한다. 선택 가능한 표는 행의 기존 클릭 동작을 쓴다. */
+export function vimTableKeys(e: KeyboardEvent<HTMLElement>, select = false) {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const target = e.target as HTMLElement;
+  if (target !== e.currentTarget && (select || !target.matches("tbody tr[tabindex='-1']"))) return;
+  const step = ARROW_STEP[e.key] ?? VIM_STEP[e.key];
+  if (!step) return;
+  const rows = Array.from(e.currentTarget.querySelectorAll<HTMLTableRowElement>("tbody tr"));
+  if (!rows.length) return;
+  e.preventDefault();
+  const i = rows.findIndex((row) => select ? row.getAttribute("aria-selected") === "true" : row === document.activeElement);
+  const next = step === "first" ? 0 : step === "last" ? rows.length - 1 : step === "next" ? Math.min(rows.length - 1, i + 1) : Math.max(0, i - 1);
+  if (next === i) return;
+  if (select) rows[next].click();
+  else rows[next].focus();
+  rows[next].scrollIntoView?.({ block: "nearest" });
+}
+
 function compare(a: string | number, b: string | number): number {
   if (typeof a === "number" && typeof b === "number") return a - b;
   return String(a).localeCompare(String(b), "ko", { sensitivity: "base" });
@@ -69,6 +87,7 @@ export function ListTable<T>({ label, rows, columns, rowKey, selectedId, onSelec
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
+    if ((e.target as Element).closest('[role="dialog"], [role="alertdialog"]')) return;
     if (e.key === "Enter" && selectedId) {
       onOpen(selectedId);
       return;

@@ -27,18 +27,21 @@ export function useK8sWatch(
 ): { rows: K8sRow[]; status: "loading" | "ready" | "error"; error: AppError | null } {
   const tk = targetKey(target);
   const key = `${tk}|${context}|${kindKey(kind)}|${namespace ?? "*"}`;
-  const [snap, setSnap] = useState<WatchSnapshot>(LOADING);
+  // 받은 목록이 어느 감시의 것인지 함께 둔다: 종류나 네임스페이스가 바뀐 첫 그림에서 이전 목록을 새 목록처럼 보이지 않는다
+  const [state, setState] = useState<{ key: string; snap: WatchSnapshot }>({ key, snap: LOADING });
 
   useEffect(() => {
+    const set = (snap: WatchSnapshot) => setState({ key, snap });
     if (!enabled) {
-      setSnap(LOADING);
+      set(LOADING);
       return;
     }
-    return watchRegistry.subscribe(key, (onMessage) => k8sApi.watch(target, kind, namespace, ssoProfile, onMessage), setSnap, ssoProfile);
+    return watchRegistry.subscribe(key, (onMessage) => k8sApi.watch(target, kind, namespace, ssoProfile, onMessage), set, ssoProfile);
     // key가 target·context·kind·namespace를 모두 담는다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, enabled, ssoProfile, sessionEpoch]);
 
+  const snap = state.key === key ? state.snap : LOADING;
   const rows = useMemo(() => [...snap.rows].sort(byNameThenNamespace), [snap.rows]);
   return { rows, status: snap.status, error: snap.error };
 }

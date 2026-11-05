@@ -18,6 +18,11 @@ interface Entry {
 const entries: Entry[] = [];
 /** 화면이 더하는 바인딩(사용자가 정의한 플러그인 키). 고정 표 뒤에서 찾는다 */
 const extraBindings: Keybinding[][] = [];
+
+/** 현재 화면에서 제공하는 사용자 바인딩 */
+export function getExtraBindings(): Keybinding[] {
+  return Array.from(new Map(extraBindings.flat().map((binding) => [`${binding.command}\u0000${binding.key}`, binding])).values());
+}
 /** 앱이 정하는 문맥 키(VS Code의 setContext). DOM으로 알 수 있는 키는 아래 builtin이 따진다 */
 const contexts: Record<string, boolean> = {};
 let lastPointer: Element | null = null;
@@ -45,6 +50,8 @@ function builtin(key: string): boolean | undefined {
       return !!active?.closest(".list-find");
     case "dialogOpen":
       return visibleModal();
+    case "inlineDialog":
+      return !!active?.closest('[role="dialog"], [role="alertdialog"]') && !active.closest("[hidden]");
     case "textSelected":
       return (window.getSelection()?.toString() ?? "").length > 0;
     default:

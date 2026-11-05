@@ -734,9 +734,9 @@ spec:
         shells.input(opened.id, "echo alive\n".into());
         assert!(screen.until("alive", Duration::from_secs(20)).await);
         shells.close(opened.id);
-        // 닫은 뒤의 입력은 어디에도 가지 않는다
+        // 닫으면 화면에 코드 없는 종료를 한 번 알리고, 닫은 뒤의 입력은 어디에도 가지 않는다
         shells.input(opened.id, "echo after-close\n".into());
-        assert_eq!(screen.exit(Duration::from_secs(3)).await, None);
+        assert_eq!(screen.exit(Duration::from_secs(3)).await, Some(None));
         assert!(!screen.seen.contains("after-close"));
         assert!(crate::k8s::log::read_all(&log)[0].closed_at.is_some());
         let _ = std::fs::remove_dir_all(log.parent().unwrap());

@@ -11,6 +11,8 @@ export interface Keybinding {
   /** keys.ts 표기(`shift+cmd+r`) */
   key: string;
   command: string;
+  /** 사용자가 정의한 명령의 이름 */
+  title?: string;
   /** `inputFocus`, `dialogOpen` 같은 문맥 키와 `!`, `&&`, `||`로 쓴 조건. 비우면 늘 */
   when?: string;
   scope: KeyScope;
@@ -47,6 +49,7 @@ export const COMMANDS: Record<string, CommandInfo> = {
   "dialog.close": { title: "대화상자 닫기", scope: "dialog" },
   "terminal.leave": { title: "터미널에서 빠져나오기", scope: "terminal" },
   "k8s.terminal": { title: "EKS 터미널 열기", scope: "k8s" },
+  "k8s.pluginMenuClose": { title: "플러그인 메뉴 닫기", scope: "k8s" },
   "explorer.compare": { title: "로컬·S3 파일 비교", scope: "explorer" },
   "explorer.delete": { title: "고른 S3 객체 삭제", scope: "explorer" },
   "explorer.switchPane": { title: "로컬·S3 칸 바꾸기", scope: "explorer" },
@@ -70,8 +73,8 @@ export const COMMANDS: Record<string, CommandInfo> = {
 };
 
 /** EKS 목록에 커서가 있고 입력칸·터미널·대화상자가 아닐 때(한 글자 키의 조건) */
-const K8S_LIST = "k8sListFocus && !dialogOpen && !inputFocus && !terminalFocus";
-const K8S_BODY = "k8sFocus && !dialogOpen && !inputFocus && !terminalFocus";
+const K8S_LIST = "k8sListFocus && !dialogOpen && !inlineDialog && !inputFocus && !terminalFocus";
+const K8S_BODY = "k8sFocus && !dialogOpen && !inlineDialog && !inputFocus && !terminalFocus";
 
 export const KEYBINDINGS: Keybinding[] = [
   { key: "cmd+k", command: "app.findResource", when: "!dialogOpen", scope: "app", handler: "registry" },
@@ -90,6 +93,7 @@ export const KEYBINDINGS: Keybinding[] = [
   { key: "escape", command: "list.clearSelection", when: "!findOpen", scope: "list", handler: "component" },
   { key: "cmd+c", command: "list.copyId", when: "!inputFocus && !textSelected && !dialogOpen", scope: "list", handler: "registry" },
   { key: "escape", command: "dialog.close", when: "dialogOpen", scope: "dialog", handler: "component" },
+  { key: "escape", command: "k8s.pluginMenuClose", when: "!dialogOpen", scope: "k8s", handler: "registry" },
   { key: "cmd+escape", command: "terminal.leave", when: "terminalFocus", scope: "terminal", handler: "registry" },
   { key: "cmd+d", command: "explorer.compare", when: "!dialogOpen && !inputFocus", scope: "explorer", handler: "registry" },
   { key: "cmd+backspace", command: "explorer.delete", when: "!dialogOpen && !inputFocus", scope: "explorer", handler: "registry" },
@@ -97,7 +101,7 @@ export const KEYBINDINGS: Keybinding[] = [
   { key: "f7", command: "diff.next", scope: "diff", handler: "registry" },
   { key: "shift+f7", command: "diff.prev", scope: "diff", handler: "registry" },
   // EKS 탭: k9s식 명령 줄과 한 글자 키(설계: 키맵 설계 "EKS 목록의 k9s식 한 글자 키")
-  { key: ":", command: "k8s.goto", when: "!dialogOpen && !inputFocus && !terminalFocus", scope: "k8s", handler: "registry" },
+  { key: ":", command: "k8s.goto", when: "!dialogOpen && !inlineDialog && !inputFocus && !terminalFocus", scope: "k8s", handler: "registry" },
   { key: "/", command: "list.find", when: K8S_BODY, scope: "k8s", handler: "registry" },
   { key: "j", command: "list.move", scope: "k8s", handler: "component" },
   { key: "k", command: "list.move", scope: "k8s", handler: "component" },

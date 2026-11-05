@@ -24,6 +24,17 @@ test("history is scoped to the cluster and undo prepares a preview", async () =>
   await waitFor(() => expect(onStart).toHaveBeenCalledWith(change, "one"));
 });
 
+test("change history rows move with vim keys without undoing", async () => {
+  vi.mocked(k8sApi.changeLog).mockResolvedValue([
+    { id: "one", at: "2026-10-30T11:00:00Z", target, change, summary: "scale web", ok: true, error: null, inverse: change, undoOf: null, undone: false },
+    { id: "two", at: "2026-10-30T12:00:00Z", target, change, summary: "restart api", ok: true, error: null, inverse: null, undoOf: null, undone: false },
+  ]);
+  render(withClientAndSso(<ChangeLog target={target} onStart={vi.fn()} />, newQueryClient(), ssoLoginStub()));
+  await screen.findByText("scale web");
+  fireEvent.keyDown(screen.getByRole("table"), { key: "G", shiftKey: true });
+  expect(screen.getByText("scale web").closest("tr")).toHaveFocus();
+});
+
 /** 되돌리기가 일반 변경 미리보기와 적용을 거치는 화면이다. */
 function HistoryFlow() {
   const flow = useK8sChange(target, "p", () => {});

@@ -132,6 +132,21 @@ test("choosing the same kind again from another menu brings it back", async () =
   expect(within(screen.getByRole("navigation", { name: KIND_TREE_LABEL })).getByRole("button", { name: "Deployment" })).toHaveAttribute("aria-current", "page");
 });
 
+test("a node link after a kind goto wins over the stale kind request", async () => {
+  m.overview.mockResolvedValue({ ...emptyOverview, nodes: [{
+    name: "ip-1", ready: true, unschedulable: false, pressures: [], instanceType: "m6i.large", zone: "a", groupKind: "managed", group: "ng",
+    kubeletVersion: "v1.31.4", capacity: { cpuMilli: 2000, memoryBytes: 1000, pods: 29 }, allocatable: { cpuMilli: 2000, memoryBytes: 1000, pods: 29 },
+    requested: { cpuMilli: 500, memoryBytes: 200, pods: 5 }, limits: { cpuMilli: 1000, memoryBytes: 400, pods: 5 }, usage: null,
+  }] });
+  setup();
+  await connected();
+  submit("deploy");
+  submit("overview");
+  fireEvent.click(await screen.findByRole("button", { name: "ip-1" }));
+  expect(within(screen.getByRole("navigation", { name: KIND_TREE_LABEL })).getByRole("button", { name: "Node" })).toHaveAttribute("aria-current", "page");
+  await vi.waitFor(() => expect(m.get).toHaveBeenCalledWith(target, expect.objectContaining({ plural: "nodes" }), null, "ip-1", expect.anything()));
+});
+
 test(":ns switches the namespace from the watched list, :ns all shows every namespace, an unknown one is refused", async () => {
   setup();
   await connected();
@@ -146,6 +161,63 @@ test(":ns switches the namespace from the watched list, :ns all shows every name
   expect(screen.getByRole("alert")).toHaveTextContent("네임스페이스 'nope'");
   expect(prompt()).toBeInTheDocument();
   expect(nsSelect().value).toBe("");
+});
+
+test("on a namespaced list, :ns picks that list's namespace instead of opening the Namespace list", async () => {
+  setup();
+  await connected();
+  submit("deploy");
+  press(":", { shiftKey: true });
+  fireEvent.change(prompt()!, { target: { value: "ns" } });
+  const picker = screen.getByRole("listbox", { name: "Deployment 목록의 네임스페이스" });
+  expect(within(picker).getByText("지금 보는 곳").closest("li")).toHaveTextContent("default");
+  // Enter는 이동하지 않고 고르기를 이어 간다
+  fireEvent.keyDown(prompt()!, { key: "Enter" });
+  expect(prompt()!.value).toBe("ns ");
+  fireEvent.change(prompt()!, { target: { value: "ns kube" } });
+  fireEvent.keyDown(prompt()!, { key: "ArrowDown" });
+  fireEvent.keyDown(prompt()!, { key: "Enter" });
+  expect(nsSelect().value).toBe("kube-system");
+  expect(within(screen.getByRole("navigation", { name: KIND_TREE_LABEL })).getByRole("button", { name: "Deployment" })).toHaveAttribute("aria-current", "page");
+  await vi.waitFor(() => expect(m.watch).toHaveBeenCalledWith(target, expect.objectContaining({ plural: "deployments" }), "kube-system", expect.anything(), expect.any(Function)));
+});
+
+test("picking the ns suggestion with the arrows and Enter shows the namespaces of the list", async () => {
+  setup();
+  await connected();
+  submit("deploy");
+  press(":", { shiftKey: true });
+  fireEvent.change(prompt()!, { target: { value: "n" } });
+  const options = within(screen.getByRole("listbox", { name: "이동 후보" })).getAllByRole("option");
+  const at = options.findIndex((o) => o.textContent?.startsWith("ns"));
+  expect(at).toBeGreaterThanOrEqual(0);
+  for (let i = 0; i <= at; i++) fireEvent.keyDown(prompt()!, { key: "ArrowDown" });
+  expect(prompt()!.value).toBe("ns");
+  fireEvent.keyDown(prompt()!, { key: "Enter" });
+  expect(prompt()!.value).toBe("ns ");
+  const picker = screen.getByRole("listbox", { name: "Deployment 목록의 네임스페이스" });
+  expect(within(picker).getByText("kube-system")).toBeInTheDocument();
+  expect(within(screen.getByRole("navigation", { name: KIND_TREE_LABEL })).getByRole("button", { name: "Deployment" })).toHaveAttribute("aria-current", "page");
+});
+
+test("after :ns on a list the cursor goes back to the list, not to the lane resizer", async () => {
+  setup();
+  await connected();
+  submit("deploy");
+  act(() => emits.get("deployments")!({ type: "reset", rows: [row("web")] }));
+  await waitFor(() => expect(screen.getByTestId("iam-list")).toHaveFocus());
+  submit("ns kube-system");
+  await vi.waitFor(() => expect(m.watch).toHaveBeenCalledWith(target, expect.objectContaining({ plural: "deployments" }), "kube-system", expect.anything(), expect.any(Function)));
+  act(() => emits.get("deployments")!({ type: "reset", rows: [row("dns")] }));
+  await waitFor(() => expect(screen.getByTestId("iam-list")).toHaveFocus());
+  expect(document.activeElement).not.toHaveAttribute("role", "separator");
+});
+
+test("away from a list, :ns still opens the Namespace list", async () => {
+  setup();
+  await connected();
+  submit("ns");
+  expect(within(screen.getByRole("navigation", { name: KIND_TREE_LABEL })).getByRole("button", { name: "Namespace" })).toHaveAttribute("aria-current", "page");
 });
 
 test("an unknown kind is refused inline with the closest names, and nothing moves", async () => {
@@ -163,8 +235,8 @@ test("recent commands come back in the next prompt", async () => {
   await connected();
   submit("ns prod");
   press(":", { shiftKey: true });
-  expect(within(screen.getByRole("list", { name: "최근 명령" })).getByText("ns prod")).toBeInTheDocument();
-  fireEvent.keyDown(prompt()!, { key: "ArrowUp" });
+  expect(within(screen.getByRole("listbox", { name: "최근 명령" })).getByText("ns prod")).toBeInTheDocument();
+  fireEvent.keyDown(prompt()!, { key: "ArrowDown" });
   expect(prompt()!.value).toBe("ns prod");
 });
 

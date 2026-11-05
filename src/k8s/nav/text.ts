@@ -4,13 +4,17 @@ export const GOTO_PLACEHOLDER = "pod, deploy, svc, no, ns <이름>, events, helm
 export const GOTO_COMPLETIONS_LABEL = "이동 후보";
 export const GOTO_HISTORY_LABEL = "최근 명령";
 export const GOTO_CLOSE = "이동 명령 닫기";
-export const GOTO_HINT = "Enter 이동 · Tab 완성 · ↑↓ 기록 · Esc 닫기";
+export const GOTO_HINT = "Enter 이동 · ↑↓·Tab 고르기 · ⌃P⌃N 기록 · Esc 닫기";
 export const GOTO_EMPTY = "맞는 종류나 메뉴가 없어요";
 
 export const GOTO_GROUP_KIND = "종류";
 export const GOTO_GROUP_VIEW = "메뉴";
 export const GOTO_GROUP_NS = "네임스페이스";
 export const GOTO_NS_ALL = "모든 네임스페이스";
+export const GOTO_NS_CURRENT = "지금 보는 곳";
+export const gotoNamespaceLabel = (kind: string) => `${kind} 목록의 네임스페이스`;
+export const gotoNamespacePick = (kind: string) => `${kind} 목록의 네임스페이스 바꾸기`;
+export const gotoNamespaceHint = (kind: string) => `${kind} 목록의 네임스페이스 바꾸기 · ↑↓ 고르기 · Enter 바꾸기 · Esc 닫기`;
 
 /** 알 수 없는 별칭. 가까운 것을 같이 보인다 */
 export const gotoUnknown = (input: string, closest: string[]) =>

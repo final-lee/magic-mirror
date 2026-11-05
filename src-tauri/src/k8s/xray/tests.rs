@@ -437,3 +437,81 @@ fn a_secret_root_keeps_no_data() {
     let x = build(&secret, &pool);
     assert!(x.sections.is_empty());
 }
+
+#[test]
+fn replaced_owner_uid_is_not_resolved_by_name() {
+    let child = pod("p", "old", json!({}), json!({"containers": []}), "Running");
+    let mut replacement = replica_set("old", "web");
+    replacement.uid = "replacement".into();
+    let pool = pool_of(vec![(&pool::POD, vec![child.clone()]), (&pool::REPLICA_SET, vec![replacement])]);
+    let tree = build(&child, &pool);
+    let node = &section(&tree, Edge::Owner).nodes[0];
+    assert_eq!(node.name, "old");
+    assert_eq!(node.presence, Presence::Missing);
+}
+
+#[test]
+fn endpoint_targets_keep_namespaces_and_reverse_links() {
+    let root = pod("p", "rs", json!({}), json!({"containers": []}), "Running");
+    let slice = item(&pool::ENDPOINT_SLICE, json!({
+        "apiVersion": "discovery.k8s.io/v1", "kind": "EndpointSlice",
+        "metadata": {"name": "slice", "namespace": "prod", "uid": "slice", "labels": {"kubernetes.io/service-name": "svc"}},
+        "endpoints": [
+            {"targetRef": {"kind": "Pod", "name": "p", "namespace": "prod"}},
+            {"targetRef": {"kind": "Pod", "name": "p", "namespace": "other"}},
+            {"targetRef": {"kind": "Pod", "name": "p", "namespace": "other"}}
+        ]
+    }));
+    let pool = pool_of(vec![(&pool::POD, vec![root.clone()]), (&pool::ENDPOINT_SLICE, vec![slice.clone()]), (&pool::SERVICE, vec![service("svc", json!({}))])]);
+    let tree = build(&slice, &pool);
+    let pods: Vec<_> = section(&tree, Edge::Target).nodes.iter().filter(|n| n.kind == "Pod").collect();
+    assert_eq!(pods.len(), 2);
+    assert_eq!(pods.iter().find(|n| n.namespace.as_deref() == Some("prod")).unwrap().presence, Presence::Found);
+    assert_eq!(pods.iter().find(|n| n.namespace.as_deref() == Some("other")).unwrap().presence, Presence::Unknown);
+    let reverse = build(&root, &pool);
+    let slice_node = find(&section(&reverse, Edge::Target).nodes, "EndpointSlice", "slice").unwrap();
+    assert!(find(&slice_node.children, "Service", "svc").is_some());
+}
+
+#[test]
+fn ingress_deduplicates_before_capping_targets() {
+    let paths: Vec<_> = (0..60).map(|i| json!({"backend": {"service": {"name": format!("svc-{i}")}}})).collect();
+    let ingress = item(&pool::INGRESS, json!({"apiVersion":"networking.k8s.io/v1", "kind":"Ingress", "metadata":{"name":"in","namespace":"prod","uid":"in"}, "spec":{"rules":[{"http":{"paths":paths}}]}}));
+    let tree = build(&ingress, &Pool::default());
+    assert_eq!(section(&tree, Edge::Target).nodes.len(), FAN_OUT_MAX);
+    assert!(tree.truncated);
+}
+
+#[test]
+fn owner_cycles_and_depth_limits_are_reported_correctly() {
+    let make = |n: usize, parent: Option<usize>| item(&pool::POD, json!({
+        "apiVersion":"v1", "kind":"Pod", "metadata":{"name":format!("p{n}"),"namespace":"prod","uid":format!("u{n}"),
+        "ownerReferences": parent.map(|p| owner("Pod", &format!("p{p}"), &format!("u{p}"))).unwrap_or(json!([]))},
+        "spec":{"containers":[]}
+    }));
+    let a = make(0, Some(1));
+    let b = make(1, Some(0));
+    let tree = build(&a, &pool_of(vec![(&pool::POD, vec![a.clone(), b])]));
+    let top = &section(&tree, Edge::Owner).nodes[0];
+    assert_eq!(top.name, "p1");
+    assert!(top.children[0].current);
+    assert!(top.children[0].children.is_empty());
+    let chain: Vec<_> = (0..11).map(|i| make(i, (i > 0).then_some(i.saturating_sub(1)))).collect();
+    let pool = pool_of(vec![(&pool::POD, chain.clone())]);
+    assert!(build(&chain[0], &pool).truncated);
+    assert!(build(&chain[10], &pool).truncated);
+}
+
+#[test]
+fn reverse_endpoint_slices_are_capped() {
+    let root = pod("p", "rs", json!({}), json!({"containers": []}), "Running");
+    let slices: Vec<_> = (0..60).map(|i| item(&pool::ENDPOINT_SLICE, json!({
+        "apiVersion":"discovery.k8s.io/v1", "kind":"EndpointSlice",
+        "metadata":{"name":format!("s{i}"),"namespace":"prod","uid":format!("s{i}")},
+        "endpoints":[{"targetRef":{"kind":"Pod","namespace":"prod","name":"p"}}]
+    }))).collect();
+    let pool = pool_of(vec![(&pool::POD, vec![root.clone()]), (&pool::ENDPOINT_SLICE, slices)]);
+    let tree = build(&root, &pool);
+    assert_eq!(section(&tree, Edge::Target).nodes.len(), FAN_OUT_MAX);
+    assert!(tree.truncated);
+}

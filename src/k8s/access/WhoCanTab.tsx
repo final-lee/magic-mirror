@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ListFind, useListFind } from "../../components/ListFind";
+import { vimTableKeys } from "../../iam/ListTable";
 import { fuzzyKeep } from "../../lib/fuzzy";
 import { K8sError } from "../K8sError";
 import { DETAIL_PCT } from "../lanes";
@@ -176,7 +177,7 @@ export function WhoCanTab({ target, context, ssoProfile, namespaces, canReview, 
           </div>
           {checks && !checking && <p role="status">{checkSummary(match, mismatch, failed)}</p>}
           <ListFind find={find} placeholder={WHO_FILTER} count={listed.length} />
-          <div className="tbl acc-table">
+          <div className="tbl acc-table" tabIndex={0} onKeyDown={(e) => vimTableKeys(e, true)}>
             <table aria-label={WHO_LABEL}>
               <thead>
                 <tr>

@@ -98,6 +98,37 @@ test("keys a component already handled, dialogs and missing handlers are left al
   expect(runCommand("app.refresh")).toBe(false);
 });
 
+test.each(["dialog", "alertdialog"])("focused inline %s blocks list shortcuts", (role) => {
+  const run = vi.fn();
+  function Inline() {
+    useCommand("k8s.yaml", run);
+    useCommand("k8s.attach", run);
+    useCommand("k8s.delete", run);
+    return <div className="k8s-list-pane"><button>목록</button><div role={role}><button>확인</button></div></div>;
+  }
+  render(<Root><Inline /></Root>);
+  screen.getByRole("button", { name: "확인" }).focus();
+  fireEvent.keyDown(window, { key: "y" });
+  fireEvent.keyDown(window, { key: "a" });
+  fireEvent.keyDown(window, { key: "d", ctrlKey: true });
+  expect(run).not.toHaveBeenCalled();
+  screen.getByRole("button", { name: "목록" }).focus();
+  fireEvent.keyDown(window, { key: "y" });
+  expect(run).toHaveBeenCalledTimes(1);
+});
+
+test("global find still works while an inline popover has focus", () => {
+  const run = vi.fn();
+  function Inline() {
+    useCommand("list.find", run);
+    return <div role="dialog"><button>팝오버</button></div>;
+  }
+  render(<Root><Inline /></Root>);
+  screen.getByRole("button", { name: "팝오버" }).focus();
+  fireEvent.keyDown(window, { key: "f", metaKey: true });
+  expect(run).toHaveBeenCalledTimes(1);
+});
+
 function Nested({ onRun }: { onRun: (n: string) => void }) {
   const outer = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);

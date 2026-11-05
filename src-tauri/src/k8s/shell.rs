@@ -66,6 +66,33 @@ pub enum ShellMessage {
     },
 }
 
+/// 작업이 취소되어도 화면에 종료를 한 번 알린다.
+pub struct ExitSender<F: FnMut(ShellMessage) -> bool> {
+    send: F,
+    exited: bool,
+}
+
+impl<F: FnMut(ShellMessage) -> bool> ExitSender<F> {
+    pub fn new(send: F) -> Self {
+        Self { send, exited: false }
+    }
+
+    pub fn send(&mut self, message: ShellMessage) -> bool {
+        if matches!(message, ShellMessage::Exit { .. }) {
+            self.exited = true;
+        }
+        (self.send)(message)
+    }
+}
+
+impl<F: FnMut(ShellMessage) -> bool> Drop for ExitSender<F> {
+    fn drop(&mut self) {
+        if !self.exited {
+            (self.send)(ShellMessage::Exit { code: None, reason: None });
+        }
+    }
+}
+
 /// 열린 세션. `input`은 이 세션이 입력을 받는지(attach는 컨테이너에 stdin과 tty가 켜져 있어야 한다).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -433,7 +460,8 @@ impl Shells {
         send: impl FnMut(ShellMessage) -> bool + Send + 'static,
     ) -> Result<ShellOpened, AppError> {
         let Connected { process, input } = connected;
-        self.register(log, info, input, cleanup, move |rx| session(process, rx, send))
+        let mut sender = ExitSender::new(send);
+        self.register(log, info, input, cleanup, move |rx| session(process, rx, move |message| sender.send(message)))
     }
 
     /// 변경 기록에 세션 한 줄을 남기고 `run`이 만든 세션 작업을 띄워 등록한다. 기록을 못 남기면 열지 않는다.

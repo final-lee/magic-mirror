@@ -45,6 +45,7 @@ base64 = "0.22"
 # Helm 릴리스(`release` 데이터는 base64 + gzip JSON)를 풀고, 업그레이드·설치할 때 만드는 임시 차트 폴더. 둘 다 이미 의존성 그래프에 있다
 flate2 = "1"
 tempfile = "3"
+libc = "0.2"
 # EKS 앱 안 터미널: 사용자의 로그인 셸을 PTY(의사 터미널)에 띄운다. 표준 라이브러리 Command는 제어 터미널·창 크기(SIGWINCH)를 다루지 못해서 필요하다. PTY 열기·크기 변경·자식 종료만 쓴다.
 portable-pty = "0.9"
 aws-sdk-iam = "1"
