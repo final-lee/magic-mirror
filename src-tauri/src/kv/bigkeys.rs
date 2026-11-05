@@ -2,10 +2,10 @@
 //! 서버리스는 MEMORY가 막혀 있어 길이(원소 수·바이트)로 대신한다(`basis`가 밝힌다). 진행을 알리고 중단할 수 있다.
 //! 명령 제한 시간은 30초다.
 //!
-//! Valkey·Redis는 명령을 한 스레드에서 하나씩 처리한다. 수십만 키를 재는 동안 운영 명령이 밀리지 않게 천천히 간다.
-//! - SCAN 한 번에 1,000개를 받아 한꺼번에(파이프라인) 잰다. 한 번에 서버를 붙잡는 시간은 키당 수 µs라 수 ms다.
-//! - 한 번 재고 나면 걸린 시간만큼(최소 20ms) 쉰다. 이 작업이 서버 시간을 절반 넘게 쓰지 않는다(왕복이 길면 훨씬 덜 쓴다).
-//! - 5만 개마다 1초 쉬고, 그때까지의 상위 키를 중간 결과로 보낸다.
+//! Valkey·Redis는 명령을 한 스레드에서 하나씩 처리한다. 수십만 키를 재는 동안 운영 명령이 밀리지 않게 나눠서 간다.
+//! - SCAN 한 번에 5만 개를 받아 한꺼번에(파이프라인) 잰다. 서버는 받은 요청을 16KB씩 읽어 처리하고 그 사이에 다른 클라이언트를 받으므로,
+//!   5만 개를 한꺼번에 보내도 한 번에 붙잡는 시간은 짧다. 길게 붙잡는 것은 `SCAN … COUNT 50000` 한 번(운영 ElastiCache에서 약 44ms)뿐이다.
+//! - 5만 개를 재고 나면 걸린 시간만큼(최소 0.5초) 쉬고, 그때까지의 상위 키를 중간 결과로 보낸다. 이 작업이 서버 시간을 절반 넘게 쓰지 않는다.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -22,14 +22,11 @@ use super::value::{int, text};
 use crate::error::AppError;
 
 /// SCAN 한 번의 COUNT이자 한꺼번에 재는 키 수. fred가 한 연결에서 파이프라인하므로 왕복 한 번으로 잰다
-const SCAN_COUNT: usize = 1_000;
+pub const BATCH: usize = 50_000;
 /// 한 번 재고 나서 쉬는 가장 짧은 시간
-const MIN_GAP: Duration = Duration::from_millis(20);
-/// 이만큼 훑을 때마다 길게 쉬고 중간 결과를 보낸다
-pub const CHUNK: u64 = 50_000;
-const CHUNK_PAUSE: Duration = Duration::from_secs(1);
+const MIN_GAP: Duration = Duration::from_millis(500);
 
-/// 한 번 재는 데 `spent`가 걸렸을 때 다음까지 쉬는 시간: 걸린 만큼, 최소 20ms
+/// 한 번 재는 데 `spent`가 걸렸을 때 다음까지 쉬는 시간: 걸린 만큼, 최소 0.5초
 pub fn gap_after(spent: Duration) -> Duration {
     spent.max(MIN_GAP)
 }
@@ -64,7 +61,7 @@ async fn size_of(conn: &Connected, key: &[u8], basis: KvBigKeysBasis) -> Result<
 
 /// 상위 키에 종류를 붙인다(메모리 기준은 종류를 따로 묻는다)
 async fn typed(conn: &Connected, top: &[(u64, Vec<u8>, Option<KvType>)]) -> Result<Vec<KvBigKey>, AppError> {
-    let types = concurrently(top.iter(), SCAN_COUNT, |(_, key, kind)| async move {
+    let types = concurrently(top.iter(), BATCH, |(_, key, kind)| async move {
         Ok::<_, AppError>(match kind {
             Some(kind) => *kind,
             None => type_of(conn, key).await?.unwrap_or(KvType::Other),
@@ -74,12 +71,12 @@ async fn typed(conn: &Connected, top: &[(u64, Vec<u8>, Option<KvType>)]) -> Resu
     top.iter().zip(types).map(|((size, key, _), kind)| Ok(KvBigKey { name: KvKeyName::from_bytes(key), kind: kind?, size: *size })).collect()
 }
 
-/// 큰 키를 찾는다. 한 번 잴 때마다 `progress`로 진행(`keys: None`)을, 5만 개마다 그때까지의 상위 키(`keys: Some`)를 보낸다.
+/// 큰 키를 찾는다. 5만 개를 잴 때마다 `progress`로 진행과 그때까지의 상위 키를 보낸다.
 /// `stop`이 켜지면 거기까지 모은 것으로 끝낸다(`stopped`).
 pub async fn bigkeys(conn: &Connected, limit: usize, stop: &AtomicBool, mut progress: impl FnMut(KvBigKeysMessage)) -> Result<KvBigKeysReport, AppError> {
     let basis = if conn.mode() == KvMode::Serverless { KvBigKeysBasis::Length } else { KvBigKeysBasis::Memory };
     let total = dbsize(conn).await?;
-    let mut scanner = Scanner::start(conn, "*", None, SCAN_COUNT);
+    let mut scanner = Scanner::start(conn, "*", None, BATCH);
     let mut top: Vec<(u64, Vec<u8>, Option<KvType>)> = Vec::new();
     let mut scanned: u64 = 0;
     let mut stopped = false;
@@ -90,31 +87,20 @@ pub async fn bigkeys(conn: &Connected, limit: usize, stop: &AtomicBool, mut prog
         }
         let started = Instant::now();
         let Some(batch) = scanner.step().await? else { break };
-        let before = scanned;
         scanned += batch.len() as u64;
-        let sizes = concurrently(batch.iter(), SCAN_COUNT, |key| size_of(conn, key, basis)).await;
+        let sizes = concurrently(batch.iter(), BATCH, |key| size_of(conn, key, basis)).await;
         for (key, size) in batch.into_iter().zip(sizes) {
             if let Some((size, kind)) = size? {
                 top.push((size, key, kind));
             }
         }
-        // 모든 키를 들고 있지 않는다: 상위만 남긴다
-        if top.len() > limit * 4 {
-            keep_top(&mut top, limit);
-        }
+        keep_top(&mut top, limit);
         let spent = started.elapsed();
-        let total = total.max(scanned);
-        let more = scanner.cursor().is_some();
-        if more && scanned / CHUNK > before / CHUNK {
-            keep_top(&mut top, limit);
-            progress(KvBigKeysMessage::Progress { scanned, total, keys: Some(typed(conn, &top).await?) });
-            tokio::time::sleep(CHUNK_PAUSE).await;
-        } else {
-            progress(KvBigKeysMessage::Progress { scanned, total, keys: None });
-            if more {
-                tokio::time::sleep(gap_after(spent)).await;
-            }
+        if scanner.cursor().is_none() {
+            break;
         }
+        progress(KvBigKeysMessage::Progress { scanned, total: total.max(scanned), keys: Some(typed(conn, &top).await?) });
+        tokio::time::sleep(gap_after(spent)).await;
     }
     keep_top(&mut top, limit);
     let keys = typed(conn, &top).await?;

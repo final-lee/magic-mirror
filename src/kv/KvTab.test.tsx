@@ -517,7 +517,8 @@ describe("big keys", () => {
     await connected();
     openMenu("큰 키");
     fireEvent.click(screen.getByRole("button", { name: "찾기" }));
-    expect(await screen.findByText("100 / 1,000개 훑는 중…")).toBeInTheDocument();
+    // 뒤에 남은 시간이 붙을 수 있다
+    expect(await screen.findByText(/^100 \/ 1,000개 훑는 중…/)).toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "큰 키 찾기 진행" })).toHaveAttribute("aria-valuenow", "10");
     fireEvent.click(screen.getByRole("button", { name: "중단" }));
     expect(m.bigkeysStop).toHaveBeenCalledWith(kvTarget);

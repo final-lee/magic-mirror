@@ -177,7 +177,7 @@ export const CLIENT_MAP_LEGEND = "호스트 → 연결 이름(🐂 Bull 큐) · 
 export const CLIENT_MAP_LEGEND_NODES = "호스트 → 연결 이름(🐂 Bull 큐) → 노드 · 선 굵기는 연결 수";
 
 // 큰 키
-export const BIGKEYS_INTRO = "모든 키를 SCAN으로 훑으며 키마다 메모리를 재서 상위 50개를 찾아요. 서버는 명령을 한 번에 하나씩 처리하므로 1,000개씩 재고 걸린 만큼 쉬어 가며, 5만 개마다 잠깐 멈춰요. 키가 많으면 몇 분 걸려요";
+export const BIGKEYS_INTRO = "모든 키를 SCAN으로 훑으며 키마다 메모리를 재서 상위 50개를 찾아요. 서버는 명령을 한 번에 하나씩 처리하므로 5만 개씩 재고 걸린 만큼 쉬어 가며, 그때마다 중간 결과를 보여요";
 export const BIGKEYS_FIND = "찾기";
 export const BIGKEYS_REFIND = "다시 찾기";
 export const BIGKEYS_STOP = "중단";
