@@ -14,6 +14,8 @@ mod explorer_commands;
 mod iam;
 mod iam_commands;
 mod jsonl;
+mod kv;
+mod kv_commands;
 pub mod k8s;
 mod k8s_access_commands;
 mod k8s_commands;
@@ -61,9 +63,11 @@ pub fn run() {
             app.manage(argocd::ArgocdState::default());
             app.manage(argowf::client::State::new(dir.join("settings.json")));
             app.manage(pg_commands::PgState::new(dir.join("db-changes.jsonl")));
+            app.manage(kv_commands::KvState::default());
             app.manage(cost_commands::CostState::new(dir.join("cost-cache.json")));
             app.manage(resource_index::ResourceIndexState::new(dir.join("resource-index.json")));
             pg_commands::spawn_sweeper(app.handle().clone());
+            kv_commands::spawn_sweeper(app.handle().clone());
             std::thread::spawn(explorer::external::sweep_stale);
             mouse_nav::install(app.handle().clone());
             Ok(())
@@ -138,6 +142,24 @@ pub fn run() {
             pg_commands::pg_preset,
             pg_commands::pg_drop_plan,
             pg_commands::pg_apply_drop,
+            kv_commands::kv_target,
+            kv_commands::kv_open,
+            kv_commands::kv_overview,
+            kv_commands::kv_scan,
+            kv_commands::kv_key,
+            kv_commands::kv_slowlog,
+            kv_commands::kv_clients,
+            kv_commands::kv_bigkeys,
+            kv_commands::kv_bigkeys_stop,
+            kv_commands::kv_close,
+            kv_commands::kv_forget_password,
+            kv_commands::kv_bull_queues,
+            kv_commands::kv_bull_queue,
+            kv_commands::kv_bull_jobs,
+            kv_commands::kv_bull_job,
+            kv_commands::kv_bull_flow,
+            kv_commands::kv_bull_transitions,
+            kv_commands::kv_bull_topology,
             k8s_access_commands::k8s_access,
             k8s_access_commands::k8s_access_matrix,
             k8s_access_commands::k8s_access_cell,

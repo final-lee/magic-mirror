@@ -56,6 +56,21 @@ export const rdsService: ServiceInfo = {
   ],
 };
 
+/** ElastiCache 서비스 정의(유형 이름은 백엔드 어댑터와 같다). 목록의 행은 cacheRow로 만든다. */
+export const elasticacheService: ServiceInfo = {
+  id: "elasticache",
+  name: "ElastiCache",
+  global: false,
+  types: [
+    { id: "replication-groups", name: "Replication Groups", columns: [column("name", "Identifier"), column("engine", "Engine")] },
+    { id: "cache-clusters", name: "Cache Clusters", columns: [column("name", "Identifier"), column("engine", "Engine"), column("group", "Replication group")] },
+    { id: "serverless-caches", name: "Serverless Caches", columns: [column("name", "Identifier"), column("engine", "Engine")] },
+  ],
+};
+
+/** ElastiCache 목록의 행. 복제 그룹에 속한 캐시 클러스터는 extra로 `{ group }`을 준다. */
+export const cacheRow = (id: string, engine: string, extra: Record<string, string> = {}): Resource => makeResource(id, { name: id, engine, ...extra });
+
 /** RDS 목록의 행. 클러스터에 속한 인스턴스는 extra로 `{ cluster }`를 준다. */
 export const dbRow = (id: string, engine: string, extra: Record<string, string> = {}): Resource => makeResource(id, { name: id, engine, ...extra });
 

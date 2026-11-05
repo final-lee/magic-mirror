@@ -9,7 +9,10 @@ import { LOGIN_USER, sampleFindings as samplePgFindings, sampleOverview as sampl
 import { pgKeys } from "./pg/queries";
 import { vpcApi } from "./vpcmap/api";
 import { sampleTopology } from "./vpcmap/fixtures";
-import { dbRow, eksService, makeResource, rdsService, renderWithClient, sampleServices } from "./test/utils";
+import { cacheRow, dbRow, eksService, elasticacheService, makeResource, rdsService, renderWithClient, sampleServices } from "./test/utils";
+import { kvApi } from "./kv/api";
+import { sampleKeys as kvSampleKeys, sampleOverview as kvSampleOverview, sampleTargetInfo as kvSampleTargetInfo } from "./kv/fixtures";
+import { kvKeys } from "./kv/queries";
 import { FOCUS_GONE } from "./components/ResourceArea";
 import { k8sApi } from "./k8s/api";
 import { tabTitle } from "./k8s/text";
@@ -61,6 +64,9 @@ vi.mock("./pg/api", () => ({
     findings: vi.fn(),
     close: vi.fn(async () => null),
   },
+}));
+vi.mock("./kv/api", () => ({
+  kvApi: { target: vi.fn(), open: vi.fn(), overview: vi.fn(), scan: vi.fn(), key: vi.fn(), slowlog: vi.fn(), clients: vi.fn(), bigkeys: vi.fn(), bigkeysStop: vi.fn(), close: vi.fn(async () => null), forgetPassword: vi.fn(), bullQueues: vi.fn(), bullQueue: vi.fn(), bullJobs: vi.fn(), bullJob: vi.fn(), bullFlow: vi.fn(), bullTransitions: vi.fn(), bullTopology: vi.fn() },
 }));
 // 터미널(xterm)은 k8s/PodTerminal.test에서 본다
 vi.mock("./k8s/PodTerminal", () => ({ PodTerminal: () => null }));
@@ -870,6 +876,177 @@ describe("PostgreSQL 탭", () => {
       await waitFor(() => expect(targetsOf("orders-aurora")).toBe(2));
       expect(pgApi.open).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("⚡ Valkey·Redis 탭", () => {
+  const target = (id: string, kind: "replicationGroup" | "serverlessCache" | "cacheCluster" = "replicationGroup") => ({ profile: "prod", region: "ap-northeast-2", kind, id });
+  const arnOf = (id: string) => `arn:aws:elasticache:ap-northeast-2:123456789012:replicationgroup:${id}`;
+  const kvTabs = () => screen.queryAllByRole("tab", { name: /⚡/ });
+  const closeButtonOf = (tab: HTMLElement) => within(tab.parentElement as HTMLElement).getByRole("button", { name: /닫기/ });
+  const login = { mode: "none" as const, user: "", database: 0 };
+
+  beforeEach(() => {
+    // 탭은 진짜 KvTab을 그린다. 대상 확인 → 연결 → 키 읽기 순이다. 연결 방식은 기억해 두어 바로 연결한다.
+    vi.mocked(kvApi.target).mockImplementation(async (t) => kvSampleTargetInfo({ identifier: t.id, arn: arnOf(t.id), users: null, userGroupIds: [] }));
+    vi.mocked(kvApi.open).mockResolvedValue(kvSampleOverview());
+    vi.mocked(kvApi.overview).mockResolvedValue(kvSampleOverview());
+    vi.mocked(kvApi.scan).mockResolvedValue({ keys: kvSampleKeys, cursor: null, scanned: 10 });
+    m.listServices.mockResolvedValue([...sampleServices, elasticacheService]);
+    m.getSettings.mockResolvedValue({ enabledServices: ["ec2", "elasticache"], favorites: [], lastProfile: "prod", lastRegion: null, kvLogins: { [arnOf("sessions")]: login, [arnOf("cart")]: login } });
+    m.listResources.mockImplementation(async (_p, _r, _service, typeId) => ({
+      items:
+        typeId === "replication-groups"
+          ? [cacheRow("sessions", "valkey"), cacheRow("cart", "redis"), cacheRow("mc-group", "memcached")]
+          : typeId === "cache-clusters"
+            ? [cacheRow("sessions-001", "valkey", { group: "sessions" }), cacheRow("catalog-mc", "memcached", { group: "" })]
+            : [cacheRow("feature-flags", "valkey")],
+      truncated: false,
+    }));
+  });
+
+  const showGroups = async () => {
+    const view = renderWithClient(<App />);
+    fireEvent.click(await screen.findByText("ElastiCache"));
+    fireEvent.click(screen.getByText("Replication Groups"));
+    await screen.findByText("sessions");
+    return view;
+  };
+  const openGroup = async (name: string) => fireEvent.doubleClick(await screen.findByText(name));
+  const connected = () => screen.findByRole("navigation", { name: "Valkey·Redis 메뉴" });
+
+  test("double-clicking a Valkey replication group opens an active ⚡ tab titled with its identifier", async () => {
+    await showGroups();
+    await openGroup("sessions");
+    const tab = await screen.findByRole("tab", { name: "⚡ sessions" });
+    expect(tab).toHaveAttribute("aria-selected", "true");
+    expect(kvTabs()).toHaveLength(1);
+    await connected();
+    expect(kvApi.open).toHaveBeenCalledWith(target("sessions"), { mode: "none", user: "", database: 0, password: null, rememberPassword: false });
+  });
+
+  test("a member of a replication group opens the tab of its group", async () => {
+    renderWithClient(<App />);
+    fireEvent.click(await screen.findByText("ElastiCache"));
+    fireEvent.click(screen.getByText("Cache Clusters"));
+    fireEvent.doubleClick(await screen.findByText("sessions-001"));
+    expect(await screen.findByRole("tab", { name: "⚡ sessions" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("a serverless cache opens its own tab", async () => {
+    renderWithClient(<App />);
+    fireEvent.click(await screen.findByText("ElastiCache"));
+    fireEvent.click(screen.getByText("Serverless Caches"));
+    fireEvent.doubleClick(await screen.findByText("feature-flags"));
+    expect(await screen.findByRole("tab", { name: "⚡ feature-flags" })).toBeInTheDocument();
+    expect(kvApi.target).toHaveBeenCalledWith(target("feature-flags", "serverlessCache"));
+  });
+
+  test("a Memcached cluster shows the notice and opens no tab", async () => {
+    renderWithClient(<App />);
+    fireEvent.click(await screen.findByText("ElastiCache"));
+    fireEvent.click(screen.getByText("Cache Clusters"));
+    fireEvent.doubleClick(await screen.findByText("catalog-mc"));
+    const notice = await screen.findByText("Valkey·Redis OSS 캐시만 열 수 있어요");
+    expect(notice.closest('[role="status"]')).not.toBeNull();
+    expect(kvTabs()).toHaveLength(0);
+    expect(kvApi.target).not.toHaveBeenCalled();
+  });
+
+  test("opening the same target twice keeps one tab and activates it", async () => {
+    await showGroups();
+    await openGroup("sessions");
+    await screen.findByRole("tab", { name: "⚡ sessions" });
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    expect(screen.getByRole("tab", { name: "⚡ sessions" })).toHaveAttribute("aria-selected", "false");
+    fireEvent.doubleClick(within(screen.getByRole("table")).getByText("sessions"));
+    expect(kvTabs()).toHaveLength(1);
+    expect(screen.getByRole("tab", { name: "⚡ sessions" })).toHaveAttribute("aria-selected", "true");
+    expect(kvApi.close).not.toHaveBeenCalled();
+  });
+
+  test("closing the tab closes the connection of that target only and returns to the resources tab", async () => {
+    const { qc } = await showGroups();
+    await openGroup("sessions");
+    const first = await screen.findByRole("tab", { name: "⚡ sessions" });
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    fireEvent.doubleClick(screen.getByText("cart"));
+    await screen.findByRole("tab", { name: "⚡ cart" });
+    qc.setQueryData(kvKeys.slowlog(target("sessions")), []);
+    fireEvent.click(closeButtonOf(first));
+    expect(kvApi.close).toHaveBeenCalledTimes(1);
+    expect(kvApi.close).toHaveBeenCalledWith(target("sessions"));
+    expect(qc.getQueryData(kvKeys.slowlog(target("sessions")))).toBeUndefined();
+    expect(screen.getByRole("tab", { name: "⚡ cart" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(closeButtonOf(screen.getByRole("tab", { name: "⚡ cart" })));
+    expect(kvApi.close).toHaveBeenLastCalledWith(target("cart"));
+    expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("changing profile closes all ⚡ tabs and each connection, even from the resources tab", async () => {
+    await showGroups();
+    await openGroup("sessions");
+    await screen.findByRole("tab", { name: "⚡ sessions" });
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    fireEvent.doubleClick(screen.getByText("cart"));
+    await screen.findByRole("tab", { name: "⚡ cart" });
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "프로필" }), { target: { value: "dev" } });
+    expect(kvTabs()).toHaveLength(0);
+    expect(kvApi.close).toHaveBeenCalledTimes(2);
+    expect(kvApi.close).toHaveBeenCalledWith(target("sessions"));
+    expect(kvApi.close).toHaveBeenCalledWith(target("cart"));
+    expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("changing the region keeps the tab", async () => {
+    await showGroups();
+    await openGroup("sessions");
+    await screen.findByRole("tab", { name: "⚡ sessions" });
+    fireEvent.change(screen.getByRole("combobox", { name: "리전" }), { target: { value: "us-east-1" } });
+    expect(kvTabs()).toHaveLength(1);
+    expect(kvApi.close).not.toHaveBeenCalled();
+  });
+
+  describe("refreshing (⌘R)", () => {
+    const cmdR = () => fireEvent.keyDown(window, { key: "r", metaKey: true });
+    const overviewsOf = (id: string) => vi.mocked(kvApi.overview).mock.calls.filter(([t]) => t.id === id).length;
+
+    test("⌘R with a ⚡ tab showing reconnects that target and reads the keys again", async () => {
+      await showGroups();
+      await openGroup("sessions");
+      await connected();
+      await screen.findByRole("tree", { name: "키 목록" });
+      cmdR();
+      await waitFor(() => expect(overviewsOf("sessions")).toBe(1));
+      await waitFor(() => expect(kvApi.scan).toHaveBeenCalledTimes(2));
+    });
+
+    test("it is the tab that is showing that is read, and with the resources tab showing no ⚡ tab is", async () => {
+      await showGroups();
+      await openGroup("sessions");
+      await connected();
+      fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+      fireEvent.doubleClick(screen.getByText("cart"));
+      await screen.findByRole("tab", { name: "⚡ cart" });
+      await waitFor(() => expect(vi.mocked(kvApi.open).mock.calls.filter(([t]) => t.id === "cart")).toHaveLength(1));
+      cmdR();
+      await waitFor(() => expect(overviewsOf("cart")).toBe(1));
+      expect(overviewsOf("sessions")).toBe(0);
+      fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+      cmdR();
+      await act(async () => {});
+      expect(overviewsOf("sessions")).toBe(0);
+      expect(overviewsOf("cart")).toBe(1);
+    });
+  });
+
+  test("the login that worked is remembered in the settings under the target's ARN", async () => {
+    m.getSettings.mockResolvedValue({ enabledServices: ["ec2", "elasticache"], favorites: [], lastProfile: "prod", lastRegion: null });
+    await showGroups();
+    await openGroup("sessions");
+    fireEvent.click(await screen.findByRole("button", { name: "연결" }));
+    await waitFor(() => expect(m.saveSettings).toHaveBeenCalledWith(expect.objectContaining({ kvLogins: { [arnOf("sessions")]: login } })));
   });
 });
 
