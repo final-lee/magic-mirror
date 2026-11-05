@@ -7,6 +7,7 @@ import type {
   KvBullFlow,
   KvBullJob,
   KvBullJobsPage,
+  KvBullQueue,
   KvBullQueueView,
   KvBullQueuesPage,
   KvBullState,
@@ -50,6 +51,7 @@ export const kvKeys = {
   clients: (t: KvTarget) => ["kv", targetKey(t), "clients"] as const,
   // 🐂 Bull. 세 번째 요소는 모두 "bull"이다(refreshKv가 개요 다음에 다시 읽는다).
   bullQueues: (t: KvTarget, prefix: string) => ["kv", targetKey(t), "bull", "queues", prefix] as const,
+  bullSummaries: (t: KvTarget, prefix: string, names: string[]) => ["kv", targetKey(t), "bull", "summaries", prefix, names] as const,
   bullQueue: (t: KvTarget, prefix: string, name: string) => ["kv", targetKey(t), "bull", "queue", prefix, name] as const,
   bullJobs: (t: KvTarget, prefix: string, name: string, state: KvBullState) => ["kv", targetKey(t), "bull", "jobs", prefix, name, state] as const,
   bullJob: (t: KvTarget, prefix: string, name: string, id: string) => ["kv", targetKey(t), "bull", "job", prefix, name, id] as const,
@@ -60,8 +62,6 @@ export const kvKeys = {
 
 /** 큐 목록·큐 상세를 자동으로 다시 읽는 간격 */
 export const BULL_REFRESH_MS = 5000;
-/** 큐를 찾으며 이만큼보다 많은 키를 훑었으면 5초마다 다시 훑지 않는다(자동 새로 고침이 서버를 계속 훑게 되므로) */
-export const BULL_AUTO_SCAN_LIMIT = 100_000;
 /** 작업 표 한 쪽의 작업 수 */
 export const BULL_JOBS_PAGE = 50;
 
@@ -141,20 +141,34 @@ export function useKvClients(target: KvTarget, enabled: boolean) {
 }
 
 /**
- * 🐂 큐 찾기(kv_bull_queues). 이어서 찾으면(cursor) 쪽이 늘어난다. auto가 켜져 있고 끝까지 찾았고 너무 많은 키를 훑지 않았을 때만 5초마다 다시 읽는다.
+ * 🐂 큐 찾기(kv_bull_queues): 키 공간을 SCAN으로 훑는다. 이어서 찾으면(cursor) 쪽이 늘어난다.
+ * 키가 많은 서버에서는 오래 걸리므로 자동으로 다시 훑지 않는다([다시 읽기]·prefix 바꾸기·전체 새로 고침 때만). 자동 새로 고침은 useKvBullSummaries가 한다.
  */
-export function useKvBullQueues(target: KvTarget, prefix: string, auto: boolean) {
+export function useKvBullQueues(target: KvTarget, prefix: string) {
   return useInfiniteQuery<KvBullQueuesPage, AppError, { pages: KvBullQueuesPage[] }, readonly unknown[], string | null>({
     queryKey: kvKeys.bullQueues(target, prefix),
     queryFn: ({ pageParam }) => kvApi.bullQueues(target, prefix, pageParam),
     initialPageParam: null,
     getNextPageParam: (last) => last.cursor ?? undefined,
-    refetchInterval: (query) => {
-      const pages = query.state.data?.pages;
-      if (!auto || query.state.status === "error" || !pages) return false;
-      return pages[pages.length - 1].cursor === null && pages[0].scanned <= BULL_AUTO_SCAN_LIMIT ? BULL_REFRESH_MS : false;
-    },
-    staleTime: 0,
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+/**
+ * 🐂 찾은 큐들의 요약만 다시 읽는다(kv_bull_queue_summaries, 키 공간을 훑지 않는다). 처음 값은 찾기 결과이고, auto가 켜져 있으면 5초마다 다시 읽는다.
+ * `foundAt`은 찾기 결과의 시각이다: 화면은 둘 중 새것을 보인다.
+ */
+export function useKvBullSummaries(target: KvTarget, prefix: string, found: KvBullQueue[], foundAt: number, auto: boolean) {
+  const names = found.map((q) => q.name);
+  return useQuery<KvBullQueue[], AppError>({
+    queryKey: kvKeys.bullSummaries(target, prefix, names),
+    queryFn: () => kvApi.bullQueueSummaries(target, prefix, names),
+    initialData: found,
+    initialDataUpdatedAt: foundAt,
+    enabled: names.length > 0,
+    staleTime: BULL_REFRESH_MS,
+    refetchInterval: (query) => (auto && query.state.status !== "error" ? BULL_REFRESH_MS : false),
     retry: false,
   });
 }

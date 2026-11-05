@@ -18,9 +18,22 @@ pub fn glob_escape(text: &str) -> String {
     out
 }
 
-/// 큐를 찾는 SCAN 패턴: `<prefix>:*:<종류>`
-pub fn discovery_pattern(prefix: &str, suffix: &str) -> String {
-    format!("{}:*:{suffix}", glob_escape(prefix))
+/// 사용자가 넣은 prefix: 앞뒤 공백과 끝의 `:`를 뗀다. 남는 게 없으면 `None`.
+/// BullMQ의 prefix가 정말 `:`로 끝나도(`a:` → 키 `a::q:meta`) `a`로 찾으면 큐 이름이 `:q`가 되어 키는 같게 만들어진다.
+pub fn normalize_prefix(prefix: &str) -> Option<&str> {
+    let prefix = prefix.trim().trim_end_matches(':');
+    (!prefix.is_empty()).then_some(prefix)
+}
+
+/// 큐를 찾는 SCAN 패턴. 큐가 있다는 표시인 `<prefix>:<큐>:meta`(BullMQ)와 `<prefix>:<큐>:id`(BullMQ·옛 Bull)를 한 번의 훑기로 모은다.
+/// glob에는 "또는"이 없어 마지막 마디가 `me…`·`id…`인 키를 모두 받고, 정확한 이름은 [`discovered_queue`]가 가린다.
+pub fn discovery_pattern(prefix: &str) -> String {
+    format!("{}:*:[im][de]*", glob_escape(prefix))
+}
+
+/// 찾기 패턴에 걸린 키에서 큐 이름(`…:meta`나 `…:id`가 아니면 `None`)
+pub fn discovered_queue(prefix: &str, key: &str) -> Option<String> {
+    queue_name_of(prefix, key, "meta").or_else(|| queue_name_of(prefix, key, "id"))
 }
 
 /// 큐 키: `<prefix>:<queue>:<종류>`

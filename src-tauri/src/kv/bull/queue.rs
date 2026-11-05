@@ -1,5 +1,5 @@
 //! 큐 찾기와 큐 하나의 읽기: 상태별 수, 일시정지, 워커, 최근 처리량, 시간 분포, 실패 이유, 지표.
-//! 읽기 명령만 쓰고 `KEYS`는 쓰지 않는다. 큐 이름은 `SCAN MATCH <prefix>:*:meta`와 `…:id`로 모은다.
+//! 읽기 명령만 쓰고 `KEYS`는 쓰지 않는다. 큐 이름은 `…:meta`와 `…:id` 키를 한 번의 SCAN으로 모은다.
 
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -8,8 +8,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use futures::future::join_all;
 use crate::kv::value::concurrently;
 
-use super::io::{card_any, exists, flavor_of, hmget, llen, lrange, zcard, zrange_ids, zrange_scored};
-use super::keys::{discovery_pattern, queue_key, queue_name_of, state_suffix, worker_name};
+use super::cache::FinishedJob;
+use super::io::{card_any, exists, flavor_of, hmget, llen, lrange, zcard, zrange_scored};
+use super::keys::{discovered_queue, discovery_pattern, queue_key, state_suffix, worker_name};
 use super::model::{
     KvBullCounts, KvBullFlavor, KvBullQueue, KvBullQueueView, KvBullQueuesPage, KvBullRecent, KvBullState, KvBullWorker,
 };
@@ -23,15 +24,17 @@ use crate::kv::model::KvClient;
 use crate::kv::scan::Scanner;
 use crate::kv::value::{int, text};
 
-/// 큐를 찾는 SCAN의 COUNT
-const DISCOVERY_COUNT: usize = 1_000;
+/// 큐를 찾는 SCAN의 COUNT. 대부분이 작업 해시인 수십만 키를 원격(왕복 수십 ms)으로 훑으므로 크게 잡아 왕복 수를 줄인다.
+/// 크게 잡을수록 한 번의 SCAN이 서버를 오래 붙잡는다(단일 스레드라 그동안 워커의 명령이 기다린다).
+/// 운영 ElastiCache(Redis 7.1)에서 잰 값: 1만 개에 약 20ms, 5만 개에 약 44ms, 10만 개에 약 104ms. 50ms 안쪽인 5만으로 둔다.
+const DISCOVERY_COUNT: usize = 50_000;
 /// 한 번의 찾기에서 쓰는 시간과 훑는 키 수(근사: SCAN 횟수 × COUNT)의 한도
 const DISCOVERY_TIME: Duration = Duration::from_secs(20);
-const DISCOVERY_KEYS: u64 = 500_000;
-/// 큐 정보를 동시에 읽는 큐 수
-const QUEUE_CONCURRENCY: usize = 8;
-/// 분 구간 ZCOUNT를 동시에 보내는 수
-const BUCKET_CONCURRENCY: usize = 30;
+const DISCOVERY_KEYS: u64 = 5_000_000;
+/// 큐 정보를 동시에 읽는 큐 수. 명령은 fred가 같은 연결에서 파이프라인하므로 왕복을 겹치는 만큼 빨라진다
+const QUEUE_CONCURRENCY: usize = 16;
+/// 분 구간 ZCOUNT를 동시에 보내는 수(한 시간 60칸을 한 번에)
+const BUCKET_CONCURRENCY: usize = stats::RECENT_MINUTES;
 /// 최근 끝난 작업을 읽는 수(시간 분포, 실패 이유)
 const RECENT_JOBS: i64 = 100;
 /// 지표(`metrics:*:data`)에서 읽는 최대 칸 수(하루)
@@ -42,53 +45,33 @@ pub fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
-/// 찾기 커서: `b1.<단계>.<SCAN 커서>`. 단계 0은 `:meta`, 1은 `:id`를 찾는 중이다
-fn encode_cursor(phase: u8, scan: &ScanCursor) -> String {
-    format!("b1.{phase}.{}", scan.encode())
+/// 찾기 커서: `b2.<SCAN 커서>`
+fn encode_cursor(scan: &ScanCursor) -> String {
+    format!("b2.{}", scan.encode())
 }
 
-fn decode_cursor(text: &str) -> Result<(u8, ScanCursor), AppError> {
-    let mut parts = text.splitn(3, '.');
-    let (Some("b1"), Some(phase), Some(scan)) = (parts.next(), parts.next(), parts.next()) else {
-        return Err(AppError::other("이어 찾을 자리가 올바르지 않아요. 처음부터 다시 찾아 주세요"));
-    };
-    let phase = phase.parse::<u8>().ok().filter(|p| *p <= 1).ok_or_else(|| AppError::other("이어 찾을 자리가 올바르지 않아요. 처음부터 다시 찾아 주세요"))?;
-    Ok((phase, ScanCursor::decode(scan)?))
+fn decode_cursor(text: &str) -> Result<ScanCursor, AppError> {
+    let scan = text.strip_prefix("b2.").ok_or_else(|| AppError::other("이어 찾을 자리가 올바르지 않아요. 처음부터 다시 찾아 주세요"))?;
+    ScanCursor::decode(scan)
 }
 
 /// 큐 이름을 모은다. 한도에 걸리면 `truncated`와 이어 찾을 커서를 준다.
 async fn discover(conn: &Connected, prefix: &str, cursor: Option<&str>) -> Result<(BTreeSet<String>, u64, bool, Option<String>), AppError> {
-    let (mut phase, mut resume) = match cursor {
-        Some(text) => {
-            let (phase, scan) = decode_cursor(text)?;
-            (phase, Some(scan))
-        }
-        None => (0, None),
+    let pattern = discovery_pattern(prefix);
+    let mut scanner = match cursor {
+        Some(text) => Scanner::resume(conn, &pattern, None, DISCOVERY_COUNT, decode_cursor(text)?)?,
+        None => Scanner::start(conn, &pattern, None, DISCOVERY_COUNT),
     };
     let started = Instant::now();
     let mut names = BTreeSet::new();
     let mut calls: u64 = 0;
-    while phase <= 1 {
-        let suffix = if phase == 0 { "meta" } else { "id" };
-        let pattern = discovery_pattern(prefix, suffix);
-        let mut scanner = match resume.take() {
-            Some(scan) => Scanner::resume(conn, &pattern, None, DISCOVERY_COUNT, scan)?,
-            None => Scanner::start(conn, &pattern, None, DISCOVERY_COUNT),
-        };
-        while let Some(batch) = scanner.step().await? {
-            calls += 1;
-            names.extend(batch.iter().filter_map(|key| queue_name_of(prefix, &String::from_utf8_lossy(key), suffix)));
-            if calls * DISCOVERY_COUNT as u64 >= DISCOVERY_KEYS || started.elapsed() >= DISCOVERY_TIME {
-                // 이 단계가 마침 끝났으면 다음 단계에서 이어 찾는다
-                let next = match scanner.cursor() {
-                    Some(scan) => Some(encode_cursor(phase, &scan)),
-                    None if phase == 0 => Some(encode_cursor(1, &Scanner::initial_cursor(conn))),
-                    None => None,
-                };
-                return Ok((names, calls * DISCOVERY_COUNT as u64, next.is_some(), next));
-            }
+    while let Some(batch) = scanner.step().await? {
+        calls += 1;
+        names.extend(batch.iter().filter_map(|key| discovered_queue(prefix, &String::from_utf8_lossy(key))));
+        if calls * DISCOVERY_COUNT as u64 >= DISCOVERY_KEYS || started.elapsed() >= DISCOVERY_TIME {
+            let next = scanner.cursor().map(|scan| encode_cursor(&scan));
+            return Ok((names, calls * DISCOVERY_COUNT as u64, next.is_some(), next));
         }
-        phase += 1;
     }
     Ok((names, calls * DISCOVERY_COUNT as u64, false, None))
 }
@@ -112,7 +95,8 @@ async fn count_state(conn: &Connected, prefix: &str, queue: &str, state: KvBullS
 }
 
 /// `completed`·`failed`(BullMQ는 점수가 끝난 시각인 정렬 셋)의 최근 60분 분당 수. 가장 최근 것이 구간보다 오래됐으면 ZCOUNT를 보내지 않는다.
-async fn recent_counts(conn: &Connected, key: &str, start: i64) -> Result<Vec<u64>, AppError> {
+/// 이미 지난 분은 캐시에서 읽고, 아직 열린 최근 칸만 센다.
+async fn recent_counts(conn: &Connected, key: &str, start: i64, now: i64) -> Result<Vec<u64>, AppError> {
     let zeros = vec![0; stats::RECENT_MINUTES];
     if text(&conn.data(cmd("TYPE").arg(key)).await?).as_deref() != Some("zset") {
         return Ok(zeros);
@@ -121,32 +105,47 @@ async fn recent_counts(conn: &Connected, key: &str, start: i64) -> Result<Vec<u6
     if newest.first().is_none_or(|(_, score)| (*score as i64) < start) {
         return Ok(zeros);
     }
-    let counts = concurrently(0..stats::RECENT_MINUTES, BUCKET_CONCURRENCY, |i| async move {
+    let cache = conn.bull_cache();
+    let mut counts = zeros;
+    let mut missing = Vec::new();
+    for (i, count) in counts.iter_mut().enumerate() {
+        match cache.bucket(key, stats::bucket_range(start, i).0) {
+            Some(cached) => *count = cached,
+            None => missing.push(i),
+        }
+    }
+    let read = concurrently(missing.iter().copied(), BUCKET_CONCURRENCY, |i| async move {
         let (from, to) = stats::bucket_range(start, i);
         let reply = conn.data(cmd("ZCOUNT").arg(key).arg(from).arg(format!("({to}"))).await?;
-        Ok::<_, AppError>(int(&reply).and_then(|n| u64::try_from(n).ok()).unwrap_or(0))
+        Ok::<_, AppError>((i, from, int(&reply).and_then(|n| u64::try_from(n).ok()).unwrap_or(0)))
     })
     .await;
-    counts.into_iter().collect()
+    for row in read {
+        let (i, from, count) = row?;
+        cache.put_bucket(key, from, count, now);
+        counts[i] = count;
+    }
+    Ok(counts)
 }
 
-/// 큐 하나의 요약. `clients`는 CLIENT LIST(못 읽으면 `None`)
+/// 큐 하나의 요약. `clients`는 CLIENT LIST(못 읽으면 `None`).
+/// 종류(BullMQ·옛 Bull)에 기대지 않는 읽기는 종류를 묻는 것과 함께 보내 왕복 단계를 줄인다.
 pub async fn queue_info(conn: &Connected, prefix: &str, name: &str, now: i64, clients: Option<&[KvClient]>) -> Result<KvBullQueue, AppError> {
-    let (flavor, version, paused) = flavor_of(conn, prefix, name).await?;
+    let start = stats::bucket_start(now);
+    let ((flavor, version, paused), completed, failed, repeatables, metrics) = futures::future::try_join5(
+        flavor_of(conn, prefix, name),
+        recent_counts(conn, &queue_key(prefix, name, "completed"), start, now),
+        recent_counts(conn, &queue_key(prefix, name, "failed"), start, now),
+        zcard(conn, &queue_key(prefix, name, "repeat")),
+        exists(conn, &queue_key(prefix, name, "metrics:completed")),
+    )
+    .await?;
     let counts_read = join_all(KvBullState::ALL.iter().map(|&state| async move { Ok::<_, AppError>((state, count_state(conn, prefix, name, state, flavor).await?)) })).await;
     let mut counts = KvBullCounts::default();
     for read in counts_read {
         let (state, count) = read?;
         counts.set(state, count);
     }
-    let start = stats::bucket_start(now);
-    let (completed, failed, repeatables, metrics) = futures::future::try_join4(
-        recent_counts(conn, &queue_key(prefix, name, "completed"), start),
-        recent_counts(conn, &queue_key(prefix, name, "failed"), start),
-        zcard(conn, &queue_key(prefix, name, "repeat")),
-        exists(conn, &queue_key(prefix, name, "metrics:completed")),
-    )
-    .await?;
     Ok(KvBullQueue {
         prefix: prefix.to_string(),
         name: name.to_string(),
@@ -166,14 +165,25 @@ async fn client_list(conn: &Connected) -> Option<Vec<KvClient>> {
     clients(conn).await.ok()
 }
 
+/// 큐들의 요약(이름 순서대로)
+async fn infos(conn: &Connected, prefix: &str, names: impl IntoIterator<Item = &String>, clients: Option<&[KvClient]>) -> Result<Vec<KvBullQueue>, AppError> {
+    let now = now_ms();
+    let reads = concurrently(names, QUEUE_CONCURRENCY, |name| queue_info(conn, prefix, name, now, clients)).await;
+    reads.into_iter().collect()
+}
+
 /// 큐 목록의 한 쪽: 큐를 찾고(한도 안에서) 큐마다 요약을 읽는다
 pub async fn queues(conn: &Connected, prefix: &str, cursor: Option<&str>) -> Result<KvBullQueuesPage, AppError> {
-    let (names, scanned, truncated, next) = discover(conn, prefix, cursor).await?;
-    let now = now_ms();
-    let clients = client_list(conn).await;
-    let reads = concurrently(names.iter(), QUEUE_CONCURRENCY, |name| queue_info(conn, prefix, name, now, clients.as_deref())).await;
-    let queues = reads.into_iter().collect::<Result<Vec<_>, _>>()?;
+    let (found, clients) = futures::future::join(discover(conn, prefix, cursor), client_list(conn)).await;
+    let (names, scanned, truncated, next) = found?;
+    let queues = infos(conn, prefix, &names, clients.as_deref()).await?;
     Ok(KvBullQueuesPage { queues, scanned, truncated, cursor: next })
+}
+
+/// 이미 찾은 큐들의 요약만 다시 읽는다. 키 공간을 훑지 않아 키가 많은 서버에서도 자동으로 다시 읽을 수 있다
+pub async fn summaries(conn: &Connected, prefix: &str, names: &[String]) -> Result<Vec<KvBullQueue>, AppError> {
+    let clients = client_list(conn).await;
+    infos(conn, prefix, names, clients.as_deref()).await
 }
 
 fn ms_of(value: &Option<String>) -> Option<i64> {
@@ -196,18 +206,33 @@ async fn next_delayed(conn: &Connected, prefix: &str, queue: &str, flavor: KvBul
     Ok(first.first().map(|(_, score)| stats::delayed_at(*score, flavor)))
 }
 
+/// 끝난 작업들(`(ID, 끝난 시각 점수)`)의 시각과 실패 이유. 이미 읽은 끝남은 캐시에서 꺼낸다
+async fn finished_jobs(conn: &Connected, prefix: &str, queue: &str, entries: &[(String, f64)]) -> Result<Vec<FinishedJob>, AppError> {
+    let cache = conn.bull_cache();
+    let rows = concurrently(entries.iter(), QUEUE_CONCURRENCY * 4, |(id, score)| async move {
+        let key = queue_key(prefix, queue, id);
+        if let Some(job) = cache.job(&key, *score) {
+            return Ok::<_, AppError>(job);
+        }
+        let mut fields = hmget(conn, &key, &["timestamp", "processedOn", "finishedOn", "failedReason"]).await?.into_iter();
+        let job = FinishedJob { timestamp: fields.next().flatten(), processed_on: fields.next().flatten(), finished_on: fields.next().flatten(), failed_reason: fields.next().flatten() };
+        cache.put_job(&key, *score, job.clone());
+        Ok(job)
+    })
+    .await;
+    rows.into_iter().collect()
+}
+
 /// 최근 끝난 작업 100개의 (대기 시간, 처리 시간)들. BullMQ의 `completed`는 정렬 셋이라 최신순으로 읽는다
 async fn timing_samples(conn: &Connected, prefix: &str, queue: &str) -> Result<(Vec<u64>, Vec<u64>), AppError> {
     let key = queue_key(prefix, queue, "completed");
     if text(&conn.data(cmd("TYPE").arg(key.as_str())).await?).as_deref() != Some("zset") {
         return Ok((Vec::new(), Vec::new()));
     }
-    let ids = zrange_ids(conn, &key, 0, RECENT_JOBS - 1, true).await?;
-    let rows = concurrently(ids.iter(), QUEUE_CONCURRENCY * 4, |id| async move { hmget(conn, &queue_key(prefix, queue, id), &["timestamp", "processedOn", "finishedOn"]).await }).await;
+    let recent = zrange_scored(conn, &key, 0, RECENT_JOBS - 1, true).await?;
     let (mut waits, mut processes) = (Vec::new(), Vec::new());
-    for row in rows {
-        let row = row?;
-        let (created, started, finished) = (ms_of(&row[0]), ms_of(&row[1]), ms_of(&row[2]));
+    for job in finished_jobs(conn, prefix, queue, &recent).await? {
+        let (created, started, finished) = (ms_of(&job.timestamp), ms_of(&job.processed_on), ms_of(&job.finished_on));
         waits.extend(stats::span(created, started));
         processes.extend(stats::span(started, finished));
     }
@@ -221,16 +246,8 @@ async fn failures(conn: &Connected, prefix: &str, queue: &str) -> Result<Vec<(St
         return Ok(Vec::new());
     }
     let recent = zrange_scored(conn, &key, 0, RECENT_JOBS - 1, true).await?;
-    let rows = concurrently(recent.iter(), QUEUE_CONCURRENCY * 4, |(id, score)| async move {
-        let reason = hmget(conn, &queue_key(prefix, queue, id), &["failedReason"]).await?.remove(0);
-        Ok::<_, AppError>(reason.map(|r| (r, Some(*score as i64))))
-    })
-    .await;
-    let mut out = Vec::new();
-    for row in rows {
-        out.extend(row?);
-    }
-    Ok(out)
+    let jobs = finished_jobs(conn, prefix, queue, &recent).await?;
+    Ok(jobs.into_iter().zip(&recent).filter_map(|(job, (_, score))| job.failed_reason.map(|r| (r, Some(*score as i64)))).collect())
 }
 
 /// 지표 목록 하나(`metrics:<종류>:data`, 최근이 앞)

@@ -13,7 +13,28 @@ fn queue_names_are_the_part_between_prefix_and_suffix() {
 #[test]
 fn glob_characters_in_a_prefix_are_escaped() {
     assert_eq!(glob_escape("a*b?[c]\\"), "a\\*b\\?\\[c\\]\\\\");
-    assert_eq!(discovery_pattern("{bull}", "meta"), "{bull}:*:meta");
+    assert_eq!(discovery_pattern("{bull}"), "{bull}:*:[im][de]*");
+}
+
+#[test]
+fn only_meta_and_id_keys_name_a_queue_among_what_the_pattern_lets_through() {
+    assert_eq!(discovered_queue("bull", "bull:emails:meta").as_deref(), Some("emails"));
+    assert_eq!(discovered_queue("bull", "bull:legacy:id").as_deref(), Some("legacy"));
+    // 패턴(`me…`·`id…`)에는 걸리지만 큐 표시가 아닌 키들
+    for key in ["bull:q:metrics:completed", "bull:q:meta-paused", "bull:q:member-7", "bull:q:idle", "bull:q:12:dependencies"] {
+        assert_eq!(discovered_queue("bull", key), None, "{key}");
+    }
+}
+
+#[test]
+fn a_prefix_loses_surrounding_spaces_and_trailing_colons() {
+    assert_eq!(normalize_prefix(" bull: "), Some("bull"));
+    assert_eq!(normalize_prefix("{bull}"), Some("{bull}"));
+    assert_eq!(normalize_prefix("app:bull::"), Some("app:bull"));
+    assert_eq!(normalize_prefix(" : "), None);
+    // prefix가 정말 `:`로 끝나는 큐(`a::q:meta`)는 이름이 `:q`가 되어 같은 키로 이어진다
+    let name = discovered_queue(normalize_prefix("a:").unwrap(), "a::q:meta").unwrap();
+    assert_eq!(queue_key("a", &name, "wait"), "a::q:wait");
 }
 
 #[test]

@@ -6,7 +6,7 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 
 use super::flow::split_job_key;
-use super::io::{flavor_of, hmget, is_set, lrange, zrange_ids};
+use super::io::{hmget, is_set, lrange, zrange_ids};
 use super::keys::{job_key, queue_key, worker_name};
 use super::model::{KvBullFlavor, KvBullTopology, KvBullTopologyLink, KvBullTopologyQueue, KvBullTopologyWorker};
 use super::{queue, stats};
@@ -20,6 +20,8 @@ use crate::kv::value::concurrently;
 pub const SAMPLE_PER_QUEUE: usize = 50;
 /// 표본 작업을 동시에 읽는 수
 const CONCURRENCY: usize = 16;
+/// 표본을 동시에 읽는 큐 수
+const QUEUE_CONCURRENCY: usize = 8;
 
 /// 워커 연결 이름 `<prefix>:<base64(큐)>[:w:<워커 이름>]`에서 큐 이름. 이 prefix가 아니거나 base64가 아니면 `None`
 pub fn decode_worker_queue(prefix: &str, client_name: &str) -> Option<String> {
@@ -86,29 +88,41 @@ async fn sample_ids(conn: &Connected, prefix: &str, name: &str, flavor: KvBullFl
     let last = SAMPLE_PER_QUEUE as i64 - 1;
     let completed_key = queue_key(prefix, name, "completed");
     // BullMQ와 옛 Bull 3의 `completed`는 정렬 셋이다. 오래된 Bull의 셋은 순서가 없어 표본에서 뺀다
-    let completed = if flavor == KvBullFlavor::Bullmq || !is_set(conn, &completed_key).await? { zrange_ids(conn, &completed_key, 0, last, true).await? } else { Vec::new() };
-    let wait = lrange(conn, &queue_key(prefix, name, "wait"), 0, last).await?;
-    let active = lrange(conn, &queue_key(prefix, name, "active"), 0, last).await?;
-    let waiting_children = zrange_ids(conn, &queue_key(prefix, name, "waiting-children"), 0, last, false).await?;
+    let completed = async {
+        if flavor == KvBullFlavor::Bullmq || !is_set(conn, &completed_key).await? { zrange_ids(conn, &completed_key, 0, last, true).await } else { Ok(Vec::new()) }
+    };
+    let (completed, wait, active, waiting_children) = futures::future::try_join4(
+        completed,
+        lrange(conn, &queue_key(prefix, name, "wait"), 0, last),
+        lrange(conn, &queue_key(prefix, name, "active"), 0, last),
+        zrange_ids(conn, &queue_key(prefix, name, "waiting-children"), 0, last, false),
+    )
+    .await?;
     Ok(take_balanced(vec![completed, wait, active, waiting_children], SAMPLE_PER_QUEUE))
+}
+
+/// 큐 하나에서 읽은 표본 작업 수와, 그 작업들이 가리키는 부모 큐들
+async fn parents_of(conn: &Connected, prefix: &str, name: &str, flavor: KvBullFlavor) -> Result<(u64, Vec<String>), AppError> {
+    let ids = sample_ids(conn, prefix, name, flavor).await?;
+    let reads = concurrently(ids.iter(), CONCURRENCY, |id| async move { hmget(conn, &job_key(prefix, name, id), &["parentKey", "parent"]).await }).await;
+    let sampled = reads.len() as u64;
+    let mut parents = Vec::new();
+    for read in reads {
+        let fields = read?;
+        parents.extend(stats::parent_of(fields[1].as_deref(), fields[0].as_deref()).and_then(|p| parent_queue_name(prefix, &format!("{}:{}", p.queue_key, p.id))));
+    }
+    Ok((sampled, parents))
 }
 
 pub async fn topology(conn: &Connected, prefix: &str) -> Result<KvBullTopology, AppError> {
     let page = queue::queues(conn, prefix, None).await?;
+    let reads = concurrently(page.queues.iter(), QUEUE_CONCURRENCY, |q| parents_of(conn, prefix, &q.name, q.flavor)).await;
     let mut pairs: Vec<(String, String)> = Vec::new();
     let mut sampled = 0u64;
-    for q in &page.queues {
-        let (flavor, _, _) = flavor_of(conn, prefix, &q.name).await?;
-        let ids = sample_ids(conn, prefix, &q.name, flavor).await?;
-        let reads = concurrently(ids.iter(), CONCURRENCY, |id| async move { hmget(conn, &job_key(prefix, &q.name, id), &["parentKey", "parent"]).await }).await;
-        for read in reads {
-            let fields = read?;
-            sampled += 1;
-            let parent = stats::parent_of(fields[1].as_deref(), fields[0].as_deref());
-            if let Some(parent) = parent.and_then(|p| parent_queue_name(prefix, &format!("{}:{}", p.queue_key, p.id))) {
-                pairs.push((parent, q.name.clone()));
-            }
-        }
+    for (q, read) in page.queues.iter().zip(reads) {
+        let (count, parents) = read?;
+        sampled += count;
+        pairs.extend(parents.into_iter().map(|parent| (parent, q.name.clone())));
     }
     let workers = clients(conn).await.ok().map(|list| workers_of(&list, prefix));
     let queues = page.queues.iter().map(|q| KvBullTopologyQueue { name: q.name.clone(), flavor: q.flavor, paused: q.paused, counts: q.counts }).collect();

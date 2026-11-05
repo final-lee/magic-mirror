@@ -23,6 +23,7 @@ vi.mock("./api", () => ({
     close: vi.fn(),
     forgetPassword: vi.fn(),
     bullQueues: vi.fn(),
+    bullQueueSummaries: vi.fn(),
     bullQueue: vi.fn(),
     bullJobs: vi.fn(),
     bullJob: vi.fn(),
