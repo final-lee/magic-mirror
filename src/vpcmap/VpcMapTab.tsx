@@ -10,6 +10,7 @@ import { C, CHIP_BADGE_COLOR, KIND_BADGE, stateColor, TIER_COLOR } from "./palet
 import { topologyKey, useVpcTopology } from "./queries";
 import { svgToPng } from "./toPng";
 import type { VpcHighlight, VpcTopology } from "./types";
+import { useMapGrab } from "../lib/useMapGrab";
 
 interface Props {
   profile: string;
@@ -56,7 +57,13 @@ export function VpcMapTab({ profile, region, vpcId, name, active, highlight }: P
   const [view, setView] = useState<View>({ k: 1, x: 0, y: 0 });
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
-  const boxRef = useRef<HTMLDivElement>(null);
+  // 휠 확대/축소는 눌러서 잡은 동안만 받는다(놓여 있으면 휠은 화면을 스크롤한다). 보이지 않는 탭은 받지 않는다
+  const map = useMapGrab((e, el) => {
+    if (!activeRef.current) return;
+    const rect = el.getBoundingClientRect();
+    zoomAt(Math.exp(-e.deltaY * 0.0018), e.clientX - rect.left, e.clientY - rect.top);
+  });
+  const boxRef = map.element;
   const svgRef = useRef<SVGSVGElement>(null);
   const viewRef = useRef(view);
   viewRef.current = view;
@@ -96,20 +103,6 @@ export function VpcMapTab({ profile, region, vpcId, name, active, highlight }: P
     zoomAt(factor, (el?.clientWidth ?? 0) / 2, (el?.clientHeight ?? 0) / 2);
   };
 
-  // 휠 확대/축소 (passive: false 리스너가 필요하다)
-  useEffect(() => {
-    const el = boxRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      if (!activeRef.current) return;
-      e.preventDefault();
-      const rect = el.getBoundingClientRect();
-      zoomAt(Math.exp(-e.deltaY * 0.0018), e.clientX - rect.left, e.clientY - rect.top);
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, [zoomAt, !!layout]); // eslint-disable-line react-hooks/exhaustive-deps
-
   useEffect(() => {
     if (!active) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
@@ -121,6 +114,11 @@ export function VpcMapTab({ profile, region, vpcId, name, active, highlight }: P
 
   const onPointerDown = (e: RPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
+    // 잡지 않았던 구조도를 누르면 잡기만 한다: 끌지 않고, 바탕을 눌러도 선택을 지우지 않는다
+    if (!map.grab()) {
+      moved.current = true;
+      return;
+    }
     moved.current = false;
     const sx = e.clientX;
     const sy = e.clientY;
@@ -251,7 +249,7 @@ export function VpcMapTab({ profile, region, vpcId, name, active, highlight }: P
         ) : !topo || !layout ? (
           <div className="empty">구조도를 불러오는 중…</div>
         ) : (
-          <div className="vm-canvas" ref={boxRef} onPointerDown={onPointerDown} onClick={onBackgroundClick} data-testid="vpc-canvas">
+          <div {...map.frameProps} className={`vm-canvas${map.active ? " grabbed" : ""}`} onPointerDown={onPointerDown} onClick={onBackgroundClick} data-testid="vpc-canvas">
             <svg ref={svgRef} width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" role="group" aria-label={`${title} 네트워크 구조도`} style={{ display: "block" }}>
               <g data-viewport transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
                 <Diagram

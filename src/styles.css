@@ -489,8 +489,10 @@ mark.hl { background: none; color: var(--yellow); font-weight: 600; }
 .vm-toolbar .sp { margin-left: auto; gap: 6px; }
 .vm-pct { width: 44px; text-align: right; color: var(--dim); font: 11px ui-monospace, Menlo, monospace; }
 .vm-warnings { list-style: none; margin: 0; padding: 4px 14px; background: var(--yellow-alpha-1a); color: var(--yellow); font-size: 12px; }
-.vm-canvas { flex: 1; min-height: 0; position: relative; overflow: hidden; background: var(--tone-1b1b1e); cursor: grab; touch-action: none; user-select: none; }
-.vm-canvas:active { cursor: grabbing; }
+.vm-canvas { flex: 1; min-height: 0; position: relative; overflow: hidden; background: var(--tone-1b1b1e); cursor: pointer; touch-action: none; user-select: none; outline: none; }
+/* 지도·그래프는 눌러서 잡은 동안만 휠·끌기를 받는다(useMapGrab): 잡혀 있으면 테두리와 손 모양 커서 */
+.vm-canvas.grabbed, .argowf-graph-frame.grabbed, .kvg-frame.grabbed { cursor: grab; box-shadow: inset 0 0 0 2px var(--accent); }
+.vm-canvas.grabbed:active, .argowf-graph-frame.grabbed:active, .kvg-frame.grabbed:active { cursor: grabbing; }
 .vm-canvas svg text { user-select: none; }
 .vm-canvas [role="button"]:focus-visible rect { stroke: var(--accent); }
 .vm-leg { display: flex; align-items: center; gap: 5px; }
@@ -1861,8 +1863,7 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .argowf-graph-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 4px 0; font-size: 12px; }
 .argowf-graph-bar label { display: inline-flex; align-items: center; gap: 4px; }
 .argowf-graph-bar .btn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
-.argowf-graph-frame { position: relative; height: 420px; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); overflow: hidden; cursor: grab; user-select: none; }
-.argowf-graph-frame:active { cursor: grabbing; }
+.argowf-graph-frame { position: relative; height: 420px; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); overflow: hidden; cursor: pointer; user-select: none; outline: none; }
 .argowf-edge { fill: none; stroke: var(--tone-8e8e93); stroke-width: 1.4; }
 .argowf-gnode rect { fill: var(--panel); stroke: var(--border-strong); stroke-width: 1.2; cursor: pointer; }
 .argowf-gnode.selected rect { stroke: var(--accent); stroke-width: 2.4; }
@@ -2280,8 +2281,7 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .kvg-zoom { min-width: 36px; }
 .kvg-legend { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; color: var(--dim); font-size: 11px; }
 .kvg-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; border: 1.5px solid var(--border-strong); background: var(--panel); }
-.kvg-frame { position: relative; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); overflow: hidden; cursor: grab; user-select: none; }
-.kvg-frame:active { cursor: grabbing; }
+.kvg-frame { position: relative; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); overflow: hidden; cursor: pointer; user-select: none; outline: none; }
 .kvg-edge path { fill: none; stroke: var(--tone-8e8e93, var(--dim)); }
 .kvg-edge .kvg-edge-label rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; }
 .kvg-edge .kvg-edge-label text { fill: var(--text); font-size: 10px; font-variant-numeric: tabular-nums; stroke: none; }

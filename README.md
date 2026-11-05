@@ -77,7 +77,7 @@ Everything is read-only until you ask for a change, and every change starts with
 - Subnet tiers come from the route tables: a default route to an internet gateway means public, any other default route means private, and no default route means isolated.
 - Shows EC2 instances, NAT gateways, load balancers, RDS, Lambda functions, and interface endpoints inside their subnets. Internet, egress-only, and VPN gateways sit on the VPC border. Gateway endpoints, Transit Gateway attachments, and peering connections sit in the bottom band.
 - Click a subnet to see its route table and highlight where its default route goes. Click any resource for details and a console link.
-- Zoom and pan, and save the diagram as a PNG.
+- Zoom and pan, and save the diagram as a PNG. Like every diagram and graph in the app, it takes the wheel and dragging only after you click it (an accent outline shows it's grabbed); until then the wheel scrolls past it, and clicking or tabbing elsewhere lets go.
 - Anything the profile can't read is skipped with a warning instead of failing the diagram.
 - Opened from an EKS cluster's **🌐 네트워크** screen, the cluster's nodes and load balancers are outlined in pink; **강조 끄기** in the bar turns that off.
 

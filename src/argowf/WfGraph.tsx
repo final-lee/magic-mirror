@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useMapGrab } from "../lib/useMapGrab";
 import { layoutGraph, NODE_H, NODE_W, type GraphDirection } from "./graphLayout";
 import type { WfNode } from "./types";
 
@@ -28,7 +29,6 @@ export function WfGraph({ nodes, selected, onSelect }: { nodes: WfNode[]; select
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number } | null>(null);
-  const frame = useRef<HTMLDivElement>(null);
   const graph = useMemo(
     () => layoutGraph(nodes, { direction, collapsed, hiddenPhases, hiddenTypes, showArtifacts }),
     [nodes, direction, collapsed, hiddenPhases, hiddenTypes, showArtifacts],
@@ -37,17 +37,8 @@ export function WfGraph({ nodes, selected, onSelect }: { nodes: WfNode[]; select
   const types = useMemo(() => [...new Set(nodes.map((n) => n.type))].sort(), [nodes]);
   const hasArtifacts = nodes.some((n) => n.artifacts.length > 0);
 
-  // 휠은 확대·축소다. 화면이 같이 스크롤되지 않게 passive가 아닌 리스너로 붙인다
-  useEffect(() => {
-    const el = frame.current;
-    if (!el) return;
-    const wheel = (e: WheelEvent) => {
-      e.preventDefault();
-      setZoom((z) => clampZoom(z * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
-    };
-    el.addEventListener("wheel", wheel, { passive: false });
-    return () => el.removeEventListener("wheel", wheel);
-  }, []);
+  // 휠은 확대·축소다. 눌러서 잡은 동안만 받는다(놓여 있으면 휠은 화면을 스크롤한다)
+  const map = useMapGrab((e) => setZoom((z) => clampZoom(z * (e.deltaY < 0 ? 1.1 : 1 / 1.1))));
 
   return (
     <div className="argowf-graph">
@@ -95,9 +86,11 @@ export function WfGraph({ nodes, selected, onSelect }: { nodes: WfNode[]; select
         ))}
       </div>
       <div
-        ref={frame}
-        className="argowf-graph-frame"
+        {...map.frameProps}
+        className={`argowf-graph-frame${map.active ? " grabbed" : ""}`}
         onMouseDown={(e) => {
+          // 잡지 않았던 그래프를 누르면 잡기만 한다
+          if (e.button !== 0 || !map.grab()) return;
           drag.current = { x: e.clientX, y: e.clientY };
         }}
         onMouseMove={(e) => {

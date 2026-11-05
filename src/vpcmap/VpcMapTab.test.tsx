@@ -125,24 +125,53 @@ test("PNG save failure shows an error", async () => {
   expect(document.querySelector(".vm-toolbar .err")).not.toBeNull();
 });
 
-const wheel = (el: Element) =>
+const wheel = (el: Element) => {
+  let notPrevented = true;
   act(() => {
-    el.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, bubbles: true, cancelable: true }));
+    notPrevented = el.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, bubbles: true, cancelable: true }));
   });
+  return notPrevented;
+};
 
-test("wheel zooms the active tab", async () => {
+test("the wheel scrolls past the map until it is clicked, zooms while it has focus, and lets go when focus leaves", async () => {
   renderWithClient(<VpcMapTab {...props} />);
   await screen.findByText("pub-a");
+  const canvas = screen.getByTestId("vpc-canvas");
   const before = screen.getByTestId("vpc-zoom").textContent;
-  wheel(screen.getByTestId("vpc-canvas"));
-  expect(screen.getByTestId("vpc-zoom").textContent).not.toBe(before);
+  expect(wheel(canvas)).toBe(true);
+  expect(screen.getByTestId("vpc-zoom").textContent).toBe(before);
+  fireEvent.pointerDown(canvas, { button: 0 });
+  expect(canvas).toHaveFocus();
+  expect(wheel(canvas)).toBe(false);
+  const zoomed = screen.getByTestId("vpc-zoom").textContent;
+  expect(zoomed).not.toBe(before);
+  fireEvent.blur(canvas);
+  expect(wheel(canvas)).toBe(true);
+  expect(screen.getByTestId("vpc-zoom").textContent).toBe(zoomed);
+});
+
+test("the click that grabs the map does not clear the selection", async () => {
+  renderWithClient(<VpcMapTab {...props} />);
+  await screen.findByText("pub-a");
+  fireEvent.click(tile("i-1"));
+  expect(screen.getByRole("complementary")).toBeInTheDocument();
+  const canvas = screen.getByTestId("vpc-canvas");
+  fireEvent.blur(canvas);
+  fireEvent.pointerDown(canvas, { button: 0 });
+  fireEvent.click(canvas);
+  expect(screen.getByRole("complementary")).toBeInTheDocument();
+  fireEvent.pointerDown(canvas, { button: 0 });
+  fireEvent.click(canvas);
+  expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
 });
 
 test("wheel is ignored when the tab is inactive", async () => {
   renderWithClient(<VpcMapTab {...props} active={false} />);
   await screen.findByText("pub-a");
+  const canvas = screen.getByTestId("vpc-canvas");
+  fireEvent.pointerDown(canvas, { button: 0 });
   const before = screen.getByTestId("vpc-zoom").textContent;
-  wheel(screen.getByTestId("vpc-canvas"));
+  wheel(canvas);
   expect(screen.getByTestId("vpc-zoom").textContent).toBe(before);
 });
 
