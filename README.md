@@ -328,10 +328,13 @@ Double-click a Valkey or Redis OSS row in **ElastiCache → Replication Groups**
 **Server**
 
 - **📊 개요**: memory against `maxmemory`, peak and fragmentation, hit ratio, commands per second, clients, evicted and expired keys, uptime, and replication lag, plus a node table (role, shard, slots) and the keyspace per DB.
+- **Topology graph** (in 📊 개요): shards as groups, primary → replica edges labelled with replication lag, slot ranges, memory and commands per node, and the client hosts (top 20 by connections, the rest folded) linked to the nodes they use.
 - **🐢 Slow log** (`COMMANDLOG` on Valkey 8.1+, else `SLOWLOG`), **👥 클라이언트** (`CLIENT LIST`, with the app's own connections marked), and **🐘 큰 키**: samples up to 5,000 keys and ranks the 50 largest by `MEMORY USAGE`, with progress and **중단**.
 - Serverless caches block `SLOWLOG`, `CLIENT LIST`, `MEMORY`, and `OBJECT`: those screens are turned off with the reason, and big keys are ranked by length instead.
 
 ![Overview of a three-shard cluster](docs/screenshots/kv-overview.png)
+
+![Cluster topology with client hosts](docs/screenshots/kv-topology.png)
 
 **🐂 Bull**
 
@@ -339,12 +342,22 @@ BullMQ and the older Bull keep each queue in plain keys (`<prefix>:<queue>:wait`
 
 - Enter the prefix (`bull` by default, `{bull}` and the like for hash-tagged cluster queues; remembered per cache) and the app finds the queues with a bounded `SCAN` (up to 20 s or 500,000 keys, then **이어서 찾기**).
 - **Queue cards**: counts per state as a stacked bar (waiting, active, delayed, prioritized, waiting for children, paused), completed and failed totals, workers (from `CLIENT LIST` connection names), and a 60-minute sparkline of completed and failed jobs. Queues with waiting jobs and no workers, or with many recent failures, come first with a red border; paused queues, backlogs of 1,000 or more, or a failure rate of 2% or more get a yellow one. The list reloads every 5 seconds while shown, unless the keyspace is large.
+- **Queue map** (**카드 | 지도**): queues as nodes in the cards' health colors, parent → child queue links with job counts (from the `parentKey` of up to 50 recent jobs per queue), and worker hosts linked to the queues they work.
 - **Queue detail**: state tiles that open the job table for that state, completed and failed per minute for the last hour (and per 10 minutes for the last day when BullMQ metrics are on), wait and processing time p50/p95 with histograms from the last 100 finished jobs, the oldest waiting job and the next delayed one, failure reasons grouped from the last 100 failures, and the workers.
-- **Job detail**: a timeline from created to started to finished, attempts, progress, data, options and return value as JSON trees, stack traces, the last 100 log lines, and the parent and child jobs of a flow, each one click away.
+- **상태 전이**: a graph of how jobs moved between states over the last 15 minutes, hour, or 6 hours, read from the queue's `events` stream (each entry names the event and the previous state). Edge widths and labels are counts; stalled jobs and exhausted retries are highlighted, other events (progress, drained, removed, …) are listed below. The stream is trimmed by BullMQ (`maxLenEvents`), so the panel says when it covers less than the chosen window.
+- **Job detail**: a timeline from created to started to finished, attempts, progress, data, options and return value as JSON trees, stack traces, and the last 100 log lines.
+- **Flow graph**: for a job in a BullMQ flow, the whole tree from the root parent down — across queues — with each job colored by state and edges marking pending, finished, failed, and ignored children (from `dependencies`, `processed`, `failed`, and `unsuccessful`), up to 300 jobs. Click a job to open it; **크게 보기** gives it the whole pane.
+- Both BullMQ and the older Bull are read, including Bull 3's sorted `completed`/`failed` sets and the plain sets of older versions.
 
 ![Bull queue detail](docs/screenshots/kv-bull-queue.png)
 
+![Bull queue map](docs/screenshots/kv-bull-map.png)
+
+![Bull state transitions](docs/screenshots/kv-bull-transitions.png)
+
 ![A failed Bull job](docs/screenshots/kv-bull-job.png)
+
+![Bull flow graph across queues](docs/screenshots/kv-bull-flow.png)
 
 ### S3 explorer
 ![S3 explorer](docs/screenshots/explorer.png)
@@ -534,7 +547,7 @@ Tests that need real servers are `#[ignore]`d in a normal `cargo test` and run t
 | --- | --- | --- |
 | `scripts/k8s-live-test.sh` | The EKS tab against two [kind](https://kind.sigs.k8s.io) clusters (default `kindest/node:v1.33.1` and `v1.35.0`; override with `KIND_IMAGES`), including a restricted ServiceAccount, CRDs, shells, port-forwards, drain, and the access, RBAC change, network, security check, and Helm fixtures in `scripts/k8s-live/` | Docker, `kind`, `kubectl`, `yq`, `jq`, `helm` |
 | `scripts/pg-live-test.sh` | The PostgreSQL catalog reads and changes against PostgreSQL 14 and 16 containers on `127.0.0.1:55414` / `55416`, removed when it ends | Docker |
-| `scripts/kv-live-test.sh` | The Valkey/Redis tab against Valkey 8 containers: a plain server with every value type and BullMQ- and Bull-shaped queues, an AUTH and ACL server (password, no-password, and restricted users), a TLS server with a CA made for the run, and a three-shard cluster; removed when it ends | Docker, `openssl` |
+| `scripts/kv-live-test.sh` | The Valkey/Redis tab against Valkey 8 containers: a plain server with every value type, BullMQ-, Bull 3-, and older Bull-shaped queues, a two-queue flow and an events stream, an AUTH and ACL server (password, no-password, and restricted users), a TLS server with a CA made for the run, and a three-shard cluster; removed when it ends | Docker, `openssl` |
 | `scripts/cost-live-test.sh <profile>` | The cost commands against a real account; about 3 Cost Explorer requests (≈ $0.03) | An AWS profile with Cost Explorer access |
 
 ### Maintenance scripts
