@@ -317,6 +317,11 @@ export default function App() {
             favorites={settings.favorites}
             onSelect={select}
             onToggleFavorite={toggleFavorite}
+            serviceOrder={settings.sidebarServiceOrder}
+            typeOrder={settings.sidebarTypeOrder}
+            onServiceOrderChange={(ids) => update({ sidebarServiceOrder: ids })}
+            onTypeOrderChange={(service, keys) => update({ sidebarTypeOrder: { ...settings.sidebarTypeOrder, [service]: keys } })}
+            onFavoritesChange={(favorites) => update({ favorites })}
             onOpenIam={() => openIam()}
             onOpenCost={openCost}
             onOpenArgocd={openArgocd}

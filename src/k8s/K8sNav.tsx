@@ -4,7 +4,7 @@ import { NAV_HELM } from "./helm/text";
 import { NAV_TERMINAL, TERMINAL_ICON } from "./terminal/text";
 import { NAV_NETWORK } from "./network/text";
 import { NAV_SECURITY, SECURITY_ICON } from "./security/text";
-import { useReorder } from "./useReorder";
+import { useReorder } from "../lib/useReorder";
 
 /** 북마크 화면은 `bookmark:<그룹>/<복수형>` */
 export type K8sView = "overview" | "workloads" | "events" | "network" | "forwards" | "helm" | "terminal" | "myRules" | "access" | "security" | "changeLog" | `bookmark:${string}`;

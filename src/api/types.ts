@@ -94,6 +94,10 @@ export interface Settings {
   /** 앱이 이미 보여 준 서비스. 백엔드가 새 서비스를 한 번 켤 때 쓰고, 화면은 읽지 않고 그대로 돌려 저장한다. */
   knownServices?: string[];
   favorites: Favorite[];
+  /** 첫 열에서 끌어 바꾼 서비스 순서. 비어 있으면 백엔드가 주는 순서이고, 여기 없는 서비스는 뒤에 붙는다. */
+  sidebarServiceOrder?: string[];
+  /** 서비스 ID → 그 서비스 아래 줄(리소스 종류 ID, `@`로 시작하는 바로가기)의 끌어 바꾼 순서 */
+  sidebarTypeOrder?: Record<string, string[]>;
   lastProfile: string | null;
   lastRegion: string | null;
   explorerLocalPath?: string | null;

@@ -23,7 +23,7 @@ import { NODES, bookmarkKey, bookmarkOf } from "./kinds";
 import { LaneResizer, useLaneWidths } from "./lanes";
 import { GotoBar } from "./nav/GotoBar";
 import type { Goto } from "./nav/goto";
-import { moved } from "./useReorder";
+import { moved } from "../lib/useReorder";
 import { MyRules } from "./MyRules";
 import { NoContext } from "./NoContext";
 import { OverviewView } from "./OverviewView";

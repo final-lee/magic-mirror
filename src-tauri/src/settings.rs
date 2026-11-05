@@ -119,6 +119,10 @@ pub struct Settings {
     /// 앱이 한 번이라도 보여 준 서비스. 여기 없는 새 서비스는 설정을 읽을 때 한 번 켜고, 사용자가 끈 서비스는 다시 켜지 않는다.
     pub known_services: Vec<String>,
     pub favorites: Vec<Favorite>,
+    /// 첫 열(서비스 목록)에서 사용자가 끌어 바꾼 서비스 순서. 비어 있으면 어댑터 순서. 여기 없는 서비스는 뒤에 붙는다.
+    pub sidebar_service_order: Vec<String>,
+    /// 서비스 ID → 그 서비스 아래 줄(리소스 종류 ID와 `@`로 시작하는 바로가기)의 끌어 바꾼 순서
+    pub sidebar_type_order: BTreeMap<String, Vec<String>>,
     pub last_profile: Option<String>,
     pub last_region: Option<String>,
     pub explorer_local_path: Option<String>,
@@ -153,6 +157,8 @@ struct RawSettings {
     enabled_services: Option<Vec<String>>,
     known_services: Option<Vec<String>>,
     favorites: Vec<Favorite>,
+    sidebar_service_order: Vec<String>,
+    sidebar_type_order: BTreeMap<String, Vec<String>>,
     last_profile: Option<String>,
     last_region: Option<String>,
     explorer_local_path: Option<String>,
@@ -206,6 +212,8 @@ pub fn load(path: &Path, all_services: &[&str]) -> Settings {
                     enabled_services: enabled,
                     known_services: known,
                     favorites: raw.favorites,
+                    sidebar_service_order: raw.sidebar_service_order,
+                    sidebar_type_order: raw.sidebar_type_order,
                     last_profile: raw.last_profile,
                     last_region: raw.last_region,
                     explorer_local_path: raw.explorer_local_path,
@@ -253,6 +261,25 @@ mod tests {
         assert_eq!(s.enabled_services, vec!["ec2", "s3"]);
         assert!(s.favorites.is_empty());
         assert_eq!(s.last_profile, None);
+    }
+
+    #[test]
+    fn sidebar_order_roundtrips_and_is_empty_in_old_files() {
+        let old = load_text(r#"{"favorites":[]}"#);
+        assert!(old.sidebar_service_order.is_empty() && old.sidebar_type_order.is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let s = Settings {
+            sidebar_service_order: vec!["eks".into(), "rds".into()],
+            sidebar_type_order: BTreeMap::from([("eks".into(), vec!["@argocd".into(), "clusters".into()])]),
+            ..Default::default()
+        };
+        save(&path, &s).unwrap();
+        let back = load(&path, &[]);
+        assert_eq!(back.sidebar_service_order, s.sidebar_service_order);
+        assert_eq!(back.sidebar_type_order, s.sidebar_type_order);
+        let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(json["sidebarTypeOrder"]["eks"][0], "@argocd");
     }
 
     #[test]

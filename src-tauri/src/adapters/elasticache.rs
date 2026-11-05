@@ -33,6 +33,17 @@ impl ResourceAdapter for ElastiCache {
                 ],
             },
             ResourceType {
+                id: "serverless-caches",
+                name: "Serverless Caches",
+                columns: vec![
+                    col("name", "Name", Text),
+                    col("engine", "Engine", Text),
+                    col("version", "Version", Text),
+                    col("status", "Status", State),
+                    col("endpoint", "Endpoint", Mono),
+                ],
+            },
+            ResourceType {
                 id: "cache-clusters",
                 name: "Cache Clusters",
                 columns: vec![
@@ -43,17 +54,6 @@ impl ResourceAdapter for ElastiCache {
                     col("nodeType", "Node type", Text),
                     col("nodes", "Nodes", Text),
                     col("group", "Replication group", Text),
-                ],
-            },
-            ResourceType {
-                id: "serverless-caches",
-                name: "Serverless Caches",
-                columns: vec![
-                    col("name", "Name", Text),
-                    col("engine", "Engine", Text),
-                    col("version", "Version", Text),
-                    col("status", "Status", State),
-                    col("endpoint", "Endpoint", Mono),
                 ],
             },
         ]

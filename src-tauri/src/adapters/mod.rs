@@ -159,4 +159,18 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn types_are_listed_from_the_largest_unit_with_clusters_on_top() {
+        let types = |id: &str| -> Vec<&str> {
+            let a = registry().into_iter().find(|a| a.service_id() == id).unwrap();
+            a.resource_types().into_iter().map(|t| t.id).collect()
+        };
+        assert_eq!(types("rds"), ["db-clusters", "db-instances"]);
+        assert_eq!(types("ecs"), ["clusters", "services", "tasks"]);
+        assert_eq!(types("eks"), ["clusters", "node-groups"]);
+        // ElastiCache의 클러스터 단위는 복제 그룹이고, Cache Clusters는 그 안의 노드다
+        assert_eq!(types("elasticache"), ["replication-groups", "serverless-caches", "cache-clusters"]);
+        assert_eq!(types("vpc"), ["vpcs", "subnets"]);
+    }
 }
