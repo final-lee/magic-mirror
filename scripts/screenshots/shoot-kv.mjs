@@ -38,6 +38,13 @@ export async function shootKv(page, out) {
   await page.getByRole('img', { name: '토폴로지' }).scrollIntoViewIfNeeded();
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${out}/kv-topology.png` });
+  // 클라이언트 지도: 호스트 → 연결 이름(BullMQ 연결은 큐 이름) → 노드
+  await nav.getByRole('button', { name: /클라이언트/ }).click();
+  await page.getByRole('table', { name: '클라이언트 목록' }).waitFor();
+  await page.getByRole('button', { name: '지도', exact: true }).click();
+  await page.getByRole('img', { name: '클라이언트 지도' }).waitFor();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `${out}/kv-clients-map.png` });
 
   // 🐂 Bull: 큐 목록, 큐 상세(처리량·시간·실패 이유·작업 표), 실패한 작업 상세
   await nav.getByRole('button', { name: 'Bull', exact: true }).click();

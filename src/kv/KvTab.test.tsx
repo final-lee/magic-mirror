@@ -476,6 +476,20 @@ describe("slow log and clients", () => {
     expect(rows[2]).toHaveTextContent("magic-mirror");
   });
 
+  test("[지도] draws the clients as hosts linked to their connection names, and [표] goes back", async () => {
+    setup();
+    await connected();
+    openMenu("클라이언트");
+    await screen.findByRole("table", { name: "클라이언트 목록" });
+    fireEvent.click(screen.getByRole("button", { name: "지도" }));
+    const map = screen.getByRole("img", { name: "클라이언트 지도" });
+    expect(screen.queryByRole("table", { name: "클라이언트 목록" })).not.toBeInTheDocument();
+    expect(within(map).getByRole("group", { name: "10.0.4.7 연결 1" })).toBeInTheDocument();
+    expect(within(map).getByRole("group", { name: "magic-mirror 연결 1 · 호스트 1 · 이 앱" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "표" }));
+    expect(screen.getByRole("table", { name: "클라이언트 목록" })).toBeInTheDocument();
+  });
+
   test("[다시 읽기] reads the slow log again", async () => {
     setup();
     await connected();

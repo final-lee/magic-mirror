@@ -169,6 +169,12 @@ export const CLIENTS_LABEL = "클라이언트 목록";
 export const CLIENTS_COLS = { addr: "주소", name: "이름", user: "사용자", db: "DB", age: "나이", idle: "유휴", cmd: "마지막 명령", flags: "플래그", node: "노드" };
 export const CLIENTS_EMPTY = "연결된 클라이언트가 없어요";
 export const OWN_CLIENT = "이 앱";
+export const CLIENTS_TABLE = "표";
+export const CLIENT_MAP_TITLE = "클라이언트 지도";
+export const CLIENT_MAP_CONNS = (n: string) => `연결 ${n}`;
+export const CLIENT_MAP_HOSTS = (n: number) => `호스트 ${n}`;
+export const CLIENT_MAP_LEGEND = "호스트 → 연결 이름(🐂 Bull 큐) · 선 굵기는 연결 수";
+export const CLIENT_MAP_LEGEND_NODES = "호스트 → 연결 이름(🐂 Bull 큐) → 노드 · 선 굵기는 연결 수";
 
 // 큰 키
 export const BIGKEYS_INTRO = "SCAN으로 최대 5,000개 키를 훑으며 키마다 메모리를 재서 상위 50개를 찾아요. 서버에 부담이 가지 않게 샘플링해요";

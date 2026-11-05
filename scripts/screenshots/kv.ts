@@ -213,7 +213,7 @@ const slowlog = (): KvSlowEntry[] => {
   ];
   return rows.map(([args, micros, client, n], i) => ({ node: "10.0.1.10:6379", id: 400 - i, time: t - i * 190, micros, args, client, name: n }));
 };
-/** cart(샤드 3개): 클라이언트 호스트 26개가 기본 노드에 주로, 일부는 읽기 복제 노드에 붙는다 */
+/** cart(샤드 3개): 클라이언트 호스트 26개가 기본 노드에 주로, 일부는 읽기 복제 노드에 붙는다. worker 호스트의 연결은 BullMQ 이름(`{bull}:<base64(큐)>[:w:…]`) */
 function cartClients(): KvClient[] {
   const r = rng(23);
   const nodes = clusterOverview().nodes;
@@ -228,7 +228,9 @@ function cartClients(): KvClient[] {
       const readOnly = r() < 0.12;
       const pool = readOnly ? replicas : primaries;
       const node = pool[(h + i) % pool.length];
-      out.push({ node: node.address, id: `${h}-${i}`, addr: `${host}:${40000 + i * 13 + h}`, name: h === 25 && i === 0 ? "magic-mirror" : apps[h % apps.length], user: "cart-app", db: 0, age: between(r, 60, 400_000), idle: between(r, 0, 30), cmd: ["get", "hgetall", "hset", "expire", "mget"][i % 5], flags: readOnly ? "r" : "N", own: h === 25 && i === 0 });
+      const bullQueue = apps[h % apps.length] === "worker" ? ["orders", "emails", "webhooks", "notifications"][i % 4] : null;
+      const name = h === 25 && i === 0 ? "magic-mirror" : bullQueue ? `{bull}:${btoa(bullQueue)}${i % 3 ? `:w:worker-${h}-${i}` : ""}` : apps[h % apps.length];
+      out.push({ node: node.address, id: `${h}-${i}`, addr: `${host}:${40000 + i * 13 + h}`, name, user: "cart-app", db: 0, age: between(r, 60, 400_000), idle: between(r, 0, 30), cmd: bullQueue ? "bzpopmin" : ["get", "hgetall", "hset", "expire", "mget"][i % 5], flags: readOnly ? "r" : bullQueue ? "b" : "N", own: h === 25 && i === 0 });
     }
   }
   return out;

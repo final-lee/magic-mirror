@@ -330,11 +330,14 @@ Double-click a Valkey or Redis OSS row in **ElastiCache → Replication Groups**
 - **📊 개요**: memory against `maxmemory`, peak and fragmentation, hit ratio, commands per second, clients, evicted and expired keys, uptime, and replication lag, plus a node table (role, shard, slots) and the keyspace per DB.
 - **Topology graph** (in 📊 개요): shards as groups, primary → replica edges labelled with replication lag, slot ranges, memory and commands per node, and the client hosts (top 20 by connections, the rest folded) linked to the nodes they use.
 - **🐢 Slow log** (`COMMANDLOG` on Valkey 8.1+, else `SLOWLOG`), **👥 클라이언트** (`CLIENT LIST`, with the app's own connections marked), and **🐘 큰 키**: samples up to 5,000 keys and ranks the 50 largest by `MEMORY USAGE`, with progress and **중단**.
+- **👥 클라이언트** has **표 | 지도**: the map links client hosts to connection names, and on to the nodes when there are several. Bull and BullMQ connections (`<prefix>:<base64 queue name>`) are shown by queue name, so producers and workers of one queue share a box. The search filters both.
 - Serverless caches block `SLOWLOG`, `CLIENT LIST`, `MEMORY`, and `OBJECT`: those screens are turned off with the reason, and big keys are ranked by length instead.
 
 ![Overview of a three-shard cluster](docs/screenshots/kv-overview.png)
 
 ![Cluster topology with client hosts](docs/screenshots/kv-topology.png)
+
+![Client map: hosts, connection names and nodes](docs/screenshots/kv-clients-map.png)
 
 **🐂 Bull**
 

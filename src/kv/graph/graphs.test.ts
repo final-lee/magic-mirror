@@ -1,5 +1,6 @@
 import { clientRows, nodeInfo, sampleBullFlow, sampleBullTopology, sampleBullTransitions, sampleOverview, serverlessOverview, standaloneNodes } from "../fixtures";
 import type { KvBullTransitions, KvClient, KvNode } from "../types";
+import { bullQueueOf, buildClientMap, TOP_NAMES } from "./clientModel";
 import { buildClusterTopology, hostOf, TOP_HOSTS } from "./clusterModel";
 import { flowEdgeStyle, flowNodeId, flowNodeTone, flowStateLabel, layoutFlow } from "./flowModel";
 import { buildQueueMap, hostNodeId, mapAttention, queueNodeId } from "./queueModel";
@@ -199,5 +200,62 @@ describe("cluster topology", () => {
 
   test("the node list of the fixtures is a primary and two replicas", () => {
     expect(standaloneNodes.map((n) => n.role)).toEqual(["primary", "replica", "replica"]);
+  });
+});
+
+describe("client map", () => {
+  const client = (addr: string, name: string, node = "n1:6379", own = false): KvClient => ({ ...clientRows[0], addr, name, node, own });
+  const b64 = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+
+  test("Bull connection names decode to their queue, with or without a worker name; other names stay as they are", () => {
+    expect(bullQueueOf("bull:bm90aWZpY2F0aW9uLWtha2Fv")).toBe("notification-kakao");
+    expect(bullQueueOf(`{bull}:${b64("emails")}:w:mailer-1`)).toBe("emails");
+    expect(bullQueueOf(`bull:${b64("알림")}`)).toBe("알림");
+    // base64로도 읽히는 평범한 이름
+    expect(bullQueueOf("app:prod")).toBeNull();
+    expect(bullQueueOf("web:test")).toBeNull();
+    expect(bullQueueOf("orders-api")).toBeNull();
+    expect(bullQueueOf("bull:")).toBeNull();
+  });
+
+  test("hosts link to connection names; a queue's producers and workers are one name; a single node has no node column", () => {
+    const q = b64("emails");
+    const map = buildClientMap([client("10.0.0.1:1", `bull:${q}`), client("10.0.0.1:2", `bull:${q}:w:w1`), client("10.0.0.2:1", `bull:${q}:w:w2`), client("10.0.0.2:2", ""), client("10.0.9.9:1", "magic-mirror", "n1:6379", true)]);
+    expect(map.showNodes).toBe(false);
+    expect(map.nodes.map((n) => [n.kind, n.label, n.connections])).toEqual([
+      ["host", "10.0.0.1", 2],
+      ["host", "10.0.0.2", 2],
+      ["host", "10.0.9.9", 1],
+      ["name", "emails", 3],
+      ["name", "magic-mirror", 1],
+      ["name", "이름 없음", 1],
+    ]);
+    const emails = map.nodes.find((n) => n.label === "emails")!;
+    expect(emails).toMatchObject({ bull: true, hosts: 2, raw: [`bull:${q}`, `bull:${q}:w:w1`, `bull:${q}:w:w2`] });
+    expect(map.nodes.find((n) => n.label === "magic-mirror")!.own).toBe(true);
+    expect(map.edges.map((e) => [e.from, e.to, e.count])).toEqual([
+      ["host:10.0.0.1", "name:bull:emails", 2],
+      ["host:10.0.0.2", "name:bull:emails", 1],
+      ["host:10.0.0.2", "name:none", 1],
+      ["host:10.0.9.9", "name:name:magic-mirror", 1],
+    ]);
+  });
+
+  test("with several nodes, names link on to the nodes they use", () => {
+    const map = buildClientMap([client("10.0.0.1:1", "api", "a:6379"), client("10.0.0.1:2", "api", "b:6379"), client("10.0.0.2:1", "api", "b:6379")]);
+    expect(map.showNodes).toBe(true);
+    expect(map.nodes.filter((n) => n.kind === "node").map((n) => [n.label, n.connections])).toEqual([["a:6379", 1], ["b:6379", 2]]);
+    expect(map.edges.filter((e) => e.from.startsWith("name:")).map((e) => [e.to, e.count])).toEqual([["node:a:6379", 1], ["node:b:6379", 2]]);
+  });
+
+  test("names past the busiest few fold into one, with their links added", () => {
+    const many = Array.from({ length: TOP_NAMES + 3 }, (_, i) => client(`10.0.0.1:${i}`, `app-${String(i).padStart(2, "0")}`));
+    const busy = Array.from({ length: 4 }, (_, i) => client(`10.0.0.2:${i}`, "busy"));
+    const map = buildClientMap([...many, ...busy]);
+    const names = map.nodes.filter((n) => n.kind === "name");
+    expect(names).toHaveLength(TOP_NAMES + 1);
+    expect(names[0]).toMatchObject({ label: "busy", connections: 4 });
+    expect(names[TOP_NAMES]).toMatchObject({ id: "name:*", label: "기타 이름 4개", connections: 4, folded: 4 });
+    expect(map.edges.find((e) => e.from === "host:10.0.0.1" && e.to === "name:*")!.count).toBe(4);
   });
 });

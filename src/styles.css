@@ -2317,6 +2317,6 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .kv-view-seg { margin-left: 8px; }
 /* 지도는 큐 목록 칸의 남은 높이를 모두 채운다 */
 .kv-pane.kv-pane-map { display: flex; flex-direction: column; }
-.kv-qmap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 10px 16px 16px; }
+.kv-qmap, .kv-cmap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 10px 16px 16px; }
 .kv-topology { display: flex; flex-direction: column; gap: 6px; }
 .kv-transitions { margin-top: 4px; }
