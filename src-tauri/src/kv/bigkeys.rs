@@ -11,15 +11,17 @@ use super::connect::{Connected, BIGKEYS_TIMEOUT};
 use super::key::length_command;
 use super::model::{KvBigKey, KvBigKeysBasis, KvBigKeysMessage, KvKeyName, KvMode, KvType};
 use super::overview::dbsize;
-use super::scan::{Scanner, SCAN_COUNT};
+use super::scan::Scanner;
 use super::value::{int, text};
 use crate::error::AppError;
 
 /// 훑을 키의 최대 수
 pub const MAX_SCANNED: u64 = 5_000;
-/// 키마다 크기를 재는 동시 수
-const SIZE_CONCURRENCY: usize = 16;
-
+/// SCAN 한 번의 COUNT. 진행 표시가 5번쯤 움직이고 왕복 수는 적게
+const SCAN_COUNT: usize = 1_000;
+/// 키마다 크기를 재는 동시 수. fred가 한 연결에서 파이프라인하므로 SCAN 한 번에 받은 키를 한꺼번에 보내 왕복 한 번으로 잰다.
+/// 키마다 서버 시간은 짧다(`MEMORY USAGE … SAMPLES 5`는 원소 5개만 본다). 예전 16개씩은 키 5,000개에 왕복 300번이 넘었다
+const SIZE_CONCURRENCY: usize = SCAN_COUNT;
 
 async fn type_of(conn: &Connected, key: &[u8]) -> Result<Option<KvType>, AppError> {
     let reply = conn.data_within(BIGKEYS_TIMEOUT, cmd("TYPE").arg(key)).await?;
@@ -70,13 +72,16 @@ pub async fn bigkeys(conn: &Connected, limit: usize, stop: &AtomicBool, mut prog
     }
     sized.sort_by_key(|s| std::cmp::Reverse(s.0));
     sized.truncate(limit);
+    let types = concurrently(sized.iter(), SIZE_CONCURRENCY, |(_, key, kind)| async move {
+        Ok::<_, AppError>(match kind {
+            Some(kind) => *kind,
+            None => type_of(conn, key).await?.unwrap_or(KvType::Other),
+        })
+    })
+    .await;
     let mut keys = Vec::with_capacity(sized.len());
-    for (size, key, kind) in sized {
-        let kind = match kind {
-            Some(kind) => kind,
-            None => type_of(conn, &key).await?.unwrap_or(KvType::Other),
-        };
-        keys.push(KvBigKey { name: KvKeyName::from_bytes(&key), kind, size });
+    for ((size, key, _), kind) in sized.into_iter().zip(types) {
+        keys.push(KvBigKey { name: KvKeyName::from_bytes(&key), kind: kind?, size });
     }
     Ok(KvBigKeysMessage::Done { basis, keys, scanned, stopped })
 }
