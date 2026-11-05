@@ -72,6 +72,8 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const [gotoOpen, setGotoOpen] = useState(false);
   const [gotoKind, setGotoKind] = useState<WorkloadsGoto | null>(null);
+  // 목록 화면이 지금 보이는 종류(`:ns`가 그 목록의 네임스페이스를 바꾸는지 정한다)
+  const [shownKind, setShownKind] = useState<K8sKindRef | null>(null);
   const beforeGoto = useRef<Element | null>(null);
   const terminals = useTerminals();
   // 터미널 화면을 처음 열면 셸을 하나 띄운다(터미널은 다른 화면을 보는 동안에도 유지된다)
@@ -193,6 +195,7 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
   const shownBookmark = bookmarkView ? bookmarks.find((b) => `bookmark:${bookmarkKey(b)}` === view) : undefined;
   const fixedKind = shownBookmark ? served(shownBookmark) ?? undefined : undefined;
   const listView = view === "workloads" || fixedKind !== undefined;
+  const gotoCurrent = listView && shownKind?.namespaced ? { kind: shownKind, namespace } : undefined;
 
   if (!settingsReady || ctx.isPending) return <div className="empty">{STATE_CONNECTING}</div>;
   if (ctx.isError) {
@@ -212,7 +215,7 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
   const connection: K8sConnection = session.isError ? "failed" : session.isSuccess && !session.isFetching ? "connected" : "connecting";
   return (
     <div className="pg" ref={root}>
-      {gotoOpen && <GotoBar ctx={{ kinds: kinds.data ?? [], namespaces: names }} onGo={goto} onClose={closeGoto} />}
+      {gotoOpen && <GotoBar ctx={{ kinds: kinds.data ?? [], namespaces: names, current: gotoCurrent }} onGo={goto} onClose={closeGoto} />}
       {/* 연결돼 있는 동안 고른 네임스페이스(전체면 모두)의 사용량을 계속 모은다 */}
       <UsageSampler target={target} context={chosen} namespace={nsOrAll} ssoProfile={ssoProfile} live={live} />
       <TopBar
@@ -287,6 +290,7 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
               discoveryAvailable={kinds.data !== undefined}
               focus={focus}
               goto={gotoKind}
+              onKindShown={setShownKind}
               onAllNamespaces={() => setUserNs(ALL)}
               onOpenIam={onOpenIam}
               onChange={change.start}
