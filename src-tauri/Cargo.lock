@@ -4235,7 +4235,7 @@ dependencies = [
 
 [[package]]
 name = "magic-mirror"
-version = "0.11.0"
+version = "0.11.1"
 dependencies = [
  "async-trait",
  "aws-config",
