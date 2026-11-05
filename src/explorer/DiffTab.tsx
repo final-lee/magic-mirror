@@ -8,7 +8,8 @@ import { formatBytes, formatDate } from "../lib/format";
 import { explorerApi } from "./api";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { refKey, refLabel } from "./rows";
-import type { DiffLine, DiffResult, DiffRow, FileRef, TransferRequest } from "./types";
+import type { DiffResult, FileRef, TransferRequest } from "./types";
+import { RowView } from "./TextDiffView";
 import type { Transfers } from "./useTransfers";
 
 interface Props {
@@ -24,30 +25,6 @@ const REASON = {
   tooLarge: "2MB가 넘어서 내용 대신 정보만 비교해요",
 } as const;
 
-function Line({ line }: { line: DiffLine | null }) {
-  if (!line) return <div className="dcell empty-cell" />;
-  return (
-    <div className="dcell">
-      <span className="ln">{line.no}</span>
-      <span className="code">
-        {line.segments.map((s, i) => (
-          <span key={i} className={s.emph ? "emph" : undefined}>
-            {s.text}
-          </span>
-        ))}
-      </span>
-    </div>
-  );
-}
-
-function RowView({ row }: { row: DiffRow }) {
-  return (
-    <>
-      <Line line={row.left} />
-      <Line line={row.right} />
-    </>
-  );
-}
 
 export function DiffTab({ profile, left, right, transfers }: Props) {
   const q = useQuery<DiffResult>({

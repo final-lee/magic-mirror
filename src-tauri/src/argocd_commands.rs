@@ -1,9 +1,8 @@
 //! ArgoCD 서버 API 명령.
 use reqwest::Method;
-use serde_json::{json, Value};
 use tauri::State;
 
-use crate::argocd::{self, ArgoApp, ArgoAppRow, ArgoAppSetRow, ArgoSyncOptions, ArgoTreeNode, ArgocdSession, ArgocdState};
+use crate::argocd::{self, ArgoApp, ArgoAppRow, ArgoAppSetRow, ArgoTreeNode, ArgocdSession, ArgocdState};
 use crate::error::AppError;
 
 /// 토큰을 검증하고 키체인에 저장한다.
@@ -52,22 +51,3 @@ pub async fn argocd_tree(state: State<'_, ArgocdState>, url: String, namespace: 
     Ok(argocd::list(&body, "/nodes").iter().chain(argocd::list(&body, "/orphanedNodes")).map(argocd::tree_node).collect())
 }
 
-#[tauri::command]
-/// 서버에 새로고침을 요청한다.
-pub async fn argocd_refresh(state: State<'_, ArgocdState>, url: String, namespace: String, name: String, hard: bool) -> Result<(), AppError> {
-    let refresh = if hard {
-        "hard"
-    } else {
-        "normal"
-    };
-    state.api(&url, Method::GET, &["api", "v1", "applications", &name], &[("appNamespace", &namespace), ("refresh", refresh)], None).await?;
-    Ok(())
-}
-
-#[tauri::command]
-/// 서버에 동기화를 요청한다.
-pub async fn argocd_sync(state: State<'_, ArgocdState>, url: String, namespace: String, name: String, options: ArgoSyncOptions) -> Result<(), AppError> {
-    let body: Value = json!({ "appNamespace": namespace, "prune": options.prune, "dryRun": options.dry_run });
-    state.api(&url, Method::POST, &["api", "v1", "applications", &name, "sync"], &[], Some(&body)).await?;
-    Ok(())
-}

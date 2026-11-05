@@ -7,6 +7,8 @@ import { fuzzyRank, tokenize } from "../lib/fuzzy";
 import { Highlight } from "./Highlight";
 import { resourceSearchFields } from "./ResourceTable";
 import { ServiceBadge } from "./ServiceBadge";
+import type { ArgoPaletteItem } from "../argocd/search/palette";
+import type { ArgoJump } from "../argocd/types";
 
 export interface PalettePick {
   /** 전역 서비스면 "global" */
@@ -26,6 +28,10 @@ interface Props {
   onClose: () => void;
   /** 테스트용 지금 시각 */
   now?: number;
+  /** ArgoCD 앱·리소스(앱 목록을 읽어 둔 서버의 것). 없으면 AWS만 찾는다 */
+  argo?: ArgoPaletteItem[];
+  /** ArgoCD 항목을 골랐을 때 */
+  onPickArgo?: (jump: ArgoJump) => void;
 }
 
 interface Entry {
@@ -37,6 +43,13 @@ interface Entry {
   fetchedAt: number;
   fields: string[];
 }
+
+interface ArgoEntry {
+  key: string;
+  fields: ArgoPaletteItem["fields"];
+  argo: ArgoPaletteItem;
+}
+type Row = Entry | ArgoEntry;
 
 /** 한 번에 보여 주는 결과 수. 잘 맞는 것부터 자른다 */
 export const PALETTE_LIMIT = 100;
@@ -54,7 +67,7 @@ function ageText(ms: number): string {
  * ⌘K: 이 프로필로 읽어 둔 모든 리소스 목록(리전·종류 전부)에서 퍼지로 찾는다. AWS는 부르지 않는다.
  * 목록은 백엔드가 읽을 때마다 남기는 검색용 사본이라 앱을 다시 켜도 남아 있다(7일). 고르면 그 리전·종류로 가서 그 행을 고른다.
  */
-export function ResourcePalette({ profile, services, ttlMs, onPick, onClose, now }: Props) {
+export function ResourcePalette({ profile, services, ttlMs, onPick, onClose, now, argo, onPickArgo }: Props) {
   const index = useResourceIndex(profile);
   const [query, setQuery] = useState("");
   const deferred = useDeferredValue(query);
@@ -86,9 +99,11 @@ export function ResourcePalette({ profile, services, ttlMs, onPick, onClose, now
     return out;
   }, [index.data, services]);
   const lists = useMemo(() => new Set(entries.map((e) => `${e.region}|${e.service.id}|${e.type.id}`)).size, [entries]);
+  const argoEntries = useMemo<ArgoEntry[]>(() => (argo ?? []).map((item) => ({ key: item.key, fields: item.fields, argo: item })), [argo]);
+  const rows = useMemo<Row[]>(() => [...entries, ...argoEntries], [entries, argoEntries]);
 
   const tokens = useMemo(() => tokenize(deferred), [deferred]);
-  const ranked = useMemo(() => (tokens.length === 0 ? [] : fuzzyRank(entries, deferred, (e) => e.fields)), [entries, deferred, tokens]);
+  const ranked = useMemo(() => (tokens.length === 0 ? [] : fuzzyRank(rows, deferred, (e) => e.fields)), [rows, deferred, tokens]);
   const shown = ranked.slice(0, PALETTE_LIMIT).map((r) => r.item);
   const activeIndex = Math.max(0, shown.findIndex((e) => e.key === activeKey));
   const active = shown[activeIndex];
@@ -98,7 +113,10 @@ export function ResourcePalette({ profile, services, ttlMs, onPick, onClose, now
     if (active) document.getElementById(`${listId}-${activeIndex}`)?.scrollIntoView?.({ block: "nearest" });
   }, [active, activeIndex, listId]);
 
-  const pick = (e: Entry) => onPick({ region: e.region, service: e.service.id, type: e.type.id, id: e.item.id });
+  const pick = (e: Row) => {
+    if ("argo" in e) onPickArgo?.(e.argo.jump);
+    else onPick({ region: e.region, service: e.service.id, type: e.type.id, id: e.item.id });
+  };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -114,9 +132,11 @@ export function ResourcePalette({ profile, services, ttlMs, onPick, onClose, now
   let status: string | null = null;
   if (index.isError) status = errorMessage(index.error);
   else if (index.isPending) status = "불러오는 중…";
-  else if (entries.length === 0) status = "아직 읽어 둔 목록이 없어요. 왼쪽에서 리소스 종류를 열면 여기서 찾을 수 있어요";
-  else if (tokens.length === 0) status = `읽어 둔 목록 ${lists}개, 리소스 ${entries.length.toLocaleString()}개에서 찾아요. 글자 일부만 순서대로 쳐도 되고, 공백으로 나누면 모두 맞는 것만 보여요`;
-  else if (shown.length === 0) status = "맞는 리소스가 없어요";
+  else if (rows.length === 0) status = "아직 읽어 둔 목록이 없어요. 왼쪽에서 리소스 종류를 열면 여기서 찾을 수 있어요";
+  else if (tokens.length === 0) {
+    const where = [entries.length > 0 ? `읽어 둔 목록 ${lists}개, 리소스 ${entries.length.toLocaleString()}개` : null, argoEntries.length > 0 ? `ArgoCD 앱·리소스 ${argoEntries.length.toLocaleString()}개` : null].filter(Boolean).join(", ");
+    status = `${where}에서 찾아요. 글자 일부만 순서대로 쳐도 되고, 공백으로 나누면 모두 맞는 것만 보여요`;
+  } else if (shown.length === 0) status = "맞는 리소스가 없어요";
 
   return (
     <div className="modal">
@@ -142,6 +162,33 @@ export function ResourcePalette({ profile, services, ttlMs, onPick, onClose, now
         {shown.length > 0 && (
           <ul className="pk-list" id={listId} role="listbox" aria-label={`${PALETTE_TITLE} 결과`}>
             {shown.map((e, i) => {
+              if ("argo" in e) {
+                const a = e.argo;
+                return (
+                  <li
+                    key={e.key}
+                    id={`${listId}-${i}`}
+                    role="option"
+                    aria-selected={i === activeIndex}
+                    className={`pk-opt${i === activeIndex ? " on" : ""}`}
+                    onMouseDown={(ev) => ev.preventDefault()}
+                    onMouseMove={() => setActiveKey(e.key)}
+                    onClick={() => pick(e)}
+                  >
+                    <div className="pk-top">
+                      <span className="argo-badge argo-dim">{a.kind ?? "ArgoCD 앱"}</span>
+                      <span className="pk-name">
+                        <Highlight text={a.name} tokens={tokens} />
+                      </span>
+                      {a.where && <span className="mono dim">{a.where}</span>}
+                      <span className="pal-where dim">
+                        ArgoCD · {a.serverName}
+                        {a.app && ` › 앱 ${a.app}`}
+                      </span>
+                    </div>
+                  </li>
+                );
+              }
               const age = at - e.fetchedAt;
               return (
                 // 마우스를 눌러도 검색 상자가 초점을 잃지 않게 mousedown은 막고, 고르는 일은 click에서 한다

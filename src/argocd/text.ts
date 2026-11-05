@@ -176,3 +176,20 @@ export const ARGO_HEALTH_BADGE_TITLE = "Health 상태";
 export const H_ARGO_ID = "ID";
 export const H_ARGO_DEPLOYED = "배포";
 export const H_ARGO_HOOK_PHASE = "hook 단계";
+
+// 화면 전환(서버 화면 위쪽). 화면을 늘릴 때는 ArgoViews.tsx의 ARGO_VIEWS에 한 줄을 더한다.
+export const ARGO_VIEWS_LABEL = "ArgoCD 화면";
+export const ARGO_VIEW_APPS = "앱";
+export const ARGO_VIEW_RESOURCES = "리소스 검색";
+export const ARGO_VIEW_MAPS = "지도";
+export const ARGO_VIEW_METRICS = "지표";
+export const MAP_TEXT = {
+  tabs: "지도 종류", matrix: "플릿 매트릭스", versions: "환경 간 버전", sets: "ApplicationSet 펼침",
+  hierarchy: "app-of-apps 계층", timeline: "배포 타임라인", network: "네트워크",
+  cluster: "클러스터", project: "프로젝트", all: "전체", empty: "표시할 데이터가 없어요",
+  driftOnly: "차이 있는 앱만", drift: "상위 환경과 달라요", cycle: "순환 참조",
+  env: "환경", app: "Application", external: "외부", ingress: "Ingress", service: "Service", pod: "Pod",
+  range: "기간", day: "24시간", week: "7일", month: "30일", revision: "리비전",
+  initiator: "실행자", message: "메시지", noNetwork: "네트워크 관계가 있는 리소스가 없어요",
+  tally: (t: { err: number; outOfSync: number; caution: number; ok: number }) => `오류 ${t.err} · OutOfSync ${t.outOfSync} · 주의 ${t.caution} · 정상 ${t.ok}`,
+};

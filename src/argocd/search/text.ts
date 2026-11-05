@@ -1,0 +1,26 @@
+// 전체 리소스 검색 화면과 ⌘K 연동의 글
+export const SEARCH_PLACEHOLDER = "이름·종류·네임스페이스·앱으로 찾기";
+export const SEARCH_LABEL = "리소스 검색";
+export const SEARCH_RESULTS_LABEL = "리소스 검색 결과";
+export const SEARCH_KIND_FILTER = "종류";
+export const SEARCH_NAMESPACE_FILTER = "네임스페이스";
+export const SEARCH_CLUSTER_FILTER = "클러스터";
+export const SEARCH_DUPLICATE_FILTER = "여러 앱이 관리";
+export const SEARCH_DUPLICATE_CHIP = "여러 앱이 관리";
+export const SEARCH_DUPLICATE_TITLE = "같은 리소스를 둘 이상의 앱이 관리해요. 앱끼리 서로 되돌릴 수 있어요";
+export const SEARCH_EMPTY = "색인할 리소스가 없어요. 앱 목록을 불러오면 여기서 찾을 수 있어요";
+export const SEARCH_NO_MATCH = "맞는 리소스가 없어요";
+export const SEARCH_CLEAR = "조건 지우기";
+export const H_SEARCH_KIND = "종류";
+export const H_SEARCH_NAME = "이름";
+export const H_SEARCH_NAMESPACE = "네임스페이스";
+export const H_SEARCH_CLUSTER = "클러스터";
+export const H_SEARCH_APP = "앱";
+export const SEARCH_CLUSTER_SCOPED = "클러스터 범위";
+export const SEARCH_FROM_TREE = "열어본 앱의 리소스 트리에서 찾은 리소스";
+export const SEARCH_FROM_TREE_BADGE = "트리";
+export const searchSummary = (shown: number, total: number) => `리소스 ${shown.toLocaleString("ko-KR")}개 (색인 ${total.toLocaleString("ko-KR")}개)`;
+export const searchLimited = (limit: number) => `잘 맞는 ${limit.toLocaleString("ko-KR")}개만 보여요. 글자를 더 쳐서 좁혀 보세요`;
+export const searchMoreApps = (n: number) => `+${n}`;
+export const searchOpenApp = (app: string) => `${app} 앱 열기`;
+export const searchApps = (n: number) => `앱 ${n}개가 관리해요`;

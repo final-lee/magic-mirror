@@ -104,3 +104,83 @@ async fn argocd_network_error_reports_cause() {
         other => panic!("unexpected error: {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn argocd_optional_live_read_only_treats_404_as_missing() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        for (status, body) in [("404 Not Found", r#"{"message":"missing"}"#), ("403 Forbidden", r#"{"message":"denied"}"#), ("500 Internal Server Error", r#"{"message":"failed"}"#)] {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = [0; 4096];
+            let _ = stream.read(&mut buf).await.unwrap();
+            let response = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+    let store = MemoryStore::default();
+    store.0.lock().unwrap().insert(url.clone(), Token("token".into()));
+    let state = ArgocdState::with_store(Arc::new(store), std::env::temp_dir());
+    assert!(state.api_optional(&url, Method::GET, &["resource"], &[], None).await.unwrap().is_none());
+    assert_eq!(state.api_optional(&url, Method::GET, &["resource"], &[], None).await.unwrap_err(), AppError::other("denied"));
+    assert_eq!(state.api_optional(&url, Method::GET, &["resource"], &[], None).await.unwrap_err(), AppError::other("failed"));
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn argocd_bodyless_delete_sends_json_content_type() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut buf = [0; 4096];
+        let n = stream.read(&mut buf).await.unwrap();
+        let request = String::from_utf8_lossy(&buf[..n]).to_lowercase();
+        let (status, body) = if request.starts_with("delete ") && request.contains("content-type: application/json") { ("200 OK", "{}") } else { ("415 Unsupported Media Type", r#"{"message":"Invalid content type"}"#) };
+        let response = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+        stream.write_all(response.as_bytes()).await.unwrap();
+    });
+    let store = MemoryStore::default();
+    store.0.lock().unwrap().insert(url.clone(), Token("token".into()));
+    let state = ArgocdState::with_store(Arc::new(store), std::env::temp_dir());
+    state.api(&url, Method::DELETE, &["api", "v1", "applications", "a", "operation"], &[], None).await.unwrap();
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn argocd_apply_checks_versions_and_confirmation_and_records_results() {
+    use crate::argocd::change::{self, ArgoChange, ArgoTarget};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        for (status, body) in [
+            ("200 OK", r#"{"username":"alice"}"#), ("200 OK", r#"{"metadata":{"resourceVersion":"2"}}"#),
+            ("200 OK", r#"{"username":"alice"}"#), ("200 OK", r#"{"metadata":{"resourceVersion":"2"}}"#),
+            ("200 OK", r#"{"username":"alice"}"#), ("200 OK", r#"{"metadata":{"resourceVersion":"2"}}"#), ("200 OK", r#"{}"#),
+            ("200 OK", r#"{"username":"alice"}"#), ("200 OK", r#"{"metadata":{"resourceVersion":"2"}}"#), ("500 Error", r#"{"message":"실패"}"#),
+        ] {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = [0; 8192];
+            let _ = stream.read(&mut buf).await.unwrap();
+            let response = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let store = MemoryStore::default();
+    store.0.lock().unwrap().insert(url.clone(), Token("secret".into()));
+    let state = ArgocdState::with_store(Arc::new(store), dir.path().to_owned());
+    let target = ArgoTarget { namespace: "argocd".into(), name: "web".into(), project: "default".into(), env: None };
+    let change = ArgoChange::AppDelete { cascade: false, propagation_policy: None };
+    let version = change::fingerprint(&json!({"metadata":{"resourceVersion":"2"}}));
+    assert!(change::apply(&state, &url, &target, &change, Some("stale".into()), Some("web".into())).await.is_err());
+    assert!(change::apply(&state, &url, &target, &change, Some(version.clone()), Some("wrong".into())).await.is_err());
+    assert!(change::apply(&state, &url, &target, &change, Some(version.clone()), Some("web".into())).await.is_ok());
+    assert!(change::apply(&state, &url, &target, &change, Some(version), Some("web".into())).await.is_err());
+    let records = change::changes(&state, &url);
+    assert_eq!(records.iter().map(|r| r.ok).collect::<Vec<_>>(), vec![false, false, true, false]);
+    assert_eq!(records[0].error.as_deref(), Some("요청을 완료하지 못했어요"));
+    assert_eq!(records[1].error.as_deref(), Some("요청을 완료하지 못했어요"));
+    assert_eq!(records[2].user.as_deref(), Some("alice"));
+    server.await.unwrap();
+}

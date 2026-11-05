@@ -68,6 +68,25 @@ impl TokenStore for Keychain {
     }
 }
 
+#[cfg(test)]
+#[derive(Default)]
+struct MemoryStore(Mutex<HashMap<String, Token>>);
+
+#[cfg(test)]
+impl TokenStore for MemoryStore {
+    fn get(&self, url: &str) -> Result<Option<Token>, AppError> {
+        Ok(self.0.lock().unwrap().get(url).cloned())
+    }
+    fn set(&self, url: &str, token: &Token) -> Result<(), AppError> {
+        self.0.lock().unwrap().insert(url.to_owned(), token.clone());
+        Ok(())
+    }
+    fn delete(&self, url: &str) -> Result<(), AppError> {
+        self.0.lock().unwrap().remove(url);
+        Ok(())
+    }
+}
+
 /// 서버별 토큰 캐시와 HTTP 클라이언트, 열린 스트림, 로컬 기록 파일 위치.
 pub struct ArgocdState {
     client: Client,
@@ -80,12 +99,20 @@ pub struct ArgocdState {
     next_stream: AtomicU64,
     /// 변경 기록(`argocd-changes.jsonl`)과 상태 변화 기록(`argocd-events.jsonl`)을 두는 앱 데이터 폴더.
     data_dir: PathBuf,
+    events: Mutex<super::events::Recorder>,
 }
 
 impl ArgocdState {
     /// `data_dir`은 앱 데이터 폴더.
     pub fn new(data_dir: PathBuf) -> Self {
         Self::with_store(Arc::new(Keychain), data_dir)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn in_memory(data_dir: PathBuf, url: &str, token: String) -> Self {
+        let store = Arc::new(MemoryStore::default());
+        store.set(account(url), &Token(token)).unwrap();
+        Self::with_store(store, data_dir)
     }
 
     fn with_store(store: Arc<dyn TokenStore>, data_dir: PathBuf) -> Self {
@@ -99,6 +126,7 @@ impl ArgocdState {
             streams: Mutex::new(HashMap::new()),
             next_stream: AtomicU64::new(1),
             data_dir,
+            events: Mutex::new(super::events::Recorder::default()),
         }
     }
 
@@ -110,6 +138,10 @@ impl ArgocdState {
     /// 감시 중 본 상태 변화의 기록 파일.
     pub fn events_path(&self) -> PathBuf {
         self.data_dir.join("argocd-events.jsonl")
+    }
+
+    pub(super) fn recorder(&self) -> &Mutex<super::events::Recorder> {
+        &self.events
     }
 }
 
@@ -199,15 +231,26 @@ impl ArgocdState {
     }
 
     async fn request(&self, method: Method, url: Url, token: Option<&Token>, body: Option<&Value>) -> Result<Value, AppError> {
+        self.request_optional(method, url, token, body, false).await?.ok_or_else(|| AppError::other(RESPONSE_ERROR))
+    }
+
+    async fn request_optional(&self, method: Method, url: Url, token: Option<&Token>, body: Option<&Value>, allow_not_found: bool) -> Result<Option<Value>, AppError> {
+        // ArgoCD 서버는 GET이 아닌 요청에 Content-Type이 없으면 본문이 없어도 415로 거절한다(DELETE 포함).
+        let needs_type = method != Method::GET;
         let mut request = self.client.request(method, url);
         if let Some(token) = token {
             request = request.bearer_auth(&token.0);
         }
         if let Some(body) = body {
             request = request.json(body);
+        } else if needs_type {
+            request = request.header(reqwest::header::CONTENT_TYPE, "application/json");
         }
         let response = request.send().await.map_err(network_error)?;
         let status = response.status();
+        if allow_not_found && status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
         let bytes = response.bytes().await.map_err(network_error)?;
         let value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
         if !status.is_success() {
@@ -216,7 +259,7 @@ impl ArgocdState {
         if value.is_null() {
             return Err(AppError::other(RESPONSE_ERROR));
         }
-        Ok(value)
+        Ok(Some(value))
     }
 
     async fn session_for(&self, url: &str, token: &Token) -> Result<ArgocdSession, AppError> {
@@ -273,6 +316,11 @@ impl ArgocdState {
     pub async fn api(&self, url: &str, method: Method, segments: &[&str], query: &[(&str, &str)], body: Option<&Value>) -> Result<Value, AppError> {
         let token = self.token(url).await?.ok_or_else(|| AppError::other(ARGOCD_TOKEN_MISSING))?;
         self.request(method, request_url(url, segments, query)?, Some(&token), body).await
+    }
+
+    pub async fn api_optional(&self, url: &str, method: Method, segments: &[&str], query: &[(&str, &str)], body: Option<&Value>) -> Result<Option<Value>, AppError> {
+        let token = self.token(url).await?.ok_or_else(|| AppError::other(ARGOCD_TOKEN_MISSING))?;
+        self.request_optional(method, request_url(url, segments, query)?, Some(&token), body, true).await
     }
 
     /// 저장된 토큰으로 스트림 응답(서버 전송 이벤트·로그)을 연다. 성공 상태가 아니면 본문의 메시지로 실패한다.

@@ -1,6 +1,12 @@
 mod adapters;
 mod argocd;
 mod argocd_commands;
+mod argocd_change_commands;
+mod argocd_stream_commands;
+mod argocd_read_commands;
+mod argocd_appset_commands;
+mod argocd_ops_commands;
+mod argocd_metrics_commands;
 mod argowf;
 mod argowf_commands;
 mod argowf_manifest_commands;
@@ -48,6 +54,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             k8s::tls::install_crypto_provider();
             k8s::terminal::sweep_pinned_in(&std::env::temp_dir());
@@ -64,6 +71,7 @@ pub fn run() {
             app.manage(k8s_access_commands::AccessState::default());
             app.manage(argocd::ArgocdState::new(dir.clone()));
             app.manage(tailscale::TailscaleState::new(dir.join("tailscale-changes.jsonl")));
+            app.manage(argocd::cluster::ArgoKube::default());
             app.manage(argowf::client::State::new(dir.join("settings.json")));
             app.manage(pg_commands::PgState::new(dir.join("db-changes.jsonl")));
             app.manage(kv_commands::KvState::new(dir.join("kv-bigkeys.json")));
@@ -275,8 +283,39 @@ pub fn run() {
             argocd_commands::argocd_appsets,
             argocd_commands::argocd_app,
             argocd_commands::argocd_tree,
-            argocd_commands::argocd_refresh,
-            argocd_commands::argocd_sync,
+            argocd_change_commands::argocd_preview,
+            argocd_change_commands::argocd_apply,
+            argocd_change_commands::argocd_changes,
+            argocd_change_commands::argocd_can,
+            argocd_change_commands::argocd_settings,
+            argocd_stream_commands::argocd_watch_apps,
+            argocd_stream_commands::argocd_watch_tree,
+            argocd_stream_commands::argocd_watch_appsets,
+            argocd_stream_commands::argocd_watch_stop,
+            argocd_stream_commands::argocd_events,
+            argocd_read_commands::argocd_resource,
+            argocd_read_commands::argocd_resource_events,
+            argocd_read_commands::argocd_resource_links,
+            argocd_read_commands::argocd_app_links,
+            argocd_read_commands::argocd_app_diff,
+            argocd_read_commands::argocd_history,
+            argocd_read_commands::argocd_manifests_diff,
+            argocd_read_commands::argocd_operation_waves,
+            argocd_read_commands::argocd_sync_windows,
+            argocd_read_commands::argocd_logs,
+            argocd_read_commands::argocd_logs_stop,
+            argocd_ops_commands::argocd_resource_actions,
+            argocd_ops_commands::argocd_kube_contexts,
+            argocd_metrics_commands::argocd_deploy_history,
+            argocd_metrics_commands::argocd_controller_metrics,
+            argocd_metrics_commands::argocd_app_usage,
+            argocd_appset_commands::argocd_appset,
+            argocd_appset_commands::argocd_appset_events,
+            argocd_appset_commands::argocd_appset_tree,
+            argocd_appset_commands::argocd_appset_apps,
+            argocd_appset_commands::argocd_appset_generate,
+            argocd_appset_commands::argocd_yaml_diff,
+            argocd_appset_commands::argocd_notification_catalog,
             argowf_commands::argowf_contexts,
             argowf_commands::argowf_set_token,
             argowf_commands::argowf_forget_token,

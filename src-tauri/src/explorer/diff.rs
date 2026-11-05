@@ -49,7 +49,7 @@ pub struct DiffStats {
     pub changed: usize,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TextDiff {
     pub rows: Vec<DiffRow>,
     pub hunks: Vec<usize>,

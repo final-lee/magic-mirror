@@ -9,7 +9,11 @@ import { ARGO_ENVS, type ArgoEnv, envOf } from "./argoEnv";
 import { type LabelPick, labelMatch, labelOptions, parsePick, pickText, searchMatch } from "./argoFilter";
 import { type Group, type GroupDim, type Tally, bySeverityThenName, buildGroups, clusterOf, clusterText, dimText, groupLevel, isProblem, labelDim, labelKey, labelKeys, namespaceOf, parseDim, projectOf, rowKey, tally } from "./argoGroup";
 import { ArgoBadge } from "./argoParts";
+import { ArgoChips } from "./ArgoChips";
 import { ArgoDetail } from "./ArgoDetail";
+import { AppSetPanel } from "./manage/AppSetPanel";
+import { CreateApp } from "./manage/CreateApp";
+import { APPSET_OPEN } from "./manage/text";
 import { ArgoLabelFilter } from "./ArgoLabelFilter";
 import { ArgoMultiSelect } from "./ArgoMultiSelect";
 import { isTokenError, useApps, useAppsets } from "./queries";
@@ -18,7 +22,7 @@ import {
   ARGO_HEALTH_STATUSES, ARGO_NO_APPS, ARGO_NO_MATCH, ARGO_PROJECT, ARGO_SEARCH, ARGO_SYNC_GROUP, ARGO_SYNC_STATUSES, COL_NAME, H_ARGO_AUTO, H_ARGO_DEST, H_ARGO_ENV,
   H_ARGO_LAST_SYNC, H_ARGO_OPERATION, H_ARGO_REVISION, LOADING, ARGO_EXPAND_ALL, ARGO_FOLD_OK, argoAppCount, argoCaution, argoErrors, argoGenerators, argoOk, argoOkApps, argoOutOfSync, argoWarnings,
 } from "./text";
-import type { ArgoAppRow, ArgoViewState } from "./types";
+import type { ArgoAppRow, ArgoOpenRequest, ArgoResourceFocus, ArgoViewState } from "./types";
 
 interface Props {
   /** ArgoCD 서버 주소 */
@@ -32,6 +36,9 @@ interface Props {
   saved?: ArgoViewState | null;
   /** 필터·묶기를 바꿀 때마다 부른다(검색어는 넣지 않는다) */
   onSave?: (view: ArgoViewState) => void;
+  /** 다른 화면(리소스 검색·⌘K)에서 앱을 열라는 요청. 받으면 상세를 열고 onOpened를 부른다 */
+  open?: ArgoOpenRequest | null;
+  onOpened?: () => void;
 }
 
 /** 알려진 상태가 아니거나 없으면 Unknown 칸으로 센다 */
@@ -98,35 +105,12 @@ function count(rows: ArgoAppRow[], of: (r: ArgoAppRow) => string): Record<string
   return n;
 }
 
-interface ChipsProps {
-  label: string;
-  statuses: readonly string[];
-  counts: Record<string, number>;
-  picked: Set<string>;
-  onToggle: (s: string) => void;
-  /** 칩 앞 점의 색을 정하는 클래스 */
-  dot: (s: string) => string;
-  text?: (s: string) => string;
-}
-
-function Chips({ label, statuses, counts, picked, onToggle, dot, text }: ChipsProps) {
-  return (
-    <div className="k8s-levels" role="group" aria-label={label}>
-      {statuses.map((s) => (
-        <button key={s} className={`k8s-lvl argo-lvl ${dot(s)}`} aria-pressed={picked.has(s)} onClick={() => onToggle(s)}>
-          {text ? text(s) : s} <span className="k8s-lvl-n">{(counts[s] ?? 0).toLocaleString("ko-KR")}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
 /** 묶기 기준 목록: 데이터에 있는 레이블 키마다 하나씩. exclude는 1단계에서 이미 고른 기준 */
 const dimsFor = (keys: string[], exclude: GroupDim | null): GroupDim[] =>
   (["set", "env", "cluster", "project", "namespace", ...keys.map(labelDim), "none"] as GroupDim[]).filter((d) => d === "none" || d !== exclude);
 
 /** 한 서버의 Application·ApplicationSet 목록. 행을 누르면 상세가 겹쳐 뜬다. */
-export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props) {
+export function ArgoView({ url, live, onTokenError, now, saved, onSave, open, onOpened }: Props) {
   const apps = useApps(url, live);
   const sets = useAppsets(url, live);
   const appRows = useMemo(() => apps.data ?? [], [apps.data]);
@@ -156,6 +140,20 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
   // "모두 펼치기": 기본을 모두 펼침으로 바꾼다. 다시 누르면 처음 규칙(정상 접기)으로 돌아간다. 둘 다 그동안 직접 펴고 접은 것은 잊는다.
   const [allOpen, setAllOpen] = useState(false);
   const [selected, setSelected] = useState<{ namespace: string; name: string } | null>(null);
+  // 앱 상세와 ApplicationSet 상세는 같은 자리를 쓰므로 하나만 열린다
+  const [selectedSet, setSelectedSet] = useState<{ namespace: string; name: string } | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  // 리소스 검색·⌘K에서 온 요청: 그 앱의 상세를 열고(필요하면 리소스도 고르게) 한 번만 받는다. 같은 앱·리소스를 다시 열어도 새로 그리도록 nonce를 키에 넣는다.
+  const [focus, setFocus] = useState<{ resource: ArgoResourceFocus | null; nonce: number; tab?: "history" } | null>(null);
+  const onOpenedRef = useRef(onOpened);
+  onOpenedRef.current = onOpened;
+  useEffect(() => {
+    if (!open) return;
+    setSelectedSet(null);
+    setSelected({ namespace: open.namespace, name: open.name });
+    setFocus({ resource: open.resource, nonce: open.nonce, tab: open.tab });
+    onOpenedRef.current?.();
+  }, [open]);
   const at = now ?? Date.now();
 
   // 고른 필터·묶기를 서버별로 남긴다. 처음 그린 상태(지난번에 남긴 것)와 같으면 다시 저장하지 않는다.
@@ -251,7 +249,11 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
     const errors = Number(v.errors ?? 0);
     const warnings = Number(v.warnings ?? 0);
     const on = selected !== null && selected.name === r.name && selected.namespace === r.namespace;
-    const open = () => setSelected(on ? null : { namespace: r.namespace, name: r.name });
+    const open = () => {
+      setFocus(null);
+      setSelectedSet(null);
+      setSelected(on ? null : { namespace: r.namespace, name: r.name });
+    };
     return (
       <tr
         key={rowKey(r.namespace, r.name)}
@@ -354,6 +356,17 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
           {g.set?.message && <span className="err argo-band-msg">{g.set.message}</span>}
           <span className="dim">{argoAppCount(g.apps.length)}</span>
         </button>
+        {g.set && (
+          <button
+            className="btn small tone-secondary argo-band-open"
+            onClick={() => {
+              setSelected(null);
+              setSelectedSet({ namespace: g.set!.namespace, name: g.set!.name });
+            }}
+          >
+            {APPSET_OPEN}
+          </button>
+        )}
         {open && g.apps.length > 0 && (
           <table className="k8s-table argo-table argo-card-rows" aria-label={g.name}>
             <Columns withEnv={showEnv} />
@@ -370,17 +383,18 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
     <div
       className="argo"
       onKeyDown={(e) => {
-        if (e.key !== "Escape" || e.defaultPrevented || !selected) return;
+        if (e.key !== "Escape" || e.defaultPrevented || (!selected && !selectedSet)) return;
         if ((e.target as Element).closest(".list-find") || Array.from(document.querySelectorAll(".modal")).some((modal) => !modal.closest("[hidden]"))) return;
         setSelected(null);
+        setSelectedSet(null);
       }}
     >
       {apps.isError && <ErrorState error={apps.error} profile="" compact onRetry={() => void apps.refetch()} />}
       {sets.isError && <ErrorState error={sets.error} profile="" compact onRetry={() => void sets.refetch()} />}
       <div className="argo-bar">
-        <Chips label={ARGO_SYNC_GROUP} statuses={ARGO_SYNC_STATUSES} counts={view.syncCounts} picked={syncPick} onToggle={(s) => setSyncPick((p) => toggled(p, s))} dot={(s) => `argo-lvl-${s}`} />
-        <Chips label={ARGO_HEALTH_GROUP} statuses={ARGO_HEALTH_STATUSES} counts={view.healthCounts} picked={healthPick} onToggle={(s) => setHealthPick((p) => toggled(p, s))} dot={(s) => `argo-lvl-${s}`} />
-        <Chips
+        <ArgoChips label={ARGO_SYNC_GROUP} statuses={ARGO_SYNC_STATUSES} counts={view.syncCounts} picked={syncPick} onToggle={(s) => setSyncPick((p) => toggled(p, s))} dot={(s) => `argo-lvl-${s}`} />
+        <ArgoChips label={ARGO_HEALTH_GROUP} statuses={ARGO_HEALTH_STATUSES} counts={view.healthCounts} picked={healthPick} onToggle={(s) => setHealthPick((p) => toggled(p, s))} dot={(s) => `argo-lvl-${s}`} />
+        <ArgoChips
           label={ARGO_ENV_GROUP}
           statuses={envs}
           counts={view.envCounts}
@@ -438,13 +452,22 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
         >
           {allOpen ? ARGO_FOLD_OK : ARGO_EXPAND_ALL}
         </button>
+        <CreateApp url={url} rows={appRows} onDone={setNote} />
+        {note && (
+          <span className="ok" role="status">
+            {note}
+          </span>
+        )}
       </div>
       <div
         className="argo-scroll"
         ref={listRef}
         onClick={(e) => {
           // 행·머리글·묶음 단추 밖의 빈 곳을 누르면 선택을 푼다
-          if (!(e.target as Element).closest("thead, tbody tr, button, .list-find")) setSelected(null);
+          if (!(e.target as Element).closest("thead, tbody tr, button, .list-find")) {
+            setSelected(null);
+            setSelectedSet(null);
+          }
         }}
       >
         <ListFind find={find} placeholder={ARGO_SEARCH} count={visible.length} />
@@ -483,15 +506,36 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave }: Props)
           </div>
         )}
       </div>
+      {selectedSet && (
+        <AppSetPanel
+          key={rowKey(selectedSet.namespace, selectedSet.name)}
+          url={url}
+          namespace={selectedSet.namespace}
+          name={selectedSet.name}
+          rows={appRows}
+          live={live}
+          onClose={() => setSelectedSet(null)}
+          onOpenApp={(namespace, name) => {
+            setSelectedSet(null);
+            setFocus(null);
+            setSelected({ namespace, name });
+          }}
+          onTokenError={onTokenError}
+          now={now}
+          widthPct={DETAIL_PCT}
+        />
+      )}
       {selected && (
         <ArgoDetail
-          key={rowKey(selected.namespace, selected.name)}
+          key={`${rowKey(selected.namespace, selected.name)}#${focus?.nonce ?? 0}`}
           url={url}
           namespace={selected.namespace}
           name={selected.name}
           resourceVersion={selectedRow?.resourceVersion ?? null}
           live={live}
           onClose={() => setSelected(null)}
+          focus={focus?.resource ?? null}
+          initialTab={focus?.tab}
           onTokenError={onTokenError}
           now={now}
           widthPct={DETAIL_PCT}

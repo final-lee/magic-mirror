@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { errorMessage } from "../api/errors";
 import { useSettings } from "../api/queries";
@@ -9,9 +9,17 @@ import { ArgoServerEditor, ArgoServerForm } from "./ArgoServerEditor";
 import { ArgoSteps } from "./ArgoSteps";
 import { ArgoTokenForm } from "./ArgoTokenForm";
 import { ArgoView } from "./ArgoView";
-import { argoKeys, isTokenError, useSession } from "./queries";
+import { ArgoViewSwitcher, parseArgoView, type ArgoViewId } from "./ArgoViews";
+import { argoKeys, isTokenError, useAppsWatch, useSession } from "./queries";
 import { LOADING, SERVER_EDIT, SERVER_HELP, SERVER_LABEL, SERVER_NEXT, TOKEN_CHANGE, TOKEN_FORGET, sessionLine } from "./text";
-import type { ArgocdServer } from "./types";
+import { ResourceSearch } from "./search/ResourceSearch";
+import { useKubeContexts, withKubeContext } from "./ops/queries";
+import { MapsView } from "./maps/MapsView";
+import { MetricsView } from "./metrics/MetricsView";
+import { useArgoNotifier } from "./notify/useArgoNotifier";
+import type { ArgoJump, ArgoOpenRequest, ArgocdServer, ArgoResourceFocus, ArgoViewState } from "./types";
+
+const EMPTY_VIEW: ArgoViewState = { sync: [], health: [], envs: [], clusters: [], projects: [], labels: [], groupBy: null, thenBy: null };
 
 /** 토큰 폼을 띄울 서버와, 그 폼에 먼저 보일 이유(없으면 null) */
 interface Forced {
@@ -23,7 +31,7 @@ interface Forced {
  * ArgoCD 탭. 처음에는 서버 주소(1단계) → API 토큰(2단계) 순으로 연결하고, 그 뒤로는 서버를 골라 Application 목록을 본다.
  * 서버 목록은 설정에, 토큰은 백엔드가 키체인에 둔다. 토큰은 폼 안에서만 들고 있다가 보내고 이 탭에는 남기지 않는다.
  */
-export function ArgocdTab({ active }: { active: boolean }) {
+export function ArgocdTab({ active, jump, onJumpDone }: { active: boolean; jump?: ArgoJump | null; onJumpDone?: () => void }) {
   const { settings, update, isError: settingsFailed, error: settingsFailure } = useSettings();
   const qc = useQueryClient();
   const servers: ArgocdServer[] = settings?.argocdServers ?? [];
@@ -35,17 +43,44 @@ export function ArgocdTab({ active }: { active: boolean }) {
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
+  const kubeContexts = useKubeContexts(editing);
 
   const onTokenError = useCallback((message: string) => setForced({ url, message }), [url]);
 
   const sessionTokenError = isTokenError(session.error);
   const needsToken = forced?.url === url || session.data === null || sessionTokenError;
+  // 알림이 켜져 있으면 탭이 가려져 있어도 스트림을 열어 둬서 Degraded·작업 실패·OutOfSync 지속을 알린다
+  const notifier = useArgoNotifier(server);
+  useAppsWatch(url, (active || notifier.enabled) && !!session.data && !needsToken, notifier.listen);
   const reason = failure ?? (forced?.url === url ? forced.message : null) ?? (sessionTokenError ? errorMessage(session.error) : null);
 
   const selectServer = (next: string) => {
     setSelected(next);
     setFailure(null);
   };
+
+  // 화면 전환: 서버마다 마지막으로 연 화면을 설정에 남긴다. 눌러서 바꾼 것은 설정이 돌아오기 전에도 바로 보이게 따로 쥔다.
+  const [chosen, setChosen] = useState<Record<string, ArgoViewId>>({});
+  const view = chosen[url] ?? parseArgoView(settings?.argocdViews?.[url]?.view);
+  const chooseView = (next: ArgoViewId) => {
+    setChosen((c) => ({ ...c, [url]: next }));
+    update({ argocdViews: { ...settings?.argocdViews, [url]: { ...(settings?.argocdViews?.[url] ?? EMPTY_VIEW), view: next } } });
+  };
+
+  // 앱 목록 화면에 보내는 "이 앱(과 리소스)을 열어 주세요" 요청. 검색 화면과 ⌘K(jump)가 만든다. 앱 목록 화면이 받으면 비운다.
+  const [request, setRequest] = useState<(ArgoOpenRequest & { url: string }) | null>(null);
+  const [mapFilter, setMapFilter] = useState<{ url: string; state: ArgoViewState; nonce: number } | null>(null);
+  const nonce = useRef(0);
+  const openApp = useCallback((target: string, app: { namespace: string; name: string }, resource: ArgoResourceFocus | null, history = false) => {
+    setChosen((c) => ({ ...c, [target]: "apps" }));
+    setRequest({ url: target, namespace: app.namespace, name: app.name, resource, tab: history ? "history" : undefined, nonce: ++nonce.current });
+  }, []);
+  useEffect(() => {
+    if (!jump) return;
+    selectServer(jump.url);
+    openApp(jump.url, jump, jump.resource);
+    onJumpDone?.();
+  }, [jump]);
 
   // 새로 넣은 서버를 곧바로 골라 2단계(토큰)로 넘어간다
   const addServer = (added: ArgocdServer) => {
@@ -112,14 +147,30 @@ export function ArgocdTab({ active }: { active: boolean }) {
     body = <ErrorState error={session.error} profile="" compact onRetry={() => void session.refetch()} />;
   } else if (session.data) {
     body = (
-      <ArgoView
-        key={url}
-        url={url}
-        live={active}
-        onTokenError={onTokenError}
-        saved={settings.argocdViews?.[url] ?? null}
-        onSave={(view) => update({ argocdViews: { ...settings.argocdViews, [url]: view } })}
-      />
+      <>
+        <div className="argo" hidden={view !== "apps"}>
+          <ArgoView
+            key={`${url}:${mapFilter?.url === url ? mapFilter.nonce : 0}`}
+            url={url}
+            live={active && view === "apps"}
+            onTokenError={onTokenError}
+            saved={mapFilter?.url === url ? mapFilter.state : settings.argocdViews?.[url] ?? null}
+            onSave={(state) => {
+              setMapFilter(current => current?.url === url ? { ...current, state } : current);
+              update({ argocdViews: { ...settings.argocdViews, [url]: { ...state, view: settings.argocdViews?.[url]?.view } } });
+            }}
+            open={request?.url === url ? request : null}
+            onOpened={() => setRequest(null)}
+          />
+        </div>
+        {view === "resources" && <ResourceSearch key={url} url={url} live={active} onOpen={(app, resource) => openApp(url, app, resource)} />}
+        {view === "maps" && <MapsView key={url} url={url} live={active} onOpen={(app, history) => openApp(url, app, null, history)} onFilter={(state) => {
+          setMapFilter({ url, state, nonce: ++nonce.current });
+          setChosen(c => ({ ...c, [url]: "apps" }));
+          update({ argocdViews: { ...settings.argocdViews, [url]: { ...state, view: "apps" } } });
+        }} />}
+        {view === "metrics" && <MetricsView key={url} url={url} live={active} onOpen={(row) => openApp(url, row, null)} />}
+      </>
     );
   } else {
     body = <div className="empty">{LOADING}</div>;
@@ -140,6 +191,7 @@ export function ArgocdTab({ active }: { active: boolean }) {
             </select>
           </label>
           {session.data && !needsToken && <span className="argo-session mono">{sessionLine(session.data.username, session.data.version)}</span>}
+          {session.data && !needsToken && <ArgoViewSwitcher view={view} onChange={chooseView} />}
           {session.data && !needsToken && (
             <>
               <button className="btn small tone-warn" onClick={() => setForced({ url, message: null })}>
@@ -155,7 +207,15 @@ export function ArgocdTab({ active }: { active: boolean }) {
           </button>
         </div>
       )}
-      {editing && server !== null && <ArgoServerEditor servers={servers} onAdd={addServer} onRemove={removeServer} />}
+      {editing && server !== null && (
+        <ArgoServerEditor
+          servers={servers}
+          onAdd={addServer}
+          onRemove={removeServer}
+          kubeContexts={kubeContexts.data}
+          onKubeContext={(target, context) => update({ argocdServers: servers.map((s) => (s.url === target ? withKubeContext(s, context) : s)) })}
+        />
+      )}
       {body}
     </div>
   );

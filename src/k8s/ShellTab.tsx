@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { errorMessage } from "../api/errors";
 import { k8sApi } from "./api";
 import { PodTerminal } from "./PodTerminal";
@@ -20,6 +20,8 @@ interface Props {
   rules: K8sRules | undefined;
   /** 이 탭이 보이는지(숨겨도 열린 세션은 유지된다) */
   visible: boolean;
+  /** 다른 탭(ArgoCD)이 이 Pod의 셸을 열라고 부탁했다: 그 컨테이너를 고르고, 권한이 확인되면 바로 확인 단계를 띄운다 */
+  start?: { container: string | null };
 }
 
 interface Session {
@@ -32,8 +34,8 @@ interface Session {
  * Pod 상세의 셸 탭. 컨테이너와 방식(셸, attach)을 고르고, 확인(위험한 네임스페이스는 Pod 이름 입력)을 거쳐 터미널을 연다.
  * 세션은 탭을 바꿔도 유지되고, Pod 상세를 닫거나 세션을 닫을 때 끊는다.
  */
-export function ShellTab({ target, ssoProfile, namespace, pod, containers, rules, visible }: Props) {
-  const [container, setContainer] = useState<string>("");
+export function ShellTab({ target, ssoProfile, namespace, pod, containers, rules, visible, start }: Props) {
+  const [container, setContainer] = useState<string>(start?.container ?? "");
   const [mode, setMode] = useState<K8sShellMode>("exec");
   const [confirming, setConfirming] = useState(false);
   const [typed, setTyped] = useState("");
@@ -60,6 +62,15 @@ export function ShellTab({ target, ssoProfile, namespace, pod, containers, rules
     setNonce((n) => n + 1);
     close();
   };
+  // 부탁받은 셸은 컨테이너와 권한이 준비되는 대로 한 번만 확인 단계를 띄운다(확인과 이름 입력은 평소와 같다)
+  const [pendingStart, setPendingStart] = useState(start !== undefined);
+  useEffect(() => {
+    if (!pendingStart || !perm.allowed || chosen === "") return;
+    setPendingStart(false);
+    ask();
+    // ask는 매 렌더 새로 만들어지지만 이 효과는 준비됐을 때 한 번만 돈다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingStart, perm.allowed, chosen]);
 
   return (
     <div className="k8s-shell">

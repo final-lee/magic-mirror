@@ -1,6 +1,6 @@
 import { chromium } from "playwright-core";
 import { shootK8s } from "./shoot-k8s.mjs";
-import { shootArgocd } from "./shoot-argocd.mjs";
+import { shootArgocd, shootArgowf } from "./shoot-argocd.mjs";
 import { shootPg } from "./shoot-pg.mjs";
 import { shootKv } from "./shoot-kv.mjs";
 // 사용: npm run dev 를 띄우고 `npm i --no-save playwright-core && node scripts/screenshots/shoot.mjs [폴더] [구역…]` (Google Chrome 필요)
@@ -77,7 +77,7 @@ async function shootCore(page, out) {
   await page.keyboard.press("Escape");
 }
 
-const SECTIONS = { core: shootCore, k8s: shootK8s, argocd: shootArgocd, pg: shootPg, kv: shootKv };
+const SECTIONS = { core: shootCore, k8s: shootK8s, argocd: shootArgocd, argowf: shootArgowf, pg: shootPg, kv: shootKv };
 
 const browser = await chromium.launch({ channel: "chrome" });
 try {

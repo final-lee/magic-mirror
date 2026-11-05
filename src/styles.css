@@ -1436,6 +1436,9 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .argo-bar .k8s-filter { flex: 0 1 240px; }
 .argo-top { background: var(--panel); }
 .argo-session { color: var(--dim); }
+.argo-top .k8s-tabs { padding: 0; border-bottom: 0; }
+.argo-app-link { margin: 0 4px 2px 0; }
+.argo-limit { margin: 0; padding: 8px 12px; font-size: 12px; }
 .argo-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
 .argo-token { width: 520px; max-width: calc(100% - 32px); margin: 24px auto; display: flex; flex-direction: column; gap: 10px; background: var(--panel); border: 1px solid var(--border-input); border-radius: 12px; padding: 20px; }
 .argo-token p { margin: 0; font-size: 12px; }
@@ -2514,3 +2517,69 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .ts-diff-add { background: var(--green-soft); color: var(--green-text); }
 .ts-diff-del { background: var(--red-soft); color: var(--tone-ff6b62); }
 .ts-diff-gap { color: var(--dim); }
+
+/* ArgoCD 앱 관리·ApplicationSet */
+.argo-band-open { position: absolute; top: 4px; right: 8px; }
+.mg { display: flex; flex-direction: column; gap: 8px; }
+.mg-views { display: flex; gap: 2px; border-bottom: 1px solid var(--line); }
+.mg-views [role="tab"] { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--dim); padding: 4px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+.mg-views [aria-selected="true"] { color: inherit; border-bottom-color: var(--accent); }
+.mg-form { display: flex; flex-direction: column; gap: 6px; }
+.mg-indent { padding-left: 22px; }
+.mg-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 2px 12px; }
+.mg-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; margin: 6px 0; }
+.mg-field input, .mg-row input:not([type="checkbox"]), .mg-pick select { background: var(--code-bg); border: 1px solid var(--border-input); border-radius: 6px; padding: 3px 8px; color: var(--text); font: inherit; font-size: 12px; }
+.mg-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 2px 0; }
+.mg-row input:not([type="checkbox"]) { flex: 1; min-width: 120px; }
+.mg-pick { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); }
+.mg-details { margin: 8px 0; }
+.mg-details summary { cursor: pointer; font-size: 12px; color: var(--dim); }
+.mg-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.mg-problems { margin: 4px 0; padding-left: 18px; font-size: 12px; }
+.mg-acts { white-space: nowrap; text-align: right; }
+.mg-choices { display: flex; flex-direction: column; gap: 8px; }
+.mg-choice { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; cursor: pointer; }
+.mg-choice span { display: flex; flex-direction: column; }
+.mg-list { margin: 0; padding-left: 18px; font-size: 12px; }
+.mg-step { margin: 8px 0; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+.mg-changes { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.mg-change-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 6px; border: 0; background: var(--tone-252528); color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer; border-radius: 4px; }
+
+/* ArgoCD detail, operation, and change controls */
+.argo-res, .argo-diff-tab, .argo-ops { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.argo-res-head, .argo-bar-links, .argo-links, .argo-diff-head, .argo-recent { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
+.argo-res-head { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.argo-res-body, .argo-diff { min-width: 0; overflow: auto; }
+.argo-bar-links { padding: 6px 12px; border-bottom: 1px solid var(--line); }
+.argo-sw { cursor: pointer; border: 1px solid transparent; font: inherit; }
+.argo-sw-list { flex-basis: 100%; margin: 0; padding: 8px 12px 8px 28px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
+.argo-node-pick { width: 100%; text-align: left; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.argo-node-pick:hover { background: var(--neutral-alpha-08); }
+.argo-node-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.argo-diff-res { min-width: 0; margin: 6px 0; border: 1px solid var(--line); border-radius: 6px; overflow: auto; }
+.argo-diff-head, .argo-diff-res > summary { padding: 6px 8px; background: var(--code-bg); cursor: pointer; }
+.argo-diff-toggle { flex: none; }
+.argo-diff-stats { margin: 6px 8px; font-size: 11px; }
+.argo-rev { display: flex; flex-direction: column; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.argo-actions, .argo-sync-res { list-style: none; padding: 0; margin: 0; }
+.argo-actions { display: flex; flex-direction: column; gap: 6px; }
+.argo-actions li { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.argo-sync-res { max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+.argo-sync-res li { padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.argo-sync-res li:last-child { border-bottom: 0; }
+.argo-recent { margin: 4px 0; }
+.argo-dim { color: var(--dim); }
+.argo-problem td:first-child { box-shadow: inset 3px 0 var(--red); }
+.argo-sync-options, .argo-sync-retry { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 4px 12px; }
+.argo-sync-options h4, .argo-sync-retry h4, .argo-sync-retry .err { grid-column: 1 / -1; }
+.argo-sync-options .argo-opt { margin: 2px 0; }
+.argo-sync-retry label { display: flex; align-items: center; gap: 6px; }
+.argo-sync-retry input { min-width: 0; width: 100px; }
+.argo-change-sheet { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
+.argo-change-sheet section { margin: 12px 0; min-width: 0; }
+.argo-change-sheet h4 { margin: 0 0 6px; }
+.argo-change-sheet ul { margin: 0; padding-left: 20px; }
+.argo-change-sheet details { margin: 12px 0; }
+.argo-change-sheet summary { cursor: pointer; color: var(--accent); }
+.argo-change-sheet pre { max-height: 240px; overflow: auto; padding: 8px; background: var(--code-bg); }
+.argo-change-sheet label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }

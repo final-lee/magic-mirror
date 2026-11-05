@@ -20,6 +20,8 @@ export interface WorkloadsFocus {
   ref: ObjectRef;
   /** 같은 객체를 다시 열 때도 바뀌는 값 */
   nonce: number;
+  /** 이 Pod의 셸 탭으로 연다(다른 탭의 부탁). 그 컨테이너를 고르고 확인 단계를 띄운다 */
+  shell?: { container: string | null };
 }
 
 /** `:deploy` 같은 이동 명령이 고른 종류 */
@@ -191,7 +193,7 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
         {top && <LaneResizer lane="detailPct" onResize={lanes.resize} onCommit={lanes.commit} style={{ right: `${detailPct}%` }} />}
         {top && (
           <ObjectDetail
-            key={JSON.stringify([kindKey(top.kind), top.namespace, top.name])}
+            key={JSON.stringify([kindKey(top.kind), top.namespace, top.name, top === focus?.ref && focus.shell ? focus.nonce : null])}
             target={target}
             context={context}
             ssoProfile={ssoProfile}
@@ -212,6 +214,7 @@ export function WorkloadsView({ target, context, sessionEpoch, ssoProfile, live,
             onRunPlugin={onRunPlugin}
             pluginHost={pane}
             widthPct={detailPct}
+            openShell={top === focus?.ref ? focus.shell : undefined}
           />
         )}
       </div>

@@ -67,6 +67,8 @@ interface Props {
   onRunPlugin?: (command: string, title: string) => void;
   /** 플러그인 키를 받는 목록·상세 상자. 없으면 이 상세 안에서만 받는다 */
   pluginHost?: RefObject<HTMLElement>;
+  /** 다른 탭이 이 Pod의 셸을 열라고 부탁했다: 셸 탭으로 시작해 그 컨테이너로 확인 단계를 띄운다 */
+  openShell?: { container: string | null };
 }
 
 /** 사용량 한 칸: 값 아래에 요청·제한과 그 대비 비율 */
@@ -296,8 +298,8 @@ function prettyJson(value: string): string | null {
 
 /** 객체 하나의 상세(요약·YAML). 소유자·자식·노드 링크는 onOpen으로 상세 스택에 쌓는다. */
 export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose,
-  onOpenIam, now, widthPct = DETAIL_PCT, onChange, rolloutProgress, appliedChange, shellNamespace, usageIndex, plugins, onRunPlugin, pluginHost }: Props) {
-  const [tab, setTab] = useState<"summary" | "yaml" | "logs" | "shell" | "describe" | "relations">("summary");
+  onOpenIam, now, widthPct = DETAIL_PCT, onChange, rolloutProgress, appliedChange, shellNamespace, usageIndex, plugins, onRunPlugin, pluginHost, openShell }: Props) {
+  const [tab, setTab] = useState<"summary" | "yaml" | "logs" | "shell" | "describe" | "relations">(openShell ? "shell" : "summary");
   // 노드 셸: 변경 틀로 디버그 Pod를 만들고 나면 그 Pod에 들어가는 터미널을 연다
   const [nodeShell, setNodeShell] = useState<{ namespace: string; pod: string } | null>(null);
   const seenChange = useRef(appliedChange);
@@ -445,6 +447,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
               containers={logContainers.filter((c) => !c.init)}
               rules={rules.data}
               visible={shellTab}
+              start={openShell}
             />
           </div>
         )}

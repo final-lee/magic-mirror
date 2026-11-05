@@ -32,7 +32,7 @@ interface SourceState {
   error: unknown;
 }
 
-interface StreamState {
+export interface LogStreamState {
   buf: LogBuffer;
   sources: SourceState[];
   notices: string[];
@@ -41,9 +41,9 @@ interface StreamState {
   error: unknown;
 }
 
-const INITIAL: StreamState = { buf: EMPTY_BUFFER, sources: [], notices: [], status: "opening", error: null };
+export const LOG_INITIAL: LogStreamState = { buf: EMPTY_BUFFER, sources: [], notices: [], status: "opening", error: null };
 
-type Action = { type: "reset" } | { type: "message"; message: K8sLogMessage } | { type: "fail"; error: unknown };
+export type LogAction = { type: "reset" } | { type: "message"; message: K8sLogMessage } | { type: "fail"; error: unknown };
 
 /** 흐름을 찾아 patch를 합친다. 없으면 새로 붙이고, 바뀐 것이 없으면 같은 배열을 돌려준다(이름표를 다시 만들지 않게). */
 function upsert(sources: SourceState[], pod: string, container: string, patch: Partial<Pick<SourceState, "ended" | "error">>): SourceState[] {
@@ -57,8 +57,8 @@ function upsert(sources: SourceState[], pod: string, container: string, patch: P
   return out;
 }
 
-function reduce(state: StreamState, action: Action): StreamState {
-  if (action.type === "reset") return INITIAL;
+export function logReduce(state: LogStreamState, action: LogAction): LogStreamState {
+  if (action.type === "reset") return LOG_INITIAL;
   if (action.type === "fail") return { ...state, status: "error", error: action.error };
   const m = action.message;
   switch (m.type) {
@@ -82,7 +82,7 @@ function reduce(state: StreamState, action: Action): StreamState {
 
 /** 로그 흐름 하나. 옵션이나 nonce가 바뀌면 끊고 처음부터 다시 연다. 컴포넌트가 사라지면 끊는다. */
 export function useLogStream(target: K8sTarget, ssoProfile: string, live: boolean, stream: LogStream, options: K8sLogOptions, nonce: number) {
-  const [state, dispatch] = useReducer(reduce, INITIAL);
+  const [state, dispatch] = useReducer(logReduce, LOG_INITIAL);
   const key = JSON.stringify([targetKey(target), stream, options, nonce, live, ssoProfile]);
 
   useEffect(() => {
@@ -247,22 +247,59 @@ interface ViewProps {
   find: ListFindState;
 }
 
-/**
- * 로그 보기: 출처 칩(여러 Pod·컨테이너를 합쳐 볼 때), 레벨 거르기(여러 개), 찾기, 일시정지, 복사·저장(보이는 줄 그대로), 맨 아래 따라가기.
- * 출처가 둘 이상이면 줄마다 출처 이름표를 앞에 붙이고, 칩으로 출처마다 보이거나 감춘다.
- */
+/** EKS 로그 보기: 대상 클러스터에서 흐름을 열어 `LogPane`에 그린다. */
 export function LogView({ target, ssoProfile, live, stream, options, pretty, showTime, wrap, find }: ViewProps) {
   const [nonce, setNonce] = useState(0);
-  const { buf, sources, notices, status, error } = useLogStream(target, ssoProfile, live, stream, options, nonce);
-  const restart = () => setNonce((n) => n + 1);
+  const state = useLogStream(target, ssoProfile, live, stream, options, nonce);
   const name = stream.kind === "pod" ? stream.pod : stream.name;
+  return (
+    <LogPane
+      state={state}
+      ssoProfile={ssoProfile}
+      name={name}
+      workload={stream.kind === "workload" ? stream.name : ""}
+      options={options}
+      nonce={nonce}
+      onRestart={() => setNonce((n) => n + 1)}
+      pretty={pretty}
+      showTime={showTime}
+      wrap={wrap}
+      find={find}
+    />
+  );
+}
+
+interface PaneProps {
+  state: LogStreamState;
+  /** 오류 화면의 다시 로그인에 쓰는 SSO 프로필(EKS가 아니면 빈 글) */
+  ssoProfile: string;
+  /** 파일 이름과 접근성 이름에 쓰는 대상 이름 */
+  name: string;
+  /** 워크로드 이름(Pod 이름의 짧은 이름표를 만드는 데 쓴다). Pod 하나면 빈 글 */
+  workload: string;
+  options: K8sLogOptions;
+  /** 다시 열 때마다 바뀌는 번호(일시정지와 저장 안내를 푼다) */
+  nonce: number;
+  onRestart: () => void;
+  pretty: boolean;
+  showTime: boolean;
+  wrap: boolean;
+  find: ListFindState;
+}
+
+/**
+ * 로그 보기: 출처 칩(여러 Pod·컨테이너를 합쳐 볼 때), 레벨 거르기(여러 개), 찾기, 일시정지, 복사·저장(보이는 줄 그대로), 맨 아래 따라가기.
+ * 출처가 둘 이상이면 줄마다 출처 이름표를 앞에 붙이고, 칩으로 출처마다 보이거나 감춘다. 흐름은 어디서 받아도 된다(EKS·ArgoCD).
+ */
+export function LogPane({ state, ssoProfile, name, workload, options, nonce, onRestart: restart, pretty, showTime, wrap, find }: PaneProps) {
+  const { buf, sources, notices, status, error } = state;
 
   // 출처 목록(Pod·컨테이너)이 같으면 이름표도 같다: 오류나 끝남이 바뀌어도 모든 묶음을 다시 그리지 않는다
   const sourceList = sources.map((s) => s.key).join("\n");
   const labels = useMemo(
-    () => sourceLabels(sources, stream.kind === "workload" ? stream.name : ""),
+    () => sourceLabels(sources, workload),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sourceList, stream.kind === "workload" ? stream.name : ""],
+    [sourceList, workload],
   );
 
   const query = find.query;

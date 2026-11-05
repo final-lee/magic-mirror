@@ -63,11 +63,36 @@ fn plugin_confirm_default() -> bool {
     true
 }
 
-/// ArgoCD API 서버의 표시 이름과 주소.
+/// ArgoCD API 서버의 표시 이름과 주소. `kube_context`는 이 서버가 자기 클러스터(in-cluster)를 가리킬 때
+/// 그 클러스터에 붙는 kubeconfig context 이름이다(터미널·지표가 쓴다).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ArgocdServer {
     pub name: String,
     pub url: String,
+    #[serde(rename = "kubeContext", default, skip_serializing_if = "Option::is_none")]
+    pub kube_context: Option<String>,
+    /// ArgoCD가 설치된 네임스페이스(컨트롤러 지표를 service proxy로 읽을 때). 없으면 `argocd`.
+    #[serde(rename = "argocdNamespace", default, skip_serializing_if = "Option::is_none")]
+    pub argocd_namespace: Option<String>,
+    /// 이 서버의 macOS 알림 설정. 없으면 꺼짐.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notify: Option<ArgocdNotify>,
+}
+
+/// ArgoCD 서버 하나의 macOS 알림 설정. `envs`가 비면 모든 환경.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ArgocdNotify {
+    pub enabled: bool,
+    pub envs: Vec<String>,
+    /// OutOfSync가 이만큼(분) 이어지면 알린다
+    pub out_of_sync_minutes: u32,
+}
+
+impl Default for ArgocdNotify {
+    fn default() -> Self {
+        Self { enabled: false, envs: Vec::new(), out_of_sync_minutes: 30 }
+    }
 }
 
 /// ArgoCD 서버 하나의 목록 화면 상태: 마지막으로 고른 필터와 묶기 기준. 검색어는 남기지 않는다.
@@ -83,6 +108,8 @@ pub struct ArgocdView {
     pub labels: Vec<String>,
     pub group_by: Option<String>,
     pub then_by: Option<String>,
+    /// 마지막으로 연 화면의 id(앱, 리소스 검색 등). 없으면 첫 화면
+    pub view: Option<String>,
 }
 
 /// Argo Workflows 서버의 인증은 context 또는 키체인 토큰을 쓴다.
@@ -323,6 +350,9 @@ mod tests {
             argocd_servers: vec![ArgocdServer {
                 name: "stg".into(),
                 url: "https://example.test".into(),
+                kube_context: Some("stg-eks".into()),
+                argocd_namespace: Some("gitops".into()),
+                notify: Some(ArgocdNotify { enabled: true, envs: vec!["prd".into()], out_of_sync_minutes: 45 }),
             }],
             ..Default::default()
         };
@@ -330,6 +360,15 @@ mod tests {
         assert_eq!(load(&path, &[]).argocd_servers, settings.argocd_servers);
         let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
         assert_eq!(json["argocdServers"][0]["name"], "stg");
+        assert_eq!(json["argocdServers"][0]["kubeContext"], "stg-eks");
+        // 옛 설정(kubeContext 없음)도 읽는다
+        assert_eq!(load_text(r#"{"argocdServers":[{"name":"a","url":"https://a.test"}]}"#).argocd_servers[0].kube_context, None);
+        // 알림 설정은 칸이 빠져도 기본값(꺼짐, 모든 환경, 30분)으로 채워 읽는다
+        let partial = load_text(r#"{"argocdServers":[{"name":"a","url":"https://a.test","notify":{"enabled":true}}]}"#);
+        let notify = partial.argocd_servers[0].notify.clone().unwrap();
+        assert_eq!((notify.enabled, notify.envs.len(), notify.out_of_sync_minutes), (true, 0, 30));
+        assert_eq!(json["argocdServers"][0]["argocdNamespace"], "gitops");
+        assert_eq!(json["argocdServers"][0]["notify"]["outOfSyncMinutes"], 45);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ErrorState } from "../components/ErrorState";
 import { DiagnoseTargetProvider } from "../tailscale/DiagnoseContext";
 import { DoneNotice } from "../components/DoneNotice";
@@ -20,7 +20,7 @@ import { isRbacChange } from "./rbac/changes";
 import { refreshAccess } from "./rbac/refresh";
 import { K8sError } from "./K8sError";
 import { K8sNav, type K8sView, type NavBookmark } from "./K8sNav";
-import { NODES, bookmarkKey, bookmarkOf } from "./kinds";
+import { NODES, PODS, bookmarkKey, bookmarkOf } from "./kinds";
 import { LaneResizer, useLaneWidths } from "./lanes";
 import { GotoBar } from "./nav/GotoBar";
 import type { Goto } from "./nav/goto";
@@ -41,6 +41,7 @@ import { BOOKMARK_MISSING, savedMissing, NO_CONTEXT, NO_KUBECONFIG, STATE_CONNEC
 import { refreshK8s, useK8sKinds, useK8sRules, useUsageSampler } from "./queries";
 import { useK8sConnection } from "./useK8sConnection";
 import type { K8sChange, K8sKindRef, K8sTarget, ObjectRef } from "./types";
+import type { K8sOpen } from "./open";
 import { useK8sWatch } from "./useK8sWatch";
 
 interface Props {
@@ -51,6 +52,8 @@ interface Props {
   onOpenIam?: (arn: string) => void;
   /** 클러스터의 VPC 다이어그램을 노드·로드 밸런서 강조와 함께 연다(앱이 VPC 탭을 연다) */
   onOpenVpc?: (open: VpcOpen) => void;
+  /** 다른 탭(ArgoCD)의 부탁: 이 Pod의 셸을 연다. 새 요청마다 nonce가 바뀐다 */
+  open?: K8sOpen | null;
 }
 
 /** 사용량 그래프의 기록을 모은다. 읽을 때마다 다시 그려지는 것이 이 빈 컴포넌트뿐이도록 탭과 떼어 둔다. */
@@ -61,7 +64,7 @@ function UsageSampler({ target, context, namespace, ssoProfile, live }: {
   return null;
 }
 
-export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
+export function K8sTab({ target, active, onOpenIam, onOpenVpc, open }: Props) {
   const qc = useQueryClient();
   const { settings, update, settingsReady, ctx, info, chosen, missing, candidate, session, ssoProfile, live } = useK8sConnection(target);
 
@@ -136,6 +139,16 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
     setFocus((f) => ({ ref, nonce: (f?.nonce ?? 0) + 1 }));
     setView("workloads");
   };
+  // 부탁받은 Pod 셸: 그 네임스페이스의 Pod 상세를 셸 탭으로 연다(확인 단계는 셸 탭이 평소대로 거친다)
+  useEffect(() => {
+    if (open?.kind !== "shell") return;
+    setGotoKind(null);
+    setUserNs(open.namespace);
+    setFocus({ ref: { kind: PODS, namespace: open.namespace, name: open.pod }, nonce: open.nonce, shell: { container: open.container } });
+    setView("workloads");
+    // 요청이 바뀔 때(nonce)만 연다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open?.nonce]);
 
   const connected = settingsReady && !ctx.isPending && !ctx.isError && chosen !== null;
   useCommand(

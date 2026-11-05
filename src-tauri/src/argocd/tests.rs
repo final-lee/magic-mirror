@@ -23,6 +23,52 @@ fn argocd_application_row_values() {
 }
 
 #[test]
+fn argocd_application_row_policy_flags_and_images() {
+    let row = app_row(&json!({
+        "metadata": {"name": "app"},
+        "spec": {"syncPolicy": {"automated": {"selfHeal": true}}},
+        "status": {"summary": {"images": ["repo/web:1", "repo/api:2"]}}
+    }));
+    // 자동 sync는 켜져 있고 selfHeal만 켜졌다: prune은 빠졌으면 꺼진 것
+    assert_eq!((row.values["autoSync"].as_str(), row.values["selfHeal"].as_str(), row.values["autoPrune"].as_str()), ("true", "true", "false"));
+    assert_eq!(row.images, ["repo/web:1", "repo/api:2"]);
+    let manual = app_row(&json!({"metadata": {"name": "manual"}, "spec": {"syncPolicy": {}}}));
+    assert_eq!((manual.values["autoSync"].as_str(), manual.values["selfHeal"].as_str(), manual.values["autoPrune"].as_str()), ("false", "false", "false"));
+    assert!(manual.images.is_empty());
+    let wire = serde_json::to_value(&manual).unwrap();
+    assert!(wire.get("images").is_none());
+    assert_eq!(serde_json::to_value(&row).unwrap()["images"][1], "repo/api:2");
+}
+
+#[test]
+fn argocd_application_row_resource_summary() {
+    let row = app_row(&json!({
+        "metadata": {"name": "app"},
+        "status": {"resources": [
+            {"group":"apps","version":"v1","kind":"Deployment","namespace":"web","name":"api","status":"OutOfSync","health":{"status":"Healthy"},"requiresPruning":true},
+            {"version":"v1","kind":"Namespace","name":"web"},
+            {"group":"batch","version":"v1","kind":"Job","namespace":"web","name":"migrate","hook":true,"health":{}},
+            {"kind":"Broken"}
+        ]}
+    }));
+    assert_eq!(row.resources.len(), 3);
+    let deploy = &row.resources[0];
+    assert_eq!((deploy.group.as_str(), deploy.kind.as_str(), deploy.name.as_str()), ("apps", "Deployment", "api"));
+    assert_eq!(deploy.namespace.as_deref(), Some("web"));
+    assert_eq!(deploy.status.as_deref(), Some("OutOfSync"));
+    assert_eq!(deploy.health.as_deref(), Some("Healthy"));
+    assert!(deploy.requires_pruning && !deploy.hook);
+    let namespace = &row.resources[1];
+    assert_eq!(namespace.group, "");
+    assert!(namespace.namespace.is_none() && namespace.status.is_none() && namespace.health.is_none());
+    assert!(row.resources[2].hook && row.resources[2].health.is_none());
+
+    let wire = serde_json::to_value(&row).unwrap();
+    assert_eq!(wire["resources"][1], json!({"group":"","version":"v1","kind":"Namespace","name":"web"}));
+    assert!(serde_json::to_value(app_row(&json!({"metadata":{"name":"bare"}}))).unwrap().get("resources").is_none());
+}
+
+#[test]
 fn argocd_appset_row_and_tree() {
     let row = appset_row(&json!({"metadata":{"name":"fleet"},"spec":{"generators":[{"git":{}}]},"status":{"conditions":[{"type":"ErrorOccurred","status":"True","message":"bad"}]}}));
     assert_eq!(row.status.as_deref(), Some("Error"));
@@ -38,6 +84,23 @@ fn argocd_appset_row_and_tree() {
     assert_eq!(node.health_message.as_deref(), Some("ok"));
     assert_eq!(node.info, ["k: v"]);
     assert_eq!(node.images, ["image"]);
+}
+
+#[test]
+fn argocd_tree_networking_info_shape() {
+    let node = tree_node(&json!({"networkingInfo":{
+        "targetLabels":{"app":"web"},"labels":{"tier":"edge"},
+        "targetRefs":[{"kind":"Service","name":"web","namespace":"default"}],
+        "ingress":[{"hostname":"example.test"},{"ip":"192.0.2.1"}],
+        "externalURLs":["https://example.test"]
+    }}));
+    let wire = serde_json::to_value(node).unwrap();
+    assert_eq!(wire["networkingInfo"]["targetLabels"]["app"], "web");
+    assert_eq!(wire["networkingInfo"]["labels"]["tier"], "edge");
+    assert_eq!(wire["networkingInfo"]["targetRefs"][0]["name"], "web");
+    assert_eq!(wire["networkingInfo"]["ingress"][1]["ip"], "192.0.2.1");
+    assert_eq!(wire["networkingInfo"]["externalURLs"][0], "https://example.test");
+    assert!(serde_json::to_value(tree_node(&json!({}))).unwrap()["networkingInfo"].is_null());
 }
 
 #[test]
