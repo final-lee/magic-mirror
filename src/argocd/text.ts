@@ -41,7 +41,6 @@ export const TOKEN_CHANGE = "토큰 바꾸기";
 export const TOKEN_FORGET = "토큰 지우기";
 export const TOKEN_HELP = "ArgoCD UI의 Settings → Accounts → 계정 → Tokens에서 만들거나, argocd account generate-token 으로 만들어 붙여 넣어요. 토큰은 이 Mac의 키체인에만 저장해요.";
 export const TOKEN_HTTP_WARNING = "이 서버는 http:// 라서 토큰이 암호화되지 않은 채 오가요. 믿을 수 있는 내부망에서만 쓰세요.";
-export const RETRY = "다시 시도";
 
 // 목록
 export const ARGO_SYNC_GROUP = "Sync 상태";

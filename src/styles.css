@@ -2029,3 +2029,21 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 
 /* 선택하지 않는 EKS 표의 키보드 포커스 */
 .k8s-vim-rows tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* 네트워크 오류 안에 펼치는 연결 진단 */
+.error-state-actions, .tailscale-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.error-state-actions .btn { width: auto; padding: 6px 12px; }
+.tailscale-diagnosis { margin-top: 12px; padding: 12px; max-width: 640px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; color: var(--text); text-align: left; font-size: 12px; }
+.tailscale-diagnosis .tailscale-verdict { color: var(--text); font-weight: 600; margin: 0 0 6px; }
+.tailscale-diagnosis .tailscale-target { color: var(--dim); overflow-wrap: anywhere; margin: 0 0 10px; }
+.tailscale-checks { padding: 0; margin: 0 0 10px; list-style: none; }
+.tailscale-check { display: flex; gap: 8px; padding: 4px 0; border-top: 1px solid var(--line); }
+.tailscale-check p { color: var(--dim); margin: 3px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tailscale-mark { flex: 0 0 16px; text-align: center; font-weight: 700; }
+.tailscale-check-ok .tailscale-mark { color: var(--green-text); }
+.tailscale-check-warn .tailscale-mark { color: var(--yellow); }
+.tailscale-check-fail .tailscale-mark { color: var(--red); }
+.tailscale-check-skip .tailscale-mark { color: var(--dim); }
+.tailscale-confirm { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; }
+.tailscale-confirm .raw { display: block; max-height: none; }
+.tailscale-confirm p { margin: 8px 0; }

@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { errorMessage, isAppError } from "../api/errors";
 import { useSsoLoginContext } from "../lib/useSsoLogin";
+import { useDiagnoseTarget } from "../tailscale/DiagnoseContext";
+import { TailscaleDiagnosis } from "../tailscale/TailscaleDiagnosis";
+import { DIAGNOSE } from "../tailscale/text";
 
 interface Props {
   error: unknown;
@@ -22,6 +25,8 @@ export function ErrorState({ error, profile, onRetry, onLoggedIn, compact = fals
   const [busy, setBusy] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const sso = useSsoLoginContext();
+  const target = useDiagnoseTarget();
+  const [diagnosing, setDiagnosing] = useState(false);
   const ssoExpired = isAppError(error) && error.kind === "ssoExpired";
   // 이 화면이 뜬 뒤 그 세션의 로그인이 성공하면(자동 로그인이든 이 버튼이든) 한 번 onLoggedIn을 부른다.
   // 화면이 뜨기 전의 성공은 보지 않는다: 로그인한 뒤에도 만료로 실패한 화면을 계속 다시 부르지 않게 한다.
@@ -75,11 +80,19 @@ export function ErrorState({ error, profile, onRetry, onLoggedIn, compact = fals
     <div className={box}>
       <div>
         <p className="err">{errorMessage(error)}</p>
-        {retryable && (
-          <button className="btn" onClick={onRetry}>
-            다시 시도
-          </button>
-        )}
+        <div className="error-state-actions">
+          {retryable && (
+            <button className="btn" onClick={onRetry}>
+              다시 시도
+            </button>
+          )}
+          {target && isAppError(error) && error.kind === "network" && (
+            <button className="btn" aria-expanded={diagnosing} onClick={() => setDiagnosing(!diagnosing)}>
+              {DIAGNOSE}
+            </button>
+          )}
+        </div>
+        {target && isAppError(error) && error.kind === "network" && diagnosing && <TailscaleDiagnosis key={target} url={target} />}
       </div>
     </div>
   );

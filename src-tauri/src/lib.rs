@@ -29,6 +29,8 @@ mod pg;
 mod pg_commands;
 mod resource_index;
 mod settings;
+mod tailscale;
+mod tailscale_commands;
 mod topology;
 mod topology_commands;
 
@@ -69,6 +71,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            tailscale_commands::tailscale_diagnose,
+            tailscale_commands::tailscale_accept_routes,
             commands::list_profiles,
             commands::get_account,
             commands::list_services,

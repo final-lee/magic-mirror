@@ -5,7 +5,7 @@ import { renderWithClient } from "../test/utils";
 import { argocdApi } from "./api";
 import { ArgocdTab } from "./ArgocdTab";
 import {
-  ARGO_GROUP_BY, ARGO_NO_APPS, LOADING, RETRY, SERVER_ADD, SERVER_EDIT, SERVER_HELP, SERVER_LABEL, SERVER_NAME, SERVER_NEXT, SERVER_URL, STEPS_LABEL, STEP_SERVER, STEP_TOKEN,
+  ARGO_GROUP_BY, ARGO_NO_APPS, LOADING, SERVER_ADD, SERVER_EDIT, SERVER_HELP, SERVER_LABEL, SERVER_NAME, SERVER_NEXT, SERVER_URL, STEPS_LABEL, STEP_SERVER, STEP_TOKEN,
   TOKEN_CANCEL, TOKEN_CHANGE, TOKEN_FORGET, TOKEN_HTTP_WARNING, TOKEN_INVALID, TOKEN_LABEL, TOKEN_MISSING, TOKEN_SUBMIT, serverRemoveLabel, tokenFor,
 } from "./text";
 import type { ArgoAppRow, ArgocdServer, ArgocdSession, ArgoViewState } from "./types";
@@ -250,7 +250,7 @@ describe("token flow", () => {
     expect(await screen.findByText(/Tailscale·VPN 연결을 확인해 주세요/)).toBeInTheDocument();
     expect(screen.queryByLabelText(TOKEN_LABEL)).toBeNull();
     keychain.add(STG.url);
-    fireEvent.click(screen.getByRole("button", { name: RETRY }));
+    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
     expect(await screen.findByText("stg-app")).toBeInTheDocument();
   });
 

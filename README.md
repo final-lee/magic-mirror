@@ -19,7 +19,7 @@ Everything is read-only until you ask for a change, and every change starts with
 
 - [Features](#features)
   - [Resource browser](#resource-browser-read-only) · [VPC network diagram](#vpc-network-diagram) · [IAM workspace](#iam-workspace) · [Cost dashboard](#cost-dashboard)
-  - [EKS (Kubernetes)](#eks-kubernetes) · [ArgoCD](#argocd) · [Argo Workflows](#argo-workflows) · [PostgreSQL users (RDS)](#postgresql-users-rds)
+  - [EKS (Kubernetes)](#eks-kubernetes) · [ArgoCD](#argocd) · [Argo Workflows](#argo-workflows) · [Tailscale connection check](#tailscale-connection-check) · [PostgreSQL users (RDS)](#postgresql-users-rds)
   - [S3 explorer](#s3-explorer) · [File diff](#file-diff) · [Auto-update](#auto-update)
 - [What can change things](#what-can-change-things)
 - [Settings](#settings)
@@ -262,6 +262,17 @@ Open **EKS → ⚙️ Argo Workflows** in the sidebar for a single tab that does
 
 ![Argo Workflows graph](docs/screenshots/argowf-graph.png)
 
+### Tailscale connection check
+
+When the EKS, ArgoCD, or Argo Workflows tab can't reach its server, the error box gets a **Tailscale 진단** button. It runs the local `tailscale` CLI and checks, in order:
+
+- the CLI, whether Tailscale is running and signed in (and any health warnings), and which tailnet this Mac is on
+- whether the server's name resolves, including a MagicDNS name while **accept DNS** is off
+- which tailnet device or subnet router carries the address (the longest matching approved route), whether this Mac accepts subnet routes, and whether that device is online
+- a `tailscale ping` to the address (direct or through which DERP relay, and how fast), a TCP connection to the server's port, and whether UDP works here (`netcheck`)
+
+The first failure becomes the conclusion. If subnet routes are off, **경로 받기 켜기** shows `tailscale set --accept-routes=true` and what it changes, runs it after you confirm, and checks again; **되돌리기** turns it back off. Nothing else is changed, and the tailnet itself (devices, policy, keys) isn't read through the API.
+
 ### PostgreSQL users (RDS)
 ![PostgreSQL privileges](docs/screenshots/pg-privileges.png)
 
@@ -334,6 +345,7 @@ Everything else in the app only reads. These are the only places that write, and
 | EKS tab | Workloads, CronJobs, Jobs, nodes, any object by YAML, RBAC bindings, EKS access entries, Helm releases, security fixes; shells and port-forwards | RBAC-aware buttons, dry-run preview (`helm --dry-run=server` for Helm), typed name for `kube-system` / `prod` and risky permission changes, stale-preview check | `k8s-changes.jsonl`, many undoable |
 | ArgoCD tab | Refresh and sync of applications | Sync sheet with Prune and Dry run | — |
 | Argo Workflows tab | Workflows, CronWorkflows, templates, event sources, sensors | Confirmation, typed name for `prod` on stop/terminate/delete | — |
+| Tailscale check | This Mac's **accept routes** setting | Shows the `tailscale set` command and asks first | Undo button |
 | S3 explorer | Objects (upload, rename, delete, new folder) | Confirmation before overwrite and delete | — |
 
 ## Settings
@@ -446,6 +458,10 @@ A Korean install guide is in [docs/INSTALL.md](docs/INSTALL.md) and is attached 
 
 - Network access to the Argo Server (for example over Tailscale). To sign in with a kubeconfig context, the server must run with `--auth-mode=client` and that identity needs RBAC on the Argo resources it reads or changes; events and IRSA roles also need `list events` and `get serviceaccounts` in those namespaces.
 
+**Tailscale check**
+
+- The Tailscale app (`/Applications/Tailscale.app`) or a `tailscale` CLI on your login shell's `PATH`.
+
 **PostgreSQL tab**
 
 - `rds:DescribeDBClusters`, `rds:DescribeDBInstances`, and `rds-db:connect` for the DB user you sign in as.
@@ -506,6 +522,7 @@ src/                     React frontend
   argocd/                ArgoCD tab
   argowf/                Argo Workflows tab
   pg/                    PostgreSQL users tab
+  tailscale/             Tailscale connection check shown inside network error boxes
 src-tauri/src/
   adapters/              per-service read-only adapters for the resource browser
   aws/                   profiles, SDK configs, SSO sign-in
@@ -520,6 +537,7 @@ src-tauri/src/
   argocd/                ArgoCD API client with keychain tokens, application shaping
   argowf/                Argo Server client, kubeconfig-context and keychain auth, response shaping, cron next runs, log streams
   pg/                    PostgreSQL connection, read-only catalog snapshot, privilege evaluation, security checks, change previews and commits
+  tailscale/             Tailscale connection check: runs the local CLI (cli.rs is the only place that starts it), pure decision over its output
   jsonl.rs               the shared change-log file format
   mouse_nav.rs           macOS mouse back/forward buttons
 scripts/                 dev runner, release, live tests, IAM catalog updater, screenshots

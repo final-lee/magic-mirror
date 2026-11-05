@@ -2,13 +2,15 @@ import { useCallback, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { errorMessage } from "../api/errors";
 import { useSettings } from "../api/queries";
+import { ErrorState } from "../components/ErrorState";
+import { DiagnoseTargetProvider } from "../tailscale/DiagnoseContext";
 import { argocdApi } from "./api";
 import { ArgoServerEditor, ArgoServerForm } from "./ArgoServerEditor";
 import { ArgoSteps } from "./ArgoSteps";
 import { ArgoTokenForm } from "./ArgoTokenForm";
 import { ArgoView } from "./ArgoView";
 import { argoKeys, isTokenError, useSession } from "./queries";
-import { LOADING, RETRY, SERVER_EDIT, SERVER_HELP, SERVER_LABEL, SERVER_NEXT, TOKEN_CHANGE, TOKEN_FORGET, sessionLine } from "./text";
+import { LOADING, SERVER_EDIT, SERVER_HELP, SERVER_LABEL, SERVER_NEXT, TOKEN_CHANGE, TOKEN_FORGET, sessionLine } from "./text";
 import type { ArgocdServer } from "./types";
 
 /** 토큰 폼을 띄울 서버와, 그 폼에 먼저 보일 이유(없으면 null) */
@@ -107,14 +109,7 @@ export function ArgocdTab({ active }: { active: boolean }) {
     const cancelable = !!session.data && forced?.url === url && forced.message === null && failure === null;
     body = <ArgoTokenForm key={url} server={server} message={reason} busy={busy} onSubmit={(token) => void submitToken(token)} onCancel={cancelable ? () => setForced(null) : undefined} />;
   } else if (session.isError) {
-    body = (
-      <div className="error-banner">
-        <p className="err">{errorMessage(session.error)}</p>
-        <button className="btn tone-secondary" onClick={() => void session.refetch()}>
-          {RETRY}
-        </button>
-      </div>
-    );
+    body = <ErrorState error={session.error} profile="" compact onRetry={() => void session.refetch()} />;
   } else if (session.data) {
     body = (
       <ArgoView
@@ -130,7 +125,7 @@ export function ArgocdTab({ active }: { active: boolean }) {
     body = <div className="empty">{LOADING}</div>;
   }
 
-  return (
+  const content = (
     <div className="argo">
       {server !== null && (
         <div className="argo-bar argo-top">
@@ -164,4 +159,5 @@ export function ArgocdTab({ active }: { active: boolean }) {
       {body}
     </div>
   );
+  return <DiagnoseTargetProvider value={url || null}>{content}</DiagnoseTargetProvider>;
 }
