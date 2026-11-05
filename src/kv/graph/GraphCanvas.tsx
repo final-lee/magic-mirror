@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { createContext, useContext, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useMapGrab } from "../../lib/useMapGrab";
 
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 3;
@@ -83,7 +84,19 @@ export function GraphCanvas({ width, height, label, children, lead, extra, minHe
   const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [windowHeight, setWindowHeight] = useState(() => window.innerHeight);
-  const frame = useRef<HTMLDivElement>(null);
+  // 휠은 확대·축소다. 눌러서 잡은 동안만 받는다(놓여 있으면 휠은 화면을 스크롤한다)
+  const map = useMapGrab((e, el) => {
+    touched.current = true;
+    const rect = el.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    setView((v) => {
+      const zoom = clamp(v.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+      // 마우스 아래 점이 그대로 있게 옮긴다
+      return { zoom, x: px - ((px - v.x) / v.zoom) * zoom, y: py - ((py - v.y) / v.zoom) * zoom };
+    });
+  });
+  const frame = map.element;
   const drag = useRef<{ x: number; y: number; moved: number } | null>(null);
   const moved = useRef(false);
   /** 손으로 옮기거나 확대했다(맞춤을 누를 때까지 저절로 다시 맞추지 않는다) */
@@ -127,26 +140,6 @@ export function GraphCanvas({ width, height, label, children, lead, extra, minHe
     return Math.round(Math.min(Math.max(minHeight, natural), Math.max(minHeight, windowHeight * maxHeight)));
   };
 
-  // 휠은 확대·축소다. 화면이 같이 스크롤되지 않게 passive가 아닌 리스너로 붙인다
-  useEffect(() => {
-    const el = frame.current;
-    if (!el) return;
-    const wheel = (e: WheelEvent) => {
-      e.preventDefault();
-      touched.current = true;
-      const rect = el.getBoundingClientRect();
-      const px = e.clientX - rect.left;
-      const py = e.clientY - rect.top;
-      setView((v) => {
-        const zoom = clamp(v.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
-        // 마우스 아래 점이 그대로 있게 옮긴다
-        return { zoom, x: px - ((px - v.x) / v.zoom) * zoom, y: py - ((py - v.y) / v.zoom) * zoom };
-      });
-    };
-    el.addEventListener("wheel", wheel, { passive: false });
-    return () => el.removeEventListener("wheel", wheel);
-  }, []);
-
   const zoomBy = (factor: number) => {
     touched.current = true;
     const el = frame.current;
@@ -160,8 +153,11 @@ export function GraphCanvas({ width, height, label, children, lead, extra, minHe
 
   const down = (e: MouseEvent) => {
     if (e.button !== 0) return;
+    const grabbed = map.grab();
     // 끄는 동안 둘레의 글이 선택되지 않게 한다
     e.preventDefault();
+    // 잡지 않았던 지도를 누르면 잡기만 한다
+    if (!grabbed) return;
     drag.current = { x: e.clientX, y: e.clientY, moved: 0 };
     moved.current = false;
   };
@@ -206,8 +202,8 @@ export function GraphCanvas({ width, height, label, children, lead, extra, minHe
         {extra}
       </div>
       <div
-        ref={frame}
-        className="kvg-frame"
+        {...map.frameProps}
+        className={`kvg-frame${map.active ? " grabbed" : ""}`}
         style={fill ? { minHeight } : { height: frameHeight() }}
         onMouseDown={down}
         onMouseMove={move}

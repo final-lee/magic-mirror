@@ -35,18 +35,38 @@ test("the zoom buttons scale the drawing and [100%] resets it", () => {
   expect(group().getAttribute("transform")).toBe("translate(0,0) scale(1)");
 });
 
-test("the wheel zooms, within limits", () => {
+/** 지도를 한 번 눌러 잡는다(그 누름은 끌기를 시작하지 않는다) */
+function grab(frame: HTMLElement) {
+  fireEvent.mouseDown(frame, { clientX: 0, clientY: 0 });
+  fireEvent.mouseUp(frame);
+}
+
+test("the wheel scrolls past until the frame is grabbed, then zooms within limits, and stops when focus leaves", () => {
   const { group } = setup();
   const frame = screen.getByRole("img", { name: "시험 그래프" }).parentElement!;
-  fireEvent.wheel(frame, { deltaY: -100 });
+  // 잡지 않았으면 휠을 막지 않는다(fireEvent는 기본 동작이 막히지 않았으면 true): 화면이 스크롤된다
+  expect(fireEvent.wheel(frame, { deltaY: -100 })).toBe(true);
+  expect(group().getAttribute("transform")).toContain("scale(1)");
+  grab(frame);
+  expect(frame).toHaveFocus();
+  expect(frame).toHaveClass("grabbed");
+  expect(fireEvent.wheel(frame, { deltaY: -100 })).toBe(false);
   expect(group().getAttribute("transform")).toContain("scale(1.1)");
   for (let i = 0; i < 60; i++) fireEvent.wheel(frame, { deltaY: -100 });
   expect(group().getAttribute("transform")).toContain("scale(3)");
+  fireEvent.blur(frame);
+  expect(frame).not.toHaveClass("grabbed");
+  expect(fireEvent.wheel(frame, { deltaY: 100 })).toBe(true);
+  expect(group().getAttribute("transform")).toContain("scale(3)");
 });
 
-test("dragging pans the drawing", () => {
+test("the press that grabs does not pan; dragging after that does", () => {
   const { group } = setup();
   const frame = screen.getByRole("img", { name: "시험 그래프" }).parentElement!;
+  fireEvent.mouseDown(frame, { clientX: 100, clientY: 100 });
+  fireEvent.mouseMove(frame, { clientX: 130, clientY: 90 });
+  fireEvent.mouseUp(frame);
+  expect(group().getAttribute("transform")).toBe("translate(0,0) scale(1)");
   fireEvent.mouseDown(frame, { clientX: 100, clientY: 100 });
   fireEvent.mouseMove(frame, { clientX: 130, clientY: 90 });
   fireEvent.mouseUp(frame);
@@ -100,6 +120,7 @@ test("a click is a click, but letting go of a drag over a node is not", () => {
   const frame = screen.getByRole("img", { name: "시험 그래프" }).parentElement!;
   fireEvent.click(screen.getByRole("button", { name: "노드" }));
   expect(onClick).toHaveBeenCalledTimes(1);
+  grab(frame);
   fireEvent.mouseDown(frame, { clientX: 0, clientY: 0 });
   fireEvent.mouseMove(frame, { clientX: 40, clientY: 0 });
   fireEvent.mouseUp(frame);
