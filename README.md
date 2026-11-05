@@ -10,6 +10,7 @@ A macOS desktop app for working with AWS and the Kubernetes, ArgoCD, Argo Workfl
 - **Understand and fix** IAM: who can do what, security findings, unused permissions, and previewed, undoable changes.
 - **Operate** EKS clusters (Lens-style overview, live lists, logs, shell, port-forward, Helm, network and access views, security checks, previewed changes), ArgoCD applications, and Argo Workflows.
 - **Manage** RDS PostgreSQL roles and privileges over IAM authentication.
+- **Inspect** ElastiCache Valkey and Redis OSS caches like Medis — key tree, values, server stats — and see BullMQ queues drawn as charts.
 
 Everything is read-only until you ask for a change, and every change starts with a preview of exactly what will be sent.
 
@@ -19,7 +20,7 @@ Everything is read-only until you ask for a change, and every change starts with
 
 - [Features](#features)
   - [Resource browser](#resource-browser-read-only) · [VPC network diagram](#vpc-network-diagram) · [IAM workspace](#iam-workspace) · [Cost dashboard](#cost-dashboard)
-  - [EKS (Kubernetes)](#eks-kubernetes) · [ArgoCD](#argocd) · [Argo Workflows](#argo-workflows) · [PostgreSQL users (RDS)](#postgresql-users-rds)
+  - [EKS (Kubernetes)](#eks-kubernetes) · [ArgoCD](#argocd) · [Argo Workflows](#argo-workflows) · [PostgreSQL users (RDS)](#postgresql-users-rds) · [Valkey and Redis OSS (ElastiCache)](#valkey-and-redis-oss-elasticache)
   - [S3 explorer](#s3-explorer) · [File diff](#file-diff) · [Auto-update](#auto-update)
 - [What can change things](#what-can-change-things)
 - [Settings](#settings)
@@ -58,7 +59,7 @@ Everything is read-only until you ask for a change, and every change starts with
 - Uses the profiles in `~/.aws/config`, including SSO. Pick a profile and region and the list loads. The last profile and region are remembered.
 - **SSO sign-in**: when an SSO session has expired — when you pick the profile, when the app starts, or while you work — the app runs `aws sso login` for you. Approve it in the browser that opens and the lists reload. A banner shows the progress and lets you cancel. Profiles that share an SSO session sign in once, and role profiles sign in through their `source_profile`. The same sign-in starts when an EKS kubeconfig context or an Argo Workflows connection hits an expired session.
 - **Sidebar**: services in the official AWS Architecture icon set, with a count per resource type. Turn on only the services you use (Settings → 표시할 서비스), and pin resource types as favorites; favorites sit at the top. **💰 비용** opens the cost tab, **IAM → 🔐 IAM 관리** the IAM workspace, and **EKS → 🐙 ArgoCD** / **⚙️ Argo Workflows** those tabs.
-- **Detail panel**: key fields, tags, raw JSON, a link to the AWS console, and ID copy (⌘C). It opens as an overlay over the list; click the selected row again or an empty spot to close it. An EKS cluster's detail also shows its usage summary. Double-clicking opens a workspace for some types: a bucket opens the S3 explorer, a VPC its diagram, an IAM user, role, or policy the IAM workspace, an EKS cluster the EKS tab, and an RDS PostgreSQL cluster or instance the PostgreSQL tab.
+- **Detail panel**: key fields, tags, raw JSON, a link to the AWS console, and ID copy (⌘C). It opens as an overlay over the list; click the selected row again or an empty spot to close it. An EKS cluster's detail also shows its usage summary. Double-clicking opens a workspace for some types: a bucket opens the S3 explorer, a VPC its diagram, an IAM user, role, or policy the IAM workspace, an EKS cluster the EKS tab, an RDS PostgreSQL cluster or instance the PostgreSQL tab, and a Valkey or Redis OSS cache the `⚡` tab.
 - **Fuzzy filter (⌘F)**: type letters in order, skipping any — `poa` finds `prod-orders-api`. Space-separated words must all match. In the resource list it looks at the name, ID, text columns, and tags (`team=pay`); matched letters are highlighted. While filtering, the best matches come first until you click a column header. The same filter works on the other tabs (IAM, PostgreSQL, ArgoCD, Kubernetes, S3 explorer).
 - **Find anything you've opened (⌘K)**: searches every list this profile has read, in every region, without calling AWS. Words can also match the service, type, or region (`west web`). Pick a result to jump to its region and type with the row selected. Results show how old the list is; lists past the cache TTL are marked and reload when opened.
 - **Caching**: lists stay cached while the app runs and reload in the background when you reopen one older than the cache TTL (Settings → 리소스 캐시: 5 min, 15 min, 1 h, 6 h, or unlimited; default 15 min). ⌘R refreshes what's on screen. **캐시 비우기** or ⌘⇧R drops every cached list for all profiles and regions, on disk too, and reloads what's on screen.
@@ -303,6 +304,48 @@ The DB user you sign in as needs rights for what you change:
 - Setting passwords and expiry dates needs `rds_password` when `rds.restrict_password_commands` is on.
 - A read replica can't be changed at all. When changing is off, the buttons are disabled and say why.
 
+### Valkey and Redis OSS (ElastiCache)
+![Bull queues](docs/screenshots/kv-bull.png)
+
+Double-click a Valkey or Redis OSS row in **ElastiCache → Replication Groups** or **Serverless Caches** to open a `⚡` tab (a node in **Cache Clusters** opens its replication group; Memcached can't be opened). The tab connects straight to the cache and **only reads**: every command goes through one allow-list of read commands, and `KEYS` is never sent. Closing the tab closes its connections.
+
+**Signing in**
+
+- Four ways, preselected from the cache's settings: no login, AUTH token, RBAC user and password (a user that needs no password leaves it empty), or IAM. When the cache has a user group, the users and how they sign in are listed to pick from.
+- IAM signs a fresh token for every connection (`elasticache:Connect`, Valkey 7.2+ or Redis OSS 7.0+ with TLS) and reconnects when the 12-hour session ends. Tokens are never shown or stored.
+- The way and user (and the DB number for caches without cluster mode) are remembered per cache. Passwords are kept in the macOS keychain only when **비밀번호 기억하기** is on, and **저장한 비밀번호 지우기** removes them.
+- TLS is used when the cache encrypts in transit, checked against the macOS system roots with host name verification. Cluster-mode caches and serverless caches follow the slot map; caches without cluster mode read from the reader endpoint when there is one.
+
+![Login with a user group's users](docs/screenshots/kv-login.png)
+
+**Keys and values**
+
+- **🔑 키**: keys read with `SCAN` a page at a time across every shard, grouped into a tree by a delimiter (`:` by default), with folder counts, type badges, and TTLs. Filter by `SCAN` pattern and type; **더 읽기** continues. The top line shows how many keys were read out of about how many in total.
+- A key's detail shows its type, TTL with the expiry time, length, memory (`MEMORY USAGE`), and encoding. Strings are read up to 1 MiB and shown as text, a collapsible JSON tree, or hex and Base64 for binary data. Hashes, sets, and sorted sets come 200 at a time, lists from the front, streams with a summary and 100 entries, and RedisJSON values as JSON. Binary key names work too. Values stay in memory; nothing is written to disk.
+
+![Key tree with a hash open](docs/screenshots/kv-keys.png)
+
+**Server**
+
+- **📊 개요**: memory against `maxmemory`, peak and fragmentation, hit ratio, commands per second, clients, evicted and expired keys, uptime, and replication lag, plus a node table (role, shard, slots) and the keyspace per DB.
+- **🐢 Slow log** (`COMMANDLOG` on Valkey 8.1+, else `SLOWLOG`), **👥 클라이언트** (`CLIENT LIST`, with the app's own connections marked), and **🐘 큰 키**: samples up to 5,000 keys and ranks the 50 largest by `MEMORY USAGE`, with progress and **중단**.
+- Serverless caches block `SLOWLOG`, `CLIENT LIST`, `MEMORY`, and `OBJECT`: those screens are turned off with the reason, and big keys are ranked by length instead.
+
+![Overview of a three-shard cluster](docs/screenshots/kv-overview.png)
+
+**🐂 Bull**
+
+BullMQ and the older Bull keep each queue in plain keys (`<prefix>:<queue>:wait`, `:active`, `:delayed`, `:completed`, `:failed`, `:meta`, job hashes, …). This screen reads them and draws the queues; it never retries, removes, or pauses anything.
+
+- Enter the prefix (`bull` by default, `{bull}` and the like for hash-tagged cluster queues; remembered per cache) and the app finds the queues with a bounded `SCAN` (up to 20 s or 500,000 keys, then **이어서 찾기**).
+- **Queue cards**: counts per state as a stacked bar (waiting, active, delayed, prioritized, waiting for children, paused), completed and failed totals, workers (from `CLIENT LIST` connection names), and a 60-minute sparkline of completed and failed jobs. Queues with waiting jobs and no workers, or with many recent failures, come first with a red border; paused queues, backlogs of 1,000 or more, or a failure rate of 2% or more get a yellow one. The list reloads every 5 seconds while shown, unless the keyspace is large.
+- **Queue detail**: state tiles that open the job table for that state, completed and failed per minute for the last hour (and per 10 minutes for the last day when BullMQ metrics are on), wait and processing time p50/p95 with histograms from the last 100 finished jobs, the oldest waiting job and the next delayed one, failure reasons grouped from the last 100 failures, and the workers.
+- **Job detail**: a timeline from created to started to finished, attempts, progress, data, options and return value as JSON trees, stack traces, the last 100 log lines, and the parent and child jobs of a flow, each one click away.
+
+![Bull queue detail](docs/screenshots/kv-bull-queue.png)
+
+![A failed Bull job](docs/screenshots/kv-bull-job.png)
+
 ### S3 explorer
 ![S3 explorer](docs/screenshots/explorer.png)
 
@@ -374,17 +417,17 @@ Under `~/Library/Application Support/dev.finallee.magicmirror/`:
 
 | File | Contents | Kept |
 | --- | --- | --- |
-| `settings.json` | Enabled services and the services the app has already shown, favorites, last profile and region, theme, diff tool, kubeconfig path, cache TTL, the explorer's local folder, PostgreSQL sign-in users, EKS contexts, bookmarks, lane widths, and security checks turned off, ArgoCD and Argo Workflows servers and their list filters | Until changed |
+| `settings.json` | Enabled services and the services the app has already shown, favorites, last profile and region, theme, diff tool, kubeconfig path, cache TTL, the explorer's local folder, PostgreSQL sign-in users, ElastiCache sign-in ways and users, DB numbers, and Bull prefixes, EKS contexts, bookmarks, lane widths, and security checks turned off, ArgoCD and Argo Workflows servers and their list filters | Until changed |
 | `resource-index.json` | The ⌘K index: names, IDs, column values, tags. No raw JSON or detail fields. Readable only by you | 7 days; wiped by ⌘⇧R |
 | `cost-cache.json` | Cost Explorer answers and the monthly request counter | Answers for 6 hours |
 | `iam-changes.jsonl` | IAM changes applied from the app, with undo state | Until deleted |
 | `db-changes.jsonl` | PostgreSQL changes, with the DB user and SQL (never passwords) | Until deleted |
 | `k8s-changes.jsonl` | EKS changes, and when shells and node shells opened and closed (never their input or output, never Secret values) | Until deleted |
 
-- ArgoCD and Argo Workflows API tokens live only in the macOS keychain (services `magic-mirror.argocd` and `magic-mirror.argo-workflows`).
+- ArgoCD and Argo Workflows API tokens and ElastiCache passwords you chose to remember live only in the macOS keychain (services `magic-mirror.argocd`, `magic-mirror.argo-workflows`, and `magic-mirror.elasticache`).
 - AWS credentials are never stored by the app; it uses `~/.aws` and the AWS CLI's SSO cache.
 - Saved logs go to `~/Downloads`; files for external diff tools go to `$TMPDIR/magic-mirror-diff/` and are removed after an hour.
-- Metrics samples, Secret values you reveal, and new PostgreSQL passwords are kept in memory only.
+- Metrics samples, Secret values you reveal, new PostgreSQL passwords, and cache keys and values are kept in memory only.
 
 ## Install
 
@@ -442,6 +485,13 @@ A Korean install guide is in [docs/INSTALL.md](docs/INSTALL.md) and is attached 
 
 - Network access to the ArgoCD API server and an API token for an account allowed to read applications and ApplicationSets, and to sync the ones you want to sync.
 
+**Valkey and Redis OSS tab**
+
+- `elasticache:DescribeReplicationGroups`, `DescribeCacheClusters`, and `DescribeServerlessCaches`; `DescribeUserGroups` and `DescribeUsers` to list a user group's users (otherwise you type the user name).
+- A network path to the cache endpoint, such as a VPN or Tailscale; serverless public endpoints work directly.
+- IAM sign-in needs `elasticache:Connect` on the cache and the ElastiCache user, an IAM-enabled user in the cache's user group, Valkey 7.2+ or Redis OSS 7.0+, and TLS.
+- The user needs the read commands each screen uses (`SCAN`, `TYPE`, `PTTL`, the per-type reads, `INFO`, and for the server screens `SLOWLOG`/`COMMANDLOG`, `CLIENT LIST`, `MEMORY USAGE`); a missing one is named in the error.
+
 **Argo Workflows tab**
 
 - Network access to the Argo Server (for example over Tailscale). To sign in with a kubeconfig context, the server must run with `--auth-mode=client` and that identity needs RBAC on the Argo resources it reads or changes; events and IRSA roles also need `list events` and `get serviceaccounts` in those namespaces.
@@ -458,7 +508,7 @@ A Korean install guide is in [docs/INSTALL.md](docs/INSTALL.md) and is attached 
 | Part | Stack |
 | --- | --- |
 | App | [Tauri 2](https://tauri.app) |
-| Backend | Rust, AWS SDK for Rust, [`kube`](https://crates.io/crates/kube) and `k8s-openapi`, `tokio-postgres` with rustls, `reqwest`, `keyring`, [`similar`](https://crates.io/crates/similar) for diffs, `croner` / `chrono-tz` for cron schedules |
+| Backend | Rust, AWS SDK for Rust, [`kube`](https://crates.io/crates/kube) and `k8s-openapi`, `tokio-postgres` with rustls, [`fred`](https://crates.io/crates/fred) (Valkey/Redis), `reqwest`, `keyring`, [`similar`](https://crates.io/crates/similar) for diffs, `croner` / `chrono-tz` for cron schedules |
 | Frontend | React 18, TypeScript, Vite, TanStack Query, CodeMirror 6 (YAML), xterm.js (terminals) |
 | Tests | Vitest, Testing Library, `cargo test` |
 
@@ -484,6 +534,7 @@ Tests that need real servers are `#[ignore]`d in a normal `cargo test` and run t
 | --- | --- | --- |
 | `scripts/k8s-live-test.sh` | The EKS tab against two [kind](https://kind.sigs.k8s.io) clusters (default `kindest/node:v1.33.1` and `v1.35.0`; override with `KIND_IMAGES`), including a restricted ServiceAccount, CRDs, shells, port-forwards, drain, and the access, RBAC change, network, security check, and Helm fixtures in `scripts/k8s-live/` | Docker, `kind`, `kubectl`, `yq`, `jq`, `helm` |
 | `scripts/pg-live-test.sh` | The PostgreSQL catalog reads and changes against PostgreSQL 14 and 16 containers on `127.0.0.1:55414` / `55416`, removed when it ends | Docker |
+| `scripts/kv-live-test.sh` | The Valkey/Redis tab against Valkey 8 containers: a plain server with every value type and BullMQ- and Bull-shaped queues, an AUTH and ACL server (password, no-password, and restricted users), a TLS server with a CA made for the run, and a three-shard cluster; removed when it ends | Docker, `openssl` |
 | `scripts/cost-live-test.sh <profile>` | The cost commands against a real account; about 3 Cost Explorer requests (≈ $0.03) | An AWS profile with Cost Explorer access |
 
 ### Maintenance scripts
@@ -506,6 +557,7 @@ src/                     React frontend
   argocd/                ArgoCD tab
   argowf/                Argo Workflows tab
   pg/                    PostgreSQL users tab
+  kv/                    Valkey and Redis OSS tab, including the Bull screens
 src-tauri/src/
   adapters/              per-service read-only adapters for the resource browser
   aws/                   profiles, SDK configs, SSO sign-in
@@ -520,6 +572,7 @@ src-tauri/src/
   argocd/                ArgoCD API client with keychain tokens, application shaping
   argowf/                Argo Server client, kubeconfig-context and keychain auth, response shaping, cron next runs, log streams
   pg/                    PostgreSQL connection, read-only catalog snapshot, privilege evaluation, security checks, change previews and commits
+  kv/                    ElastiCache target and sign-in (IAM tokens, keychain), fred connection and topology, the read-only command allow-list, keys, values, server stats, Bull queues
   jsonl.rs               the shared change-log file format
   mouse_nav.rs           macOS mouse back/forward buttons
 scripts/                 dev runner, release, live tests, IAM catalog updater, screenshots
