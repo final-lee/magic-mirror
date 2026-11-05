@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { errorMessage } from "../api/errors";
 import { useSettings } from "../api/queries";
 import { ErrorState } from "../components/ErrorState";
+import { DiagnoseTargetProvider } from "../tailscale/DiagnoseContext";
 import { ArgoServerEditor, ArgoServerForm } from "../argocd/ArgoServerEditor";
 import { ArgoSteps } from "../argocd/ArgoSteps";
 import { ArgoTokenForm } from "../argocd/ArgoTokenForm";
@@ -158,7 +159,7 @@ export function ArgoWfTab({ active }: { active: boolean }) {
   const namespace = managed ?? (server?.namespace || null);
   const patchServer = (patch: { namespace?: string | null; labelColumns?: string[] }) =>
     update({ argoWorkflowsServers: servers.map((s) => (s.url === url ? { ...s, ...patch } : s)) });
-  return (
+  const content = (
     <div className="argo argowf">
       {server && (
         <div className="argo-bar argo-top">
@@ -319,6 +320,7 @@ export function ArgoWfTab({ active }: { active: boolean }) {
       )}
     </div>
   );
+  return <DiagnoseTargetProvider value={url || null}>{content}</DiagnoseTargetProvider>;
 }
 
 function Dashboard({

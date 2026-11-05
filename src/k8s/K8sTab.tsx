@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { ErrorState } from "../components/ErrorState";
+import { DiagnoseTargetProvider } from "../tailscale/DiagnoseContext";
 import { DoneNotice } from "../components/DoneNotice";
 import { useCommand } from "../keymap/registry";
 import { useApplyNotices } from "../iam/useApplyFlow";
@@ -225,7 +226,7 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
   }
 
   const connection: K8sConnection = session.isError ? "failed" : session.isSuccess && !session.isFetching ? "connected" : "connecting";
-  return (
+  const content = (
     <div className="pg" ref={root}>
       {gotoOpen && <GotoBar ctx={{ kinds: kinds.data ?? [], namespaces: names, current: gotoCurrent }} onGo={goto} onClose={closeGoto} />}
       {/* 연결돼 있는 동안 고른 네임스페이스(전체면 모두)의 사용량을 계속 모은다 */}
@@ -382,4 +383,5 @@ export function K8sTab({ target, active, onOpenIam, onOpenVpc }: Props) {
       </div>
     </div>
   );
+  return <DiagnoseTargetProvider value={info?.endpoint ?? null}>{content}</DiagnoseTargetProvider>;
 }
