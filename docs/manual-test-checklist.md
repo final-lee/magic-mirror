@@ -346,6 +346,7 @@
 - [ ] EKS 탭에서 `:`를 누르면 탭 맨 위에 입력줄이 열린다. `dep`를 치면 deployments 후보가 뜨고 Tab으로 채워 Enter하면 워크로드 화면에서 Deployment 목록이 열린다(종류 트리에 선택 표시). `:po`·`:svc`·`:no`·`:cm`·`:sec`·`:ing`·`:crd`와 `:deployments.apps`도 열린다
 - [ ] `:events`·`:helm`·`:access`·`:security`·`:network`·`:forwards`·`:terminal`(처음이면 셸 하나를 띄움)·`:changes`·`:overview`가 그 메뉴로 간다. `:depoy`는 "비슷한 것: deploy…"를 보이고 이동하지 않는다
 - [ ] `:ns <이름>`이 위쪽 네임스페이스를 바꾸고, `:ns ` 뒤 후보는 이 클러스터의 네임스페이스다. `:ns all`은 모두, 없는 이름은 거절한다. Esc는 닫고 커서를 돌려준다
+- [ ] Deployment 목록을 보는 중에 `:ns`를 치면 Namespace 목록으로 가지 않고 "Deployment 목록의 네임스페이스 바꾸기" 안내와 네임스페이스 후보(지금 보는 곳 표시)가 뜬다. ↑↓로 골라 Enter하면 위쪽 네임스페이스가 바뀌고 Deployment 목록에 그대로 있다. 개요 화면이나 노드 목록에서 `:ns`는 Namespace 목록으로 가고, 어디서든 `:namespaces`는 Namespace 목록이다
 - [ ] `:` 입력줄에서 ↑↓(와 Tab·⇧Tab)가 후보 목록의 줄을 고르고 Enter가 고른 후보로 간다. 빈 입력줄에서는 최근 명령 목록을 ↑↓로 골라 Enter로 실행한다. 치는 중에는 ⌃P·⌃N이 최근 명령을 하나씩 불러오고 ⌃N 끝에서 치던 글자로 돌아온다. 앱을 껐다 켜도 기록이 남는다
 - [ ] 목록에 커서를 두고 j·k·g·G로 행을 옮기고 `/`가 찾기 줄을 연다. 입력칸(찾기 줄, 복제본 수 칸)에서는 글자가 그대로 입력된다. 셸 터미널 안에서는 어떤 키도 가로채지 않는다
 - [ ] Pod에서 y(YAML)·l(로그)·s(셸 탭, 방식 "셸")·a(셸 탭, 방식 attach, 세션은 확인을 거쳐 열림)·⇧F(포트포워딩 대상 포트로 커서)·e(YAML 편집). Deployment에서 s는 복제본 칸으로 가서 숫자 + Enter가 scale 미리보기, r은 restart 미리보기, ⌃D는 삭제 미리보기. 어느 것도 미리보기 없이 적용되지 않는다

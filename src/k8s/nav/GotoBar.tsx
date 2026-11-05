@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { completions, parseGoto, type Completion, type Goto, type GotoContext } from "./goto";
+import { completions, opensNamespacePicker, parseGoto, pickingNamespace, type Completion, type Goto, type GotoContext } from "./goto";
 import { loadHistory, pushHistory } from "./history";
 import {
-  GOTO_CLOSE, GOTO_COMPLETIONS_LABEL, GOTO_EMPTY, GOTO_HINT, GOTO_HISTORY_LABEL, GOTO_LABEL, GOTO_PLACEHOLDER,
+  GOTO_CLOSE, GOTO_COMPLETIONS_LABEL, GOTO_EMPTY, GOTO_HINT, GOTO_HISTORY_LABEL, GOTO_LABEL, GOTO_PLACEHOLDER, gotoNamespaceHint, gotoNamespaceLabel,
 } from "./text";
 
 /** 빈 줄에 보이는 최근 명령 수 */
@@ -19,6 +19,7 @@ interface Props {
 /**
  * `:` 명령 줄(k9s). 종류 이름·별칭, 메뉴 이름, `ns <이름>`을 적으면 퍼지로 맞는 후보를 보이고,
  * ↑↓·Tab으로 후보를 고르고 Enter로 이동한다. 빈 줄에서는 최근 명령 목록을 같은 키로 고른다.
+ * 네임스페이스 있는 종류의 목록을 보는 중이면 `ns`가 그 목록의 네임스페이스 고르기가 된다(종류 목록으로 가지 않는다).
  * ⌃P·⌃N은 치는 중에도 최근 명령을 하나씩 불러오고, Esc는 닫는다.
  */
 export function GotoBar({ ctx, onGo, onClose }: Props) {
@@ -41,8 +42,19 @@ export function GotoBar({ ctx, onGo, onClose }: Props) {
   const count = showHistory ? recent.length : list.length;
   const picked = pick === null ? null : showHistory ? recent[pick] ?? null : list[pick]?.text ?? null;
   const shown = picked ?? typed;
+  const nsKind = pickingNamespace(typed, ctx) ? ctx.current?.kind ?? null : null;
+
+  // 고른 줄이 목록 밖에 있으면 보이게 스크롤한다(네임스페이스 후보는 길다)
+  useEffect(() => {
+    bar.current?.querySelector(".k8s-goto-item.on")?.scrollIntoView?.({ block: "nearest" });
+  }, [pick]);
 
   const run = (text: string, selected?: Goto) => {
+    if (!selected && opensNamespacePicker(text, ctx)) {
+      // 이동하지 않고 네임스페이스 고르기로: 입력을 `ns `로 채워 후보를 그대로 보인다
+      edit(`${text.trim().replace(/^:/, "").trim()} `);
+      return;
+    }
     const parsed = selected ? { ok: true as const, goto: selected } : parseGoto(text, ctx);
     if (!parsed.ok) {
       setError(parsed.message);
@@ -129,7 +141,7 @@ export function GotoBar({ ctx, onGo, onClose }: Props) {
           onChange={(e) => edit(e.target.value)}
           onKeyDown={onKeyDown}
         />
-        <span className="k8s-goto-hint dim">{GOTO_HINT}</span>
+        <span className="k8s-goto-hint dim">{nsKind ? gotoNamespaceHint(nsKind.kind) : GOTO_HINT}</span>
         <button className="icon" aria-label={GOTO_CLOSE} title={GOTO_CLOSE} onMouseDown={(e) => e.preventDefault()} onClick={() => onClose(false)}>
           ✕
         </button>
@@ -152,7 +164,7 @@ export function GotoBar({ ctx, onGo, onClose }: Props) {
           ))}
         </ul>
       ) : list.length > 0 ? (
-        <ul className="k8s-goto-list" role="listbox" aria-label={GOTO_COMPLETIONS_LABEL}>
+        <ul className="k8s-goto-list" role="listbox" aria-label={nsKind ? gotoNamespaceLabel(nsKind.kind) : GOTO_COMPLETIONS_LABEL}>
           {list.map((c, i) => (
             <li
               key={`${c.group}/${c.text}/${c.goto?.type === "kind" ? c.goto.kind.group : ""}`}

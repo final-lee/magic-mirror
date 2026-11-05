@@ -1,5 +1,5 @@
 import { TEST_KINDS } from "./testKinds";
-import { completions, parseGoto, VIEW_NAMES, type GotoContext } from "./goto";
+import { completions, opensNamespacePicker, parseGoto, VIEW_NAMES, type GotoContext } from "./goto";
 
 const ctx: GotoContext = { kinds: TEST_KINDS, namespaces: ["default", "kube-system", "prod", "prod-web"] };
 
@@ -83,6 +83,27 @@ describe("completions", () => {
     expect(completions("ns pw", ctx).map((c) => c.text)).toEqual(["ns prod-web"]);
     expect(completions("ns al", ctx)[0]).toMatchObject({ text: "ns all", hint: "모든 네임스페이스" });
     expect(completions("namespaces k", ctx)[0].text).toBe("ns kube-system");
+  });
+
+  test("while a namespaced list is shown, bare ns offers that list's namespaces with the current one marked; namespaces stays the kind", () => {
+    const deployments = ctx.kinds.find((k) => k.plural === "deployments")!;
+    const shown = { ...ctx, current: { kind: deployments, namespace: "prod" } };
+    const list = completions("ns", shown);
+    expect(list.map((c) => c.text)).toEqual(["ns all", "ns default", "ns kube-system", "ns prod", "ns prod-web"]);
+    expect(list.find((c) => c.title === "prod")).toMatchObject({ hint: "지금 보는 곳" });
+    expect(completions("namespace", shown)[0].text).toBe("namespace all");
+    expect(opensNamespacePicker("ns", shown)).toBe(true);
+    expect(opensNamespacePicker("ns prod", shown)).toBe(false);
+    expect(opensNamespacePicker("namespaces", shown)).toBe(false);
+    expect(completions("namespaces", shown).some((c) => c.group === "네임스페이스")).toBe(false);
+    // 목록을 보는 중이 아니면 그대로 종류 후보다
+    expect(opensNamespacePicker("ns", ctx)).toBe(false);
+    expect(completions("ns", ctx).some((c) => c.group === "네임스페이스")).toBe(false);
+  });
+
+  test("all is marked as current when the list shows every namespace", () => {
+    const pods = ctx.kinds.find((k) => k.plural === "pods")!;
+    expect(completions("ns", { ...ctx, current: { kind: pods, namespace: "" } })[0]).toMatchObject({ title: "all", hint: "모든 네임스페이스 · 지금 보는 곳" });
   });
 
   test("a kind name followed by anything else has no completions", () => {

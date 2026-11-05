@@ -163,6 +163,32 @@ test(":ns switches the namespace from the watched list, :ns all shows every name
   expect(nsSelect().value).toBe("");
 });
 
+test("on a namespaced list, :ns picks that list's namespace instead of opening the Namespace list", async () => {
+  setup();
+  await connected();
+  submit("deploy");
+  press(":", { shiftKey: true });
+  fireEvent.change(prompt()!, { target: { value: "ns" } });
+  const picker = screen.getByRole("listbox", { name: "Deployment 목록의 네임스페이스" });
+  expect(within(picker).getByText("지금 보는 곳").closest("li")).toHaveTextContent("default");
+  // Enter는 이동하지 않고 고르기를 이어 간다
+  fireEvent.keyDown(prompt()!, { key: "Enter" });
+  expect(prompt()!.value).toBe("ns ");
+  fireEvent.change(prompt()!, { target: { value: "ns kube" } });
+  fireEvent.keyDown(prompt()!, { key: "ArrowDown" });
+  fireEvent.keyDown(prompt()!, { key: "Enter" });
+  expect(nsSelect().value).toBe("kube-system");
+  expect(within(screen.getByRole("navigation", { name: KIND_TREE_LABEL })).getByRole("button", { name: "Deployment" })).toHaveAttribute("aria-current", "page");
+  await vi.waitFor(() => expect(m.watch).toHaveBeenCalledWith(target, expect.objectContaining({ plural: "deployments" }), "kube-system", expect.anything(), expect.any(Function)));
+});
+
+test("away from a list, :ns still opens the Namespace list", async () => {
+  setup();
+  await connected();
+  submit("ns");
+  expect(within(screen.getByRole("navigation", { name: KIND_TREE_LABEL })).getByRole("button", { name: "Namespace" })).toHaveAttribute("aria-current", "page");
+});
+
 test("an unknown kind is refused inline with the closest names, and nothing moves", async () => {
   setup();
   await connected();
