@@ -4,7 +4,7 @@ export const GOTO_PLACEHOLDER = "pod, deploy, svc, no, ns <이름>, events, helm
 export const GOTO_COMPLETIONS_LABEL = "이동 후보";
 export const GOTO_HISTORY_LABEL = "최근 명령";
 export const GOTO_CLOSE = "이동 명령 닫기";
-export const GOTO_HINT = "Enter 이동 · Tab 완성 · ↑↓ 기록 · Esc 닫기";
+export const GOTO_HINT = "Enter 이동 · ↑↓·Tab 고르기 · ⌃P⌃N 기록 · Esc 닫기";
 export const GOTO_EMPTY = "맞는 종류나 메뉴가 없어요";
 
 export const GOTO_GROUP_KIND = "종류";

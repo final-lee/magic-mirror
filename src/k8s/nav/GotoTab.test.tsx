@@ -178,8 +178,8 @@ test("recent commands come back in the next prompt", async () => {
   await connected();
   submit("ns prod");
   press(":", { shiftKey: true });
-  expect(within(screen.getByRole("list", { name: "최근 명령" })).getByText("ns prod")).toBeInTheDocument();
-  fireEvent.keyDown(prompt()!, { key: "ArrowUp" });
+  expect(within(screen.getByRole("listbox", { name: "최근 명령" })).getByText("ns prod")).toBeInTheDocument();
+  fireEvent.keyDown(prompt()!, { key: "ArrowDown" });
   expect(prompt()!.value).toBe("ns prod");
 });
 

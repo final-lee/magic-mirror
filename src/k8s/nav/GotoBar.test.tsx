@@ -79,6 +79,24 @@ test("Tab then Enter goes to the filled name", () => {
   expect(onGo).toHaveBeenCalledWith({ type: "kind", kind: expect.objectContaining({ plural: "deployments" }) });
 });
 
+test("↓ and ↑ pick completions like Tab, wrapping at the ends, and Enter goes to the picked one", () => {
+  const { onGo, input, type, key } = open();
+  type("po");
+  const list = options();
+  key("ArrowDown");
+  expect(input().value).toBe(list[0]);
+  key("ArrowDown");
+  expect(input().value).toBe(list[1]);
+  key("ArrowUp");
+  key("ArrowUp");
+  expect(input().value).toBe(list[list.length - 1]);
+  expect(screen.getAllByRole("option").filter((o) => o.getAttribute("aria-selected") === "true")).toHaveLength(1);
+  key("ArrowDown");
+  key("Enter");
+  expect(onGo).toHaveBeenCalledWith(expect.objectContaining({ type: expect.any(String) }));
+  expect(loadHistory()[0]).toBe(list[0]);
+});
+
 test("Esc closes without going anywhere and is not passed on", () => {
   const { onGo, onClose, input } = open();
   const outer = vi.fn();
@@ -158,7 +176,7 @@ describe("history", () => {
     pushHistory("ns prod");
     pushHistory("helm");
     const { onGo } = open();
-    const items = within(screen.getByRole("list", { name: "최근 명령" })).getAllByRole("listitem").map((li) => li.firstChild?.textContent);
+    const items = within(screen.getByRole("listbox", { name: "최근 명령" })).getAllByRole("option").map((li) => li.firstChild?.textContent);
     expect(items).toEqual(["helm", "ns prod", "pods"]);
     fireEvent.click(screen.getByText("ns prod"));
     expect(onGo).toHaveBeenCalledWith({ type: "namespace", namespace: "prod" });
@@ -166,34 +184,51 @@ describe("history", () => {
     expect(loadHistory()[0]).toBe("ns prod");
   });
 
-  test("↑ walks back through the commands, ↓ forward again and back to what was being typed", () => {
+  test("on an empty prompt ↓ and ↑ pick a recent command and Enter runs it", () => {
+    pushHistory("pods");
+    pushHistory("ns prod");
+    pushHistory("helm");
+    const { onGo, input, key } = open();
+    key("ArrowDown");
+    key("ArrowDown");
+    expect(input().value).toBe("ns prod");
+    const picked = within(screen.getByRole("listbox", { name: "최근 명령" })).getAllByRole("option").filter((o) => o.getAttribute("aria-selected") === "true");
+    expect(picked.map((o) => o.firstChild?.textContent)).toEqual(["ns prod"]);
+    key("ArrowUp");
+    expect(input().value).toBe("helm");
+    key("ArrowDown");
+    key("Enter");
+    expect(onGo).toHaveBeenCalledWith({ type: "namespace", namespace: "prod" });
+  });
+
+  test("⌃P walks back through the commands while typing, ⌃N forward again and back to what was being typed", () => {
     pushHistory("pods");
     pushHistory("helm");
     pushHistory("ns prod");
     const { input, type, key } = open();
     type("dep");
-    key("ArrowUp");
+    key("p", { ctrlKey: true });
     expect(input().value).toBe("ns prod");
-    key("ArrowUp");
+    key("p", { ctrlKey: true });
     expect(input().value).toBe("helm");
-    key("ArrowUp");
+    key("p", { ctrlKey: true });
     expect(input().value).toBe("pods");
     // 맨 끝에서 더 올라가도 그대로
-    key("ArrowUp");
+    key("p", { ctrlKey: true });
     expect(input().value).toBe("pods");
-    key("ArrowDown");
+    key("n", { ctrlKey: true });
     expect(input().value).toBe("helm");
-    key("ArrowDown");
-    key("ArrowDown");
+    key("n", { ctrlKey: true });
+    key("n", { ctrlKey: true });
     expect(input().value).toBe("dep");
-    // 되돌아온 뒤 ↓는 아무것도 하지 않는다
-    key("ArrowDown");
+    // 되돌아온 뒤 ⌃N은 아무것도 하지 않는다
+    key("n", { ctrlKey: true });
     expect(input().value).toBe("dep");
   });
 
-  test("with no history ↑↓ do nothing, and a failed command is not remembered", () => {
+  test("with no history ⌃P does nothing, and a failed command is not remembered", () => {
     const { input, type, key } = open();
-    key("ArrowUp");
+    key("p", { ctrlKey: true });
     expect(input().value).toBe("");
     type("nonsense");
     key("Enter");
