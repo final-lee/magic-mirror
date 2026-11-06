@@ -129,7 +129,7 @@ test("delete asks with object count then deletes", async () => {
   fireEvent.click(screen.getByText("📄 a.txt", { selector: "[data-pane=s3] *" }));
   m.s3CountUnder.mockResolvedValue(1);
   m.s3Delete.mockResolvedValue(1);
-  fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+  fireEvent.click(screen.getByRole("button", { name: "삭제…" }));
   expect(await screen.findByText("객체 1개를 삭제할까요? 되돌릴 수 없어요.")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "삭제하기" }));
   await waitFor(() => expect(m.s3Delete).toHaveBeenCalledWith("prod", "assets", "us-west-2", ["a.txt"]));
@@ -140,7 +140,7 @@ test("rename conflict asks to overwrite then retries with overwrite", async () =
   await openBucket();
   fireEvent.click(screen.getByText("📄 a.txt", { selector: "[data-pane=s3] *" }));
   m.s3Rename.mockResolvedValueOnce({ kind: "conflict", target: "b.txt" }).mockResolvedValueOnce({ kind: "done" });
-  fireEvent.click(screen.getByRole("button", { name: "이름 변경" }));
+  fireEvent.click(screen.getByRole("button", { name: "이름 변경…" }));
   fireEvent.change(await screen.findByLabelText("새 이름"), { target: { value: "b.txt" } });
   fireEvent.click(screen.getByRole("button", { name: "바꾸기" }));
   fireEvent.click(await screen.findByRole("button", { name: "덮어쓰기" }));
@@ -151,7 +151,7 @@ test("new folder error keeps dialog open", async () => {
   setup();
   await openBucket();
   m.s3CreateFolder.mockRejectedValue({ kind: "other", message: "이름을 입력하세요" });
-  fireEvent.click(screen.getByRole("button", { name: "+ 폴더" }));
+  fireEvent.click(screen.getByRole("button", { name: "+ 폴더…" }));
   fireEvent.click(await screen.findByRole("button", { name: "만들기" }));
   expect(await screen.findByText("이름을 입력하세요")).toBeInTheDocument();
   expect(screen.getByRole("dialog", { name: "새 폴더" })).toBeInTheDocument();
@@ -408,7 +408,7 @@ describe("keys through the registry", () => {
   test("Tab is left alone when the cursor is on something outside the tables", async () => {
     setup();
     await openBucket();
-    const button = screen.getByRole("button", { name: "+ 폴더" });
+    const button = screen.getByRole("button", { name: "+ 폴더…" });
     button.focus();
     expect(button).toHaveFocus();
     press({ key: "Tab" });
@@ -446,7 +446,7 @@ describe("keys through the registry", () => {
     await openBucket();
     fireEvent.click(screen.getByText("📄 a.txt", { selector: "[data-pane=local] *" }));
     fireEvent.click(screen.getByText("📄 a.txt", { selector: "[data-pane=s3] *" }));
-    fireEvent.click(screen.getByRole("button", { name: "+ 폴더" }));
+    fireEvent.click(screen.getByRole("button", { name: "+ 폴더…" }));
     await screen.findByRole("dialog", { name: "새 폴더" });
     press({ key: "d", metaKey: true });
     expect(p.onOpenDiff).not.toHaveBeenCalled();

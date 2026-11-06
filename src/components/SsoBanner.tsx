@@ -36,10 +36,10 @@ function SsoLine({ entry: e, onCancel, onRetry, onDismiss }: Omit<Props, "entrie
     return (
       <div className="update-banner">
         <span id={textId}>{text}</span>
-        <button className="btn small primary" aria-describedby={textId} onClick={() => onRetry(e.profile)}>
+        <button className="btn small tone-primary" aria-describedby={textId} onClick={() => onRetry(e.profile)}>
           다시 로그인
         </button>
-        <button className="btn small" aria-describedby={textId} onClick={() => onDismiss(e.key)}>
+        <button className="btn small tone-ghost" aria-describedby={textId} onClick={() => onDismiss(e.key)}>
           닫기
         </button>
       </div>
@@ -48,7 +48,7 @@ function SsoLine({ entry: e, onCancel, onRetry, onDismiss }: Omit<Props, "entrie
   return (
     <div className="update-banner">
       <span id={textId}>{`${e.profile}: SSO 로그인 중이에요. 브라우저에서 승인해 주세요`}</span>
-      <button className="btn small" aria-describedby={textId} onClick={() => onCancel(e.key)}>
+      <button className="btn small tone-ghost" aria-describedby={textId} onClick={() => onCancel(e.key)}>
         취소
       </button>
     </div>

@@ -229,29 +229,29 @@ export function CronDetail({ conn, namespace, name, workflows, live, onClose, on
         title={`${namespace}/${name}`}
         actions={
           <>
-            <button className="btn small" disabled={!row || act.busy} onClick={() => ask("run")}>
+            <button className="btn small tone-primary" disabled={!row || act.busy} onClick={() => ask("run")}>
               {CRON_RUN}
             </button>
-            <button className="btn small" disabled={!row || act.busy} onClick={() => ask("toggle")}>
+            <button className="btn small tone-warn" disabled={!row || act.busy} onClick={() => ask("toggle")}>
               {row?.suspended ? CRON_RESUME : CRON_SUSPEND}
             </button>
-            <button className="btn small danger" disabled={!row || act.busy} onClick={() => ask("delete")}>
+            <button className="btn small tone-danger" disabled={!row || act.busy} onClick={() => ask("delete")}>
               {CRON_DELETE}
             </button>
-            <button className="btn small" onClick={() => setEditing(true)}>
+            <button className="btn small tone-secondary" onClick={() => setEditing(true)}>
               고치기
             </button>
-            <button className="btn small" onClick={() => void desktop.openUrl(argoUiUrl(conn.url, "cron", namespace, name))}>
+            <button className="btn small tone-nav" onClick={() => void desktop.openUrl(argoUiUrl(conn.url, "cron", namespace, name))}>
               Argo UI에서 열기
             </button>
             <button
-              className="btn small"
+              className="btn small tone-secondary"
               onClick={() => void desktop.copy(widgetUrls(conn.url, namespace, `workflows.argoproj.io/cron-workflow=${name}`).badge)}
             >
               상태 배지 주소 복사
             </button>
             <button
-              className="btn small"
+              className="btn small tone-secondary"
               onClick={() => void desktop.copy(widgetUrls(conn.url, namespace, `workflows.argoproj.io/cron-workflow=${name}`).graph)}
             >
               그래프 위젯 주소 복사
@@ -296,6 +296,7 @@ export function CronDetail({ conn, namespace, name, workflows, live, onClose, on
           note={dialogText.note}
           confirmLabel={CAT_CONFIRM}
           danger={dialog === "delete"}
+          tone={dialog === "delete" ? "tone-danger" : dialog === "toggle" ? "tone-warn" : "tone-primary"}
           requireName={dialog === "delete" && needsTypedName(namespace, name) ? name : null}
           busy={act.busy}
           error={act.error}

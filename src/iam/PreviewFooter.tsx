@@ -22,6 +22,7 @@ interface Props {
   applyLabel?: string;
   /** 적용 중일 때 [적용] 버튼의 글. 주지 않으면 "적용 중…" */
   busyLabel?: string;
+  applyTone?: "primary" | "create" | "warn" | "caution" | "danger";
   /** 지금은 바꿀 수 없는 이유(changeBlockReason). 있으면 [적용]이 꺼지고 이 글이 제목이다. 주지 않으면 IAM처럼 막지 않는다 */
   blockReason?: string | null;
 }
@@ -33,7 +34,7 @@ interface Props {
  * - 확인 문구나 막힘이 아닌 경고가 있으면 위험한 변경이라 버튼을 danger로 칠한다.
  * 오류는 스크롤되는 본문 밖, 버튼 바로 위에 둔다: 미리보기가 길어도 가려지지 않는다.
  */
-export function PreviewFooter({ gated, phase, error, stale, typed, cancelRef, retryRef, onApply, onRetry, onCancel, applyLabel = "적용", busyLabel = "적용 중…", blockReason = null }: Props) {
+export function PreviewFooter({ gated, phase, error, stale, typed, cancelRef, retryRef, onApply, onRetry, onCancel, applyLabel = "적용", busyLabel = "적용 중…", applyTone, blockReason = null }: Props) {
   const applying = phase === "applying";
   const gate = gated ? applyGate(gated, typed) : null;
   const canApply = gate?.ok === true && phase === "ready" && !stale && blockReason === null;
@@ -46,15 +47,15 @@ export function PreviewFooter({ gated, phase, error, stale, typed, cancelRef, re
       <PreviewAlerts error={error} stale={stale} />
       <div className="foot">
         {hint && <span className="cp-hint">{hint}</span>}
-        <button ref={cancelRef} className="btn plain" disabled={applying} onClick={onCancel}>
+        <button ref={cancelRef} className="btn plain tone-ghost" disabled={applying} onClick={onCancel}>
           취소
         </button>
         {needsRetry && (
-          <button ref={retryRef} className="btn" onClick={onRetry}>
+          <button ref={retryRef} className="btn plain tone-refresh" onClick={onRetry}>
             미리보기 다시 받기
           </button>
         )}
-        <button className={`btn ${danger ? "danger" : "primary"}`} disabled={!canApply} title={blockReason ?? undefined} aria-description={blockReason ?? undefined} onClick={() => onApply(typed)}>
+        <button className={`btn plain tone-${applyTone ?? (danger ? "danger" : "primary")}`} disabled={!canApply} title={blockReason ?? undefined} aria-description={blockReason ?? undefined} onClick={() => onApply(typed)}>
           {applying ? busyLabel : applyLabel}
         </button>
       </div>

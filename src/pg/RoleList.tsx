@@ -62,8 +62,8 @@ export function RoleList({ roles, kinds, onKinds, selectedId, onSelect, onClear,
         <RoleKinds value={kinds} onChange={onKinds} />
         {onCreate && (
           <span className="pg-bar-end">
-            <button type="button" className="btn small primary" disabled={blockReason !== null} title={blockReason ?? undefined} aria-description={blockReason ?? undefined} onClick={onCreate}>
-              역할 만들기
+            <button type="button" className="btn small tone-create" disabled={blockReason !== null} title={blockReason ?? undefined} aria-description={blockReason ?? undefined} onClick={onCreate}>
+              역할 만들기…
             </button>
           </span>
         )}

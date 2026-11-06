@@ -1,3 +1,4 @@
+import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { api } from "../api/client";
 import type { Settings } from "../api/types";
@@ -5,13 +6,13 @@ import { renderWithClient } from "../test/utils";
 import { argocdApi } from "./api";
 import { ArgocdTab } from "./ArgocdTab";
 import {
-  ARGO_GROUP_BY, ARGO_NO_APPS, LOADING, SERVER_ADD, SERVER_EDIT, SERVER_HELP, SERVER_LABEL, SERVER_NAME, SERVER_NEXT, SERVER_URL, STEPS_LABEL, STEP_SERVER, STEP_TOKEN,
+  ARGO_GROUP_BY, ARGO_NO_APPS, ARGO_VIEW_APPS, ARGO_VIEW_RESOURCES, LOADING, SERVER_ADD, SERVER_EDIT, SERVER_HELP, SERVER_LABEL, SERVER_NAME, SERVER_NEXT, SERVER_URL, STEPS_LABEL, STEP_SERVER, STEP_TOKEN,
   TOKEN_CANCEL, TOKEN_CHANGE, TOKEN_FORGET, TOKEN_HTTP_WARNING, TOKEN_INVALID, TOKEN_LABEL, TOKEN_MISSING, TOKEN_SUBMIT, serverRemoveLabel, tokenFor,
 } from "./text";
 import type { ArgoAppRow, ArgocdServer, ArgocdSession, ArgoViewState } from "./types";
 
 vi.mock("../api/client", () => ({ api: { getSettings: vi.fn(), saveSettings: vi.fn() } }));
-vi.mock("./api", () => ({ argocdApi: { session: vi.fn(), setToken: vi.fn(), forgetToken: vi.fn(), apps: vi.fn(), appsets: vi.fn(), app: vi.fn(), tree: vi.fn(), refresh: vi.fn(), sync: vi.fn() } }));
+vi.mock("./api", () => ({ argocdApi: { session: vi.fn(), setToken: vi.fn(), forgetToken: vi.fn(), apps: vi.fn(), appsets: vi.fn(), app: vi.fn(), tree: vi.fn(), refresh: vi.fn(), sync: vi.fn(), watchApps: vi.fn(), watchAppsets: vi.fn(), watchStop: vi.fn() } }));
 const a = vi.mocked(argocdApi);
 const STG: ArgocdServer = { name: "stg", url: "https://stg.example" };
 const OPS: ArgocdServer = { name: "ops", url: "http://ops.example" };
@@ -316,6 +317,54 @@ describe("switching servers", () => {
     fireEvent.change(serverSelect(), { target: { value: STG.url } });
     await screen.findByText("stg-app");
     expect(groupSel()).toHaveValue("env");
+  });
+
+  test("a previously saved maps view falls back to the app list", async () => {
+    keychain = new Set([STG.url]);
+    const view: ArgoViewState = { sync: [], health: [], envs: [], clusters: [], projects: [], labels: [], groupBy: null, thenBy: null, view: "maps" };
+    vi.mocked(api.getSettings).mockResolvedValue({ ...SETTINGS, argocdViews: { [STG.url]: view } });
+    renderWithClient(<ArgocdTab active />);
+    await screen.findByText("stg-app");
+    expect(screen.getByRole("tab", { name: ARGO_VIEW_APPS })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("each server remembers which screen it was on, and the switcher saves the choice", async () => {
+    const view = (v: string): ArgoViewState => ({ sync: [], health: [], envs: [], clusters: [], projects: [], labels: [], groupBy: null, thenBy: null, view: v });
+    vi.mocked(api.getSettings).mockResolvedValue({ ...SETTINGS, argocdViews: { [OPS.url]: view("resources") } });
+    a.apps.mockImplementation(async (url) => [{ ...row(url === OPS.url ? "ops-app" : "stg-app"), resources: [{ group: "apps", version: "v1", kind: "Deployment", namespace: "web", name: url === OPS.url ? "ops-api" : "stg-api" }] }]);
+    keychain = new Set([STG.url, OPS.url]);
+    renderWithClient(<ArgocdTab active />);
+    await screen.findByText("stg-app");
+    const tab = (name: string) => screen.getByRole("tab", { name });
+    expect(tab(ARGO_VIEW_APPS)).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(tab(ARGO_VIEW_RESOURCES));
+    expect(await screen.findByText("stg-api")).toBeInTheDocument();
+    await waitFor(() => expect(api.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ argocdViews: expect.objectContaining({ [STG.url]: expect.objectContaining({ view: "resources" }) }) })));
+
+    fireEvent.change(serverSelect(), { target: { value: OPS.url } });
+    expect(await screen.findByText("ops-api")).toBeInTheDocument();
+    expect(tab(ARGO_VIEW_RESOURCES)).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(tab(ARGO_VIEW_APPS));
+    expect(await screen.findByText("ops-app")).toBeVisible();
+  });
+
+  test("an open request for another server selects it and opens the app there, even from the search screen", async () => {
+    const view: ArgoViewState = { sync: [], health: [], envs: [], clusters: [], projects: [], labels: [], groupBy: null, thenBy: null, view: "resources" };
+    vi.mocked(api.getSettings).mockResolvedValue({ ...SETTINGS, argocdViews: { [OPS.url]: view } });
+    a.app.mockReturnValue(new Promise(() => {}));
+    keychain = new Set([STG.url, OPS.url]);
+    const jump = { url: OPS.url, namespace: "argocd", name: "ops-app", resource: null };
+    const { qc, rerender } = renderWithClient(<ArgocdTab active />);
+    await screen.findByText("stg-app");
+    rerender(
+      <QueryClientProvider client={qc}>
+        <ArgocdTab active jump={jump} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(a.app).toHaveBeenCalledWith(OPS.url, "argocd", "ops-app"));
+    expect(serverSelect()).toHaveValue(OPS.url);
+    expect(screen.getByRole("tab", { name: ARGO_VIEW_APPS })).toHaveAttribute("aria-selected", "true");
   });
 
   test("a half-typed token does not follow you to another server", async () => {

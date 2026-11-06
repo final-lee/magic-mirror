@@ -6,11 +6,13 @@ import { tailscaleApi } from "./api";
 import { ApiRequired } from "./ApiRequired";
 import { useTailscaleApi } from "./useTailscaleApi";
 import * as t from "./dnsText";
+import type { Tone } from "./tone";
 
 type Config = Record<string, unknown>;
 type Resolver = { address?: string; useWithExitNode?: boolean; [key: string]: unknown };
 type Split = Record<string, Resolver[] | null>;
 type Snapshot = { config: Config; split: boolean };
+type Candidate = Snapshot & { tone: Tone };
 
 function splitPatch(before: Config, after: Config): Record<string, string[] | null> {
   const old = (before.splitDNS ?? {}) as Split;
@@ -42,7 +44,7 @@ function DnsPanel({ tailnet }: { tailnet: string }) {
   if (query.isError) return (
     <div className="awc-body">
       <div className="err" role="alert">{errorMessage(query.error)}</div>
-      <button className="btn small" onClick={() => void query.refetch()}>{t.RELOAD}</button>
+      <button className="btn small tone-refresh" onClick={() => void query.refetch()}>{t.RELOAD}</button>
     </div>
   );
   if (!query.data) return <div className="empty">{t.LOADING}</div>;
@@ -83,13 +85,13 @@ function DnsEditor({ tailnet, config, previous, notice, reload, saved }: {
     ? config.preferences as Record<string, unknown> : {};
   const magic = initialPrefs.magicDNS === true;
   const override = initialPrefs.overrideLocalDNS === true;
-  const [candidate, setCandidate] = useState<Snapshot | null>(null);
+  const [candidate, setCandidate] = useState<Candidate | null>(null);
   return (
     <>
       <div className="awc-bar">
         <h2 className="awc-title">{t.TITLE}</h2>
         <div className="awc-bar-end">
-          <button className="btn small" onClick={reload}>{t.RELOAD}</button>
+          <button className="btn small tone-refresh" onClick={reload}>{t.RELOAD}</button>
         </div>
       </div>
       <div className="awc-body awc-scroll">
@@ -108,18 +110,18 @@ function DnsEditor({ tailnet, config, previous, notice, reload, saved }: {
                 <td><input aria-label={t.EXIT_NODE} type="checkbox" checked={server.useWithExitNode === true} onChange={(e) => {
                   setNameservers(nameservers.map((item, i) => i === index ? { ...item, useWithExitNode: e.target.checked } : item));
                 }} /></td>
-                <td><button className="btn small" onClick={() => setNameservers(nameservers.filter((_, i) => i !== index))}>{t.REMOVE}</button></td>
+                <td><button className="btn small tone-secondary" onClick={() => setNameservers(nameservers.filter((_, i) => i !== index))}>{t.REMOVE}</button></td>
               </tr>
             ))}</tbody>
           </table>
           <div className="awc-editor-opts">
-            <button className="btn small" onClick={() => setNameservers([...nameservers, { address: "" }])}>{t.ADD}</button>
+            <button className="btn small tone-secondary" onClick={() => setNameservers([...nameservers, { address: "" }])}>{t.ADD}</button>
             <button
-              className="btn small"
+              className="btn small tone-primary"
               style={{ marginLeft: "auto" }}
-              onClick={() => setCandidate({ config: { ...config, nameservers }, split: false })}
+              onClick={() => setCandidate({ config: { ...config, nameservers }, split: false, tone: "primary" })}
             >
-              {t.PREVIEW}
+              {t.PREVIEW_OPEN}
             </button>
           </div>
         </section>
@@ -131,19 +133,19 @@ function DnsEditor({ tailnet, config, previous, notice, reload, saved }: {
             <thead><tr><th>{t.DOMAIN}</th><th>{t.ACTIONS}</th></tr></thead>
             <tbody>{search.split("\n").filter(Boolean).map((path, index) => (
               <tr key={`${path}-${index}`}><td>{path}</td><td>
-                <button className="btn small" onClick={() => setSearch(search.split("\n").filter((_, i) => i !== index).join("\n"))}>{t.REMOVE}</button>
+                <button className="btn small tone-secondary" onClick={() => setSearch(search.split("\n").filter((_, i) => i !== index).join("\n"))}>{t.REMOVE}</button>
               </td></tr>
             ))}</tbody>
           </table>}
           <div className="awc-editor-opts">
             <label>{t.DOMAIN}<input aria-label={t.SEARCH_INPUT} value={searchInput} onChange={(e) => setSearchInput(e.target.value)} /></label>
-            <button className="btn small" disabled={!searchInput.trim()} onClick={() => {
+            <button className="btn small tone-secondary" disabled={!searchInput.trim()} onClick={() => {
               setSearch([search, searchInput.trim()].filter(Boolean).join("\n"));
               setSearchInput("");
             }}>{t.ADD}</button>
-            <button className="btn small" style={{ marginLeft: "auto" }} onClick={() => setCandidate({
-              config: { ...config, searchPaths: search.split("\n").map((path) => path.trim()).filter(Boolean) }, split: false,
-            })}>{t.PREVIEW}</button>
+            <button className="btn small tone-primary" style={{ marginLeft: "auto" }} onClick={() => setCandidate({
+              config: { ...config, searchPaths: search.split("\n").map((path) => path.trim()).filter(Boolean) }, split: false, tone: "primary",
+            })}>{t.PREVIEW_OPEN}</button>
           </div>
         </section>
         <section>
@@ -164,13 +166,13 @@ function DnsEditor({ tailnet, config, previous, notice, reload, saved }: {
                     ...split, [name]: (resolvers ?? []).map((item, i) => i === index ? { ...item, useWithExitNode: e.target.checked } : item),
                   })} />}</td>
                   <td>
-                    {resolver && <button className="btn small" onClick={() => setSplit({
+                    {resolver && <button className="btn small tone-secondary" onClick={() => setSplit({
                       ...split, [name]: (resolvers ?? []).filter((_, i) => i !== index),
                     })}>{t.REMOVE}</button>}{" "}
-                    <button className="btn small" onClick={() => setSplit({
+                    <button className="btn small tone-secondary" onClick={() => setSplit({
                       ...split, [name]: [...(resolvers ?? []), { address: "" }],
                     })}>{t.ADD}</button>{" "}
-                    <button className="btn small" onClick={() => {
+                    <button className="btn small tone-secondary" onClick={() => {
                       const next = { ...split };
                       delete next[name];
                       setSplit(next);
@@ -183,17 +185,17 @@ function DnsEditor({ tailnet, config, previous, notice, reload, saved }: {
           <div className="awc-editor-opts">
             <label>{t.DOMAIN}<input aria-label={t.DOMAIN} value={domain} onChange={(e) => setDomain(e.target.value)} /></label>
             <label>{t.SERVERS}<input aria-label={t.SERVERS} value={servers} onChange={(e) => setServers(e.target.value)} /></label>
-            <button className="btn small" disabled={!domain.trim()} onClick={() => {
+            <button className="btn small tone-secondary" disabled={!domain.trim()} onClick={() => {
               setSplit({ ...split, [domain.trim()]: servers.split(",").map((address) => address.trim()).filter(Boolean).map((address) => ({ address })) });
               setDomain("");
               setServers("");
             }}>{t.ADD}</button>
             <button
-              className="btn small"
+              className="btn small tone-primary"
               style={{ marginLeft: "auto" }}
-              onClick={() => setCandidate({ config: { ...config, splitDNS: split }, split: true })}
+              onClick={() => setCandidate({ config: { ...config, splitDNS: split }, split: true, tone: "primary" })}
             >
-              {t.PREVIEW}
+              {t.PREVIEW_OPEN}
             </button>
           </div>
         </section>
@@ -203,25 +205,25 @@ function DnsEditor({ tailnet, config, previous, notice, reload, saved }: {
           {[{ key: "magicDNS", label: t.MAGIC, value: magic }, { key: "overrideLocalDNS", label: t.OVERRIDE, value: override }].map((item) => (
             <div className="awc-editor-opts" key={item.key} title={item.key}>
               <span>{item.label}: {item.value ? t.ON : t.OFF}</span>
-              <button className="btn small" onClick={() => setCandidate({
-                config: { ...config, preferences: { ...initialPrefs, magicDNS: magic, overrideLocalDNS: override, [item.key]: !item.value } }, split: false,
+              <button className="btn small tone-warn" onClick={() => setCandidate({
+                config: { ...config, preferences: { ...initialPrefs, magicDNS: magic, overrideLocalDNS: override, [item.key]: !item.value } }, split: false, tone: "warn",
               })}>{item.value ? t.TURN_OFF : t.TURN_ON}</button>
             </div>
           ))}
         </section>
         <details><summary>{t.RAW}</summary><pre>{format(config)}</pre></details>
-        {previous && <button className="btn small" onClick={() => setCandidate(previous)}>{t.UNDO}</button>}
+        {previous && <button className="btn small tone-caution" onClick={() => setCandidate({ ...previous, tone: "caution" })}>{t.UNDO}</button>}
       </div>
       {candidate && (
-        <DnsDialog tailnet={tailnet} before={config} after={candidate.config} split={candidate.split}
+        <DnsDialog tailnet={tailnet} before={config} after={candidate.config} split={candidate.split} tone={candidate.tone}
           cancel={() => setCandidate(null)} saved={saved} />
       )}
     </>
   );
 }
 
-function DnsDialog({ tailnet, before, after, split, cancel, saved }: {
-  tailnet: string; before: Config; after: Config; split: boolean; cancel: () => void;
+function DnsDialog({ tailnet, before, after, split, tone, cancel, saved }: {
+  tailnet: string; before: Config; after: Config; split: boolean; tone: Tone; cancel: () => void;
   saved: (before: Config, warning: string | null, split: boolean) => void;
 }) {
   const [sending, setSending] = useState(false);
@@ -256,8 +258,8 @@ function DnsDialog({ tailnet, before, after, split, cancel, saved }: {
         <h4>{t.AFTER}</h4><pre>{format(after)}</pre>
         {error && <div className="err" role="alert">{error}</div>}
         <div className="foot">
-          <button className="btn small" disabled={sending} onClick={cancel}>{t.CANCEL}</button>
-          <button className="btn small" disabled={sending} onClick={() => void apply()}>{t.SAVE}</button>
+          <button className="btn small tone-ghost" disabled={sending} onClick={cancel}>{t.CANCEL}</button>
+          <button className={`btn small tone-${tone}`} disabled={sending} onClick={() => void apply()}>{t.SAVE}</button>
         </div>
       </div>
     </div>

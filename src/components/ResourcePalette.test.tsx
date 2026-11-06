@@ -1,6 +1,7 @@
 import { fireEvent, screen } from "@testing-library/react";
 import { api } from "../api/client";
 import type { IndexedList, IndexedResource } from "../api/types";
+import type { ArgoPaletteItem } from "../argocd/search/palette";
 import { renderWithClient, sampleServices } from "../test/utils";
 import { PALETTE_TITLE, ResourcePalette } from "./ResourcePalette";
 
@@ -61,4 +62,48 @@ test("with nothing cached yet it says how to fill the cache", async () => {
   m.resourceIndex.mockResolvedValue([]);
   open();
   expect(await screen.findByText(/아직 읽어 둔 목록이 없어요/)).toBeInTheDocument();
+});
+
+describe("with ArgoCD items", () => {
+  const argo = (name: string, kind: string | null, app: string | null): ArgoPaletteItem => ({
+    key: `${kind}|${name}|${app}`,
+    serverName: "prod-argo",
+    jump: { url: "https://argocd.example", namespace: "argocd", name: app ?? name, resource: kind ? { group: "apps", kind, namespace: "shop", name } : null },
+    name,
+    kind,
+    where: "shop",
+    app,
+    fields: [name, kind, "shop", app, "prod-argo"],
+  });
+  const items = [argo("web", null, null), argo("web-api", "Deployment", "web")];
+  const openWith = (onPick = vi.fn(), onPickArgo = vi.fn()) => {
+    renderWithClient(<ResourcePalette profile="prod" services={ec2AndIam} ttlMs={15 * 60_000} onPick={onPick} argo={items} onPickArgo={onPickArgo} onClose={() => {}} now={NOW} />);
+    return { onPick, onPickArgo };
+  };
+
+  test("finds ArgoCD apps and resources next to AWS ones and says how many it searches", async () => {
+    openWith();
+    expect(await screen.findByText(/읽어 둔 목록 3개, 리소스 4개, ArgoCD 앱·리소스 2개에서 찾아요/)).toBeInTheDocument();
+    search("web");
+    expect(results()).toEqual(expect.arrayContaining(["web", "web-api", "web-1", "web-west"]));
+    expect(screen.getAllByText(/ArgoCD · prod-argo/)).toHaveLength(2);
+  });
+
+  test("picking an ArgoCD item reports where to go and AWS items still report their own pick", async () => {
+    const { onPick, onPickArgo } = openWith();
+    await screen.findByText(/읽어 둔 목록/);
+    search("web-api");
+    fireEvent.keyDown(screen.getByRole("searchbox", { name: PALETTE_TITLE }), { key: "Enter" });
+    expect(onPickArgo).toHaveBeenCalledWith({ url: "https://argocd.example", namespace: "argocd", name: "web", resource: { group: "apps", kind: "Deployment", namespace: "shop", name: "web-api" } });
+    expect(onPick).not.toHaveBeenCalled();
+    search("alice");
+    fireEvent.keyDown(screen.getByRole("searchbox", { name: PALETTE_TITLE }), { key: "Enter" });
+    expect(onPick).toHaveBeenCalledWith({ region: "global", service: "iam", type: "users", id: "alice" });
+  });
+
+  test("ArgoCD items alone are enough to stop saying nothing is cached", async () => {
+    m.resourceIndex.mockResolvedValue([]);
+    openWith();
+    expect(await screen.findByText(/^ArgoCD 앱·리소스 2개에서 찾아요/)).toBeInTheDocument();
+  });
 });

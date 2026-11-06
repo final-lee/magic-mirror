@@ -225,26 +225,25 @@ describe("content", () => {
 });
 
 describe("applying", () => {
-  test("a clean batch can be applied with one click, in the primary style", () => {
+  test("a batch containing removal can be applied with one click in the danger style", () => {
     const { props } = setup(preview3());
     expect(applyButton()).toBeEnabled();
-    expect(applyButton()).toHaveClass("primary");
-    expect(applyButton()).not.toHaveClass("danger");
+    expect(applyButton()).toHaveClass("tone-danger");
     fireEvent.click(applyButton());
     expect(props.onApply).toHaveBeenCalledWith("");
   });
 
-  test("a warn warning, on the batch or on one change, keeps the apply enabled but turns it into the danger style", () => {
+  test("warnings keep apply enabled and preserve the removal tone", () => {
     const { unmount } = setup(preview3({ warnings: [{ level: "warn", message: "5명 이상" }] }));
     expect(applyButton()).toBeEnabled();
-    expect(applyButton()).toHaveClass("danger");
+    expect(applyButton()).toHaveClass("tone-danger");
     unmount();
 
     const items = threeItems();
     items[1] = { ...items[1], warnings: [{ level: "warn", message: "ci-bot은 관리자급이에요" }] };
     const { props } = setup(batchOf(items));
     expect(applyButton()).toBeEnabled();
-    expect(applyButton()).toHaveClass("danger");
+    expect(applyButton()).toHaveClass("tone-danger");
     fireEvent.click(applyButton());
     expect(props.onApply).toHaveBeenCalledTimes(1);
   });
@@ -281,7 +280,7 @@ describe("type to confirm", () => {
   test("many targets ask for 변경 N개 적용 and keep the apply disabled until it matches exactly", () => {
     const { props } = setup(confirmPreview());
     expect(applyButton()).toBeDisabled();
-    expect(applyButton()).toHaveClass("danger");
+    expect(applyButton()).toHaveClass("tone-danger");
     const input = confirmInput();
     for (const wrong of ["변경", "변경 3개 적용 ", " 변경 3개 적용", "변경 2개 적용", "변경 3개 적용!", "BOB"]) {
       fireEvent.change(input, { target: { value: wrong } });
@@ -475,7 +474,7 @@ describe("a batch that stopped halfway", () => {
       ...extra,
     });
   const detachBob: IamChange = { op: "detachPolicy", target: bob.arn, policyArn: readOnlyPolicy.arn };
-  const undoButton = (n = 1) => screen.getByRole("button", { name: `적용된 ${n}개 되돌리기` });
+  const undoButton = (n = 1) => screen.getByRole("button", { name: `적용된 ${n}개 되돌리기…` });
   const stopped = (result: BatchResult = stop()) => setup(preview3(), { phase: "result", result });
 
   test("says how many of the changes were applied, which one stopped the batch and why", () => {
@@ -581,7 +580,7 @@ describe("a batch that stopped halfway", () => {
     stopped(stop({ logIds: ["l-1"], failed: { index: 2, summary: "alice에서 ReadOnlyAccess를 떼요", message: "변경 기록을 저장하지 못해서 멈췄어요" } }));
     expect(screen.getByRole("alert")).toHaveTextContent("3개 중 2개를 적용하고 3번째에서 멈췄어요: alice에서 ReadOnlyAccess를 떼요: 변경 기록을 저장하지 못해서 멈췄어요");
     expect(undoButton(1)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "적용된 2개 되돌리기" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "적용된 2개 되돌리기…" })).not.toBeInTheDocument();
   });
 
   test("when nothing was logged at all, even a change that ran cannot be undone from here", () => {

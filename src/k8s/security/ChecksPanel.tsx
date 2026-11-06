@@ -25,10 +25,10 @@ export function ChecksPanel({ setting, counts, skipped, onChange }: Props) {
             <h4>
               {CATEGORY_LABELS[category]}
               <span className="sec-checks-all">
-                <button className="link" onClick={() => onChange(withChecks(setting, ids, true))}>
+                <button className="link tone-secondary" onClick={() => onChange(withChecks(setting, ids, true))}>
                   {CHECKS_ENABLE_ALL}
                 </button>
-                <button className="link" onClick={() => onChange(withChecks(setting, ids, false))}>
+                <button className="link tone-secondary" onClick={() => onChange(withChecks(setting, ids, false))}>
                   {CHECKS_DISABLE_ALL}
                 </button>
               </span>

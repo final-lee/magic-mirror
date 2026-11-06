@@ -1,16 +1,27 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { renderWithClient } from "../test/utils";
 import { argocdApi } from "./api";
 import { ArgoDetail } from "./ArgoDetail";
+import { changeApi } from "./change/api";
 import {
-  ARGO_DRY_RUN, ARGO_HARD_REFRESH, ARGO_NO_HISTORY, ARGO_NO_OPERATION, ARGO_PRUNE, ARGO_REFRESH, ARGO_REFRESH_DONE, ARGO_SYNC, ARGO_SYNC_CONFIRM,
-  ARGO_SYNC_DONE, ARGO_SYNC_RUNNING, ARGO_SYNC_TITLE, ARGO_TREE_LABEL, CLOSE, SEC_ARGO_CONDITIONS, SEC_ARGO_DEST, SEC_ARGO_FAILED, SEC_ARGO_OPERATION,
+  ARGO_HARD_REFRESH, ARGO_NO_HISTORY, ARGO_NO_OPERATION, ARGO_REFRESH, ARGO_SYNC,
+  ARGO_SYNC_RUNNING, ARGO_TREE_LABEL, CLOSE, SEC_ARGO_CONDITIONS, SEC_ARGO_DEST, SEC_ARGO_FAILED, SEC_ARGO_OPERATION,
   SEC_ARGO_SOURCES, TAB_ARGO_HISTORY, TAB_ARGO_RAW, TAB_ARGO_RESOURCES, TOKEN_INVALID, argoRefreshPending,
 } from "./text";
-import type { ArgoApp, ArgoTreeNode } from "./types";
+import type { ArgoApp, ArgoHistoryEntry, ArgoTreeNode } from "./types";
+import { readApi } from "./detail/api";
+import { HIST_SERVER } from "./detail/text";
+import { TAB_ARGO_MANAGE } from "./manage/text";
+import { MANAGE_TARGET_REVISION } from "./manage/text";
 
-vi.mock("./api", () => ({ argocdApi: { app: vi.fn(), tree: vi.fn(), refresh: vi.fn(), sync: vi.fn() } }));
+vi.mock("./api", () => ({ argocdApi: { app: vi.fn(), tree: vi.fn(), events: vi.fn() } }));
+vi.mock("./ops/api", () => ({ opsApi: { appActions: vi.fn().mockResolvedValue([]), resourceActions: vi.fn().mockResolvedValue([]), kubeContexts: vi.fn().mockResolvedValue([]) } }));
+vi.mock("./change/api", () => ({ changeApi: { can: vi.fn(), preview: vi.fn(), apply: vi.fn() } }));
+vi.mock("./detail/api", () => ({ readApi: { appLinks: vi.fn(), syncWindows: vi.fn(), history: vi.fn(), manifestsDiff: vi.fn() } }));
 const m = vi.mocked(argocdApi);
+const changes = vi.mocked(changeApi);
+const read = vi.mocked(readApi);
 const URL = "https://argocd.example";
 const NOW = Date.parse("2026-10-30T12:00:00Z");
 const SHA = "0123456789abcdef0123456789abcdef01234567";
@@ -38,7 +49,8 @@ const app = (over: Partial<ArgoApp> = {}): ArgoApp => ({
     finishedAt: "2026-10-30T11:31:00Z",
     initiatedBy: "alice",
     revisions: [SHA],
-    failedResults: [{ group: "apps", kind: "Deployment", namespace: "web", name: "web", status: "SyncFailed", message: "immutable field", hookPhase: null }],
+    retryCount: 0, retryLimit: null, dryRun: false, prune: false, syncOptions: [], results: [],
+    failedResults: [{ group: "apps", version: "v1", kind: "Deployment", namespace: "web", name: "web", status: "SyncFailed", message: "immutable field", hookPhase: null, hookType: null, syncPhase: null }],
   },
   resources: [
     { group: "apps", version: "v1", kind: "Deployment", namespace: "web", name: "web", status: "OutOfSync", hook: false, requiresPruning: false },
@@ -78,8 +90,28 @@ beforeEach(() => {
   vi.resetAllMocks();
   m.app.mockResolvedValue(app());
   m.tree.mockResolvedValue(TREE);
-  m.refresh.mockResolvedValue(undefined);
-  m.sync.mockResolvedValue(undefined);
+  m.events.mockResolvedValue([]);
+  read.appLinks.mockResolvedValue([]);
+  read.syncWindows.mockResolvedValue({ canSync: true, active: [], assigned: [] });
+  read.history.mockResolvedValue([]);
+  changes.can.mockResolvedValue([true, true]);
+  changes.preview.mockResolvedValue({ title: "동기화", calls: [], diff: null, impact: [], warnings: [], blocked: null, confirmName: null, expectedVersion: "1" });
+  changes.apply.mockResolvedValue({ message: "요청을 보냈어요" });
+});
+
+test("management draft survives a status-only resourceVersion update", async () => {
+  const document = app({ raw: { metadata: { name: "web", resourceVersion: "1" }, spec: { project: "prod", source: { repoURL: "https://git.example", targetRevision: "main" } } } });
+  m.app.mockResolvedValue(document);
+  const props = { url: URL, namespace: "argocd", name: "web", live: false, onClose: vi.fn(), onTokenError: vi.fn() };
+  const { qc, rerender } = renderWithClient(<ArgoDetail {...props} resourceVersion="1" />);
+  await loaded();
+  tab(TAB_ARGO_MANAGE);
+  const input = await screen.findByLabelText(MANAGE_TARGET_REVISION);
+  fireEvent.change(input, { target: { value: "draft" } });
+  m.app.mockResolvedValue({ ...document, raw: { ...(document.raw as object), metadata: { name: "web", resourceVersion: "2" } } });
+  rerender(<QueryClientProvider client={qc}><ArgoDetail {...props} resourceVersion="2" /></QueryClientProvider>);
+  await waitFor(() => expect(m.app).toHaveBeenCalledTimes(2));
+  expect(screen.getByLabelText(MANAGE_TARGET_REVISION)).toHaveValue("draft");
 });
 
 describe("overview", () => {
@@ -185,23 +217,33 @@ describe("resource tree", () => {
   });
 });
 
-test("history lists deployments with short revisions, ages and who asked", async () => {
-  setup();
-  await loaded();
-  tab(TAB_ARGO_HISTORY);
-  const rows = screen.getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell").map((c) => c.textContent));
-  expect(rows).toEqual([
-    ["7", "0123456", "2h", "자동"],
-    ["6", "1.2.2", "26h", "bob"],
-  ]);
-});
+describe("history tab", () => {
+  const entry = (id: number, revision: string, over: Partial<ArgoHistoryEntry> = {}): ArgoHistoryEntry => ({
+    id, deployedAt: null, deployStartedAt: null, initiatedBy: null,
+    revisions: [{ revision, sourceIndex: 0, repoUrl: null, chart: null, path: null, targetRevision: null, metadata: null, chartDetails: null, oci: null }], ...over,
+  });
 
-test("an app without history says so", async () => {
-  m.app.mockResolvedValue(app({ history: [] }));
-  setup();
-  await loaded();
-  tab(TAB_ARGO_HISTORY);
-  expect(screen.getByText(ARGO_NO_HISTORY)).toBeInTheDocument();
+  test("lists every deployment the server kept with short revisions, ages and who asked", async () => {
+    read.history.mockResolvedValue([entry(7, SHA, { deployedAt: "2026-10-30T10:00:00Z", initiatedBy: "automated" }), entry(6, "1.2.2", { deployedAt: "2026-10-29T10:00:00Z", initiatedBy: "bob" })]);
+    setup();
+    await loaded();
+    tab(TAB_ARGO_HISTORY);
+    expect(read.history).toHaveBeenCalledWith(URL, "argocd", "web");
+    const table = await screen.findByRole("table", { name: HIST_SERVER });
+    const rows = within(table).getAllByRole("row").slice(1).map((r) => within(r).getAllByRole("cell").slice(1).map((c) => c.textContent));
+    expect(rows).toEqual([
+      ["7", "0123456", "2h", "자동", "롤백…"],
+      ["6", "1.2.2", "26h", "bob", "롤백…"],
+    ]);
+  });
+
+  test("an app without history says so", async () => {
+    read.history.mockResolvedValue([]);
+    setup();
+    await loaded();
+    tab(TAB_ARGO_HISTORY);
+    expect(await screen.findByText(ARGO_NO_HISTORY)).toBeInTheDocument();
+  });
 });
 
 test("the YAML/JSON tab shows the whole Application, JSON with 2-space indent", async () => {
@@ -213,157 +255,45 @@ test("the YAML/JSON tab shows the whole Application, JSON with 2-space indent", 
   expect(pre.textContent).toContain('\n  "kind": "Application"');
 });
 
-describe("Refresh", () => {
-  test("Refresh sends hard=false and Hard refresh sends hard=true; each says so and reads the app again", async () => {
-    setup();
-    await loaded();
-    fireEvent.click(screen.getByRole("button", { name: ARGO_REFRESH }));
-    expect(await screen.findByText(ARGO_REFRESH_DONE)).toBeInTheDocument();
-    expect(m.refresh).toHaveBeenLastCalledWith(URL, "argocd", "web", false);
-    await waitFor(() => expect(m.app).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.getByRole("button", { name: ARGO_HARD_REFRESH })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: ARGO_HARD_REFRESH }));
-    await waitFor(() => expect(m.refresh).toHaveBeenLastCalledWith(URL, "argocd", "web", true));
-    await waitFor(() => expect(m.app).toHaveBeenCalledTimes(3));
-    expect(m.refresh).toHaveBeenCalledTimes(2);
-  });
-
-  test("on the resource tab an action reads the tree again too", async () => {
-    setup();
-    await loaded();
-    tab(TAB_ARGO_RESOURCES);
-    await screen.findByRole("tree");
-    fireEvent.click(screen.getByRole("button", { name: ARGO_REFRESH }));
-    await screen.findByText(ARGO_REFRESH_DONE);
-    await waitFor(() => expect(m.tree).toHaveBeenCalledTimes(2));
-  });
-
-  test("buttons are disabled while the action runs", async () => {
-    let done!: () => void;
-    m.refresh.mockReturnValue(new Promise<void>((resolve) => (done = resolve)));
-    setup();
-    await loaded();
-    fireEvent.click(screen.getByRole("button", { name: ARGO_REFRESH }));
-    expect(screen.getByRole("button", { name: ARGO_REFRESH })).toBeDisabled();
-    expect(screen.getByRole("button", { name: ARGO_HARD_REFRESH })).toBeDisabled();
-    expect(screen.getByRole("button", { name: ARGO_SYNC })).toBeDisabled();
-    done();
-    await waitFor(() => expect(screen.getByRole("button", { name: ARGO_REFRESH })).toBeEnabled());
-  });
+test("권한이 없으면 새로고침과 동기화를 막아요", async () => {
+  changes.can.mockResolvedValue([false, false]);
+  setup(); await loaded();
+  await waitFor(() => expect(screen.getByRole("button", { name: ARGO_REFRESH })).toBeDisabled());
+  expect(screen.getByRole("button", { name: ARGO_SYNC })).toBeDisabled();
 });
 
-describe("Sync", () => {
-  test("asks first, shows what it will do, and defaults to no prune and no dry run", async () => {
-    setup();
-    await loaded();
-    fireEvent.click(screen.getByRole("button", { name: ARGO_SYNC }));
-    const dialog = screen.getByRole("dialog", { name: ARGO_SYNC_TITLE });
-    expect(m.sync).not.toHaveBeenCalled();
-    expect(within(dialog).getByText("web")).toBeInTheDocument();
-    expect(within(dialog).getByText("prod")).toBeInTheDocument();
-    expect(within(dialog).getByText("https://kubernetes.default.svc/web")).toBeInTheDocument();
-    expect(within(dialog).getByText("1.2.x, main")).toBeInTheDocument();
-    expect(within(dialog).getByRole("checkbox", { name: ARGO_PRUNE })).not.toBeChecked();
-    expect(within(dialog).getByRole("checkbox", { name: ARGO_DRY_RUN })).not.toBeChecked();
-    fireEvent.click(within(dialog).getByRole("button", { name: ARGO_SYNC_CONFIRM }));
-    expect(await screen.findByText(ARGO_SYNC_DONE)).toBeInTheDocument();
-    expect(m.sync).toHaveBeenCalledWith(URL, "argocd", "web", { prune: false, dryRun: false });
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  test("sends the chosen prune and dry run; cancel and Escape send nothing", async () => {
-    const { onClose } = setup();
-    await loaded();
-    fireEvent.click(screen.getByRole("button", { name: ARGO_SYNC }));
-    fireEvent.click(screen.getByRole("button", { name: "취소" }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: ARGO_SYNC }));
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(onClose).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: ARGO_SYNC }));
-    fireEvent.click(screen.getByRole("checkbox", { name: ARGO_PRUNE }));
-    fireEvent.click(screen.getByRole("checkbox", { name: ARGO_DRY_RUN }));
-    fireEvent.click(screen.getByRole("button", { name: ARGO_SYNC_CONFIRM }));
-    await waitFor(() => expect(m.sync).toHaveBeenCalledTimes(1));
-    expect(m.sync).toHaveBeenCalledWith(URL, "argocd", "web", { prune: true, dryRun: true });
-    await screen.findByText(ARGO_SYNC_DONE);
-  });
-
-  test("겹친 창이 있으면 Sync 창은 맨 위 창이 닫힐 때까지 유지한다", async () => {
-    const { onClose } = setup();
-    await loaded();
-    fireEvent.click(screen.getByRole("button", { name: ARGO_SYNC }));
-    const overlay = document.createElement("div");
-    overlay.className = "modal";
-    document.body.appendChild(overlay);
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.getByRole("dialog", { name: ARGO_SYNC_TITLE })).toBeInTheDocument();
-    expect(onClose).not.toHaveBeenCalled();
-    overlay.remove();
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("dialog", { name: ARGO_SYNC_TITLE })).toBeNull();
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
-  test("while an operation runs Sync is disabled and says why; Refresh stays", async () => {
-    m.app.mockResolvedValue(app({ operationInProgress: true }));
-    setup();
-    await loaded();
-    const sync = screen.getByRole("button", { name: ARGO_SYNC });
-    expect(sync).toBeDisabled();
-    expect(sync).toHaveAttribute("title", ARGO_SYNC_RUNNING);
-    expect(screen.getByRole("button", { name: ARGO_REFRESH })).toBeEnabled();
-  });
+test("새로고침은 미리 보기 없이 실행해요", async () => {
+  setup(); await loaded();
+  await waitFor(() => expect(screen.getByRole("button", { name: ARGO_HARD_REFRESH })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: ARGO_HARD_REFRESH }));
+  await screen.findByText("요청을 보냈어요");
+  expect(changes.apply).toHaveBeenCalledWith(URL, expect.objectContaining({ name: "web" }), { kind: "refresh", hard: true }, null, null);
+  expect(changes.preview).not.toHaveBeenCalled();
 });
 
-describe("a failed action", () => {
-  test("Refresh shows the server's message and Retry runs the same refresh again", async () => {
-    m.refresh.mockRejectedValueOnce({ kind: "other", message: "application is being deleted" });
-    setup();
-    await loaded();
-    fireEvent.click(screen.getByRole("button", { name: ARGO_HARD_REFRESH }));
-    expect(await screen.findByText("application is being deleted")).toBeInTheDocument();
-    expect(screen.queryByText(ARGO_REFRESH_DONE)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
-    expect(await screen.findByText(ARGO_REFRESH_DONE)).toBeInTheDocument();
-    expect(screen.queryByText("application is being deleted")).toBeNull();
-    expect(m.refresh).toHaveBeenCalledTimes(2);
-    expect(m.refresh).toHaveBeenLastCalledWith(URL, "argocd", "web", true);
-  });
-
-  test("Sync is never sent again by itself; Retry sends it once more with the same options", async () => {
-    m.sync.mockRejectedValueOnce({ kind: "other", message: "another operation is already in progress" });
-    setup();
-    await loaded();
-    fireEvent.click(screen.getByRole("button", { name: ARGO_SYNC }));
-    fireEvent.click(screen.getByRole("checkbox", { name: ARGO_PRUNE }));
-    fireEvent.click(screen.getByRole("button", { name: ARGO_SYNC_CONFIRM }));
-    expect(await screen.findByText("another operation is already in progress")).toBeInTheDocument();
-    expect(screen.queryByText(ARGO_SYNC_DONE)).toBeNull();
-    expect(m.sync).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
-    expect(await screen.findByText(ARGO_SYNC_DONE)).toBeInTheDocument();
-    expect(m.sync).toHaveBeenCalledTimes(2);
-    expect(m.sync).toHaveBeenLastCalledWith(URL, "argocd", "web", { prune: true, dryRun: false });
-  });
-
-  test("a token error from an action goes to the token form with its message", async () => {
-    m.sync.mockRejectedValueOnce({ kind: "other", message: TOKEN_INVALID });
-    const h = setup();
-    await loaded();
-    fireEvent.click(screen.getByRole("button", { name: ARGO_SYNC }));
-    fireEvent.click(screen.getByRole("button", { name: ARGO_SYNC_CONFIRM }));
-    await waitFor(() => expect(h.onTokenError).toHaveBeenCalledWith(TOKEN_INVALID));
-  });
+test("작업 중에는 동기화를 막아요", async () => {
+  m.app.mockResolvedValue(app({ operationInProgress: true }));
+  setup(); await loaded();
+  expect(screen.getByRole("button", { name: ARGO_SYNC })).toHaveAttribute("title", ARGO_SYNC_RUNNING);
 });
 
 describe("reading the app", () => {
+  test("the action bar sits under the header on every tab and each action exists exactly once", async () => {
+    setup();
+    await loaded();
+    for (const name of [TAB_ARGO_RESOURCES, TAB_ARGO_HISTORY, TAB_ARGO_RAW]) {
+      tab(name);
+      expect(screen.getByRole("toolbar", { name: "앱 작업" })).toBeInTheDocument();
+      for (const label of [ARGO_SYNC, ARGO_REFRESH, ARGO_HARD_REFRESH]) expect(screen.getAllByRole("button", { name: label })).toHaveLength(1);
+    }
+    expect(within(screen.getByRole("toolbar", { name: "앱 작업" })).getAllByRole("button", { name: ARGO_SYNC })).toHaveLength(1);
+  });
+
   test("a failed read shows the error, keeps Sync off, and closing still works", async () => {
     m.app.mockRejectedValue({ kind: "other", message: "application not found" });
     const h = setup();
     expect(await screen.findByText("application not found")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: ARGO_SYNC })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: ARGO_SYNC })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: CLOSE }));
     expect(h.onClose).toHaveBeenCalled();
     expect(h.onTokenError).not.toHaveBeenCalled();

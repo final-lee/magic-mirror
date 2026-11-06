@@ -101,7 +101,7 @@ export function DiagnoseView() {
             <form className="awc-editor-opts" onSubmit={submit}>
               <label htmlFor="ts-address">{t.ADDRESS_LABEL}</label>
               <input id="ts-address" value={input} onChange={(e) => setInput(e.target.value)} />
-              <button className="btn primary small" type="submit" disabled={!input.trim()}>
+              <button className="btn small tone-refresh" type="submit" disabled={!input.trim()}>
                 {t.DIAGNOSE_BUTTON}
               </button>
             </form>
@@ -111,7 +111,7 @@ export function DiagnoseView() {
             <h3>{d.SEC_DNS_STATUS}</h3>
             <p className="ts-desc">{d.SEC_DNS_STATUS_DESC}</p>
             <div className="ts-connect-acts">
-              <button className="btn small" disabled={busy["dns-status"]} onClick={() => void run("dns-status")}>{d.DNS_STATUS}</button>
+              <button className="btn small tone-refresh" disabled={busy["dns-status"]} onClick={() => void run("dns-status")}>{d.DNS_STATUS}</button>
             </div>
             {show("dns-status")}
           </section>
@@ -121,7 +121,7 @@ export function DiagnoseView() {
             <form className="awc-editor-opts" onSubmit={(event) => { event.preventDefault(); void run("dns-query", name, recordType); }}>
               <label>{d.DNS_NAME}<input value={name} onChange={(event) => setName(event.target.value)} /></label>
               <label>{d.RECORD_TYPE}<input value={recordType} onChange={(event) => setRecordType(event.target.value)} /></label>
-              <button className="btn small" disabled={!name.trim() || busy["dns-query"]}>{d.DNS_QUERY}</button>
+              <button className="btn small tone-refresh" disabled={!name.trim() || busy["dns-query"]}>{d.DNS_QUERY}</button>
             </form>
             {show("dns-query")}
           </section>
@@ -130,7 +130,7 @@ export function DiagnoseView() {
             <p className="ts-desc">{d.SEC_WHOIS_DESC}</p>
             <form className="awc-editor-opts" onSubmit={(event) => { event.preventDefault(); void run("whois", ip); }}>
               <label>{d.IP}<input value={ip} onChange={(event) => setIp(event.target.value)} /></label>
-              <button className="btn small" disabled={!ip.trim() || busy.whois}>{d.WHOIS}</button>
+              <button className="btn small tone-refresh" disabled={!ip.trim() || busy.whois}>{d.WHOIS}</button>
             </form>
             {show("whois", true)}
           </section>
@@ -138,7 +138,7 @@ export function DiagnoseView() {
             <h3>{d.SEC_WHOAMI}</h3>
             <p className="ts-desc">{d.SEC_WHOAMI_DESC}</p>
             <div className="ts-connect-acts">
-              <button className="btn small" disabled={busy.whoami} onClick={() => void run("whoami")}>{d.WHOAMI}</button>
+              <button className="btn small tone-refresh" disabled={busy.whoami} onClick={() => void run("whoami")}>{d.WHOAMI}</button>
             </div>
             {show("whoami", true)}
           </section>

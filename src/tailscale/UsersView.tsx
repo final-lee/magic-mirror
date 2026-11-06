@@ -7,9 +7,10 @@ import { formatAgo, formatDateTime, formatDay } from "../iam/format";
 import { ApiRequired } from "./ApiRequired";
 import { useTailscaleApi } from "./useTailscaleApi";
 import * as t from "./usersText";
+import { userTone } from "./tone";
 
 type Row = Record<string, unknown>;
-type Operation = { action: string; rows: Row[]; value: unknown };
+type Operation = { action: string; rows: Row[]; value: unknown; revert?: boolean };
 
 export function UsersView() {
   const { tailnet, connected, isLoading } = useTailscaleApi();
@@ -53,9 +54,9 @@ function UsersPanel({ tailnet }: { tailnet: string }) {
         <select value={role} onChange={(e) => setRole(e.target.value)}>
           {t.ROLES.map((v) => <option key={v} value={v}>{t.ROLE_NAMES[v]}</option>)}
         </select>
-        {["role", "approve", "suspend", "restore", "delete"].map((action) => (
-          <button className="btn small" key={action} onClick={() => setOp({ action, rows: chosen, value: role })}>
-            {t.ACTIONS[action]}
+        {["role", "approve", "restore", "suspend", "delete"].map((action) => (
+          <button className={`btn small tone-${userTone(action)}`} key={action} onClick={() => setOp({ action, rows: chosen, value: role })}>
+            {t.actionButton(action)}
           </button>
         ))}
       </div>
@@ -96,7 +97,7 @@ function UsersPanel({ tailnet }: { tailnet: string }) {
         <label>{t.ROLE} <select value={role} onChange={(e) => setRole(e.target.value)}>
           {t.ROLES.filter((v) => v !== "owner").map((v) => <option key={v} value={v}>{t.ROLE_NAMES[v]}</option>)}
         </select></label>
-        <button className="btn small" disabled={!email || role === "owner"}
+        <button className="btn small tone-create" disabled={!email || role === "owner"}
           onClick={() => setOp({ action: "createInvite", rows: [{}], value: { email, role } })}>{t.CREATE}</button>
       </div>
       {!invites.isLoading && !invites.isError && !invites.data?.length && <p className="dim">{t.NO_INVITES}</p>}
@@ -104,8 +105,8 @@ function UsersPanel({ tailnet }: { tailnet: string }) {
         <p key={String(row.id)}>
           {String(row.email ?? "-")} · <span title={String(row.role ?? "")}>{t.ROLE_NAMES[String(row.role)] ?? String(row.role ?? "-")}</span>{" "}
           {(["resendInvite", "deleteInvite"] as const).map((action) => (
-            <button key={action} className="btn small" onClick={() => setOp({ action, rows: [row], value: null })}>
-              {t.ACTIONS[action]}
+            <button key={action} className={`btn small tone-${userTone(action)}`} onClick={() => setOp({ action, rows: [row], value: null })}>
+              {t.actionButton(action)}
             </button>
           ))}
         </p>
@@ -127,8 +128,8 @@ function UsersPanel({ tailnet }: { tailnet: string }) {
             {String(before.loginName ?? change.target.name)}
             {" · "}
             <span title={change.action}>{t.ACTIONS[change.action.split(":")[1]] ?? change.action}</span>{" "}
-            <button className="btn small" disabled={!matches}
-              onClick={() => setOp({ action, rows: [user], value: before.role })}>{t.UNDO}</button>
+            <button className="btn small tone-caution" disabled={!matches} title={matches ? undefined : t.UNDO_STALE}
+              onClick={() => setOp({ action, rows: [user], value: before.role, revert: true })}>{t.UNDO}</button>
           </p>
         );
       })}
@@ -181,8 +182,8 @@ function UserDialog({ tailnet, op, cancel, done }: { tailnet: string; op: Operat
         {risky && <label>{expected}<input value={typed} onChange={(e) => setTyped(e.target.value)} /></label>}
         {results.length > 0 && <><h4>{t.RESULT}</h4>{results.map((result, i) => <p key={i}>{result}</p>)}</>}
         <div className="foot">
-          <button className="btn small" disabled={sending} onClick={results.length ? done : cancel}>{t.CANCEL}</button>
-          <button className="btn small" disabled={sending || results.length > 0 || (risky && typed !== expected)}
+          <button className="btn small tone-ghost" disabled={sending} onClick={results.length ? done : cancel}>{t.CANCEL}</button>
+          <button className={`btn small tone-${userTone(op.action, op.revert)}`} disabled={sending || results.length > 0 || (risky && typed !== expected)}
             onClick={() => void apply()}>{t.APPLY}</button>
         </div>
       </div>

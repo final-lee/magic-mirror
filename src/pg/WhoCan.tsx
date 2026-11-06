@@ -104,14 +104,14 @@ function DatabaseWhoCan({ target, database, kinds }: { target: PgTarget; databas
           <span className="wc-label" aria-hidden="true">
             객체
           </span>
-          <button type="button" ref={opener} className="btn small pg-pick" aria-haspopup="dialog" onClick={() => setPicking(true)}>
+          <button type="button" ref={opener} className="btn small pg-pick tone-secondary" aria-haspopup="dialog" onClick={() => setPicking(true)}>
             {object ? (
               <>
                 <span className="mono">{objectName(object)}</span> <span className="dim">{OBJECT_KIND_LABEL[object.kind]}</span>
               </>
             ) : (
               "객체 고르기"
-            )}
+            )}…
           </button>
         </div>
         {object && privilege && (

@@ -125,10 +125,10 @@ function MatchDiff({ overview, tab, target, source, onApply, onClose }: Pick<Pro
           )}
         </ul>
         <div className="foot">
-          <button className="btn plain" ref={cancelRef} onClick={onClose}>
+          <button className="btn plain tone-ghost" ref={cancelRef} onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={add.length === 0 && remove.length === 0} onClick={() => onApply(add, remove)}>
+          <button className="btn plain tone-secondary" disabled={add.length === 0 && remove.length === 0} onClick={() => onApply(add, remove)}>
             담기
           </button>
         </div>

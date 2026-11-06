@@ -59,7 +59,7 @@ export function PolicyAccess({ tailnet, text, edited }: { tailnet: string; text:
           spellCheck={false}
           onChange={(e) => setSubject(e.target.value)}
         />
-        <button className="btn small" type="submit" disabled={running || subject.trim() === ""}>
+        <button className="btn small tone-refresh" type="submit" disabled={running || subject.trim() === ""}>
           {running ? p.ACCESS_RUNNING : p.ACCESS_RUN}
         </button>
         <span className="dim">{edited ? p.ACCESS_DRAFT : p.ACCESS_SAVED}</span>

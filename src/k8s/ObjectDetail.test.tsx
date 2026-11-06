@@ -79,10 +79,10 @@ test("change actions are there without any switch when the detail can start chan
     qc, ssoLoginStub(),
   );
   const result = render(renderDetail(vi.fn()));
-  expect(await screen.findByRole("button", { name: "삭제" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "삭제…" })).toBeInTheDocument();
   expect(screen.getByRole("tab", { name: TAB_SHELL })).toBeInTheDocument();
   result.rerender(renderDetail());
-  expect(screen.queryByRole("button", { name: "삭제" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "삭제…" })).not.toBeInTheDocument();
 });
 
 test("long annotations and last-applied-configuration start folded; expanding shows indented, colored JSON", async () => {

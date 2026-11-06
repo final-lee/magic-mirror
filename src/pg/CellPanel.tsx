@@ -154,8 +154,8 @@ function Objects({
       </div>
       {edit && (
         <div className="pg-panel-act">
-          <button type="button" className="btn small" disabled={edit.system} title={lockedTitle(edit)} aria-description={lockedTitle(edit)} onClick={onGrant}>
-            객체에 권한 주기
+          <button type="button" className="btn small tone-primary" disabled={edit.system} title={lockedTitle(edit)} aria-description={lockedTitle(edit)} onClick={onGrant}>
+            객체에 권한 주기…
           </button>
         </div>
       )}

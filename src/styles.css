@@ -45,6 +45,10 @@
   --log-c7: #5eead4;
   --log-c8: #ff8a7a;
   --orange: #ff9f0a;
+  /* 버튼 바탕용: 멈춤·되돌림(주황), 만들기(초록)의 바탕과 글자 */
+  --orange-fill: #ff9f0a;
+  --on-caution: #1c1c1e;
+  --on-create: #0b2a14;
   --tone-00000040: #00000040;
   --tone-00000073: #00000073;
   --accent-alpha-0f: #0a84ff0f;
@@ -189,6 +193,9 @@
   --log-c7: #0b7a6e;
   --log-c8: #b42318;
   --orange: #a24600;
+  --orange-fill: #c25700;
+  --on-caution: #fff;
+  --on-create: #fff;
   --tone-00000040: #0000000d;
   --tone-00000073: #00000033;
   --accent-alpha-0f: #0071e30f;
@@ -391,7 +398,6 @@ tbody tr.on td { background: var(--accent) !important; color: var(--on-accent); 
 .link { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; }
 .btn { display: block; width: 100%; background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--foreground-strong); border-radius: 6px; padding: 6px; margin-top: 8px; cursor: pointer; font-size: 12px; }
 .btn:hover { background: var(--surface-3); }
-.btn.primary { color: var(--on-accent); background: var(--accent); border-color: var(--accent); width: auto; padding: 6px 16px; display: inline-block; }
 .btn.more { width: auto; margin: 8px auto; padding: 6px 20px; }
 .btn:disabled { opacity: .6; cursor: default; }
 .empty { color: var(--dim); display: grid; place-items: center; flex: 1; text-align: center; padding: 20px; }
@@ -433,7 +439,7 @@ tbody tr.on td { background: var(--accent) !important; color: var(--on-accent); 
 .pane-head .path { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
 .path-input { flex: 1; background: var(--code-bg); border: 1px solid var(--accent); border-radius: 4px; color: var(--text); padding: 2px 6px; font: inherit; }
 .btn.small { width: auto; display: inline-block; margin-top: 0; padding: 3px 9px; font-size: 11px; }
-.btn.danger { color: var(--red); }
+.pg-edit-toggle[aria-pressed="true"] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
 .btn.plain { width: auto; display: inline-block; }
 .actions { display: flex; gap: 6px; align-items: center; padding: 6px 10px; border-top: 1px solid var(--line); background: var(--tone-232325); }
 .queue { border-top: 1px solid var(--line); background: var(--tone-1f1f21); max-height: 140px; overflow: auto; font-size: 11px; }
@@ -719,8 +725,6 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .sheet.cp { display: flex; flex-direction: column; padding: 0; max-height: 86vh; max-width: calc(100vw - 32px); overflow: hidden; }
 .cp-body { overflow: auto; padding: 18px 18px 8px; user-select: text; }
 .cp .foot { margin: 0; padding: 12px 18px; border-top: 1px solid var(--line); }
-.cp .btn.danger { background: var(--red-soft); border-color: var(--red-alpha-70); color: var(--tone-ff8a82); }
-.cp .btn.danger:disabled { background: var(--surface-2); border-color: var(--border-strong); color: var(--dim); }
 .cp-hint { margin-right: auto; color: var(--dim); font-size: 12px; }
 .cp .cp-sum { color: var(--text); font-size: 13px; margin: 0 0 12px; }
 .cp h4 { margin: 14px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }
@@ -1436,6 +1440,9 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .argo-bar .k8s-filter { flex: 0 1 240px; }
 .argo-top { background: var(--panel); }
 .argo-session { color: var(--dim); }
+.argo-top .k8s-tabs { padding: 0; border-bottom: 0; }
+.argo-app-link { margin: 0 4px 2px 0; }
+.argo-limit { margin: 0; padding: 8px 12px; font-size: 12px; }
 .argo-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
 .argo-token { width: 520px; max-width: calc(100% - 32px); margin: 24px auto; display: flex; flex-direction: column; gap: 10px; background: var(--panel); border: 1px solid var(--border-input); border-radius: 12px; padding: 20px; }
 .argo-token p { margin: 0; font-size: 12px; }
@@ -1515,7 +1522,14 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 /* 이름 칸 너비를 맞춰 상태 막대가 묶음마다 같은 자리에 온다 */
 .argo-band-name { min-width: 230px; font-size: 14px; }
 .argo-band-chips { display: inline-flex; gap: 4px; }
-.argo-band-msg { flex-basis: 100%; padding-left: 22px; white-space: pre-wrap; word-break: break-word; }
+.argo-card-head { display: flex; align-items: center; background: var(--tone-2e2e33); }
+.argo-card-head .argo-band { flex: 1; min-width: 0; }
+.argo-card-quiet .argo-card-head { background: var(--tone-252528); }
+.argo-set-acts { display: inline-flex; gap: 6px; padding: 0 12px; flex-shrink: 0; }
+.argo-set-err { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 0 12px 8px 34px; background: var(--tone-2e2e33); font-size: 12px; }
+.argo-set-err details { flex-basis: 100%; }
+.argo-set-err summary { cursor: pointer; }
+.argo-set-err pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; }
 .argo-tally { display: inline-flex; width: 120px; height: 8px; border-radius: 4px; overflow: hidden; background: var(--neutral-alpha-10); }
 .argo-tally-ok { background: var(--green); }
 .argo-tally-err { background: var(--red); }
@@ -1598,13 +1612,20 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .k8s-toolbar input:not([type="checkbox"]) { width: 9em; }
 .k8s-toolbar input[type="number"] { width: 5em; }
 .k8s-toolbar-slot { display: contents; }
-/* 버튼 색: 파랑 실행·미리보기, 노랑 상태를 바꾸는 조작, 빨강 지우기·비우기 */
+/* 버튼 색은 버튼이 끝까지 실행됐을 때 대상(서버, 앱에 남는 데이터)에 일어나는 일로 정한다:
+   파랑 실행 · 초록 만들기 · 노랑 상태 변경 · 주황 멈춤·되돌림 · 빨강 없애기 · 초록 테두리 새로고침 · 파랑 테두리 이동 · 회색 보조 · 투명 취소 · 빨강 테두리 버리기·끊기 */
 .btn.tone-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .btn.tone-primary:hover:not(:disabled) { background: var(--tone-3d9bff); }
+.btn.tone-create { background: var(--green); border-color: var(--green); color: var(--on-create); }
+.btn.tone-create:hover:not(:disabled) { filter: brightness(1.1); }
 .btn.tone-warn { background: var(--warn-fill); border-color: var(--warn-fill); color: var(--on-warn); }
 .btn.tone-warn:hover:not(:disabled) { background: var(--tone-ffe14d); }
+.btn.tone-caution { background: var(--orange-fill); border-color: var(--orange-fill); color: var(--on-caution); }
+.btn.tone-caution:hover:not(:disabled) { filter: brightness(1.1); }
 .btn.tone-danger { background: var(--red); border-color: var(--red); color: var(--on-accent); }
 .btn.tone-danger:hover:not(:disabled) { background: var(--tone-ff6b62); }
+.btn.tone-refresh { background: transparent; border-color: var(--green); color: var(--green-text); }
+.btn.tone-refresh:hover:not(:disabled) { background: var(--green-soft); }
 .btn.tone-secondary { background: var(--surface-2); border-color: var(--border-strong); color: var(--foreground-strong); }
 .btn.tone-secondary:hover:not(:disabled) { background: var(--surface-3); }
 .btn.tone-nav { background: transparent; border-color: var(--accent); color: var(--accent); }
@@ -1613,7 +1634,8 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .btn.tone-ghost:hover:not(:disabled) { background: transparent; color: var(--text); }
 .btn.tone-ghost-danger { background: transparent; border-color: var(--red-alpha-66); color: var(--red); }
 .btn.tone-ghost-danger:hover:not(:disabled) { background: transparent; color: var(--text); }
-.btn.tone-primary:disabled, .btn.tone-warn:disabled, .btn.tone-danger:disabled { opacity: .4; }
+/* 누를 수 없는 버튼은 색을 빼고 흐린 회색으로: 색이 남아 있으면 누를 수 있어 보인다. 이유는 title에 둔다 */
+.btn.btn:disabled:is(.tone-primary, .tone-create, .tone-warn, .tone-caution, .tone-danger, .tone-refresh, .tone-nav, .tone-ghost-danger) { background: var(--surface-2); border-color: var(--border-strong); color: var(--dim); filter: none; }
 /* EKS·ArgoCD 탭의 버튼은 크기가 하나다(사용자 결정 2026-11-03): 높이 24px, 글자 12px, 내용만큼의 너비. 색은 tone-* 가 정한다 */
 :is(.k8s-pane, .argo-pane, .detail-tools) .btn.btn {
   display: inline-flex;
@@ -2514,3 +2536,73 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .ts-diff-add { background: var(--green-soft); color: var(--green-text); }
 .ts-diff-del { background: var(--red-soft); color: var(--tone-ff6b62); }
 .ts-diff-gap { color: var(--dim); }
+
+/* ArgoCD 앱 관리·ApplicationSet */
+.mg { display: flex; flex-direction: column; gap: 8px; }
+.mg-views { display: flex; gap: 2px; border-bottom: 1px solid var(--line); }
+.mg-views [role="tab"] { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--dim); padding: 4px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+.mg-views [aria-selected="true"] { color: inherit; border-bottom-color: var(--accent); }
+.mg-form { display: flex; flex-direction: column; gap: 6px; }
+.mg-indent { padding-left: 22px; }
+.mg-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 2px 12px; }
+.mg-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; margin: 6px 0; }
+.mg-field input, .mg-row input:not([type="checkbox"]), .mg-pick select { background: var(--code-bg); border: 1px solid var(--border-input); border-radius: 6px; padding: 3px 8px; color: var(--text); font: inherit; font-size: 12px; }
+.mg-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 2px 0; }
+.mg-row input:not([type="checkbox"]) { flex: 1; min-width: 120px; }
+.mg-pick { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); }
+.mg-details { margin: 8px 0; }
+.mg-details summary { cursor: pointer; font-size: 12px; color: var(--dim); }
+.mg-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.mg-problems { margin: 4px 0; padding-left: 18px; font-size: 12px; }
+.mg-acts { white-space: nowrap; text-align: right; }
+.mg-choices { display: flex; flex-direction: column; gap: 8px; }
+.mg-choice { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; cursor: pointer; }
+.mg-choice span { display: flex; flex-direction: column; }
+.mg-list { margin: 0; padding-left: 18px; font-size: 12px; }
+.mg-step { margin: 8px 0; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+.mg-changes { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.mg-change-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 6px; border: 0; background: var(--tone-252528); color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer; border-radius: 4px; }
+
+/* ArgoCD detail, operation, and change controls */
+.argo-res, .argo-diff-tab, .argo-ops { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.argo-res-head, .argo-bar-links, .argo-links, .argo-diff-head, .argo-recent { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
+.argo-res-head { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.argo-res-body, .argo-diff { min-width: 0; overflow: auto; }
+.argo-bar-links { padding: 6px 12px; border-bottom: 1px solid var(--line); }
+.argo-sw { cursor: pointer; border: 1px solid transparent; font: inherit; }
+.argo-sw-list { flex-basis: 100%; margin: 0; padding: 8px 12px 8px 28px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
+.argo-node-pick { width: 100%; text-align: left; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.argo-node-pick:hover { background: var(--neutral-alpha-08); }
+.argo-node-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.argo-diff-res { min-width: 0; margin: 6px 0; border: 1px solid var(--line); border-radius: 6px; overflow: auto; }
+.argo-diff-head, .argo-diff-res > summary { padding: 6px 8px; background: var(--code-bg); cursor: pointer; }
+.argo-diff-toggle { flex: none; }
+.argo-diff-stats { margin: 6px 8px; font-size: 11px; }
+.argo-rev { display: flex; flex-direction: column; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.argo-actions, .argo-sync-res { list-style: none; padding: 0; margin: 0; }
+.argo-actions { display: flex; flex-direction: column; gap: 6px; }
+.argo-actions li { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.argo-sync-res { max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+.argo-sync-res li { padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.argo-sync-res li:last-child { border-bottom: 0; }
+.argo-recent { margin: 4px 0; }
+.argo-dim { color: var(--dim); }
+.argo-problem td:first-child { box-shadow: inset 3px 0 var(--red); }
+.argo-sync-options, .argo-sync-retry { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 4px 12px; }
+.argo-sync-options h4, .argo-sync-retry h4, .argo-sync-retry .err { grid-column: 1 / -1; }
+.argo-sync-options .argo-opt { margin: 2px 0; }
+.argo-sync-retry label { display: flex; align-items: center; gap: 6px; }
+.argo-sync-retry input { min-width: 0; width: 100px; }
+.argo-change-sheet { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
+.argo-change-sheet section { margin: 12px 0; min-width: 0; }
+.argo-change-sheet h4 { margin: 0 0 6px; }
+.argo-change-sheet ul { margin: 0; padding-left: 20px; }
+.argo-change-sheet details { margin: 12px 0; }
+.argo-change-sheet summary { cursor: pointer; color: var(--accent); }
+.argo-change-sheet pre { max-height: 240px; overflow: auto; padding: 8px; background: var(--code-bg); }
+.argo-change-sheet label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+
+/* 앱 상세 맨 위 작업 줄 */
+.argo-bar-actions { display: flex; flex-direction: column; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--border-input); }
+.argo-bar-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.argo-bar-label { font-size: 11px; min-width: 48px; margin-right: 2px; }

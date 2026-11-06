@@ -18,7 +18,7 @@ export function ContextPicker({ candidates, missing, onPick }: Props) {
         <ul className="k8s-ctx-list">
           {candidates.map((c) => (
             <li key={c.name}>
-              <button className="k8s-ctx" onClick={() => onPick(c.name)}>
+              <button className="k8s-ctx tone-primary" onClick={() => onPick(c.name)}>
                 <b className="mono">{c.name}</b>
                 <span className="dim">{c.user}</span>
                 {c.execProfile && <span className="dim mono">{c.execProfile}</span>}

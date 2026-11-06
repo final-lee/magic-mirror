@@ -77,10 +77,10 @@ export function PoliciesPane({ profile, summary, policies, overview, onOpen, onF
   return (
     <>
       <div className="pol-bar">
-        <button className="btn small" disabled={!!blocked} title={blocked ?? undefined} onClick={() => setPicking(true)}>
-          정책 붙이기
+        <button className="btn small tone-primary" disabled={!!blocked} title={blocked ?? undefined} onClick={() => setPicking(true)}>
+          정책 붙이기…
         </button>
-        <button className="btn small" disabled={!!blocked} title={blocked ?? undefined} onClick={() => setEditor({ mode: "new" })}>
+        <button className="btn small tone-create" disabled={!!blocked} title={blocked ?? undefined} onClick={() => setEditor({ mode: "new" })}>
           인라인 정책 추가
         </button>
         {blocked && (
@@ -178,11 +178,11 @@ function RowActions({ p, target, blocked, onEdit, onChange }: { p: AttachedPolic
   if (p.kind === "inline") {
     return (
       <>
-        <button className="btn small" aria-label={`${p.name} 편집`} {...off} onClick={onEdit}>
+        <button className="btn small tone-secondary" aria-label={`${p.name} 편집`} {...off} onClick={onEdit}>
           편집
         </button>
-        <button className="btn small danger" aria-label={`${p.name} 삭제`} {...off} onClick={() => onChange({ op: "deleteInlinePolicy", target, name: p.name })}>
-          삭제
+        <button className="btn small tone-danger" aria-label={`${p.name} 삭제…`} {...off} onClick={() => onChange({ op: "deleteInlinePolicy", target, name: p.name })}>
+          삭제…
         </button>
       </>
     );
@@ -190,8 +190,8 @@ function RowActions({ p, target, blocked, onEdit, onChange }: { p: AttachedPolic
   // detachable은 백엔드가 "주체에 직접 붙은 관리형 정책"일 때만 true로 준다. 권한 경계는 바꾸지 않는다.
   if (p.kind === "managed" && p.detachable) {
     return (
-      <button className="btn small" aria-label={`${p.name} 떼기`} {...off} onClick={() => onChange({ op: "detachPolicy", target, policyArn: p.id })}>
-        떼기
+      <button className="btn small tone-danger" aria-label={`${p.name} 떼기…`} {...off} onClick={() => onChange({ op: "detachPolicy", target, policyArn: p.id })}>
+        떼기…
       </button>
     );
   }
@@ -206,7 +206,7 @@ function InlineEditor({ profile, summary, policy, onFix, onClose }: { profile: s
       <div className="pe-wait">
         {q.isError ? <ErrorState compact error={q.error} profile={profile} onRetry={() => void q.refetch()} /> : <div className="empty small">불러오는 중…</div>}
         <div className="pe-actions">
-          <button className="btn plain" onClick={onClose}>
+          <button className="btn plain tone-ghost" onClick={onClose}>
             취소
           </button>
         </div>

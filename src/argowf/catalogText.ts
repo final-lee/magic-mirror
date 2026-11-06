@@ -73,16 +73,16 @@ export const CRON_TEMPLATE = "템플릿";
 export const CRON_SA = "ServiceAccount";
 export const CRON_PARAMS = "파라미터";
 
-export const CRON_RUN = "지금 실행";
+export const CRON_RUN = "지금 실행…";
 export const CRON_RUN_NOTE = "이 Cron의 설정으로 Workflow를 하나 바로 만들어요. 스케줄과 상관없고, 만든 Workflow는 지울 수 있어요.";
 export const CRON_RUN_DONE = "Workflow를 만들었어요";
-export const CRON_SUSPEND = "정지";
+export const CRON_SUSPEND = "정지…";
 export const CRON_SUSPEND_NOTE = "스케줄 실행을 멈춰요. 이미 도는 Workflow는 그대로 두고, 재개하면 다시 돌아요.";
 export const CRON_SUSPEND_DONE = "정지했어요";
-export const CRON_RESUME = "재개";
+export const CRON_RESUME = "재개…";
 export const CRON_RESUME_NOTE = "스케줄 실행을 다시 시작해요. 정지된 동안 지나간 실행은 따라잡지 않아요.";
 export const CRON_RESUME_DONE = "재개했어요";
-export const CRON_DELETE = "삭제";
+export const CRON_DELETE = "삭제…";
 export const CRON_DELETE_NOTE = "이 CronWorkflow를 지워요. 되돌릴 수 없어요. 이미 만들어진 Workflow는 남아요.";
 export const CRON_DELETE_DONE = "삭제했어요";
 
@@ -114,7 +114,7 @@ export const TPL_ENTRYPOINT = "entrypoint";
 export const TPL_TEMPLATE_NAMES = "템플릿 이름";
 export const TPL_SA = "ServiceAccount";
 export const TPL_NO_DEADLINE = "없어요";
-export const TPL_RUN = "실행";
+export const TPL_RUN = "실행…";
 
 // 템플릿 실행 창
 export const SUBMIT_TITLE = (name: string) => `${name} 실행`;

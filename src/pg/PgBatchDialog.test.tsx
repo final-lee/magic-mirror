@@ -145,7 +145,7 @@ describe("applying", () => {
   test("a clean batch can be applied with one click, in the primary style", () => {
     const { props } = setup(clean());
     expect(applyButton()).toBeEnabled();
-    expect(applyButton()).toHaveClass("primary");
+    expect(applyButton()).toHaveClass("tone-primary");
     fireEvent.click(applyButton());
     expect(props.onApply).toHaveBeenCalledWith("");
   });
@@ -153,7 +153,7 @@ describe("applying", () => {
   test("a warn warning in one change turns the apply into the danger style but keeps it enabled", () => {
     const { props } = setup(sampleBatchPreview());
     expect(applyButton()).toBeEnabled();
-    expect(applyButton()).toHaveClass("danger");
+    expect(applyButton()).toHaveClass("tone-danger");
     fireEvent.click(applyButton());
     expect(props.onApply).toHaveBeenCalledTimes(1);
   });

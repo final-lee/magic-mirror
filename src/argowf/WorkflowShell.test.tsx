@@ -121,8 +121,8 @@ test("실패 단계로 가장 먼저 끝난 Pod와 50줄 로그를 열고 위험
   fireEvent.click(await screen.findByRole("button", { name: "실패 단계로" }));
   expect(screen.getByText(/Pod: first/)).toBeInTheDocument();
   await waitFor(() => expect(argowfApi.logs).toHaveBeenCalledWith(conn, "prod", "prod-job", "first", logOptions, expect.any(Function)));
-  expect(screen.getByRole("button", { name: "Stop" })).toBeDisabled();
-  fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+  expect(screen.getByRole("button", { name: "Stop…" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "삭제…" }));
   expect(screen.getByRole("button", { name: "적용" })).toBeDisabled();
   fireEvent.change(screen.getByLabelText(/확인하려면/), { target: { value: "prod-job" } });
   expect(screen.getByRole("button", { name: "적용" })).toBeEnabled();
@@ -132,7 +132,7 @@ test("다시 제출은 파라미터를 보내고 새 Workflow를 연다", async 
   vi.mocked(argowfApi.workflowAction).mockResolvedValue("new-job");
   const open = vi.fn();
   renderWithClient(<Detail onOpenWorkflow={open} />);
-  fireEvent.click(await screen.findByRole("button", { name: "다시 제출" }));
+  fireEvent.click(await screen.findByRole("button", { name: "다시 제출…" }));
   fireEvent.change(screen.getByDisplayValue("alice"), { target: { value: "bob" } });
   fireEvent.click(screen.getByRole("button", { name: "적용" }));
   await waitFor(() => expect(open).toHaveBeenCalledWith({ kind: "live", namespace: "prod", name: "new-job" }));
@@ -141,7 +141,7 @@ test("다시 제출은 파라미터를 보내고 새 Workflow를 연다", async 
 
 test("Retry는 바꾼 파라미터만 보내고 성공한 단계도 다시 옵션을 따른다", async () => {
   renderWithClient(<Detail />);
-  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Retry…" }));
   fireEvent.click(screen.getByLabelText("성공한 단계도 다시"));
   fireEvent.change(screen.getByDisplayValue("alice"), { target: { value: "carol" } });
   fireEvent.click(screen.getByRole("button", { name: "적용" }));
@@ -162,8 +162,8 @@ test("실행 중인 Suspend 노드가 있으면 Resume을 켠다", async () => {
     nodes: [node("approval", { type: "Suspend", phase: "Running", podName: null })],
   });
   renderWithClient(<Detail target={{ kind: "live", namespace: "test", name: "job" }} />);
-  expect(await screen.findByRole("button", { name: "Resume" })).toBeEnabled();
-  expect(screen.getByRole("button", { name: "Suspend" })).toBeDisabled();
+  expect(await screen.findByRole("button", { name: "Resume…" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Suspend…" })).toBeDisabled();
 });
 
 test("보관 Retry가 새 Workflow를 만들면 live 상세를 연다", async () => {
@@ -171,7 +171,7 @@ test("보관 Retry가 새 Workflow를 만들면 live 상세를 연다", async ()
   vi.mocked(argowfApi.archivedAction).mockResolvedValue("retry-job");
   const open = vi.fn();
   renderWithClient(<Detail target={{ kind: "archived", uid: "uid" }} onOpenWorkflow={open} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Retry…" }));
   fireEvent.click(screen.getByRole("button", { name: "적용" }));
   await waitFor(() => expect(open).toHaveBeenCalledWith({ kind: "live", namespace: "prod", name: "retry-job" }));
   expect(argowfApi.archivedAction).toHaveBeenCalledWith(conn, "uid", "prod", {

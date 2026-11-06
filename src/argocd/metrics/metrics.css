@@ -1,0 +1,29 @@
+.argo-metrics { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.argo-metrics-scroll { overflow: auto; min-height: 0; flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 14px; }
+.argo-metrics-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.argo-metrics-note { color: var(--dim); font-size: 12px; }
+.argo-metrics-table { border-collapse: collapse; width: 100%; text-align: left; }
+.argo-metrics-table th, .argo-metrics-table td { border: 1px solid var(--line); padding: 6px 8px; vertical-align: top; }
+.argo-metrics-table th { background: var(--panel); color: var(--dim); font-weight: 600; }
+.argo-metrics-table tr.total td, .argo-metrics-table tr.total th { background: var(--hover); font-weight: 600; }
+.argo-metrics-table .num { text-align: right; white-space: nowrap; }
+.argo-metrics-link { color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+.argo-metrics-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.argo-metrics-card { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 10px; display: flex; flex-direction: column; gap: 4px; }
+.argo-metrics-card h5 { margin: 0; color: var(--dim); font-weight: 600; }
+.argo-metrics-card b { font-size: 1.25em; }
+.argo-metrics-card .rows { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.argo-metrics-card .rows > div { display: flex; justify-content: space-between; gap: 10px; }
+.argo-spark { width: 100%; height: 30px; }
+.argo-spark-base { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.argo-metrics-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.argo-metrics-chip { border: 1px solid var(--line); border-radius: 10px; padding: 1px 8px; background: var(--panel); color: var(--text); font-size: 12px; cursor: pointer; }
+.argo-metrics-chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft, var(--hover)); }
+.argo-metrics-flag { border-radius: 8px; padding: 0 6px; font-size: 11px; background: var(--yellow-soft); color: var(--yellow); margin-left: 4px; }
+.argo-metrics-bar-track { position: relative; height: 8px; min-width: 90px; border-radius: 4px; background: var(--hover); overflow: hidden; }
+.argo-metrics-bar-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
+.argo-metrics-bar-fill.hot { background: var(--red); }
+.argo-metrics-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.argo-metrics-list { margin: 4px 0 0; padding-left: 18px; }
+.argo-metrics-form { display: grid; grid-template-columns: max-content 1fr; gap: 8px 12px; align-items: center; max-width: 620px; }
+.argo-metrics-form .hint { grid-column: 2; margin-top: -4px; color: var(--dim); font-size: 12px; }

@@ -49,11 +49,11 @@ export function LoginPrompt({ initial = "", onSubmit, onCancel }: Props) {
       )}
       <div className="pg-login-foot">
         {onCancel && (
-          <button type="button" className="btn plain" onClick={onCancel}>
+          <button type="button" className="btn plain tone-ghost" onClick={onCancel}>
             취소
           </button>
         )}
-        <button type="submit" className="btn primary" disabled={!ready}>
+        <button type="submit" className="btn plain tone-primary" disabled={!ready}>
           연결
         </button>
       </div>

@@ -19,14 +19,14 @@ export function EntryActions({ m, mode, onChange }: Props) {
   const reason = mode === "configMap" ? t.ENTRY_CONFIG_MAP : !m.effective && m.inactiveReason ? t.ENTRY_UNREADABLE : undefined;
   return (
     <>
-      <ActionButton tone="warn" reason={reason} onClick={() => setForm({ mode: "groups", arn: m.principalArn, groups: m.groups })}>
+      <ActionButton tone="primary" reason={reason} onClick={() => setForm({ mode: "groups", arn: m.principalArn, groups: m.groups })}>
         {t.ENTRY_GROUPS}
       </ActionButton>
       <ActionButton tone="primary" reason={reason} onClick={() => setForm({ mode: "associate", arn: m.principalArn })}>
         {t.ENTRY_ASSOCIATE}
       </ActionButton>
       {m.policies.map((p) => (
-        <ActionButton key={p.policyArn} tone="secondary" reason={reason} onClick={() => onChange(entryDisassociate(m.principalArn, p.policyArn))}>
+        <ActionButton key={p.policyArn} tone="danger" reason={reason} onClick={() => onChange(entryDisassociate(m.principalArn, p.policyArn))}>
           {t.entryPolicyUndo(p.policyName)}
         </ActionButton>
       ))}
@@ -52,7 +52,7 @@ export function EntryCreateButton({ mode, onChange }: { mode: AccessView["mode"]
   const [open, setOpen] = useState(false);
   return (
     <>
-      <ActionButton tone="primary" reason={mode === "configMap" ? t.ENTRY_CONFIG_MAP : undefined} onClick={() => setOpen(true)}>
+      <ActionButton tone="create" reason={mode === "configMap" ? t.ENTRY_CONFIG_MAP : undefined} onClick={() => setOpen(true)}>
         {t.ENTRY_CREATE}
       </ActionButton>
       {open && (

@@ -143,7 +143,7 @@ export function ChangeLog({ target, targetArn, blockReason, onStart, onStartBatc
 function UndoButton({ label, busy, blockReason, onUndo }: { label: string; busy: boolean; blockReason: string | null; onUndo: () => void }) {
   return (
     <button
-      className="btn small"
+      className="btn small tone-caution"
       disabled={busy || blockReason !== null}
       title={blockReason ?? undefined}
       aria-description={blockReason ?? undefined}
@@ -157,7 +157,7 @@ function UndoButton({ label, busy, blockReason, onUndo }: { label: string; busy:
 function Action({ entry, busy, blockReason, onUndo }: { entry: PgChangeLogEntry; busy: boolean; blockReason: string | null; onUndo: () => void }) {
   if (!entry.ok || entry.undone) return null;
   if (!hasInverse(entry)) return <span className="dim">되돌릴 수 없어요</span>;
-  return <UndoButton label="되돌리기" busy={busy} blockReason={blockReason} onUndo={onUndo} />;
+  return <UndoButton label="되돌리기…" busy={busy} blockReason={blockReason} onUndo={onUndo} />;
 }
 
 /**
@@ -169,12 +169,12 @@ function BatchAction({ entries, busy, blockReason, onUndo }: { entries: PgChange
   if (!entries.some(canUndo)) {
     return (
       <>
-        <button className="btn small" disabled>
-          묶음 되돌리기
+        <button className="btn small tone-caution" disabled>
+          묶음 되돌리기…
         </button>
         <div className="dim cl-why">되돌릴 변경이 없어요</div>
       </>
     );
   }
-  return <UndoButton label="묶음 되돌리기" busy={busy} blockReason={blockReason} onUndo={onUndo} />;
+  return <UndoButton label="묶음 되돌리기…" busy={busy} blockReason={blockReason} onUndo={onUndo} />;
 }

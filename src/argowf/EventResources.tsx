@@ -72,8 +72,8 @@ export function EventResources({ conn, live, namespace, links, onTokenError, kin
         <h2 className="awc-title">{title}</h2>
         {!error && (
           <div className="awc-bar-end">
-            <button className="btn primary small" onClick={() => setEditor("create")}>
-              만들기
+            <button className="btn tone-create small" onClick={() => setEditor("create")}>
+              만들기…
             </button>
           </div>
         )}
@@ -160,7 +160,7 @@ export function EventResources({ conn, live, namespace, links, onTokenError, kin
                 .map((l) => (
                   <button
                     key={l.url}
-                    className="btn small"
+                    className="btn small tone-nav"
                     onClick={() =>
                       void desktop.openUrl(l.url.replaceAll("${metadata.name}", selected.name).replaceAll("${metadata.namespace}", selected.namespace))
                     }
@@ -168,11 +168,11 @@ export function EventResources({ conn, live, namespace, links, onTokenError, kin
                     {l.name} ↗
                   </button>
                 ))}
-            <button className="btn small" onClick={() => setEditor("edit")}>
+            <button className="btn small tone-secondary" onClick={() => setEditor("edit")}>
               고치기
             </button>
-            <button className="btn small danger" onClick={() => setDeleting(true)}>
-              삭제
+            <button className="btn small tone-danger" onClick={() => setDeleting(true)}>
+              삭제…
             </button>
           </div>
           {showLogs && <pre>{logs.join("\n") || "로그를 기다리는 중…"}</pre>}

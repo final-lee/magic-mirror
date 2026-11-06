@@ -52,12 +52,30 @@ pub struct ArgoCondition {
 #[serde(rename_all = "camelCase")]
 pub struct ArgoResourceResult {
     pub group: String,
+    pub version: String,
     pub kind: String,
     pub namespace: Option<String>,
     pub name: String,
     pub status: Option<String>,
     pub message: Option<String>,
     pub hook_phase: Option<String>,
+    pub hook_type: Option<String>,
+    pub sync_phase: Option<String>,
+}
+
+fn result_of(r: &Value) -> ArgoResourceResult {
+    ArgoResourceResult {
+        group: string(r, "/group"),
+        version: string(r, "/version"),
+        kind: string(r, "/kind"),
+        namespace: opt(r, "/namespace"),
+        name: string(r, "/name"),
+        status: opt(r, "/status"),
+        message: opt(r, "/message"),
+        hook_phase: opt(r, "/hookPhase"),
+        hook_type: opt(r, "/hookType"),
+        sync_phase: opt(r, "/syncPhase"),
+    }
 }
 
 /// 최근 동기화 작업의 상태.
@@ -70,8 +88,17 @@ pub struct ArgoOperation {
     pub finished_at: Option<String>,
     pub initiated_by: Option<String>,
     pub revisions: Vec<String>,
+    /// 재시도한 횟수(처음 시도는 세지 않는다).
+    pub retry_count: i64,
+    /// 재시도 한도. 재시도 전략이 없으면 None.
+    pub retry_limit: Option<i64>,
+    pub dry_run: bool,
+    pub prune: bool,
+    pub sync_options: Vec<String>,
     /// Synced가 아닌 결과만 최대 100개.
     pub failed_results: Vec<ArgoResourceResult>,
+    /// 모든 결과(hook 포함) 최대 500개.
+    pub results: Vec<ArgoResourceResult>,
 }
 
 /// Application이 관리하는 리소스.
@@ -149,7 +176,7 @@ fn strings(v: &Value, path: &str) -> Vec<String> {
         .collect()
 }
 
-fn revisions(v: &Value) -> Vec<String> {
+pub(super) fn revisions(v: &Value) -> Vec<String> {
     let multi = strings(v, "/revisions");
     if multi.is_empty() {
         opt(v, "/revision").into_iter().collect()
@@ -158,7 +185,7 @@ fn revisions(v: &Value) -> Vec<String> {
     }
 }
 
-fn initiated(v: &Value, path: &str) -> Option<String> {
+pub(super) fn initiated(v: &Value, path: &str) -> Option<String> {
     let by = v.pointer(path)?;
     if boolean(by, "/automated") {
         Some("automated".into())
@@ -191,27 +218,23 @@ pub fn argo_app_of(d: &Value) -> ArgoApp {
     let operation = d
         .pointer("/status/operationState")
         .filter(|v| v.is_object())
-        .map(|o| ArgoOperation {
-            phase: opt(o, "/phase"),
-            message: opt(o, "/message"),
-            started_at: opt(o, "/startedAt"),
-            finished_at: opt(o, "/finishedAt"),
-            initiated_by: initiated(o, "/operation/initiatedBy"),
-            revisions: o.pointer("/syncResult").map(revisions).unwrap_or_default(),
-            failed_results: list(o, "/syncResult/resources")
-                .iter()
-                .filter(|r| text(r, "/status") != Some("Synced"))
-                .take(100)
-                .map(|r| ArgoResourceResult {
-                    group: string(r, "/group"),
-                    kind: string(r, "/kind"),
-                    namespace: opt(r, "/namespace"),
-                    name: string(r, "/name"),
-                    status: opt(r, "/status"),
-                    message: opt(r, "/message"),
-                    hook_phase: opt(r, "/hookPhase"),
-                })
-                .collect(),
+        .map(|o| {
+            let results: Vec<_> = list(o, "/syncResult/resources").iter().map(result_of).collect();
+            ArgoOperation {
+                phase: opt(o, "/phase"),
+                message: opt(o, "/message"),
+                started_at: opt(o, "/startedAt"),
+                finished_at: opt(o, "/finishedAt"),
+                initiated_by: initiated(o, "/operation/initiatedBy"),
+                revisions: o.pointer("/syncResult").map(revisions).unwrap_or_default(),
+                retry_count: o.pointer("/retryCount").and_then(Value::as_i64).unwrap_or_default(),
+                retry_limit: o.pointer("/operation/retry/limit").and_then(Value::as_i64),
+                dry_run: boolean(o, "/operation/sync/dryRun"),
+                prune: boolean(o, "/operation/sync/prune"),
+                sync_options: strings(o, "/operation/sync/syncOptions"),
+                failed_results: results.iter().filter(|r| r.status.as_deref() != Some("Synced")).take(100).cloned().collect(),
+                results: results.into_iter().take(500).collect(),
+            }
         });
     let mut history: Vec<_> = list(d, "/status/history")
         .iter()

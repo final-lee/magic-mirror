@@ -85,6 +85,29 @@ where
     replaced
 }
 
+/// 조건에 맞는 기록만 원자적으로 남긴다. 읽을 수 없는 줄은 보존한다.
+pub fn retain<T: DeserializeOwned>(path: &Path, keep: impl Fn(&T) -> bool) -> io::Result<()> {
+    let _turn = writing();
+    let text = match read_text(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    let mut out = String::with_capacity(text.len());
+    for line in text.lines() {
+        if serde_json::from_str::<T>(line).map_or(true, |entry| keep(&entry)) {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if out == text { return Ok(()); }
+    let mut temp = path.as_os_str().to_owned();
+    temp.push(".tmp");
+    let result = write_synced(Path::new(&temp), out.as_bytes()).and_then(|()| fs::rename(&temp, path));
+    if result.is_err() { let _ = fs::remove_file(&temp); }
+    result
+}
+
 /// 파일을 새로 쓰고 디스크까지 내려보낸다: 바꿔치기한 뒤 전원이 꺼져도 반쯤 쓴 기록이 남지 않게.
 fn write_synced(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut file = File::create(path)?;

@@ -8,7 +8,8 @@ import { formatBytes, formatDate } from "../lib/format";
 import { explorerApi } from "./api";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { refKey, refLabel } from "./rows";
-import type { DiffLine, DiffResult, DiffRow, FileRef, TransferRequest } from "./types";
+import type { DiffResult, FileRef, TransferRequest } from "./types";
+import { RowView } from "./TextDiffView";
 import type { Transfers } from "./useTransfers";
 
 interface Props {
@@ -24,30 +25,6 @@ const REASON = {
   tooLarge: "2MB가 넘어서 내용 대신 정보만 비교해요",
 } as const;
 
-function Line({ line }: { line: DiffLine | null }) {
-  if (!line) return <div className="dcell empty-cell" />;
-  return (
-    <div className="dcell">
-      <span className="ln">{line.no}</span>
-      <span className="code">
-        {line.segments.map((s, i) => (
-          <span key={i} className={s.emph ? "emph" : undefined}>
-            {s.text}
-          </span>
-        ))}
-      </span>
-    </div>
-  );
-}
-
-function RowView({ row }: { row: DiffRow }) {
-  return (
-    <>
-      <Line line={row.left} />
-      <Line line={row.right} />
-    </>
-  );
-}
 
 export function DiffTab({ profile, left, right, transfers }: Props) {
   const q = useQuery<DiffResult>({
@@ -108,24 +85,24 @@ export function DiffTab({ profile, left, right, transfers }: Props) {
             +{d.stats.added} −{d.stats.removed} ~{d.stats.changed}
           </span>
         )}
-        <button className="btn small" title={shortcutTitle("이전 차이", "diff.prev")} disabled={hunks.length === 0} onClick={() => go(-1)}>
+        <button className="btn small tone-secondary" title={shortcutTitle("이전 차이", "diff.prev")} disabled={hunks.length === 0} onClick={() => go(-1)}>
           ▲ 이전
         </button>
-        <button className="btn small" title={shortcutTitle("다음 차이", "diff.next")} disabled={hunks.length === 0} onClick={() => go(1)}>
+        <button className="btn small tone-secondary" title={shortcutTitle("다음 차이", "diff.next")} disabled={hunks.length === 0} onClick={() => go(1)}>
           ▼ 다음
         </button>
         <span className="sp">
           {localRef && s3Ref && (
             <>
-              <button className="btn small" onClick={() => transferTo("download")}>
+              <button className="btn small tone-primary" onClick={() => transferTo("download")}>
                 ← 로컬로 내려받기
               </button>
-              <button className="btn small" onClick={() => transferTo("upload")}>
+              <button className="btn small tone-primary" onClick={() => transferTo("upload")}>
                 S3로 업로드 →
               </button>
             </>
           )}
-          <button className="btn small" onClick={openExternal}>
+          <button className="btn small tone-nav" onClick={openExternal}>
             외부 도구로 열기
           </button>
         </span>

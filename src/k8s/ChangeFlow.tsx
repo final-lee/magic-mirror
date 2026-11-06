@@ -6,6 +6,7 @@ import type { Gated } from "../iam/useIamChange";
 import type { PreviewWarning } from "../iam/types";
 import { usePendingFlow } from "../iam/useApplyFlow";
 import { k8sApi } from "./api";
+import { changeTone } from "./changeTone";
 import { DrainPlanView } from "./DrainPlanView";
 import { EffectView } from "./rbac/EffectView";
 import { reduceDrain, startRun, type DrainRun } from "./drain";
@@ -177,7 +178,7 @@ export function PreviewBody({ preview, typed, onTyped, locked, onForce, compactE
           {onForce && (
             <>
               <p className="dim">{t.CHANGE_FORCE_NOTE}</p>
-              <button className="btn tone-warn" onClick={onForce}>{t.CHANGE_FORCE}</button>
+              <button className="btn plain tone-primary" onClick={onForce}>{t.CHANGE_FORCE}</button>
             </>
           )}
         </>
@@ -228,6 +229,7 @@ function Sheet({ pending: p, apply, retry, cancel, force }: DialogProps) {
           )}
         </div>
         <PreviewFooter gated={gated} phase={p.phase} error={p.error} stale={p.stale} typed={typed}
+          applyTone={changeTone([{ change: p.change, undoOf: p.undoOf }])}
           cancelRef={cancelRef} retryRef={retryRef} onApply={apply} onRetry={retry} onCancel={cancel} />
       </div>
     </div>

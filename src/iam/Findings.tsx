@@ -175,13 +175,13 @@ function Items({ group, overview, onOpen, onFix }: { group: FindingGroup; overvi
                 </td>
                 <td className="fx-act">
                   {item.cli && (
-                    <button className="btn small" onClick={() => void desktop.copy(item.cli!)}>
+                    <button className="btn small tone-secondary" onClick={() => void desktop.copy(item.cli!)}>
                       CLI 복사
                     </button>
                   )}
                   {item.fix && (
-                    <button className="btn small" onClick={() => onFix(item.fix!)}>
-                      {fixLabel(item.fix)}
+                    <button className="btn small tone-primary" onClick={() => onFix(item.fix!)}>
+                      {fixLabel(item.fix)}…
                     </button>
                   )}
                 </td>

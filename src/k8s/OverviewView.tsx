@@ -98,7 +98,7 @@ export function OverviewView({ target, context, ssoProfile, live, visible = true
   return (
     <div className="k8s-overview">
       <div className="k8s-actions">
-        <button className="btn tone-secondary" onClick={refetch} disabled={q.isFetching}>{REFRESH}</button>
+        <button className="btn tone-refresh" onClick={refetch} disabled={q.isFetching}>{REFRESH}</button>
       </div>
       {o.nodes && (
         <Sect title={SEC_CLUSTER_USAGE}>
@@ -138,7 +138,7 @@ export function OverviewView({ target, context, ssoProfile, live, visible = true
             <tbody>
               {o.nodes.map((n) => (
                 <tr key={n.name} className={n.ready ? undefined : "k8s-warn"}>
-                  <td><button className="link mono" onClick={() => onOpenNode(n.name)}>{n.name}</button></td>
+                  <td><button className="link mono tone-nav" onClick={() => onOpenNode(n.name)}>{n.name}</button></td>
                   <td>{nodeStatus(n)}</td>
                   <td>{n.instanceType ?? ""}</td>
                   <td>{n.zone ?? ""}</td>

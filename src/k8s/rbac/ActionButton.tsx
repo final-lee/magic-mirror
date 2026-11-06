@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 
-/** 버튼 색: primary(파랑) 실행·미리보기, warn(노랑) 주의 조작, danger(빨강) 지우기, secondary(회색) 보조, ghost(투명) 취소 */
-export type ActionTone = "primary" | "warn" | "danger" | "secondary" | "ghost";
+export type ActionTone = "primary" | "create" | "warn" | "danger" | "secondary" | "ghost";
 
 interface Props {
   tone: ActionTone;

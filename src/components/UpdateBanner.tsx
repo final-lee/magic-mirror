@@ -35,10 +35,10 @@ export function UpdateBanner({ updater, transfersActive }: Props) {
         ✨ 새 버전 <b>{state.version}</b>이 나왔어요.
         {blocked && transfersActive && " 파일 전송이 끝난 뒤에 업데이트해 주세요."}
       </span>
-      <button className="btn small primary" onClick={start}>
+      <button className="btn small tone-primary" onClick={start}>
         지금 업데이트
       </button>
-      <button className="btn small" onClick={updater.dismiss}>
+      <button className="btn small tone-ghost" onClick={updater.dismiss}>
         나중에
       </button>
     </div>

@@ -31,7 +31,7 @@ function PolicyPanel({ tailnet }: { tailnet: string }) {
         <div className="err" role="alert">
           {errorMessage(policy.error)}
         </div>
-        <button className="btn small" onClick={() => void policy.refetch()}>
+        <button className="btn small tone-refresh" onClick={() => void policy.refetch()}>
           {p.RELOAD}
         </button>
       </div>
@@ -97,7 +97,7 @@ function PolicyLoaded({ tailnet, policy, onReload, onSaved }: {
         <h2 className="awc-title">{t.TAB_POLICY}</h2>
         <span className="awc-stat">{p.FINDINGS} <b>{policy.findings.length}</b></span>
         <div className="awc-bar-end">
-          <button className="btn small" onClick={onReload}>{changed ? p.RELOAD_DISCARD : p.RELOAD}</button>
+          <button className={`btn small ${changed ? "tone-ghost-danger" : "tone-refresh"}`} onClick={onReload}>{changed ? p.RELOAD_DISCARD : p.RELOAD}</button>
         </div>
       </div>
       <div className="awc-body"><div className="ts-policy">
@@ -105,7 +105,7 @@ function PolicyLoaded({ tailnet, policy, onReload, onSaved }: {
         <div className="notice" role="status">
           {p.EXTERNAL_NOTICE}{" "}
           {policy.externalLink && (
-            <button className="btn small" onClick={() => void desktop.openUrl(policy.externalLink!)} title={policy.externalLink}>
+            <button className="btn small tone-nav" onClick={() => void desktop.openUrl(policy.externalLink!)} title={policy.externalLink}>
               {p.EXTERNAL_OPEN}
             </button>
           )}
@@ -142,10 +142,10 @@ function PolicyLoaded({ tailnet, policy, onReload, onSaved }: {
             <CodeEditor value={policy.text} onChange={setText} label={p.EDITOR_LABEL} language="hujson" minHeight="320px" />
             <div className="dim ts-note">{p.EDIT_TIP}</div>
             <div className="ts-policy-actions">
-              <button className="btn small" disabled={shown?.state === "running"} onClick={() => void validate()}>
+              <button className="btn small tone-refresh" disabled={shown?.state === "running"} onClick={() => void validate()}>
                 {shown?.state === "running" ? p.CHECKING : p.CHECK}
               </button>
-              <button className="btn primary" disabled={!changed} onClick={() => setReviewing(true)}>
+              <button className="btn plain tone-primary" disabled={!changed} onClick={() => setReviewing(true)}>
                 {p.PREVIEW}
               </button>
               {!changed && <span className="dim">{p.UNCHANGED}</span>}

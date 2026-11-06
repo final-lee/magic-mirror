@@ -19,7 +19,7 @@ function setup(extra: Partial<React.ComponentProps<typeof PolicyEditor>> = {}) {
 }
 const editorText = () => editorView("정책 JSON").state.doc.toString();
 const nameInput = () => screen.getByRole("textbox", { name: "정책 이름" });
-const previewButton = () => screen.getByRole("button", { name: "미리보기" });
+const previewButton = () => screen.getByRole("button", { name: "미리보기…" });
 const checkButton = () => screen.getByRole("button", { name: "검사" });
 const typeDoc = (value: string) => typeYaml(value, "정책 JSON");
 const CHANGED = DOC.replace("s3:GetObject", "s3:PutObject");

@@ -99,13 +99,13 @@ export function RoleDetail({ target, role, onOpen, initialTab, onViewState, edit
         {(onChange || onDrop) && (
           <span className="pg-head-actions">
             {onChange && view.summary.attributes.login && (
-              <button type="button" className="btn small" disabled={blockReason !== null} title={blockReason ?? undefined} aria-description={blockReason ?? undefined} onClick={() => onChange({ kind: "password", role: view.summary.name })}>
-                비밀번호 재설정
+              <button type="button" className="btn small tone-primary" disabled={blockReason !== null} title={blockReason ?? undefined} aria-description={blockReason ?? undefined} onClick={() => onChange({ kind: "password", role: view.summary.name })}>
+                비밀번호 재설정…
               </button>
             )}
             {onDrop && (
-              <button type="button" className="btn small danger" disabled={dropOff !== null} title={dropOff ?? undefined} aria-description={dropOff ?? undefined} onClick={() => onDrop(view.summary.name)}>
-                삭제
+              <button type="button" className="btn small tone-danger" disabled={dropOff !== null} title={dropOff ?? undefined} aria-description={dropOff ?? undefined} onClick={() => onDrop(view.summary.name)}>
+                삭제…
               </button>
             )}
           </span>
@@ -250,7 +250,7 @@ function Databases({ view, load, children }: { view: PgRoleView; load: Load; chi
           ) : (
             <div className="pg-unloaded">
               <span className="dim">아직 읽지 않았어요</span>
-              <button className="btn small" onClick={() => load.onRequest(db.database)}>
+              <button className="btn small tone-refresh" onClick={() => load.onRequest(db.database)}>
                 불러오기
               </button>
             </div>
@@ -543,7 +543,7 @@ function AttributesForm({ view, draft }: { view: PgRoleView; draft: GridDraft })
       <div className="foot">
         <button
           type="button"
-          className="btn primary"
+          className="btn plain tone-secondary"
           disabled={!set}
           onClick={() => {
             if (set) draft.put({ kind: "attributes", role, set });

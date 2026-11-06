@@ -294,11 +294,11 @@ export function CreateRoleDialog({ target, overview, database, onPreview, onClos
           )}
         </div>
         <div className="foot">
-          <button className="btn plain" onClick={onClose}>
+          <button className="btn plain tone-ghost" onClick={onClose}>
             취소
           </button>
           <button
-            className="btn primary"
+            className="btn plain tone-create"
             disabled={!ready || blockReason !== null}
             title={blockReason ?? undefined}
             aria-description={blockReason ?? undefined}
@@ -307,7 +307,7 @@ export function CreateRoleDialog({ target, overview, database, onPreview, onClos
               if (change) onPreview(change);
             }}
           >
-            미리보기
+            미리보기…
           </button>
         </div>
       </div>

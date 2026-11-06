@@ -64,6 +64,8 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 aws-sdk-elasticloadbalancingv2 = "1"
 tauri-plugin-dialog = "2"
+# ArgoCD 탭 macOS 알림(Degraded·작업 실패·OutOfSync 지속)
+tauri-plugin-notification = "2"
 # KV 탭(ElastiCache Valkey·Redis OSS, 읽기 전용): Redis 클라이언트. 명령은 전부 `kv::command`의 허용 목록 관문을 거쳐 `custom`으로만 보내므로 i-* 명령 모음은 켜지 않는다.
 # TLS는 앱의 다른 곳처럼 rustls + aws-lc-rs만 쓴다(`enable-rustls`는 ring을 켜지 않는다)
 fred = { version = "10.1", default-features = false, features = ["enable-rustls", "credential-provider"] }

@@ -1,13 +1,28 @@
 //! ArgoCD 서버 연결과 응답 파싱. 토큰은 키체인과 메모리에만 둔다.
 mod app;
 mod client;
+pub(crate) mod change;
+pub(crate) mod appset;
+pub(crate) mod notify;
+pub(crate) mod events;
+pub(crate) mod stream;
+pub(crate) mod diff;
+pub(crate) mod history;
+pub(crate) mod logs;
+pub(crate) mod resource;
+pub(crate) mod ops;
+pub(crate) mod prom;
+pub(crate) mod cluster;
+pub(crate) mod usage;
+pub(crate) mod deploys;
+pub(crate) mod window;
 
 pub use app::{argo_app_of, ArgoApp};
 pub use client::{ArgocdSession, ArgocdState};
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 
 fn text<'a>(v: &'a Value, path: &str) -> Option<&'a str> {
@@ -36,6 +51,54 @@ pub struct ArgoAppRow {
     pub values: BTreeMap<String, String>,
     /// Application 자체의 레이블(환경 추론·레이블 필터·묶기에 쓴다)
     pub labels: BTreeMap<String, String>,
+    /// status.resources 요약(전체 리소스 색인용). 없으면 직렬화에서 빠진다.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub resources: Vec<ArgoResourceRef>,
+    /// 앱이 쓰는 컨테이너 이미지(`status.summary.images`). 이미지 목록 지표에 쓴다. 없으면 직렬화에서 빠진다.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
+}
+
+/// 목록 행에 싣는 리소스 요약. 비어 있거나 거짓인 선택 필드는 직렬화에서 뺀다(앱 수백 개의 스트림 메시지를 줄이려고).
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArgoResourceRef {
+    pub group: String,
+    pub version: String,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<String>,
+    pub name: String,
+    /// Sync 상태
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub health: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub hook: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub requires_pruning: bool,
+}
+
+fn resource_refs(d: &Value) -> Vec<ArgoResourceRef> {
+    let owned = |r: &Value, path: &str| text(r, path).filter(|s| !s.is_empty()).map(str::to_owned);
+    let flag = |r: &Value, path: &str| r.pointer(path).and_then(Value::as_bool).unwrap_or(false);
+    list(d, "/status/resources")
+        .iter()
+        .filter_map(|r| {
+            Some(ArgoResourceRef {
+                group: text(r, "/group").unwrap_or_default().to_owned(),
+                version: text(r, "/version").unwrap_or_default().to_owned(),
+                kind: owned(r, "/kind")?,
+                namespace: owned(r, "/namespace"),
+                name: owned(r, "/name")?,
+                status: owned(r, "/status"),
+                health: owned(r, "/health/status"),
+                hook: flag(r, "/hook"),
+                requires_pruning: flag(r, "/requiresPruning"),
+            })
+        })
+        .collect()
 }
 
 /// Application 응답에서 목록 행을 만든다.
@@ -74,6 +137,9 @@ pub fn app_row(d: &Value) -> ArgoAppRow {
         values.insert("targetRevision".into(), targets.join(", "));
     }
     values.insert("autoSync".into(), d.pointer("/spec/syncPolicy/automated").is_some_and(|x| !x.is_null()).to_string());
+    let automated_flag = |key: &str| d.pointer(&format!("/spec/syncPolicy/automated/{key}")).and_then(Value::as_bool).unwrap_or(false).to_string();
+    values.insert("selfHeal".into(), automated_flag("selfHeal"));
+    values.insert("autoPrune".into(), automated_flag("prune"));
     if let Some(name) = app_set(d) {
         values.insert("appSet".into(), name);
     }
@@ -90,6 +156,8 @@ pub fn app_row(d: &Value) -> ArgoAppRow {
         namespace: text(d, "/metadata/namespace").unwrap_or_default().into(),
         resource_version: text(d, "/metadata/resourceVersion").unwrap_or_default().into(),
         values,
+        resources: resource_refs(d),
+        images: list(d, "/status/summary/images").iter().filter_map(Value::as_str).map(str::to_owned).collect(),
         labels: d.pointer("/metadata/labels")
             .and_then(Value::as_object)
             .map(|m| {
@@ -109,7 +177,13 @@ pub struct ArgoAppSetRow {
     pub namespace: String,
     pub status: Option<String>,
     pub message: Option<String>,
+    /// 오류 상태가 시작된 시각(조건의 lastTransitionTime)
+    pub error_since: Option<String>,
     pub generators: Vec<String>,
+    /// generator가 다시 도는 간격 중 가장 짧은 것(초). 지정한 generator가 없으면 None
+    pub requeue_seconds: Option<u64>,
+    /// template의 프로젝트(쓰기 요청 대상에 쓴다)
+    pub project: Option<String>,
 }
 
 /// ApplicationSet 응답에서 목록 행을 만든다.
@@ -123,13 +197,45 @@ pub fn appset_row(d: &Value) -> ArgoAppSetRow {
     } else {
         None
     };
+    let generators: Vec<&serde_json::Map<String, Value>> = list(d, "/spec/generators").iter().filter_map(Value::as_object).collect();
     ArgoAppSetRow {
         name: text(d, "/metadata/name").unwrap_or_default().into(),
         namespace: text(d, "/metadata/namespace").unwrap_or_default().into(),
         status: status.map(str::to_owned),
         message: error.and_then(|c| text(c, "/message")).map(str::to_owned),
-        generators: list(d, "/spec/generators").iter().filter_map(Value::as_object).flat_map(|g| g.keys().cloned()).collect(),
+        error_since: error.and_then(|c| text(c, "/lastTransitionTime")).map(str::to_owned),
+        generators: generators.iter().flat_map(|g| g.keys().cloned()).collect(),
+        requeue_seconds: generators.iter().flat_map(|g| g.values()).filter_map(|v| v.get("requeueAfterSeconds").and_then(Value::as_u64)).min(),
+        project: text(d, "/spec/template/spec/project").filter(|p| !p.is_empty()).map(str::to_owned),
     }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArgoNetworkingInfo {
+    pub target_labels: std::collections::HashMap<String, String>,
+    pub target_refs: Vec<ArgoNetworkRef>,
+    pub labels: std::collections::HashMap<String, String>,
+    pub ingress: Vec<ArgoNetworkIngress>,
+    #[serde(rename = "externalURLs")]
+    pub external_urls: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArgoNetworkRef {
+    pub group: String,
+    pub version: String,
+    pub kind: String,
+    pub namespace: Option<String>,
+    pub name: String,
+    pub uid: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ArgoNetworkIngress {
+    pub hostname: Option<String>,
+    pub ip: Option<String>,
 }
 
 /// 서버 리소스 트리의 노드.
@@ -147,6 +253,7 @@ pub struct ArgoTreeNode {
     pub health_message: Option<String>,
     pub info: Vec<String>,
     pub images: Vec<String>,
+    pub networking_info: Option<ArgoNetworkingInfo>,
     pub created_at: Option<String>,
 }
 
@@ -154,6 +261,27 @@ pub struct ArgoTreeNode {
 pub fn tree_node(d: &Value) -> ArgoTreeNode {
     let s = |p| text(d, p).unwrap_or_default().to_owned();
     let opt = |p| text(d, p).map(str::to_owned);
+    let networking_info = d.pointer("/networkingInfo").filter(|v| v.is_object()).map(|n| {
+        let labels = |path| n.pointer(path).and_then(Value::as_object).into_iter().flat_map(|m| m.iter())
+            .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_owned()))).collect();
+        ArgoNetworkingInfo {
+            target_labels: labels("/targetLabels"),
+            labels: labels("/labels"),
+            target_refs: list(n, "/targetRefs").iter().map(|r| ArgoNetworkRef {
+                group: text(r, "/group").unwrap_or_default().into(),
+                version: text(r, "/version").unwrap_or_default().into(),
+                kind: text(r, "/kind").unwrap_or_default().into(),
+                namespace: text(r, "/namespace").map(str::to_owned),
+                name: text(r, "/name").unwrap_or_default().into(),
+                uid: text(r, "/uid").map(str::to_owned),
+            }).collect(),
+            ingress: list(n, "/ingress").iter().map(|i| ArgoNetworkIngress {
+                hostname: text(i, "/hostname").map(str::to_owned),
+                ip: text(i, "/ip").map(str::to_owned),
+            }).collect(),
+            external_urls: list(n, "/externalURLs").iter().filter_map(Value::as_str).map(str::to_owned).collect(),
+        }
+    });
     ArgoTreeNode {
         uid: s("/uid"),
         group: s("/group"),
@@ -166,17 +294,14 @@ pub fn tree_node(d: &Value) -> ArgoTreeNode {
         health_message: opt("/health/message"),
         info: list(d, "/info").iter().map(|i| format!("{}: {}", text(i, "/name").unwrap_or_default(), text(i, "/value").unwrap_or_default())).collect(),
         images: list(d, "/images").iter().filter_map(Value::as_str).map(str::to_owned).collect(),
+        networking_info,
         created_at: opt("/createdAt"),
     }
 }
 
-/// 동기화 요청 옵션.
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ArgoSyncOptions {
-    pub prune: bool,
-    pub dry_run: bool,
-}
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod live_tests;

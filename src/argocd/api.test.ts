@@ -19,13 +19,6 @@ test.each([
   ["appsets", () => argocdApi.appsets(URL), "argocd_appsets", { url: URL }],
   ["app", () => argocdApi.app(URL, "argocd", "web"), "argocd_app", { url: URL, namespace: "argocd", name: "web" }],
   ["tree", () => argocdApi.tree(URL, "argocd", "web"), "argocd_tree", { url: URL, namespace: "argocd", name: "web" }],
-  ["refresh", () => argocdApi.refresh(URL, "argocd", "web", true), "argocd_refresh", { url: URL, namespace: "argocd", name: "web", hard: true }],
-  [
-    "sync",
-    () => argocdApi.sync(URL, "argocd", "web", { prune: true, dryRun: false }),
-    "argocd_sync",
-    { url: URL, namespace: "argocd", name: "web", options: { prune: true, dryRun: false } },
-  ],
 ])("%s calls its command with exactly these arguments and no AWS profile", async (_name, call, command, args) => {
   await call();
   expect(m).toHaveBeenCalledTimes(1);

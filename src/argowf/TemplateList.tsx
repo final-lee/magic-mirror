@@ -62,11 +62,11 @@ export function TemplateList({ conn, live, namespace = null, workflows, crons, s
       <div className="awc-bar">
         <h2 className="awc-title">템플릿</h2>
         <div className="awc-bar-end">
-          <button className="btn small" onClick={() => setCreating("ClusterWorkflowTemplate")}>
-            클러스터 템플릿 만들기
+          <button className="btn small tone-create" onClick={() => setCreating("ClusterWorkflowTemplate")}>
+            클러스터 템플릿 만들기…
           </button>
-          <button className="btn primary small" onClick={() => setCreating("WorkflowTemplate")}>
-            템플릿 만들기
+          <button className="btn tone-create small" onClick={() => setCreating("WorkflowTemplate")}>
+            템플릿 만들기…
           </button>
         </div>
       </div>

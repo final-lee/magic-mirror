@@ -4,6 +4,7 @@ import { useSheetFocus } from "../iam/previewParts";
 import { applyGate } from "../iam/useIamChange";
 import { k8sApi } from "./api";
 import { gatedOf, PreviewBody } from "./ChangeFlow";
+import { changeTone } from "./changeTone";
 import * as t from "./text";
 import type { K8sChange, K8sPreview, K8sTarget } from "./types";
 
@@ -11,6 +12,7 @@ export interface BatchEntry {
   change: K8sChange;
   /** 되돌리기 미리보기면 되돌릴 변경의 기록 번호 */
   undoOf: string | null;
+  create?: boolean;
 }
 
 export interface BatchItem extends BatchEntry {
@@ -209,7 +211,7 @@ export function BatchDialog({ batch, api }: Props) {
               {item.error && (
                 <>
                   <p className="err">{t.BATCH_PREVIEW_FAILED}: {item.error}</p>
-                  {batch.phase === "ready" && <button className="btn small tone-secondary" onClick={() => api.retry(index)}>{t.CHANGE_RETRY}</button>}
+                  {batch.phase === "ready" && <button className="btn small tone-refresh" onClick={() => api.retry(index)}>{t.CHANGE_RETRY}</button>}
                 </>
               )}
               {item.preview && (
@@ -229,10 +231,10 @@ export function BatchDialog({ batch, api }: Props) {
             {closed ? t.BATCH_CLOSE : t.CHANGE_CANCEL}
           </button>
           {closed && !batch.undo && anyApplied && (
-            <button className="btn tone-warn" onClick={api.undoApplied}>{t.BATCH_UNDO_APPLIED}</button>
+            <button className="btn plain tone-caution" onClick={api.undoApplied}>{t.BATCH_UNDO_APPLIED}</button>
           )}
           {!closed && (
-            <button className="btn plain tone-primary" disabled={!ready || applying} onClick={api.apply}>
+            <button className={`btn plain tone-${changeTone(run.map((index) => batch.items[index]), batch.undo)}`} disabled={!ready || applying} onClick={api.apply}>
               {applying ? t.CHANGE_APPLYING : t.BATCH_APPLY(run.length)}
             </button>
           )}

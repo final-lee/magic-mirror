@@ -218,7 +218,7 @@ export function IamTab({ profile, active, focus, nonce }: Props) {
           {total !== null && <span className="dim">{total}개</span>}
           <span className="iam-bar-end">
             {!Number.isNaN(fetchedAt.getTime()) && <span className="dim">조회 {fetchedAt.toLocaleTimeString("ko-KR")}</span>}
-            <button className="btn small" onClick={() => void refreshIam(qc, profile)} disabled={overview.isFetching}>
+            <button className="btn small tone-refresh" onClick={() => void refreshIam(qc, profile)} disabled={overview.isFetching}>
               {overview.isFetching ? "불러오는 중…" : "새로고침"}
             </button>
           </span>

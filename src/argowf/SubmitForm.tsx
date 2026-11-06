@@ -168,7 +168,7 @@ export function SubmitForm({ conn, template, namespaces, defaultNamespace, onClo
         </div>
       ))}
       <div className="awc-dryrun">
-        <button type="button" className="btn small" disabled={act.busy} onClick={() => void submit(true)}>
+        <button type="button" className="btn small tone-primary" disabled={act.busy} onClick={() => void submit(true)}>
           검사만
         </button>
         {dryRunResult && (

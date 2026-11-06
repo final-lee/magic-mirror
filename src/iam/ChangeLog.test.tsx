@@ -28,7 +28,7 @@ function setup(entries: ChangeLogEntry[], extra: Partial<React.ComponentProps<ty
   return { props, ...utils };
 }
 const rows = () => within(screen.getByRole("table", { name: "변경 기록" })).getAllByRole("row").slice(1);
-const undoButton = (row: HTMLElement) => within(row).getByRole("button", { name: "되돌리기" });
+const undoButton = (row: HTMLElement) => within(row).getByRole("button", { name: "되돌리기…" });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -54,7 +54,7 @@ describe("list", () => {
     const row = within(rows()[0]);
     expect(row.getByText("실패")).toHaveClass("denied");
     expect(row.getByText("권한 없음 (iam:UpdateAccessKey)")).toBeInTheDocument();
-    expect(row.queryByRole("button", { name: "되돌리기" })).not.toBeInTheDocument();
+    expect(row.queryByRole("button", { name: "되돌리기…" })).not.toBeInTheDocument();
     expect(row.queryByText("되돌릴 수 없어요")).not.toBeInTheDocument();
   });
 
@@ -63,7 +63,7 @@ describe("list", () => {
     await screen.findByRole("table", { name: "변경 기록" });
     expect(within(rows()[0]).getByText("되돌리기 기록")).toBeInTheDocument();
     expect(within(rows()[1]).getByText("되돌림")).toBeInTheDocument();
-    expect(within(rows()[1]).queryByRole("button", { name: "되돌리기" })).not.toBeInTheDocument();
+    expect(within(rows()[1]).queryByRole("button", { name: "되돌리기…" })).not.toBeInTheDocument();
   });
 
   test("shows a loading message, an empty message, and the error with a retry", async () => {
@@ -93,10 +93,10 @@ describe("undo", () => {
       logEntry({ id: "d", inverse: null, summary: "키를 삭제했어요" }),
     ]);
     await screen.findByRole("table", { name: "변경 기록" });
-    expect(within(rows()[0]).getByRole("button", { name: "되돌리기" })).toBeEnabled();
-    expect(within(rows()[1]).queryByRole("button", { name: "되돌리기" })).not.toBeInTheDocument();
-    expect(within(rows()[2]).queryByRole("button", { name: "되돌리기" })).not.toBeInTheDocument();
-    expect(within(rows()[3]).queryByRole("button", { name: "되돌리기" })).not.toBeInTheDocument();
+    expect(within(rows()[0]).getByRole("button", { name: "되돌리기…" })).toBeEnabled();
+    expect(within(rows()[1]).queryByRole("button", { name: "되돌리기…" })).not.toBeInTheDocument();
+    expect(within(rows()[2]).queryByRole("button", { name: "되돌리기…" })).not.toBeInTheDocument();
+    expect(within(rows()[3]).queryByRole("button", { name: "되돌리기…" })).not.toBeInTheDocument();
     expect(within(rows()[3]).getByText("되돌릴 수 없어요")).toBeInTheDocument();
   });
 
@@ -155,7 +155,7 @@ describe("batches", () => {
   const single = (id: string, at: string) => logEntry({ id, at, summary: `${id} 단독 변경` });
   const headerText = (n: number, at: string) => `묶음 · 변경 ${n}개 · ${formatDateTime(at)}`;
   const headerRow = (text: string | RegExp) => screen.getByText(text).closest("tr") as HTMLElement;
-  const batchButton = (head: HTMLElement) => within(head).getByRole("button", { name: "묶음 되돌리기" });
+  const batchButton = (head: HTMLElement) => within(head).getByRole("button", { name: "묶음 되돌리기…" });
   const rowTexts = () => rows().map((r) => r.textContent ?? "");
   const AT = (hhmm: string) => `2026-10-26T${hhmm}:00Z`;
 
@@ -171,9 +171,9 @@ describe("batches", () => {
     expect(texts[4]).toContain("s-0 단독 변경");
     expect(batchButton(rows()[1])).toBeEnabled();
     // 단독 변경에는 머리도 [묶음 되돌리기]도 없다
-    expect(within(rows()[0]).queryByRole("button", { name: "묶음 되돌리기" })).not.toBeInTheDocument();
-    expect(within(rows()[4]).queryByRole("button", { name: "묶음 되돌리기" })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "묶음 되돌리기" })).toHaveLength(1);
+    expect(within(rows()[0]).queryByRole("button", { name: "묶음 되돌리기…" })).not.toBeInTheDocument();
+    expect(within(rows()[4]).queryByRole("button", { name: "묶음 되돌리기…" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "묶음 되돌리기…" })).toHaveLength(1);
   });
 
   test("brings the entries of a batch together even when other entries were logged in between", async () => {
@@ -197,7 +197,7 @@ describe("batches", () => {
       member("m-1", { batchId: "b-1", at: AT("12:06") }),
     ]);
     await screen.findByRole("table", { name: "변경 기록" });
-    expect(screen.getAllByRole("button", { name: "묶음 되돌리기" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "묶음 되돌리기…" })).toHaveLength(2);
     fireEvent.click(batchButton(headerRow(headerText(2, AT("12:08")))));
     await waitFor(() => expect(props.onStartBatch).toHaveBeenCalledTimes(1));
     expect(m.undoBatch).toHaveBeenCalledWith("b-2");
@@ -214,7 +214,7 @@ describe("batches", () => {
     m.undoBatch.mockResolvedValue(undo);
     const { props } = setup([member("m-2"), member("m-1")]);
     await screen.findByRole("table", { name: "변경 기록" });
-    fireEvent.click(screen.getByRole("button", { name: "묶음 되돌리기" }));
+    fireEvent.click(screen.getByRole("button", { name: "묶음 되돌리기…" }));
     await waitFor(() => expect(props.onStartBatch).toHaveBeenCalledTimes(1));
     expect(m.undoBatch).toHaveBeenCalledTimes(1);
     expect(m.undoBatch).toHaveBeenCalledWith("b-1");
@@ -228,20 +228,20 @@ describe("batches", () => {
     m.undoBatch.mockReturnValue(new Promise((r) => (resolve = r)));
     const { props } = setup([member("m-2"), member("m-1")]);
     await screen.findByRole("table", { name: "변경 기록" });
-    fireEvent.click(screen.getByRole("button", { name: "묶음 되돌리기" }));
+    fireEvent.click(screen.getByRole("button", { name: "묶음 되돌리기…" }));
     expect(screen.getByRole("button", { name: "준비 중…" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "준비 중…" }));
     expect(m.undoBatch).toHaveBeenCalledTimes(1);
     resolve({ changes: [detachBob], undoOf: ["m-1"] });
     await waitFor(() => expect(props.onStartBatch).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole("button", { name: "묶음 되돌리기" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "묶음 되돌리기…" })).toBeEnabled();
   });
 
   test("while the inverse of a batch is being prepared, pressing another [되돌리기] asks for nothing more", async () => {
     m.undoBatch.mockReturnValue(new Promise(() => {}));
     setup([member("m-2"), member("m-1")]);
     await screen.findByRole("table", { name: "변경 기록" });
-    fireEvent.click(screen.getByRole("button", { name: "묶음 되돌리기" }));
+    fireEvent.click(screen.getByRole("button", { name: "묶음 되돌리기…" }));
     fireEvent.click(undoButton(rows()[1]));
     expect(m.undoChange).not.toHaveBeenCalled();
     expect(m.undoBatch).toHaveBeenCalledTimes(1);
@@ -251,7 +251,7 @@ describe("batches", () => {
     m.undoBatch.mockRejectedValue({ kind: "other", message: "되돌릴 기록과 변경의 수가 맞지 않아요" });
     const { props } = setup([member("m-2"), member("m-1")]);
     await screen.findByRole("table", { name: "변경 기록" });
-    fireEvent.click(screen.getByRole("button", { name: "묶음 되돌리기" }));
+    fireEvent.click(screen.getByRole("button", { name: "묶음 되돌리기…" }));
     const head = headerRow(/^묶음 · 변경 2개/);
     expect(await within(head).findByText("되돌릴 기록과 변경의 수가 맞지 않아요")).toBeInTheDocument();
     expect(props.onStartBatch).not.toHaveBeenCalled();

@@ -199,7 +199,7 @@ export function ServiceSettings({
             </label>
             {onClearCache && (
               <div className="tools cache-reset">
-                <button className="btn small" disabled={clearState.kind === "busy"} onClick={() => void clearCache()} title="⌘⇧R">
+                <button className="btn small tone-danger" disabled={clearState.kind === "busy"} onClick={() => void clearCache()} title="⌘⇧R">
                   캐시 비우기
                 </button>
                 <span className={clearState.kind === "error" ? "err" : "dim"} role="status">
@@ -216,11 +216,11 @@ export function ServiceSettings({
               현재 버전 {appVersion ?? "—"} {updateStatus(updater) && `· ${updateStatus(updater)}`}
             </p>
             <div className="tools">
-              <button className="btn small" disabled={updater.state.kind === "checking" || updater.state.kind === "downloading" || updater.state.kind === "devBuild"} onClick={() => void updater.checkNow()}>
+              <button className="btn small tone-refresh" disabled={updater.state.kind === "checking" || updater.state.kind === "downloading" || updater.state.kind === "devBuild"} onClick={() => void updater.checkNow()}>
                 업데이트 확인
               </button>
               {updater.state.kind === "available" && (
-                <button className="btn small primary" onClick={() => void updater.install()}>
+                <button className="btn small tone-primary" onClick={() => void updater.install()}>
                   지금 업데이트
                 </button>
               )}
@@ -228,7 +228,7 @@ export function ServiceSettings({
           </>
         )}
         <div className="foot">
-          <button className="btn primary" onClick={onClose}>
+          <button className="btn plain tone-ghost" onClick={onClose}>
             완료
           </button>
         </div>

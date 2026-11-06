@@ -154,7 +154,7 @@ export function BullJob({ target, prefix, queue, id, onClose, onOpenJob, onBigFl
                 <>
                   <FlowGraph flow={flow.data} onOpen={onOpenJob} />
                   {onBigFlow && (
-                    <button type="button" className="btn small kv-flow-open" onClick={() => onBigFlow(queue, id)}>
+                    <button type="button" className="btn small kv-flow-open tone-nav" onClick={() => onBigFlow(queue, id)}>
                       {t.FLOW_BIG}
                     </button>
                   )}

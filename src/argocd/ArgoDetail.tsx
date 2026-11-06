@@ -1,25 +1,41 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { errorMessage } from "../api/errors";
 import { ErrorState } from "../components/ErrorState";
-import { useModal } from "../iam/useModal";
 import { age } from "../k8s/format";
 import { DETAIL_PCT } from "../k8s/lanes";
-import { argocdApi } from "./api";
 import { ArgoBadge, shortRev } from "./argoParts";
 import { ArgoTree } from "./ArgoTree";
-import { argoKeys, isTokenError, useArgoApp, useArgoTree } from "./queries";
+import { isTokenError, useArgoApp, useArgoTree } from "./queries";
+import { envOf } from "./argoEnv";
+import { useArgoCan } from "./can";
+import { ChangeSheet } from "./change/ChangeSheet";
+import { useArgoChange } from "./change/useArgoChange";
+import { CHANGE_DENIED } from "./change/text";
+import type { ArgoChange } from "./change/types";
 import {
-  ARGO_APPLICATION, ARGO_AUTOMATED_USER, ARGO_CANCEL, ARGO_DETAIL_LABEL, ARGO_DRY_RUN, ARGO_DRY_RUN_HINT, ARGO_HARD_REFRESH, ARGO_IN_CLUSTER, ARGO_NO,
-  ARGO_NO_HISTORY, ARGO_NO_OPERATION, ARGO_PRUNE, ARGO_PRUNE_HINT, ARGO_REFRESH, ARGO_REFRESH_DONE, ARGO_SYNC, ARGO_SYNC_CONFIRM, ARGO_SYNC_DONE,
-  ARGO_SYNC_NOTE, ARGO_SYNC_RUNNING, ARGO_SYNC_TITLE, ARGO_TARGET_REVISION, ARGO_YES, CLOSE, COL_NAME, H_ARGO_DEPLOYED, H_ARGO_HOOK_PHASE, H_ARGO_ID,
+  ARGO_APPLICATION, ARGO_AUTOMATED_USER, ARGO_DETAIL_LABEL, ARGO_IN_CLUSTER, ARGO_NO,
+  ARGO_NO_HISTORY, ARGO_NO_OPERATION, ARGO_YES, CLOSE, COL_NAME, H_ARGO_DEPLOYED, H_ARGO_HOOK_PHASE, H_ARGO_ID,
   H_MESSAGE, H_STATE, LOADING, L_ARGO_APPSET, L_ARGO_AUTOMATED, L_ARGO_CHART, L_ARGO_CLUSTER, L_ARGO_FINISHED, L_ARGO_HEALTH, L_ARGO_INITIATED,
   L_ARGO_MESSAGE, L_ARGO_NAMESPACE, L_ARGO_OPTIONS, L_ARGO_PATH, L_ARGO_PHASE, L_ARGO_PROJECT, L_ARGO_PRUNE, L_ARGO_RECONCILED, L_ARGO_REF, L_ARGO_REPO,
   L_ARGO_REVISIONS, L_ARGO_SELF_HEAL, L_ARGO_STARTED, L_ARGO_SYNC, L_ARGO_TARGET, L_ARGO_VALUES, SEC_ARGO_CONDITIONS, SEC_ARGO_DEST, SEC_ARGO_FAILED,
   SEC_ARGO_IMAGES, SEC_ARGO_OPERATION, SEC_ARGO_POLICY, SEC_ARGO_SOURCES, SEC_ARGO_STATUS, TAB_ARGO_HISTORY, TAB_ARGO_OVERVIEW, TAB_ARGO_RAW,
   TAB_ARGO_RESOURCES, argoRefreshPending,
 } from "./text";
-import type { ArgoApp, ArgoSyncOptions } from "./types";
+import type { AppTarget, ArgoApp, ArgoResourceFocus, ResRef } from "./types";
+import { AppDiffTab } from "./detail/AppDiffTab";
+import { DetailBar } from "./detail/DetailBar";
+import { HistoryTab } from "./detail/HistoryTab";
+import { OperationTab } from "./detail/OperationTab";
+import { Kv, Sect } from "./detail/parts";
+import { resKey } from "./detail/queries";
+import { ResourcePanel } from "./detail/ResourcePanel";
+import { TAB_ARGO_DIFF, TAB_ARGO_OPERATION } from "./detail/text";
+import { ManageTab } from "./manage/ManageTab";
+import { TAB_ARGO_MANAGE } from "./manage/text";
+import { AppMaps } from "./maps/AppMaps";
+import { ARGO_VIEW_MAPS } from "./text";
+import { ActionBar } from "./ops/ActionBar";
+import { ROLLBACK_RUNNING } from "./ops/text";
 
 interface Props {
   /** ArgoCD 서버 주소 */
@@ -37,9 +53,17 @@ interface Props {
   now?: number;
   /** 목록 너비 중 덮는 비율(%). 없으면 DETAIL_PCT */
   widthPct?: number;
+  /** 처음부터 골라 둘 리소스(전체 리소스 검색·⌘K에서 열 때). 없으면 아무것도 고르지 않는다 */
+  focus?: ArgoResourceFocus | null;
+  onOpenApp?: (app: { namespace: string; name: string }) => void;
+  initialTab?: "history";
 }
 
-type Tab = "overview" | "resources" | "history" | "raw";
+type Tab = "overview" | "resources" | "maps" | "diff" | "operation" | "history" | "manage" | "raw";
+
+/** 같은 리소스인가(group·kind·namespace·name) */
+const sameResource = (a: { group: string; kind: string; namespace?: string | null; name: string }, b: { group: string; kind: string; namespace?: string | null; name: string }) =>
+  a.group === b.group && a.kind === b.kind && (a.namespace ?? null) === (b.namespace ?? null) && a.name === b.name;
 
 const who = (v: string | null) => (v === "automated" ? ARGO_AUTOMATED_USER : v);
 const yesNo = (v: boolean) => (v ? ARGO_YES : ARGO_NO);
@@ -47,25 +71,6 @@ const when = (iso: string | null, at: number) => (iso ? <span title={iso}>{age(i
 const revs = (list: string[]) => (list.length > 0 ? <span className="mono">{list.map(shortRev).join(", ")}</span> : null);
 const destText = (d: ArgoApp["destination"]) => [d.name ?? d.server, d.namespace].filter(Boolean).join("/");
 
-function Sect({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="k8s-sect" aria-label={title}>
-      <h4>{title}</h4>
-      {children}
-    </section>
-  );
-}
-
-/** 값이 없으면 줄을 그리지 않는 이름·값 한 줄 */
-function Kv({ label, children }: { label: string; children: ReactNode }) {
-  if (children === null || children === undefined || children === "" || children === false) return null;
-  return (
-    <div className="k8s-kv">
-      <dt>{label}</dt>
-      <dd>{children}</dd>
-    </div>
-  );
-}
 
 function Overview({ app, at }: { app: ArgoApp; at: number }) {
   const op = app.operation;
@@ -197,159 +202,136 @@ function Overview({ app, at }: { app: ArgoApp; at: number }) {
   );
 }
 
-function History({ app, at }: { app: ArgoApp; at: number }) {
-  if (app.history.length === 0) return <p className="dim">{ARGO_NO_HISTORY}</p>;
-  return (
-    <table className="k8s-table">
-      <thead>
-        <tr>
-          <th>{H_ARGO_ID}</th>
-          <th>{L_ARGO_REVISIONS}</th>
-          <th>{H_ARGO_DEPLOYED}</th>
-          <th>{L_ARGO_INITIATED}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {app.history.map((h) => (
-          <tr key={h.id}>
-            <td>{h.id}</td>
-            <td className="mono k8s-wrap">{h.revisions.map(shortRev).join(", ")}</td>
-            <td>{when(h.deployedAt, at)}</td>
-            <td>{who(h.initiatedBy)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-interface SheetProps {
-  app: ArgoApp;
-  onCancel: () => void;
-  onConfirm: (options: ArgoSyncOptions) => void;
-}
-
-/** Sync를 누르면 뜨는 확인 창. 무엇을 어디에 맞추는지 보이고, prune·dry run을 고른다(기본은 둘 다 끔). */
-function SyncSheet({ app, onCancel, onConfirm }: SheetProps) {
-  const [prune, setPrune] = useState(false);
-  const [dryRun, setDryRun] = useState(false);
-  const { sheetRef, trapTab } = useModal(onCancel);
-  useEffect(() => { sheetRef.current?.focus(); }, [sheetRef]);
-  const revisions = app.sources.map((s) => s.targetRevision ?? "HEAD").join(", ");
-  return (
-    <div
-      className="modal"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}
-    >
-      <div className="sheet" role="dialog" aria-modal="true" aria-label={ARGO_SYNC_TITLE} ref={sheetRef} tabIndex={-1} onKeyDown={trapTab}>
-        <h3>{ARGO_SYNC_TITLE}</h3>
-        <p>{ARGO_SYNC_NOTE}</p>
-        <dl className="kv">
-          <Kv label={ARGO_APPLICATION}>
-            <span className="mono">{app.name}</span>
-          </Kv>
-          <Kv label={L_ARGO_PROJECT}>{app.project}</Kv>
-          <Kv label={SEC_ARGO_DEST}>
-            <span className="mono">{destText(app.destination)}</span>
-          </Kv>
-          <Kv label={ARGO_TARGET_REVISION}>
-            <span className="mono">{revisions}</span>
-          </Kv>
-        </dl>
-        <label className="k8s-check argo-opt">
-          <input type="checkbox" aria-label={ARGO_PRUNE} checked={prune} onChange={(e) => setPrune(e.target.checked)} />
-          {ARGO_PRUNE}
-          <span className="dim">{ARGO_PRUNE_HINT}</span>
-        </label>
-        <label className="k8s-check argo-opt">
-          <input type="checkbox" aria-label={ARGO_DRY_RUN} checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
-          {ARGO_DRY_RUN}
-          <span className="dim">{ARGO_DRY_RUN_HINT}</span>
-        </label>
-        <div className="foot">
-          <button className="btn plain tone-ghost" onClick={onCancel}>
-            {ARGO_CANCEL}
-          </button>
-          <button className="btn plain tone-primary" onClick={() => onConfirm({ prune, dryRun })}>
-            {ARGO_SYNC_CONFIRM}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /** Application 하나의 상세(개요·리소스 트리·이력·YAML/JSON)와 Refresh·Sync 실행 */
-export function ArgoDetail({ url, namespace, name, resourceVersion, live, onClose, onTokenError, now, widthPct = DETAIL_PCT }: Props) {
-  const [tab, setTab] = useState<Tab>("overview");
-  const qc = useQueryClient();
+export function ArgoDetail({ url, namespace, name, resourceVersion, live, onClose, onTokenError, now, widthPct = DETAIL_PCT, focus, initialTab, onOpenApp }: Props) {
+  const [tab, setTab] = useState<Tab>(focus ? "resources" : initialTab ?? "overview");
   const q = useArgoApp(url, namespace, name, resourceVersion);
-  const tree = useArgoTree(url, namespace, name, resourceVersion, tab === "resources", live);
-  const app = q.data;
+  const tree = useArgoTree(url, namespace, name, resourceVersion, tab === "resources" || tab === "maps", live);
+  const lastApp = useRef<{ key: string; app: ArgoApp } | null>(null);
+  const appKey = JSON.stringify([url, namespace, name]);
+  if (q.data) lastApp.current = { key: appKey, app: q.data };
+  const app = q.data ?? (lastApp.current?.key === appKey ? lastApp.current.app : undefined);
   const at = now ?? Date.now();
 
-  const [pending, setPending] = useState(false);
-  const [sheet, setSheet] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
-  const [error, setError] = useState<unknown>(null);
-  const last = useRef<() => void>(() => {});
-  const run = async (action: () => Promise<unknown>, done: string) => {
-    last.current = () => void run(action, done);
-    setPending(true);
-    setNote(null);
-    setError(null);
-    try {
-      await action();
-      setNote(done);
-      // 동작의 결과를 보이려고 상세와 트리를 다시 읽는다
-      await Promise.all([qc.invalidateQueries({ queryKey: argoKeys.appOf(url, namespace, name) }), qc.invalidateQueries({ queryKey: argoKeys.treeOf(url, namespace, name) })]);
-    } catch (e) {
-      setError(e);
-    } finally {
-      setPending(false);
-    }
+  // 리소스 상세 패널: 트리·Diff·작업 탭에서 리소스를 고르면 리소스 탭에서 연다
+  const [picked, setPicked] = useState<ResRef | null>(null);
+  const openResource = (res: ResRef) => {
+    setPicked(res);
+    setTab("resources");
   };
-  const refresh = (hard: boolean) => void run(() => argocdApi.refresh(url, namespace, name, hard), ARGO_REFRESH_DONE);
-  const sync = (options: ArgoSyncOptions) => {
-    setSheet(false);
-    void run(() => argocdApi.sync(url, namespace, name, options), ARGO_SYNC_DONE);
+  const readTarget = useMemo<AppTarget | null>(() => (app ? { namespace, name, project: app.project ?? "default" } : null), [app, namespace, name]);
+  // 검색에서 열 때 가리킨 리소스를 트리에서 찾아 고른다(없으면 그냥 둔다)
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focus || focused.current || !tree.data || !app) return;
+    focused.current = true;
+    const same = (r: { group: string; kind: string; namespace: string | null; name: string }) => sameResource(r, focus);
+    const node = tree.data.find(same);
+    const found = node ?? app.resources.find(same);
+    if (found) setPicked({ group: found.group, version: found.version, kind: found.kind, namespace: found.namespace, name: found.name, uid: node?.uid ?? null });
+  }, [focus, tree.data, app]);
+
+  const [change, setChange] = useState<ArgoChange | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const flow = useArgoChange(url);
+  const target = useMemo(() => {
+    if (!app) return null;
+    const raw = app.raw as { metadata?: { labels?: Record<string, string> } } | null;
+    const env = envOf({ name, namespace, resourceVersion: resourceVersion ?? "", labels: raw?.metadata?.labels ?? {}, values: { destNamespace: app.destination.namespace ?? "", destination: app.destination.name ?? app.destination.server ?? "" } }).env;
+    return { namespace, name, project: app.project ?? "default", env };
+  }, [app, name, namespace, resourceVersion]);
+  const can = useArgoCan(url, target, ["get", "sync"]);
+  const lastRefresh = useRef(false);
+  const refresh = (hard: boolean) => {
+    lastRefresh.current = hard;
+    setNote(null);
+    if (target) void flow.apply(target, { kind: "refresh", hard }, null).then((result) => setNote(result.message)).catch(() => {});
   };
 
   // 토큰 문제는 상세가 아니라 서버 단위의 일이라 토큰 폼으로 돌려보낸다
   const onToken = useRef(onTokenError);
   onToken.current = onTokenError;
   useEffect(() => {
-    const bad = [q.error, tree.error, error].find(isTokenError);
+    const bad = [q.error, tree.error, flow.error, can.error].find(isTokenError);
     if (bad) onToken.current(errorMessage(bad));
-  }, [q.error, tree.error, error]);
+  }, [q.error, tree.error, flow.error, can.error]);
 
   const syncBlocked = app?.operationInProgress === true;
+  // 동기화 권한이 있어야 작업 중단·롤백도 할 수 있다(서버가 같은 권한으로 막는다)
+  const syncDenied = can.data?.[1] === false ? CHANGE_DENIED : null;
   const tabs: [Tab, string][] = [
     ["overview", TAB_ARGO_OVERVIEW],
     ["resources", TAB_ARGO_RESOURCES],
+    ["maps", ARGO_VIEW_MAPS],
+    ["diff", TAB_ARGO_DIFF],
+    ["operation", TAB_ARGO_OPERATION],
     ["history", TAB_ARGO_HISTORY],
+    ["manage", TAB_ARGO_MANAGE],
     ["raw", TAB_ARGO_RAW],
   ];
 
   let body: ReactNode;
-  if (q.isError) {
+  if (q.isError && !app) {
     body = <ErrorState error={q.error} profile="" compact onRetry={() => void q.refetch()} />;
-  } else if (!app) {
+  } else if (!app || !readTarget) {
     body = <div className="empty">{LOADING}</div>;
   } else if (tab === "overview") {
     body = <Overview app={app} at={at} />;
   } else if (tab === "resources") {
-    body = tree.isError ? (
+    const same = picked ? (r: { group: string; kind: string; namespace: string | null; name: string }) => sameResource(r, picked) : null;
+    body = picked && same && target ? (
+      <ResourcePanel
+        key={resKey(picked)}
+        url={url}
+        target={readTarget}
+        changeTarget={target}
+        app={app}
+        version={resourceVersion}
+        res={picked}
+        node={tree.data?.find(same) ?? null}
+        status={app.resources.find(same) ?? null}
+        live={live}
+        onBack={() => setPicked(null)}
+        onTokenError={onTokenError}
+        now={now}
+      />
+    ) : tree.isError ? (
       <ErrorState error={tree.error} profile="" compact onRetry={() => void tree.refetch()} />
     ) : tree.data ? (
-      <ArgoTree nodes={tree.data} resources={app.resources} />
+      <ArgoTree nodes={tree.data} resources={app.resources} onSelect={(row) => setPicked({ group: row.group, version: row.version, kind: row.kind, namespace: row.namespace, name: row.name, uid: row.uid })} />
     ) : (
       <div className="empty">{LOADING}</div>
     );
+  } else if (tab === "maps") {
+    body = <>{tree.isError && <ErrorState error={tree.error} profile="" compact onRetry={() => void tree.refetch()} />}<AppMaps url={url} app={app} version={resourceVersion} live={live} nodes={tree.data ?? []} onResource={openResource} onApp={(next) => onOpenApp?.(next)} /></>;
+  } else if (tab === "diff") {
+    body = <AppDiffTab url={url} namespace={namespace} name={name} version={resourceVersion} enabled onOpen={openResource} onTokenError={onTokenError} />;
+  } else if (tab === "operation") {
+    body = (
+      <OperationTab
+        url={url}
+        app={app}
+        now={now}
+        onOpen={openResource}
+        onTokenError={onTokenError}
+        terminate={{ allowed: can.data?.[1] === true, reason: syncDenied, onTerminate: () => setChange({ kind: "terminate" }) }}
+      />
+    );
   } else if (tab === "history") {
-    body = <History app={app} at={at} />;
+    body = (
+      <HistoryTab
+        url={url}
+        namespace={namespace}
+        name={name}
+        version={resourceVersion}
+        enabled
+        now={now}
+        onTokenError={onTokenError}
+        rollback={{ allowed: can.data?.[1] === true && !syncBlocked, reason: syncBlocked ? ROLLBACK_RUNNING : syncDenied, autoSync: app.syncPolicy?.automated === true, onChange: setChange }}
+      />
+    );
+  } else if (tab === "manage") {
+    body = target ? <ManageTab url={url} app={app} target={target} onDone={setNote} onDeleted={onClose} /> : <div className="empty">{LOADING}</div>;
   } else {
     body = <pre className="k8s-yaml mono argo-raw">{JSON.stringify(app.raw, null, 2)}</pre>;
   }
@@ -361,27 +343,19 @@ export function ArgoDetail({ url, namespace, name, resourceVersion, live, onClos
         <span className="mono k8s-wrap">
           {namespace}/{name}
         </span>
-        <span className="argo-acts k8s-push">
-          <button className="btn small tone-secondary" disabled={pending} onClick={() => refresh(false)}>
-            {ARGO_REFRESH}
-          </button>
-          <button className="btn small tone-warn" disabled={pending} onClick={() => refresh(true)}>
-            {ARGO_HARD_REFRESH}
-          </button>
-          <button className="btn small tone-primary" disabled={pending || !app || syncBlocked} title={syncBlocked ? ARGO_SYNC_RUNNING : undefined} onClick={() => setSheet(true)}>
-            {ARGO_SYNC}
-          </button>
-        </span>
+        <span className="k8s-push" />
         <button className="icon" aria-label={CLOSE} title={CLOSE} onClick={onClose}>
           ✕
         </button>
       </div>
+      {target && app && <ActionBar url={url} app={app} target={target} version={resourceVersion} pending={flow.pending} now={now} onRefresh={refresh} onChange={setChange} />}
+      {readTarget && <DetailBar url={url} namespace={namespace} name={name} version={resourceVersion} live={live} onTokenError={onTokenError} />}
       {note && (
         <p className="ok argo-note" role="status">
           {note}
         </p>
       )}
-      {error !== null && <ErrorState error={error} profile="" compact onRetry={() => last.current()} />}
+      {flow.error !== null && <ErrorState error={flow.error} profile="" compact onRetry={() => refresh(lastRefresh.current)} />}
       <div role="tablist" className="k8s-tabs">
         {tabs.map(([t, label]) => (
           <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
@@ -390,7 +364,11 @@ export function ArgoDetail({ url, namespace, name, resourceVersion, live, onClos
         ))}
       </div>
       <div className="k8s-detail-body">{body}</div>
-      {sheet && app && <SyncSheet app={app} onCancel={() => setSheet(false)} onConfirm={sync} />}
+      {change && target && <ChangeSheet url={url} target={target} change={change} onClose={() => setChange(null)} onDone={(message) => {
+        if (change.kind === "appDelete") onClose();
+        setChange(null);
+        setNote(message);
+      }} />}
     </aside>
   );
 }

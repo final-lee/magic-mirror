@@ -87,7 +87,7 @@ export const HISTORY_COL_CHART = "차트";
 export const HISTORY_COL_APP = "앱 버전";
 export const HISTORY_COL_DESCRIPTION = "설명";
 export const HISTORY_VIEW = "보기";
-export const HISTORY_ROLLBACK = "이 리비전으로 롤백";
+export const HISTORY_ROLLBACK = "이 리비전으로 롤백…";
 export const HISTORY_CURRENT = "최신";
 export const HISTORY_SHOWING = "보는 중";
 export const HISTORY_UNREADABLE = "데이터를 읽지 못했어요";
@@ -96,10 +96,10 @@ export const VIEWING_OLD = (viewing: number, latest: number) => `리비전 ${vie
 export const VIEW_LATEST = "최신으로";
 
 // 도구 모음
-export const ACT_UPGRADE = "업그레이드";
+export const ACT_UPGRADE = "업그레이드…";
 export const ACT_ROLLBACK = "롤백";
-export const ACT_UNINSTALL = "삭제";
-export const ACT_INSTALL = "차트 설치";
+export const ACT_UNINSTALL = "삭제…";
+export const ACT_INSTALL = "차트 설치…";
 export const ACT_PREVIEW = "미리보기";
 export const ACT_CANCEL = "취소";
 export const ACT_KEEP_HISTORY = "이력 남기기";

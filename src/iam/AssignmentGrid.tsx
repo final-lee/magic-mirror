@@ -474,7 +474,7 @@ export function AssignmentGrid({ overview, tab, rows, columns, draft, grouped, o
             {pop.groups.map((group, i) => (
               <li key={group}>
                 <span id={`${popId}-${i}`}>{`${group} 그룹에서 받아요`}</span>
-                <button type="button" className="btn small" aria-describedby={`${popId}-${i}`} onClick={() => goToGroup(group)}>
+                <button type="button" className="btn small tone-nav" aria-describedby={`${popId}-${i}`} onClick={() => goToGroup(group)}>
                   그룹 행으로 가기
                 </button>
               </li>

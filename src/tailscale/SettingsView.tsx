@@ -7,7 +7,11 @@ import { ApiRequired } from "./ApiRequired";
 import { useTailscaleApi } from "./useTailscaleApi";
 import * as t from "./settingsText";
 
-type Change = { field: string; before: unknown; after: unknown; contact?: boolean; resend?: boolean };
+type Change = { field: string; before: unknown; after: unknown; contact?: boolean; resend?: boolean; revert?: boolean };
+const TOGGLE_FIELDS = [
+  "aclsExternallyManagedOn", "devicesApprovalOn", "devicesAutoUpdatesOn", "usersApprovalOn",
+  "networkFlowLoggingOn", "postureIdentityCollectionOn", "httpsEnabled",
+];
 
 export function SettingsView() {
   const { tailnet, connected, isLoading } = useTailscaleApi();
@@ -34,7 +38,7 @@ function SettingsPanel({ tailnet }: { tailnet: string }) {
     <div className="awc-bar">
       <h2 className="awc-title">{t.TITLE}</h2>
       <div className="awc-bar-end">
-        <button className="btn small" onClick={() => { void settings.refetch(); void contacts.refetch(); }}>
+        <button className="btn small tone-refresh" onClick={() => { void settings.refetch(); void contacts.refetch(); }}>
           {t.RELOAD}
         </button>
       </div>
@@ -71,7 +75,7 @@ function SettingsPanel({ tailnet }: { tailnet: string }) {
           ))}</tbody>
         </table>}
       </section>
-      {undo && <button className="btn small" onClick={() => {
+      {undo && <button className="btn small tone-caution" onClick={() => {
         const current = undo.contact ? contacts.data?.[undo.field] : settings.data?.[undo.field];
         if (undo.contact && current && typeof current === "object" && "email" in current
           && undo.before && typeof undo.before === "object" && "email" in undo.before
@@ -91,6 +95,7 @@ function SettingsPanel({ tailnet }: { tailnet: string }) {
             ...change,
             before: change.contact ? { email: change.after } : change.after,
             after: change.contact ? oldEmail : change.before,
+            revert: true,
           });
         }
         setNotice(warning || t.SAVED);
@@ -106,10 +111,7 @@ function SettingField({ field, value, help, preview }: {
   field: string; value: unknown; help: string; preview: (change: Change) => void;
 }) {
   const [text, setText] = useState(String(value ?? ""));
-  const booleanField = [
-    "aclsExternallyManagedOn", "devicesApprovalOn", "devicesAutoUpdatesOn", "usersApprovalOn",
-    "networkFlowLoggingOn", "postureIdentityCollectionOn", "httpsEnabled",
-  ].includes(field);
+  const booleanField = TOGGLE_FIELDS.includes(field);
   const options = field === "routeSelection" ? ["active-passive-failover", "regional-routing", "regional-routing-failover", "magicroute"]
     : field === "usersRoleAllowedToJoinExternalTailnets" ? ["none", "admin", "member"] : null;
   const after = typeof value === "number" ? Number(text) : text;
@@ -135,13 +137,13 @@ function SettingField({ field, value, help, preview }: {
       <td>
         {toggle ? (
           field !== "regionalRoutingOn" && (
-            <button className="btn small" onClick={() => preview({ field, before: value, after: value !== true })}>
+            <button className="btn small tone-warn" onClick={() => preview({ field, before: value, after: value !== true })}>
               {value === true ? t.TURN_OFF : t.TURN_ON}
             </button>
           )
         ) : (
-          <button className="btn small" disabled={after === value}
-            onClick={() => preview({ field, before: value, after })}>{t.PREVIEW}</button>
+          <button className="btn small tone-primary" disabled={after === value}
+            onClick={() => preview({ field, before: value, after })}>{t.PREVIEW_OPEN}</button>
         )}
       </td>
     </tr>
@@ -170,9 +172,9 @@ function ContactField({ kind, value, preview }: {
             : t.UNKNOWN}
       </td>
       <td>
-        <button className="btn small" disabled={!text || text === email}
-          onClick={() => preview({ field: kind, before: value ?? null, after: text, contact: true })}>{t.PREVIEW}</button>{" "}
-        <button className="btn small"
+        <button className="btn small tone-primary" disabled={!text || text === email}
+          onClick={() => preview({ field: kind, before: value ?? null, after: text, contact: true })}>{t.PREVIEW_OPEN}</button>{" "}
+        <button className="btn small tone-primary"
           onClick={() => preview({ field: kind, before: value, after: null, contact: true, resend: true })}>{t.RESEND}</button>
       </td>
     </tr>
@@ -183,6 +185,7 @@ function SettingsDialog({ tailnet, change, cancel, saved }: { tailnet: string; c
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { sheetRef, trapTab } = useModal(() => { if (!sending) cancel(); });
+  const tone = change.revert ? "caution" : TOGGLE_FIELDS.includes(change.field) ? "warn" : "primary";
   const path = change.contact ? `/tailnet/-/contacts/${change.field}${change.resend ? "/resend-verification-email" : ""}` : "/tailnet/-/settings";
   const body = change.contact ? change.resend ? null : { email: change.after } : { [change.field]: change.after };
   const apply = async () => {
@@ -203,8 +206,8 @@ function SettingsDialog({ tailnet, change, cancel, saved }: { tailnet: string; c
         <p>{JSON.stringify(change.before)} → {JSON.stringify(change.after)}</p>
         {error && <div className="err" role="alert">{error}</div>}
         <div className="foot">
-          <button className="btn small" disabled={sending} onClick={cancel}>{t.CANCEL}</button>
-          <button className="btn small" disabled={sending} onClick={() => void apply()}>{t.SAVE}</button>
+          <button className="btn small tone-ghost" disabled={sending} onClick={cancel}>{t.CANCEL}</button>
+          <button className={`btn small tone-${tone}`} disabled={sending} onClick={() => void apply()}>{t.SAVE}</button>
         </div>
       </div>
     </div>

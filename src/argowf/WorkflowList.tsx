@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { workflowActionTone } from "./tone";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArgoLabelFilter } from "../argocd/ArgoLabelFilter";
 import { ArgoMultiSelect } from "../argocd/ArgoMultiSelect";
@@ -237,15 +238,15 @@ export function WorkflowList({
         </span>
         <div className="awc-bar-end">
           {linksFor(info.links, "workflow-list").map((l) => (
-            <button key={l.name} className="btn small" onClick={() => void desktop.openUrl(expandLink(l, { "metadata.namespace": namespace ?? "" }))}>
+            <button key={l.name} className="btn small tone-nav" onClick={() => void desktop.openUrl(expandLink(l, { "metadata.namespace": namespace ?? "" }))}>
               {l.name} ↗
             </button>
           ))}
-          <button className="btn small" onClick={onFindings}>
+          <button className="btn small tone-nav" onClick={onFindings}>
             연속 실패 Cron {failingCrons(crons, base).length}
           </button>
           {onCreate && (
-            <button className="btn primary small" onClick={onCreate}>
+            <button className="btn tone-primary small" onClick={onCreate}>
               새 Workflow
             </button>
           )}
@@ -293,7 +294,7 @@ export function WorkflowList({
           끝나기 전 <input type="date" aria-label="끝나기 전" value={before} onChange={(e) => setBefore(e.target.value)} />
         </label>
         <span className="argowf-colpick">
-          <button className="btn small" aria-expanded={columnsOpen} onClick={() => setColumnsOpen(!columnsOpen)}>
+          <button className="btn small tone-secondary" aria-expanded={columnsOpen} onClick={() => setColumnsOpen(!columnsOpen)}>
             열
           </button>
           {columnsOpen && (
@@ -318,11 +319,11 @@ export function WorkflowList({
         <div className="argowf-batch" role="toolbar" aria-label="선택한 Workflow 동작">
           <b>선택한 {chosen.length}개</b>
           {BATCH.map((b) => (
-            <button key={b.kind} className="btn small" onClick={() => openBatch(b.kind)}>
+            <button key={b.kind} className={`btn small ${workflowActionTone(b.kind)}`} onClick={() => openBatch(b.kind)}>
               {b.label}
             </button>
           ))}
-          <button className="btn plain small" onClick={() => setPicked(new Set())}>
+          <button className="btn plain small tone-secondary" onClick={() => setPicked(new Set())}>
             선택 해제
           </button>
         </div>
@@ -423,7 +424,7 @@ export function WorkflowList({
         </table>
         {visible.length === 0 && !list.isPending && <div className="empty">Workflow가 없어요</div>}
         {list.hasMore && (
-          <button className="btn more" disabled={list.isFetchingMore} onClick={list.fetchMore}>
+          <button className="btn more tone-secondary" disabled={list.isFetchingMore} onClick={list.fetchMore}>
             더 보기
           </button>
         )}
@@ -433,7 +434,7 @@ export function WorkflowList({
           title={`선택한 ${chosen.length}개 ${BATCH.find((b) => b.kind === batch)?.label}`}
           note={`${chosen.length}개 Workflow에 ${BATCH.find((b) => b.kind === batch)?.label} 동작을 하나씩 적용해요. 실패한 것이 있어도 나머지는 계속해요.`}
           confirmLabel="적용"
-          danger={batch === "delete" || batch === "terminate"}
+          tone={workflowActionTone(batch)}
           requireName={typedName}
           busy={busy}
           error={failure}
@@ -484,7 +485,7 @@ export function WorkflowList({
               </tbody>
             </table>
             <div className="foot">
-              <button className="btn primary" onClick={() => setResults(null)}>
+              <button className="btn plain tone-ghost" onClick={() => setResults(null)}>
                 닫기
               </button>
             </div>

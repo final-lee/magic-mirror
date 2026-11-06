@@ -42,9 +42,9 @@ export function LocalTerminal({ target, ssoProfile, command, launch, title, visi
             <p>{shellExited(state.code, state.reason)}</p>
             {/* 플러그인 명령은 확인을 거쳐 한 번 실행한 것이라 같은 명령을 다시 돌리지 않는다 */}
             {command === null ? (
-              <button className="btn tone-secondary" onClick={restart}>{TERMINAL_RESTART}</button>
+              <button className="btn tone-refresh" onClick={restart}>{TERMINAL_RESTART}</button>
             ) : (
-              <button className="btn tone-secondary" onClick={onClose}>{TERMINAL_CLOSE_TAB}</button>
+              <button className="btn tone-ghost-danger" onClick={onClose}>{TERMINAL_CLOSE_TAB}</button>
             )}
           </div>
         )}

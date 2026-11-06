@@ -178,7 +178,7 @@ function KeyDeleteSheet({
         </div>
         {result ? (
           <div className="foot">
-            <button className="btn primary" onClick={onClose} autoFocus>
+            <button className="btn plain tone-ghost" onClick={onClose} autoFocus>
               {k.CLOSE}
             </button>
           </div>
@@ -202,6 +202,7 @@ function KeyDeleteSheet({
             onRetry={() => void load()}
             onCancel={cancel}
             applyLabel={k.APPLY}
+            applyTone="danger"
             busyLabel={k.APPLYING}
           />
         )}
@@ -286,11 +287,11 @@ function KeysPanel({ tailnet }: { tailnet: string }) {
         <p className="err" role="alert">
           {k.READ_ERROR}: {errorMessage(keys.error)}
         </p>
-        <button className="btn small" onClick={() => void keys.refetch()}>
+        <button className="btn small tone-refresh" onClick={() => void keys.refetch()}>
           {k.REFRESH}
         </button>
-        <button className="btn small" onClick={() => setEditing("new")}>
-          {editorText.CREATE}
+        <button className="btn small tone-create" onClick={() => setEditing("new")}>
+          {editorText.CREATE_OPEN}
         </button>
         {editing === "new" && (
           <KeyEditor
@@ -395,10 +396,10 @@ function KeysTable({ data, kind, onKind, query, onQuery, onRefresh, onDelete, on
           onChange={(e) => onQuery(e.target.value)}
         />
         <div className="awc-bar-end">
-          <button className="btn small" onClick={onCreate}>
-            {editorText.CREATE}
+          <button className="btn small tone-create" onClick={onCreate}>
+            {editorText.CREATE_OPEN}
           </button>
-          <button className="btn small" onClick={onRefresh}>
+          <button className="btn small tone-refresh" onClick={onRefresh}>
             {k.REFRESH}
           </button>
         </div>
@@ -468,11 +469,11 @@ function KeysTable({ data, kind, onKind, query, onQuery, onRefresh, onDelete, on
                 </td>
                 <td>
                   {(key.kind === "client" || key.kind === "federated") && (
-                    <button className="btn small" onClick={() => onEdit(key)}>
-                      {editorText.EDIT}
+                    <button className="btn small tone-primary" onClick={() => onEdit(key)}>
+                      {editorText.EDIT_OPEN}
                     </button>
                   )}
-                  <button className="btn small" aria-label={k.deleteLabel(keyName(key))} onClick={() => onDelete(key)}>
+                  <button className="btn small tone-danger" aria-label={k.deleteLabel(keyName(key))} onClick={() => onDelete(key)}>
                     {k.DELETE}
                   </button>
                 </td>

@@ -179,18 +179,18 @@ export function GraphCanvas({ width, height, label, children, lead, extra, minHe
     <div className={`kvg${fill ? " fill" : ""} ${className}`}>
       <div className="kvg-bar">
         {lead}
-        <button type="button" className="btn small" aria-label="확대" onClick={() => zoomBy(1.25)}>
+        <button type="button" className="btn small tone-secondary" aria-label="확대" onClick={() => zoomBy(1.25)}>
           ＋
         </button>
-        <button type="button" className="btn small" aria-label="축소" onClick={() => zoomBy(1 / 1.25)}>
+        <button type="button" className="btn small tone-secondary" aria-label="축소" onClick={() => zoomBy(1 / 1.25)}>
           －
         </button>
-        <button type="button" className="btn small" onClick={fit}>
+        <button type="button" className="btn small tone-secondary" onClick={fit}>
           맞춤
         </button>
         <button
           type="button"
-          className="btn small"
+          className="btn small tone-secondary"
           onClick={() => {
             touched.current = true;
             setView({ zoom: 1, x: 0, y: 0 });

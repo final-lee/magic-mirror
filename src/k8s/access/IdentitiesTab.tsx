@@ -46,12 +46,12 @@ function Row({ m, indent, onOpenIam, onOpenSubject, onChange, mode }: { m: Mappi
         </div>
         <div className="acc-row-actions">
           {onOpenIam && m.kind !== "other" && (
-            <button className="link" onClick={() => onOpenIam(m.principalArn)}>
+            <button className="link tone-nav" onClick={() => onOpenIam(m.principalArn)}>
               {OPEN_IAM}
             </button>
           )}
           {m.subject && (
-            <button className="link" title={SEE_MATRIX_TITLE} onClick={() => onOpenSubject(m.subject!)}>
+            <button className="link tone-nav" title={SEE_MATRIX_TITLE} onClick={() => onOpenSubject(m.subject!)}>
               {SEE_MATRIX}
             </button>
           )}
@@ -167,7 +167,7 @@ export function IdentitiesTab({ target, ssoProfile, view, onRetry, onOpenIam, on
                 <Fragment key={set}>
                   <tr className="acc-group-row" tabIndex={-1}>
                     <td colSpan={7}>
-                      <button className="link" aria-expanded={expanded} aria-label={`${ssoGroupRow(set, rows.length)} ${expanded ? COLLAPSE : EXPAND}`} onClick={() => toggle(set)}>
+                      <button className="link tone-secondary" aria-expanded={expanded} aria-label={`${ssoGroupRow(set, rows.length)} ${expanded ? COLLAPSE : EXPAND}`} onClick={() => toggle(set)}>
                         {expanded ? "▾" : "▸"} {ssoGroupRow(set, rows.length)}
                       </button>
                     </td>

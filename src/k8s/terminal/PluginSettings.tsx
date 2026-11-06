@@ -74,7 +74,7 @@ export function PluginSettings({ plugins, onChange }: { plugins: K8sPlugin[]; on
           <label>{T.key}<input className="field-input mono" value={key} onChange={(event) => setKey(event.target.value)} /></label>
           {keyError && <p className="err">{keyError}</p>}
           <label><input type="checkbox" checked={confirm} onChange={(event) => setConfirm(event.target.checked)} />{T.confirm}</label>
-          <div className="tools"><button className="btn tone-primary" disabled={!name.trim() || !command.trim() || !parsed || !!keyError || !!templateError} onClick={save}>{T.save}</button><button className="btn tone-secondary" onClick={() => setEditing(null)}>{T.cancel}</button></div>
+          <div className="tools"><button className="btn tone-primary" disabled={!name.trim() || !command.trim() || !parsed || !!keyError || !!templateError} onClick={save}>{T.save}</button><button className="btn tone-ghost" onClick={() => setEditing(null)}>{T.cancel}</button></div>
         </div>
       )}
     </section>

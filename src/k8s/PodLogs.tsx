@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from "react";
-import { useListFind } from "../components/ListFind";
+import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useListFind, type ListFindState } from "../components/ListFind";
 import { KEEP_LINES } from "./logBuffer";
 import { LogView, type LogStream } from "./LogView";
 import {
@@ -11,22 +11,23 @@ import type { K8sContainer, K8sKindRef, K8sLogOptions, K8sTarget } from "./types
 export const TAIL_CHOICES = [100, 500, 1_000, 5_000, 10_000, KEEP_LINES];
 const DEFAULT_TAIL = 500;
 
-interface ShellProps {
-  target: K8sTarget;
-  ssoProfile: string;
-  live: boolean;
-  stream: LogStream;
+export interface LogsShellProps {
   /** 컨테이너 선택에 올릴 컨테이너(init 포함). 둘 이상일 때만 선택이 보인다 */
-  containers: K8sContainer[];
+  containers: Pick<K8sContainer, "name" | "init">[];
   /** 처음에 열 컨테이너(null이면 모든 컨테이너) */
   initialContainer: string | null;
+  /** 선택에 "모든 컨테이너"를 둔다(기본 켬). 컨테이너를 꼭 골라야 하는 곳에서는 끈다 */
+  allContainers?: boolean;
+  /** 고른 옵션과 보기 설정으로 로그 보기를 그린다 */
+  children: (view: { options: K8sLogOptions; pretty: boolean; showTime: boolean; wrap: boolean; find: ListFindState }) => ReactNode;
 }
 
 /**
  * 로그 탭의 위 막대와 보기. 막대에서 컨테이너(모든 컨테이너 포함)·이전 컨테이너·따라가기·기간·처음 줄 수를 고르고,
  * 보기는 JSON 정리(기본) 또는 원문, 서버 시각과 줄바꿈은 켜고 끈다(화면만 바뀌고 흐름은 다시 열지 않는다).
+ * 흐름을 어디서 받을지는 children이 정한다(EKS·ArgoCD).
  */
-function LogsShell({ target, ssoProfile, live, stream, containers, initialContainer }: ShellProps) {
+export function LogsShell({ containers, initialContainer, allContainers = true, children }: LogsShellProps) {
   const [container, setContainer] = useState<string | null>(initialContainer);
   const [previous, setPrevious] = useState(false);
   const [follow, setFollow] = useState(true);
@@ -55,7 +56,7 @@ function LogsShell({ target, ssoProfile, live, stream, containers, initialContai
           <label className="k8s-check">
             {LOG_CONTAINER}
             <select value={container ?? ""} onChange={(e) => setContainer(e.target.value || null)}>
-              <option value="">{LOG_ALL_CONTAINERS}</option>
+              {allContainers && <option value="">{LOG_ALL_CONTAINERS}</option>}
               {containers.map((c) => (
                 <option key={c.name} value={c.name}>
                   {c.init ? `${c.name} (init)` : c.name}
@@ -95,7 +96,7 @@ function LogsShell({ target, ssoProfile, live, stream, containers, initialContai
           {LOG_WRAP}
         </label>
       </div>
-      <LogView target={target} ssoProfile={ssoProfile} live={live} stream={stream} options={options} pretty={pretty} showTime={showTime} wrap={wrap} find={find} />
+      {children({ options, pretty, showTime, wrap, find })}
     </div>
   );
 }
@@ -114,7 +115,11 @@ interface Props {
 export function PodLogs({ target, ssoProfile, live, namespace, pod, containers }: Props) {
   const stream = useMemo<LogStream>(() => ({ kind: "pod", namespace, pod }), [namespace, pod]);
   const first = containers.find((c) => !c.init)?.name ?? containers[0]?.name ?? null;
-  return <LogsShell target={target} ssoProfile={ssoProfile} live={live} stream={stream} containers={containers} initialContainer={first} />;
+  return (
+    <LogsShell containers={containers} initialContainer={first}>
+      {(view) => <LogView target={target} ssoProfile={ssoProfile} live={live} stream={stream} {...view} />}
+    </LogsShell>
+  );
 }
 
 interface WorkloadProps {
@@ -131,5 +136,9 @@ interface WorkloadProps {
 /** Deployment·StatefulSet·DaemonSet·ReplicaSet·Job·Service의 로그 탭: 셀렉터에 맞는 모든 Pod의 모든 컨테이너를 합쳐 보고, 나중에 생기는 Pod에도 붙는다. */
 export function WorkloadLogs({ target, ssoProfile, live, kind, namespace, name, containers }: WorkloadProps) {
   const stream = useMemo<LogStream>(() => ({ kind: "workload", ref: kind, namespace, name }), [kind, namespace, name]);
-  return <LogsShell target={target} ssoProfile={ssoProfile} live={live} stream={stream} containers={containers} initialContainer={null} />;
+  return (
+    <LogsShell containers={containers} initialContainer={null}>
+      {(view) => <LogView target={target} ssoProfile={ssoProfile} live={live} stream={stream} {...view} />}
+    </LogsShell>
+  );
 }

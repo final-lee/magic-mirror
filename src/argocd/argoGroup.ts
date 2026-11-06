@@ -55,7 +55,7 @@ export const groupLevel = (set: ArgoAppSetRow | null, t: Tally): ArgoLevel => (s
 
 export const rowKey = (namespace: string, name: string) => `${namespace}/${name}`;
 
-const IN_CLUSTER = ["https://kubernetes.default.svc", "in-cluster"];
+export const IN_CLUSTER = ["https://kubernetes.default.svc", "in-cluster"];
 /** 같은 클러스터를 가리키는 두 표기(이름·서버 주소)를 하나로 */
 export const IN_CLUSTER_KEY = "in-cluster";
 

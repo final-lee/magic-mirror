@@ -139,9 +139,12 @@ export function KeyEditor({
   const [body, setBody] = useState<Record<string, unknown> | null>(null);
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [previous, setPrevious] = useState<Record<string, unknown> | null>(null);
+  const [reverting, setReverting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(Boolean(item));
   const [error, setError] = useState("");
+  const previewTone = item ? "primary" : "create";
+  const applyTone = reverting ? "caution" : previewTone;
   const close = () => {
     if (!busy && !loading) onClose();
   };
@@ -182,6 +185,7 @@ export function KeyEditor({
   }, [item, tailnet]);
   function preview() {
     setError("");
+    setReverting(false);
     const selected = Array.from(new Set([...scopes, ...split(extra)]));
     const tagList = split(tags);
     if (kind !== "auth" && selected.some((s) => s === "devices:core" || s === "auth_keys") && !tagList.length) {
@@ -318,7 +322,7 @@ export function KeyEditor({
                 </div>
               </>
             )}
-            <button className="btn small" disabled={loading} onClick={preview}>
+            <button className={`btn small tone-${previewTone}`} disabled={loading} onClick={preview}>
               {t.PREVIEW}
             </button>
           </div>
@@ -330,10 +334,10 @@ export function KeyEditor({
               {"\n"}
               {JSON.stringify(body, null, 2)}
             </pre>
-            <button className="btn small" disabled={busy} onClick={() => void apply()}>
+            <button className={`btn small tone-${applyTone}`} disabled={busy} onClick={() => void apply()}>
               {t.APPLY}
             </button>
-            <button className="btn small" disabled={busy} onClick={() => setBody(null)}>
+            <button className="btn small tone-secondary" disabled={busy} onClick={() => setBody(null)}>
               {t.EDIT}
             </button>
           </>
@@ -342,24 +346,25 @@ export function KeyEditor({
           <>
             <p>{t.SECRET}</p>
             <code>{secret}</code>
-            <button className="btn small" onClick={() => void desktop.copy(secret)}>
+            <button className="btn small tone-secondary" onClick={() => void desktop.copy(secret)}>
               {t.COPY}
             </button>
           </>
         )}
         {result && previous && (
           <button
-            className="btn small"
+            className="btn small tone-caution"
             onClick={() => {
               setBody(previous);
               setPrevious(body);
               setResult(null);
+              setReverting(true);
             }}
           >
             {t.UNDO}
           </button>
         )}
-        <button className="btn small" disabled={busy || loading} onClick={close}>
+        <button className="btn small tone-ghost" disabled={busy || loading} onClick={close}>
           {result ? t.CLOSE : t.CANCEL}
         </button>
         {error && <p role="alert">{error}</p>}

@@ -87,9 +87,9 @@ export function DeviceMap({ devices, peers, self, vpcs, onShowTable }: Props) {
   return (
     <div className="ts-device-map">
       <div className="argowf-graph-bar">
-        <button className="btn small" aria-label={text.MAP_ZOOM_IN} onClick={() => zoomBy(1.25)}>＋</button>
-        <button className="btn small" aria-label={text.MAP_ZOOM_OUT} onClick={() => zoomBy(1 / 1.25)}>－</button>
-        <button className="btn small" onClick={fit}>{text.MAP_FIT}</button>
+        <button className="btn small tone-secondary" aria-label={text.MAP_ZOOM_IN} onClick={() => zoomBy(1.25)}>＋</button>
+        <button className="btn small tone-secondary" aria-label={text.MAP_ZOOM_OUT} onClick={() => zoomBy(1 / 1.25)}>－</button>
+        <button className="btn small tone-secondary" onClick={fit}>{text.MAP_FIT}</button>
         <span className="dim">{Math.round(view.zoom * 100)}%</span>
       </div>
       <div
@@ -232,8 +232,8 @@ function DeviceDetails({ device, peer, onShowTable, onClose }: {
       <div className="ts-panel-head">
         <h3>{device.hostname || device.name}</h3>
         <div className="awc-acts">
-          <button className="btn small" onClick={() => onShowTable(device.hostname || device.name)}>{text.MAP_SHOW_TABLE}</button>
-          <button className="btn small" aria-label={text.CLOSE} onClick={onClose}>✕</button>
+          <button className="btn small tone-secondary" onClick={() => onShowTable(device.hostname || device.name)}>{text.MAP_SHOW_TABLE}</button>
+          <button className="btn small tone-ghost" aria-label={text.CLOSE} onClick={onClose}>✕</button>
         </div>
       </div>
       <dl className="kv">

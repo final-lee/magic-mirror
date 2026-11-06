@@ -51,11 +51,11 @@ export function TrayBar({ draft, database, start }: Props) {
           <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
           <span>{summaryOf(items)}</span>
         </button>
-        <button className="btn small" onClick={draft.clear}>
+        <button className="btn small tone-ghost-danger" onClick={draft.clear}>
           모두 취소
         </button>
         <button
-          className="btn small primary"
+          className="btn small tone-primary"
           onClick={() =>
             start(
               draft.database ?? database,
@@ -64,7 +64,7 @@ export function TrayBar({ draft, database, start }: Props) {
             )
           }
         >
-          미리보기
+          미리보기…
         </button>
       </div>
     </div>

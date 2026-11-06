@@ -52,10 +52,10 @@ export function PasswordResult({ password, summary, onClose }: Props) {
         </p>
       </div>
       <div className="foot">
-        <button ref={copyRef} className="btn" onClick={() => void copy()}>
+        <button ref={copyRef} className="btn plain tone-secondary" onClick={() => void copy()}>
           복사
         </button>
-        <button className="btn primary" onClick={onClose}>
+        <button className="btn plain tone-ghost" onClick={onClose}>
           닫기
         </button>
       </div>

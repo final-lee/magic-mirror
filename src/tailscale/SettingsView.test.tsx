@@ -15,7 +15,7 @@ test("only previews and patches the changed setting", async () => {
   vi.mocked(tailscaleApi.settingsSave).mockResolvedValue(null);
   renderWithClient(<SettingsView />);
   const heading = await screen.findByText("새 기기 승인 필요");
-  fireEvent.click(within(heading.closest("tr")!).getByRole("button", { name: "켜기" }));
+  fireEvent.click(within(heading.closest("tr")!).getByRole("button", { name: "켜기…" }));
   const dialog = screen.getByRole("dialog");
   expect(within(dialog).getByText(/PATCH/)).toHaveTextContent("/tailnet/-/settings");
   expect(within(dialog).getByText(/devicesApprovalOn/)).toHaveTextContent('"devicesApprovalOn": true');

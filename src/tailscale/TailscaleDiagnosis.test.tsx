@@ -57,15 +57,15 @@ test.each([false, true])("expanding a network error shows verdict and checks (co
 test("route changes require confirmation, can be cancelled and undone", async () => {
   renderWithClient(box(network));
   fireEvent.click(screen.getByRole("button", { name: "Tailscale 진단" }));
-  fireEvent.click(await screen.findByRole("button", { name: "경로 받기 켜기" }));
+  fireEvent.click(await screen.findByRole("button", { name: "경로 받기 켜기…" }));
   expect(screen.getByText("tailscale set --accept-routes=true")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "취소" }));
   expect(tailscaleApi.acceptRoutes).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "경로 받기 켜기" }));
+  fireEvent.click(screen.getByRole("button", { name: "경로 받기 켜기…" }));
   fireEvent.click(screen.getByRole("button", { name: "적용" }));
   await waitFor(() => expect(tailscaleApi.acceptRoutes).toHaveBeenCalledWith(true));
   await waitFor(() => expect(tailscaleApi.diagnose).toHaveBeenCalledTimes(2));
-  fireEvent.click(await screen.findByRole("button", { name: "되돌리기" }));
+  fireEvent.click(await screen.findByRole("button", { name: "되돌리기…" }));
   expect(screen.getByText("tailscale set --accept-routes=false")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "적용" }));
   await waitFor(() => expect(tailscaleApi.acceptRoutes).toHaveBeenCalledWith(false));
@@ -78,7 +78,7 @@ test("command and apply errors remain visible", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Tailscale 진단" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("진단 실패");
   fireEvent.click(screen.getByRole("button", { name: "다시 진단" }));
-  fireEvent.click(await screen.findByRole("button", { name: "경로 받기 켜기" }));
+  fireEvent.click(await screen.findByRole("button", { name: "경로 받기 켜기…" }));
   vi.mocked(tailscaleApi.acceptRoutes).mockRejectedValueOnce({ kind: "other", message: "적용 실패" });
   fireEvent.click(screen.getByRole("button", { name: "적용" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("적용 실패");

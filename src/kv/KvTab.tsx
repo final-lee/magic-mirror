@@ -99,7 +99,7 @@ function TopBar({ info, overview, login, connection, reading, canChange, onChang
       )}
       <span className="kv-top-end">
         {overview && (
-          <button className="btn small" onClick={onReread} disabled={reading}>
+          <button className="btn small tone-refresh" onClick={onReread} disabled={reading}>
             {reading ? t.READING : t.REREAD}
           </button>
         )}

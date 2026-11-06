@@ -22,7 +22,7 @@ export function FlowFull({ target, prefix, queue, id, onClose, onOpen }: Props) 
     <div className="kv-flow-big" role="dialog" aria-label={`${t.FLOW_GRAPH} ${flowNodeId({ queue, id })}`}>
       <div className="kv-flow-big-head">
         <h3 className="mono">{`${t.FLOW_GRAPH} · ${flowNodeId({ queue, id })}`}</h3>
-        <button type="button" className="btn small" onClick={onClose}>
+        <button type="button" className="btn small tone-ghost" onClick={onClose}>
           {t.FLOW_CLOSE}
         </button>
       </div>

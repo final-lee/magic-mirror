@@ -78,10 +78,10 @@ export function BindingActions({ target, objectRef, view, rules, onStart }: Prop
 
   return (
     <>
-      <ActionButton tone="primary" reason={patch} onClick={() => open("add")}>
+      <ActionButton tone="secondary" reason={patch} onClick={() => open("add")}>
         {t.BINDING_ADD_SUBJECT}
       </ActionButton>
-      <ActionButton tone="warn" reason={patch} onClick={() => open("remove")}>
+      <ActionButton tone="secondary" reason={patch} onClick={() => open("remove")}>
         {t.BINDING_REMOVE_SUBJECT}
       </ActionButton>
       <ActionButton tone="secondary" reason={remove} onClick={() => addToCart(deleteBinding(binding))}>

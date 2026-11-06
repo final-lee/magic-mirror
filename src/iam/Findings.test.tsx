@@ -208,7 +208,7 @@ describe("items", () => {
     const { props } = setup();
     await cardGroup();
     fireEvent.click(card("oldAccessKey"));
-    fireEvent.click(within(rows()[0]).getByRole("button", { name: "키 비활성화" }));
+    fireEvent.click(within(rows()[0]).getByRole("button", { name: "키 비활성화…" }));
     expect(props.onFix).toHaveBeenCalledTimes(1);
     expect(props.onFix).toHaveBeenCalledWith(deactivateBobKey);
   });
@@ -224,7 +224,7 @@ describe("items", () => {
     setup();
     await cardGroup();
     fireEvent.click(card("oldAccessKey"));
-    const button = within(rows()[0]).getByRole("button", { name: "키 비활성화" });
+    const button = within(rows()[0]).getByRole("button", { name: "키 비활성화…" });
     expect(button).toBeEnabled();
     expect(button).not.toHaveAttribute("title");
   });

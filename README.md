@@ -237,12 +237,24 @@ Open **EKS → 🐙 ArgoCD** in the sidebar for a single tab that talks to ArgoC
 ![ArgoCD applications grouped by ApplicationSet](docs/screenshots/argocd.png)
 
 - **Connecting**: add a server in two steps — its address (the same one you open the ArgoCD web UI with), then an API token (from Settings → Accounts → Tokens in the ArgoCD UI, or `argocd account generate-token`). The token is kept in the macOS keychain only. `http://` servers get a plaintext warning. Several servers can be added; **서버 목록 편집**, **토큰 바꾸기**, and **토큰 지우기** manage them, and removing a server forgets its token. The top bar shows who you are and the server version.
-- **Applications**: refreshed every 10 s while the tab is shown. Filter by sync state (Synced, OutOfSync, Unknown), health (Healthy, Progressing, Degraded, Suspended, Missing, Unknown), environment, target cluster, project, and labels (`key=value`; the same key ORs, different keys AND), plus fuzzy search over name, namespace, and labels. Filters and grouping are remembered per server.
+- **Applications**: live app, ApplicationSet, and resource-tree streams fall back to polling if disconnected. Filter by sync state (Synced, OutOfSync, Unknown), health (Healthy, Progressing, Degraded, Suspended, Missing, Unknown), environment, target cluster, project, and labels (`key=value`; the same key ORs, different keys AND), plus fuzzy search over name, namespace, and labels. Filters, grouping, and the selected view are remembered per server.
 - **Environments** (dev, stg, prd, ops, demo, preview) are inferred in this order: a `preview=true` label, an `environment` or `env` label, the app name, its namespace, then its target cluster. Apps that match nothing are 미분류.
 - **Grouping**: two levels, by ApplicationSet, environment, target cluster, project, namespace, or a label. ApplicationSet groups are cards marked by their worst app, with a tally bar and chips (오류, OutOfSync, 주의, 정상), their generators, and their own errors.
 - **Problems first**: groups go red, then yellow, then healthy; inside a group the worst apps come first. Healthy cards fold to a thin line, and healthy apps in a mixed group fold to one green line naming them. **모두 펼치기** and **정상 접기** switch everything at once.
-- **Application detail**: **개요** (sync and health, revisions, the last operation and its failed resources, conditions, Git and Helm sources, destination, sync policy, images), **리소스** (the resource tree with health, sync state, hooks, and resources about to be pruned), **이력** (the last 20 deployments), and **YAML/JSON**.
-- **Actions**: **Refresh**, **Hard refresh**, and **Sync…**, which asks first and offers **Prune** and **Dry run** (both off by default). Sync is disabled while an operation is running. ArgoCD's RBAC decides what the token may do.
+- **Application detail**: overview, resource tree, app-wide Diff, operation progress and waves, deployment history with revision metadata and comparison, management, and YAML/JSON. Select a resource for live and desired YAML, diff, events, logs, links, and actions. Pod terminals hand off to the matching EKS context.
+- **Operations**: an action bar under the application header is on every tab. **동기화** has Sync… (selected resources or the whole application, revision, all sync options, retry settings, and an inline diff), Refresh, Hard refresh, and 작업 중단 while an operation runs. **배포** rolls back to the previous deployment (preview of the revision and manifest changes; turning auto-sync off first when it is on) and turns auto-sync on or off. **워크로드** shows what the server allows on the application's own resources, grouped by kind — for example 재시작 · Deployment 3, 일시정지 · Rollout 1, 지금 실행 · CronJob 2 — and runs one action on all selected resources in one reviewed change. **위험** deletes the application. Rolling back to any earlier revision is in the history tab; resource actions, patch, delete, and a pod terminal in the EKS tab are on each resource. Controls follow your ArgoCD RBAC.
+- **Manage**: create, edit, or delete applications; inspect an ApplicationSet and its generated applications, edit its YAML, preview generated changes, save or delete it. An ApplicationSet whose generator fails shows a one-line summary (for example a GitHub API status error), when it started and how often the controller retries, with the raw message folded below; **다시 시도** asks the controller to run the generators now (a refresh annotation, previewed first). Manage application notification subscriptions with catalog suggestions when available.
+- **Resource search and maps**: search managed resources across applications and jump from results or ⌘K into a resource. Switch the filtered app list to a fleet matrix; selecting a cell returns to the list with its environment and cluster or project selected. Each application has maps for its network, resource relationships, app-of-apps hierarchy, ApplicationSet siblings, environment versions, and deployment timeline. Select an app or resource to open its detail.
+- **Safeguards**: every write opens a preview of calls, diff, impact, and warnings. Production targets and delete, rollback, and resource-delete operations can require the target name; a stale resource version stops applying. ArgoCD RBAC controls which operations are available.
+
+**Metrics and notifications**
+
+- **지표** shows deployment frequency, change failure rate, recovery time and sync-duration percentiles by environment, project or app; drift and auto-sync settings; images and tag differences; per-app Pod CPU and memory against requests and limits; and ArgoCD controller, repo-server, server and ApplicationSet controller metrics. Deployment charts combine local events recorded while the app runs with the server's successful deployment history, so older or failed operations may not be available. Controller metrics poll every 30 seconds while visible and their sparkline samples stay in memory.
+- Optional macOS notifications per server report degraded health, failed operations and an OutOfSync episode lasting a chosen number of minutes (30 by default); filter by environment or leave it empty for all. They work while the app is running, even with the tab hidden. macOS notification permission is requested when enabled.
+
+![ArgoCD resource diff](docs/screenshots/argocd-resource.png)
+
+![ArgoCD application map](docs/screenshots/argocd-maps.png)
 
 ![ArgoCD application resource tree](docs/screenshots/argocd-detail.png)
 
@@ -440,7 +452,7 @@ Everything else in the app only reads. These are the only places that write, and
 | IAM workspace | Policy attachments, group members, inline policies, policy versions, access keys | Preview of API calls and permission impact, typed confirmation for risky changes, recheck at apply | `iam-changes.jsonl`, most undoable |
 | PostgreSQL tab | Roles, attributes, memberships, privileges, default privileges, passwords, sessions | **Change** switch, SQL preview, typed confirmation for risky changes, one transaction, recheck at apply | `db-changes.jsonl`, most undoable |
 | EKS tab | Workloads, CronJobs, Jobs, nodes, any object by YAML, RBAC bindings, EKS access entries, Helm releases, security fixes; shells and port-forwards | RBAC-aware buttons, dry-run preview (`helm --dry-run=server` for Helm), typed name for `kube-system` / `prod` and risky permission changes, stale-preview check | `k8s-changes.jsonl`, many undoable |
-| ArgoCD tab | Refresh and sync of applications | Sync sheet with Prune and Dry run | — |
+| ArgoCD tab | Refresh, sync, terminate, rollback, resource actions/patch/delete, application create/edit/delete, ApplicationSet save/delete/retry, notification subscriptions | RBAC-aware controls, calls/diff/impact preview, typed name for production and destructive changes, stale-version check | `argocd-changes.jsonl` |
 | Argo Workflows tab | Workflows, CronWorkflows, templates, event sources, sensors | Confirmation, typed name for `prod` on stop/terminate/delete | — |
 | Tailscale check | This Mac's **accept routes** setting | Shows the `tailscale set` command and asks first | Undo button |
 | Tailscale local controls | Connection, preferences, account and update commands | Exact CLI command preview; typed confirmation for logout and account removal | Preference changes recorded in `tailscale-changes.jsonl`, with undo |
@@ -494,7 +506,7 @@ Under `~/Library/Application Support/dev.finallee.magicmirror/`:
 
 | File | Contents | Kept |
 | --- | --- | --- |
-| `settings.json` | Enabled services and the services the app has already shown, favorites, the sidebar order you dragged, last profile and region, theme, diff tool, kubeconfig path, cache TTL, the explorer's local folder, PostgreSQL sign-in users, ElastiCache sign-in ways and users, DB numbers, and Bull prefixes, EKS contexts, bookmarks, lane widths, and security checks turned off, ArgoCD and Argo Workflows servers and their list filters, the Tailscale tailnet name | Until changed |
+| `settings.json` | Enabled services and the services the app has already shown, favorites, the sidebar order you dragged, last profile and region, theme, diff tool, kubeconfig path, cache TTL, the explorer's local folder, PostgreSQL sign-in users, ElastiCache sign-in ways and users, DB numbers, and Bull prefixes, EKS contexts, bookmarks, lane widths, and security checks turned off; ArgoCD servers, kube contexts, ArgoCD namespace, notification settings, per-server views and filters; Argo Workflows servers and list filters; the Tailscale tailnet name | Until changed |
 | `resource-index.json` | The ⌘K index: names, IDs, column values, tags. No raw JSON or detail fields. Readable only by you | 7 days; wiped by ⌘⇧R |
 | `cost-cache.json` | Cost Explorer answers and the monthly request counter | Answers for 6 hours |
 | `kv-bigkeys.json` | The last 🐘 큰 키 report per ElastiCache cache and DB number: key names, types, sizes, when it was made. No values | Until the next report for that cache and DB |
@@ -502,6 +514,8 @@ Under `~/Library/Application Support/dev.finallee.magicmirror/`:
 | `db-changes.jsonl` | PostgreSQL changes, with the DB user and SQL (never passwords) | Until deleted |
 | `k8s-changes.jsonl` | EKS changes, and when shells and node shells opened and closed (never their input or output, never Secret values) | Until deleted |
 | `tailscale-changes.jsonl` | Tailscale changes and undo state | Until deleted |
+| `argocd-changes.jsonl` | ArgoCD changes applied from the app | Until deleted |
+| `argocd-events.jsonl` | ArgoCD stream events recorded while the app is running | 90 days |
 
 - ArgoCD and Argo Workflows API tokens and ElastiCache passwords you chose to remember live only in the macOS keychain (services `magic-mirror.argocd`, `magic-mirror.argo-workflows`, and `magic-mirror.elasticache`).
 - The Tailscale API credential (OAuth client ID and secret, or API access token) lives only in the macOS keychain: service `magic-mirror.tailscale`, account = the tailnet name saved in `settings.json` (`tailscaleTailnet`). OAuth access tokens stay in memory.
@@ -563,7 +577,10 @@ A Korean install guide is in [docs/INSTALL.md](docs/INSTALL.md) and is attached 
 
 **ArgoCD tab**
 
-- Network access to the ArgoCD API server and an API token for an account allowed to read applications and ApplicationSets, and to sync the ones you want to sync.
+- Network access to the ArgoCD API server and an API token with permission to read applications and ApplicationSets. Resource details, logs, links, revision metadata, sync windows and ApplicationSet generation require the corresponding ArgoCD read permissions.
+- Sync, terminate and rollback require application sync permission; application and ApplicationSet create, update and delete, resource patch/delete and resource actions require the corresponding ArgoCD RBAC permissions. Notification subscriptions require application update permission; catalog suggestions require access to the notification configuration.
+- Pod terminal handoff requires a matching EKS kubeconfig context and Kubernetes pod exec permission.
+- Pod usage needs read access to pods and `metrics.k8s.io` pod metrics in the destination cluster. Controller metrics need Kubernetes `get` on `services/proxy` in the ArgoCD namespace.
 
 **Valkey and Redis OSS tab**
 
@@ -621,6 +638,7 @@ Tests that need real servers are `#[ignore]`d in a normal `cargo test` and run t
 | `scripts/pg-live-test.sh` | The PostgreSQL catalog reads and changes against PostgreSQL 14 and 16 containers on `127.0.0.1:55414` / `55416`, removed when it ends | Docker |
 | `scripts/kv-live-test.sh` | The Valkey/Redis tab against Valkey 8 containers: a plain server with every value type, BullMQ-, Bull 3-, and older Bull-shaped queues, a two-queue flow and an events stream, an AUTH and ACL server (password, no-password, and restricted users), a TLS server with a CA made for the run, and a three-shard cluster; removed when it ends | Docker, `openssl` |
 | `scripts/cost-live-test.sh <profile>` | The cost commands against a real account; about 3 Cost Explorer requests (≈ $0.03) | An AWS profile with Cost Explorer access |
+| `scripts/argocd-live-test.sh <argocd-url>` | The ArgoCD tab against a real server: reads and streams, then a throwaway `mm-live-<seconds>` application in project `default` that syncs [podinfo](https://github.com/stefanprodan/podinfo) into the in-cluster `mm-live-argocd` namespace, restarts and patches its Deployment, checks the stale and typed-name guards, and is cascade-deleted (the namespace may stay). With `ARGOCD_LIVE_KUBE_CONTEXT` set to the context ArgoCD runs in, it also reads the ArgoCD metrics through the service proxy and Pod usage from metrics-server | A token in `ARGOCD_LIVE_TOKEN` or saved by the app; rights to create and delete applications in `default` |
 
 ### Maintenance scripts
 

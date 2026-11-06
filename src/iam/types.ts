@@ -234,6 +234,10 @@ export type IamChange =
   | { op: "putInlinePolicy"; target: string; name: string; document: string }
   | { op: "deleteInlinePolicy"; target: string; name: string }
   | { op: "updateManagedPolicy"; policyArn: string; document: string };
+export function iamChangeTone(change: IamChange): "danger" | "warn" | "primary" {
+  if (change.op === "detachPolicy" || change.op === "removeFromGroup" || change.op === "deleteAccessKey" || change.op === "deleteInlinePolicy") return "danger";
+  return change.op === "setAccessKeyStatus" ? "warn" : "primary";
+}
 export type PreviewWarning = { level: "block" | "confirm" | "warn"; message: string };
 export interface ChangePreview {
   change: IamChange;

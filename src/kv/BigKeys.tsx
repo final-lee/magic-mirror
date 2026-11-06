@@ -77,11 +77,11 @@ export function BigKeys({ target, overview, state, onStart, onStop, onOpenKey }:
         <span className="dim">{t.BIGKEYS_INTRO}</span>
         <span className="kv-bar-end">
           {running ? (
-            <button className="btn small" onClick={onStop} disabled={state.stopping}>
+            <button className="btn small tone-caution" onClick={onStop} disabled={state.stopping}>
               {t.BIGKEYS_STOP}
             </button>
           ) : (
-            <button className="btn small primary" onClick={onStart}>
+            <button className="btn small tone-primary" onClick={onStart}>
               {state.status === "done" ? t.BIGKEYS_REFIND : t.BIGKEYS_FIND}
             </button>
           )}

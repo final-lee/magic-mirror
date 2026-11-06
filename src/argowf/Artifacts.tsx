@@ -74,14 +74,14 @@ export function Artifacts({
               <td>{a.direction === "input" ? "입력" : "출력"}</td>
               <td className="mono">{[a.repository, a.key].filter(Boolean).join(" · ") || "—"}</td>
               <td>
-                <button className="btn small" aria-label={`${a.name} 미리보기`} onClick={() => void open(a)}>
+                <button className="btn small tone-secondary" aria-label={`${a.name} 미리보기`} onClick={() => void open(a)}>
                   미리보기
                 </button>{" "}
-                <button className="btn small" aria-label={`${a.name} 내려받기`} onClick={() => void save(a)}>
+                <button className="btn small tone-secondary" aria-label={`${a.name} 내려받기`} onClick={() => void save(a)}>
                   내려받기
                 </button>{" "}
                 {a.key && (
-                  <button className="btn small" aria-label={`${a.name} 키 복사`} onClick={() => void desktop.copy(a.key!)}>
+                  <button className="btn small tone-secondary" aria-label={`${a.name} 키 복사`} onClick={() => void desktop.copy(a.key!)}>
                     키 복사
                   </button>
                 )}

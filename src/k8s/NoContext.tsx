@@ -28,7 +28,7 @@ export function NoContext({ message, command, onRecheck }: Props) {
           <button className="btn tone-secondary" onClick={() => void copy()}>
             {copied ? COPIED : COPY}
           </button>
-          <button className="btn tone-secondary" onClick={onRecheck}>
+          <button className="btn tone-refresh" onClick={onRecheck}>
             {RECHECK}
           </button>
         </div>

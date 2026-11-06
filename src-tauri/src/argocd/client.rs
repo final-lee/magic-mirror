@@ -1,6 +1,8 @@
 //! ArgoCD API와 키체인 토큰 관리.
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use reqwest::{Client, Method, StatusCode, Url};
@@ -66,23 +68,80 @@ impl TokenStore for Keychain {
     }
 }
 
-/// 서버별 토큰 캐시와 HTTP 클라이언트.
+#[cfg(test)]
+#[derive(Default)]
+struct MemoryStore(Mutex<HashMap<String, Token>>);
+
+#[cfg(test)]
+impl TokenStore for MemoryStore {
+    fn get(&self, url: &str) -> Result<Option<Token>, AppError> {
+        Ok(self.0.lock().unwrap().get(url).cloned())
+    }
+    fn set(&self, url: &str, token: &Token) -> Result<(), AppError> {
+        self.0.lock().unwrap().insert(url.to_owned(), token.clone());
+        Ok(())
+    }
+    fn delete(&self, url: &str) -> Result<(), AppError> {
+        self.0.lock().unwrap().remove(url);
+        Ok(())
+    }
+}
+
+/// 서버별 토큰 캐시와 HTTP 클라이언트, 열린 스트림, 로컬 기록 파일 위치.
 pub struct ArgocdState {
     client: Client,
+    /// 스트림(감시·로그)용. 전체 시간 제한 없이 연결 시간만 제한한다.
+    stream_client: Client,
     tokens: Mutex<HashMap<String, Token>>,
     store: Arc<dyn TokenStore>,
     store_lock: tokio::sync::Mutex<()>,
+    streams: Mutex<HashMap<u64, tokio::task::AbortHandle>>,
+    next_stream: AtomicU64,
+    /// 변경 기록(`argocd-changes.jsonl`)과 상태 변화 기록(`argocd-events.jsonl`)을 두는 앱 데이터 폴더.
+    data_dir: PathBuf,
+    events: Mutex<super::events::Recorder>,
 }
 
-impl Default for ArgocdState {
-    fn default() -> Self {
+impl ArgocdState {
+    /// `data_dir`은 앱 데이터 폴더.
+    pub fn new(data_dir: PathBuf) -> Self {
+        Self::with_store(Arc::new(Keychain), data_dir)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn in_memory(data_dir: PathBuf, url: &str, token: String) -> Self {
+        let store = Arc::new(MemoryStore::default());
+        store.set(account(url), &Token(token)).unwrap();
+        Self::with_store(store, data_dir)
+    }
+
+    fn with_store(store: Arc<dyn TokenStore>, data_dir: PathBuf) -> Self {
         crate::k8s::tls::install_crypto_provider();
         Self {
             client: Client::builder().timeout(Duration::from_secs(15)).build().expect("HTTP client"),
+            stream_client: Client::builder().connect_timeout(Duration::from_secs(15)).build().expect("HTTP client"),
             tokens: Mutex::new(HashMap::new()),
-            store: Arc::new(Keychain),
+            store,
             store_lock: tokio::sync::Mutex::new(()),
+            streams: Mutex::new(HashMap::new()),
+            next_stream: AtomicU64::new(1),
+            data_dir,
+            events: Mutex::new(super::events::Recorder::default()),
         }
+    }
+
+    /// 앱에서 보낸 변경의 기록 파일.
+    pub fn changes_path(&self) -> PathBuf {
+        self.data_dir.join("argocd-changes.jsonl")
+    }
+
+    /// 감시 중 본 상태 변화의 기록 파일.
+    pub fn events_path(&self) -> PathBuf {
+        self.data_dir.join("argocd-events.jsonl")
+    }
+
+    pub(super) fn recorder(&self) -> &Mutex<super::events::Recorder> {
+        &self.events
     }
 }
 
@@ -99,21 +158,15 @@ fn account(url: &str) -> &str {
     url.trim_end_matches('/')
 }
 
-fn request_url(base: &str, segments: &[&str], namespace: Option<&str>, refresh: Option<&str>) -> Result<Url, AppError> {
+fn request_url(base: &str, segments: &[&str], query: &[(&str, &str)]) -> Result<Url, AppError> {
     let mut url = Url::parse(base).map_err(|_| AppError::other(URL_ERROR))?;
     {
         let mut path = url.path_segments_mut().map_err(|_| AppError::other(URL_ERROR))?;
         path.pop_if_empty();
         path.extend(segments.iter().copied());
     }
-    if namespace.is_some() || refresh.is_some() {
-        let mut query = url.query_pairs_mut();
-        if let Some(ns) = namespace {
-            query.append_pair("appNamespace", ns);
-        }
-        if let Some(value) = refresh {
-            query.append_pair("refresh", value);
-        }
+    if !query.is_empty() {
+        url.query_pairs_mut().extend_pairs(query.iter().copied());
     }
     Ok(url)
 }
@@ -178,15 +231,26 @@ impl ArgocdState {
     }
 
     async fn request(&self, method: Method, url: Url, token: Option<&Token>, body: Option<&Value>) -> Result<Value, AppError> {
+        self.request_optional(method, url, token, body, false).await?.ok_or_else(|| AppError::other(RESPONSE_ERROR))
+    }
+
+    async fn request_optional(&self, method: Method, url: Url, token: Option<&Token>, body: Option<&Value>, allow_not_found: bool) -> Result<Option<Value>, AppError> {
+        // ArgoCD 서버는 GET이 아닌 요청에 Content-Type이 없으면 본문이 없어도 415로 거절한다(DELETE 포함).
+        let needs_type = method != Method::GET;
         let mut request = self.client.request(method, url);
         if let Some(token) = token {
             request = request.bearer_auth(&token.0);
         }
         if let Some(body) = body {
             request = request.json(body);
+        } else if needs_type {
+            request = request.header(reqwest::header::CONTENT_TYPE, "application/json");
         }
         let response = request.send().await.map_err(network_error)?;
         let status = response.status();
+        if allow_not_found && status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
         let bytes = response.bytes().await.map_err(network_error)?;
         let value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
         if !status.is_success() {
@@ -195,13 +259,13 @@ impl ArgocdState {
         if value.is_null() {
             return Err(AppError::other(RESPONSE_ERROR));
         }
-        Ok(value)
+        Ok(Some(value))
     }
 
     async fn session_for(&self, url: &str, token: &Token) -> Result<ArgocdSession, AppError> {
-        let info = self.request(Method::GET, request_url(url, &["api", "v1", "session", "userinfo"], None, None)?, Some(token), None).await?;
+        let info = self.request(Method::GET, request_url(url, &["api", "v1", "session", "userinfo"], &[])?, Some(token), None).await?;
         let username = username(&info)?;
-        let version = self.request(Method::GET, request_url(url, &["api", "version"], None, None)?, None, None).await?;
+        let version = self.request(Method::GET, request_url(url, &["api", "version"], &[])?, None, None).await?;
         let version = version.get("Version").and_then(Value::as_str).ok_or_else(|| AppError::other(RESPONSE_ERROR))?.to_owned();
         Ok(ArgocdSession {
             url: account(url).to_owned(),
@@ -248,10 +312,49 @@ impl ArgocdState {
         }
     }
 
-    /// 저장된 토큰으로 API 요청을 보낸다.
-    pub async fn api(&self, url: &str, method: Method, segments: &[&str], namespace: Option<&str>, refresh: Option<&str>, body: Option<&Value>) -> Result<Value, AppError> {
+    /// 저장된 토큰으로 API 요청을 보낸다. `query`는 순서대로 붙는다(같은 키를 여러 번 넣어도 된다).
+    pub async fn api(&self, url: &str, method: Method, segments: &[&str], query: &[(&str, &str)], body: Option<&Value>) -> Result<Value, AppError> {
         let token = self.token(url).await?.ok_or_else(|| AppError::other(ARGOCD_TOKEN_MISSING))?;
-        self.request(method, request_url(url, segments, namespace, refresh)?, Some(&token), body).await
+        self.request(method, request_url(url, segments, query)?, Some(&token), body).await
+    }
+
+    pub async fn api_optional(&self, url: &str, method: Method, segments: &[&str], query: &[(&str, &str)], body: Option<&Value>) -> Result<Option<Value>, AppError> {
+        let token = self.token(url).await?.ok_or_else(|| AppError::other(ARGOCD_TOKEN_MISSING))?;
+        self.request_optional(method, request_url(url, segments, query)?, Some(&token), body, true).await
+    }
+
+    /// 저장된 토큰으로 스트림 응답(서버 전송 이벤트·로그)을 연다. 성공 상태가 아니면 본문의 메시지로 실패한다.
+    pub async fn open_stream(&self, url: &str, segments: &[&str], query: &[(&str, &str)]) -> Result<reqwest::Response, AppError> {
+        let token = self.token(url).await?.ok_or_else(|| AppError::other(ARGOCD_TOKEN_MISSING))?;
+        let response = self.stream_client.get(request_url(url, segments, query)?).bearer_auth(&token.0).send().await.map_err(network_error)?;
+        let status = response.status();
+        if status.is_success() {
+            return Ok(response);
+        }
+        let bytes = response.bytes().await.map_err(network_error)?;
+        Err(response_error(status, &serde_json::from_slice(&bytes).unwrap_or(Value::Null)))
+    }
+
+    /// 새 스트림 번호.
+    pub fn next_stream_id(&self) -> u64 {
+        self.next_stream.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// 스트림 작업을 등록해 `stop_stream`으로 멈출 수 있게 한다.
+    pub fn track_stream(&self, id: u64, handle: tokio::task::AbortHandle) {
+        self.streams.lock().unwrap_or_else(|e| e.into_inner()).insert(id, handle);
+    }
+
+    /// 끝난 스트림을 목록에서 뺀다.
+    pub fn untrack_stream(&self, id: u64) {
+        self.streams.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+    }
+
+    /// 스트림 작업을 멈춘다. 이미 끝났으면 아무것도 하지 않는다.
+    pub fn stop_stream(&self, id: u64) {
+        if let Some(handle) = self.streams.lock().unwrap_or_else(|e| e.into_inner()).remove(&id) {
+            handle.abort();
+        }
     }
 }
 

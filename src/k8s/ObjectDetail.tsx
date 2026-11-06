@@ -67,6 +67,8 @@ interface Props {
   onRunPlugin?: (command: string, title: string) => void;
   /** 플러그인 키를 받는 목록·상세 상자. 없으면 이 상세 안에서만 받는다 */
   pluginHost?: RefObject<HTMLElement>;
+  /** 다른 탭이 이 Pod의 셸을 열라고 부탁했다: 셸 탭으로 시작해 그 컨테이너로 확인 단계를 띄운다 */
+  openShell?: { container: string | null };
 }
 
 /** 사용량 한 칸: 값 아래에 요청·제한과 그 대비 비율 */
@@ -102,7 +104,7 @@ function Links({ title, links, kinds, onOpen }: { title: string; links: K8sLink[
           return (
             <li key={l.uid}>
               {kind ? (
-                <button className="link" onClick={() => onOpen({ kind, namespace: kind.namespaced ? l.namespace : null, name: l.name })}>
+                <button className="link tone-nav" onClick={() => onOpen({ kind, namespace: kind.namespaced ? l.namespace : null, name: l.name })}>
                   {label}
                 </button>
               ) : (
@@ -135,7 +137,7 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, containerUsage, usage, c
               <dd>
                 {k === "node" && node ? (
                   // 노드는 소유자 링크처럼 이름을 눌러 연다
-                  <button className="link mono" aria-label={openNode(node)} title={openNode(node)} onClick={() => onOpen({ kind: NODES, namespace: null, name: node })}>
+                  <button className="link mono tone-nav" aria-label={openNode(node)} title={openNode(node)} onClick={() => onOpen({ kind: NODES, namespace: null, name: node })}>
                     {node}
                   </button>
                 ) : (
@@ -272,7 +274,7 @@ function Annotation({ name, value }: { name: string; value: string }) {
         </div>
       )}
       {long && (
-        <button className="link" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <button className="link tone-secondary" aria-expanded={open} onClick={() => setOpen(!open)}>
           {open ? ANNOTATION_FOLD_LABEL : annotationExpand(value.length)}
         </button>
       )}
@@ -296,8 +298,8 @@ function prettyJson(value: string): string | null {
 
 /** 객체 하나의 상세(요약·YAML). 소유자·자식·노드 링크는 onOpen으로 상세 스택에 쌓는다. */
 export function ObjectDetail({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, onBack, onClose,
-  onOpenIam, now, widthPct = DETAIL_PCT, onChange, rolloutProgress, appliedChange, shellNamespace, usageIndex, plugins, onRunPlugin, pluginHost }: Props) {
-  const [tab, setTab] = useState<"summary" | "yaml" | "logs" | "shell" | "describe" | "relations">("summary");
+  onOpenIam, now, widthPct = DETAIL_PCT, onChange, rolloutProgress, appliedChange, shellNamespace, usageIndex, plugins, onRunPlugin, pluginHost, openShell }: Props) {
+  const [tab, setTab] = useState<"summary" | "yaml" | "logs" | "shell" | "describe" | "relations">(openShell ? "shell" : "summary");
   // 노드 셸: 변경 틀로 디버그 Pod를 만들고 나면 그 Pod에 들어가는 터미널을 연다
   const [nodeShell, setNodeShell] = useState<{ namespace: string; pod: string } | null>(null);
   const seenChange = useRef(appliedChange);
@@ -363,13 +365,13 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
     <aside className="k8s-detail" aria-label={DETAIL_LABEL} style={{ width: `${widthPct}%` }} ref={aside}>
       <div className="k8s-detail-head">
         {onBack && (
-          <button className="icon" aria-label={BACK} title={BACK} onClick={onBack}>
+          <button className="icon tone-nav" aria-label={BACK} title={BACK} onClick={onBack}>
             ‹
           </button>
         )}
         <b>{objectRef.kind.kind}</b>
         <span className="mono k8s-wrap">{objectRef.namespace ? `${objectRef.namespace}/` : ""}{objectRef.name}</span>
-        <button className="icon k8s-push" aria-label={CLOSE} title={CLOSE} onClick={onClose}>
+        <button className="icon k8s-push tone-ghost" aria-label={CLOSE} title={CLOSE} onClick={onClose}>
           ✕
         </button>
       </div>
@@ -391,7 +393,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
             <span className="k8s-toolbar-slot" ref={setEditSlot} />
           ) : (
             <button
-              className="btn small tone-primary"
+              className="btn small tone-secondary"
               data-k8s-action="edit"
               disabled={!!editDenied}
               title={editDenied}
@@ -445,6 +447,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
               containers={logContainers.filter((c) => !c.init)}
               rules={rules.data}
               visible={shellTab}
+              start={openShell}
             />
           </div>
         )}

@@ -1,7 +1,7 @@
 import { memo, useState } from "react";
 import { PreviewFooter } from "./PreviewFooter";
 import { CallList, ConfirmField, ImpactList, ReversibleNote, useSheetFocus, WarningList } from "./previewParts";
-import type { ChangePreview } from "./types";
+import { iamChangeTone, type ChangePreview } from "./types";
 import type { PendingChange } from "./useIamChange";
 
 interface Props {
@@ -39,6 +39,7 @@ function Sheet({ pending, onApply, onRetry, onCancel }: Props) {
           {preview?.confirmText && <ConfirmField required={preview.confirmText} typed={typed} onTyped={setTyped} locked={applying} />}
         </div>
         <PreviewFooter
+          applyTone={undoOf ? "caution" : iamChangeTone(pending.change)}
           gated={preview}
           phase={phase}
           error={error}

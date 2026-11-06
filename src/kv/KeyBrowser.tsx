@@ -112,7 +112,7 @@ export function KeyBrowser({ target, overview, openKey, onOpenKey, active }: Pro
             <small className="dim">{t.PATTERN_LABEL}</small>
             <input className="field-input mono" aria-label={t.PATTERN_LABEL} value={patternInput} onChange={(e) => setPatternInput(e.target.value)} spellCheck={false} autoComplete="off" />
           </label>
-          <button type="submit" className="btn small">
+          <button type="submit" className="btn small tone-refresh">
             {t.PATTERN_READ}
           </button>
         </form>
@@ -134,7 +134,7 @@ export function KeyBrowser({ target, overview, openKey, onOpenKey, active }: Pro
       <div className="kv-status">
         <span>{t.KEYS_READ(keys.length, total)}</span>
         {scan.data && (more ? (
-          <button type="button" className="btn small" disabled={scan.isFetchingNextPage} onClick={() => void scan.fetchNextPage()}>
+          <button type="button" className="btn small tone-secondary" disabled={scan.isFetchingNextPage} onClick={() => void scan.fetchNextPage()}>
             {scan.isFetchingNextPage ? t.READING : t.MORE}
           </button>
         ) : (

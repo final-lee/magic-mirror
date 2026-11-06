@@ -115,13 +115,13 @@ export function ManifestEditor({ conn, kind, mode, namespace, name, initialYaml,
         )}
         {message && <p role="status">{message}</p>}
         <div className="foot">
-          <button className="btn plain" onClick={close}>
+          <button className="btn plain tone-ghost" onClick={close}>
             닫기
           </button>
-          <button className="btn plain" disabled={busy || !loaded} onClick={() => void run(true)}>
+          <button className="btn plain tone-primary" disabled={busy || !loaded} onClick={() => void run(true)}>
             검사
           </button>
-          <button className="btn primary" disabled={busy || !loaded} onClick={() => void run(false)}>
+          <button className={`btn plain ${mode === "edit" ? "tone-primary" : "tone-create"}`} disabled={busy || !loaded} onClick={() => void run(false)}>
             {mode === "edit" ? "저장" : "만들기"}
           </button>
         </div>

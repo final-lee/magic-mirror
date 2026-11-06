@@ -29,7 +29,7 @@ function show(n: WfNode, act = vi.fn().mockResolvedValue(null), extra: Partial<P
 
 test("실패한 노드 하나만 Retry하면 id 선택자와 바꾼 파라미터를 보낸다", async () => {
   const act = show(node("job-node-1", { phase: "Failed" }));
-  fireEvent.click(screen.getByRole("button", { name: "이 노드만 Retry" }));
+  fireEvent.click(screen.getByRole("button", { name: "이 노드만 Retry…" }));
   fireEvent.change(screen.getByDisplayValue("alice"), { target: { value: "bob" } });
   fireEvent.click(screen.getByRole("button", { name: "적용" }));
   await waitFor(() =>
@@ -39,7 +39,7 @@ test("실패한 노드 하나만 Retry하면 id 선택자와 바꾼 파라미터
 
 test("실패하면 대화상자에 서버 메시지를 보이고 닫지 않는다", async () => {
   show(node("n", { phase: "Failed" }), vi.fn().mockRejectedValue({ kind: "other", message: "충돌했어요" }));
-  fireEvent.click(screen.getByRole("button", { name: "이 노드만 Retry" }));
+  fireEvent.click(screen.getByRole("button", { name: "이 노드만 Retry…" }));
   fireEvent.click(screen.getByRole("button", { name: "적용" }));
   expect(await screen.findByText("충돌했어요")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "다시 시도" })).toBeInTheDocument();
@@ -57,7 +57,7 @@ test("Suspend 노드는 출력 파라미터를 채워 setOutputs 다음에 resum
       ],
     }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "값 넣고 이어 가기" }));
+  fireEvent.click(screen.getByRole("button", { name: "값 넣고 이어 가기…" }));
   expect(screen.getByDisplayValue("approve")).toBeInTheDocument();
   fireEvent.change(screen.getByDisplayValue("approve"), { target: { value: "reject" } });
   fireEvent.change(screen.getByLabelText("note"), { target: { value: "맞지 않아요" } });
@@ -76,7 +76,7 @@ test("setOutputs가 실패하면 resume은 보내지 않는다", async () => {
     node("approval", { type: "Suspend", phase: "Running", podName: null, outputs: [{ name: "x", value: "1" }] }),
     vi.fn().mockRejectedValue({ kind: "other", message: "거절" }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "값 넣고 이어 가기" }));
+  fireEvent.click(screen.getByRole("button", { name: "값 넣고 이어 가기…" }));
   fireEvent.click(screen.getByRole("button", { name: "적용" }));
   expect(await screen.findByText("거절")).toBeInTheDocument();
   expect(act).toHaveBeenCalledTimes(1);
@@ -99,7 +99,7 @@ test("실행 중 노드의 Stop은 id 선택자로 보내고 prod면 워크플�
       onTokenError={vi.fn()}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "노드 Stop" }));
+  fireEvent.click(screen.getByRole("button", { name: "노드 Stop…" }));
   expect(screen.getByRole("button", { name: "적용" })).toBeDisabled();
   fireEvent.change(screen.getByLabelText(/확인하려면/), { target: { value: "prod-job" } });
   fireEvent.click(screen.getByRole("button", { name: "적용" }));

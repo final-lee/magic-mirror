@@ -1,5 +1,6 @@
 import { useSheetFocus } from "../../iam/previewParts";
 import { PreviewBody } from "../ChangeFlow";
+import { changeTone } from "../changeTone";
 import { changeTitle } from "./changes";
 import { EffectView } from "./EffectView";
 import * as t from "./text";
@@ -57,17 +58,17 @@ export function RbacBatchDialog({ batch, api }: Props) {
             {closed ? t.BATCH_CLOSE : t.BATCH_CANCEL}
           </button>
           {closed && !batch.undo && anyApplied && (
-            <button className="btn tone-warn" onClick={api.undoApplied}>
+            <button className="btn plain tone-caution" onClick={api.undoApplied}>
               {t.BATCH_UNDO_APPLIED}
             </button>
           )}
           {!closed && (batch.stale || unplanned) && (
-            <button className="btn tone-secondary" disabled={applying || loading} onClick={api.retry}>
+            <button className="btn plain tone-refresh" disabled={applying || loading} onClick={api.retry}>
               {t.BATCH_RETRY}
             </button>
           )}
           {!closed && (
-            <button className="btn plain tone-primary" disabled={!ready || applying} onClick={api.apply}>
+            <button className={`btn plain tone-${changeTone(batch.items.filter((item) => item.status === "pending"), batch.undo)}`} disabled={!ready || applying} onClick={api.apply}>
               {applying ? t.BATCH_APPLYING : t.BATCH_APPLY(batch.items.length)}
             </button>
           )}

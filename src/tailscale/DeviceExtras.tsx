@@ -65,7 +65,7 @@ export function DeviceExtras({ tailnet, ids, close }: { tailnet: string; ids: st
     <div className="awc-panel">
       <div className="ts-panel-head">
         <h3>{t.TITLE}</h3>
-        <button className="btn small" onClick={close}>✕</button>
+        <button className="btn small tone-ghost" aria-label={t.CLOSE} onClick={close}>✕</button>
       </div>
       {result && <pre role="status">{result}</pre>}
       <section>
@@ -96,8 +96,8 @@ export function DeviceExtras({ tailnet, ids, close }: { tailnet: string; ids: st
           </label>
         </div>
         <div className="awc-editor-opts">
-          <button className="btn small" disabled={!attributes.data} onClick={() => build(false)}>{t.SET}</button>
-          <button className="btn small" disabled={!attributes.data} onClick={() => build(true)}>{t.DELETE}</button>
+          <button className="btn small tone-primary" disabled={!attributes.data} onClick={() => build(false)}>{t.SET}</button>
+          <button className="btn small tone-danger" disabled={!attributes.data} onClick={() => build(true)}>{t.DELETE}</button>
         </div>
         {error && <div className="err">{error}</div>}
       </section>
@@ -116,7 +116,7 @@ export function DeviceExtras({ tailnet, ids, close }: { tailnet: string; ids: st
               <input type="checkbox" checked={multiUse} onChange={(e) => setMultiUse(e.target.checked)} />
               {t.MULTI_USE}
             </label>
-            <button className="btn small" onClick={() => setPlan({
+            <button className="btn small tone-create" onClick={() => setPlan({
               action: "createInvite", id: ids[0], body: { ...(email ? { email } : {}), allowExitNode, multiUse },
               before: null, call: `POST /device/${encodeURIComponent(ids[0])}/device-invites`,
             })}>{t.CREATE}</button>
@@ -125,14 +125,14 @@ export function DeviceExtras({ tailnet, ids, close }: { tailnet: string; ids: st
           {(invites.data ?? []).map((invite) => (
             <p key={String(invite.id)}>
               {String(invite.email ?? "-")}
-              <button className="btn small" onClick={() => setPlan({
+              <button className="btn small tone-primary" onClick={() => setPlan({
                 action: "resendInvite", id: String(invite.id), body: null, before: invite,
                 call: `POST /device-invites/${encodeURIComponent(String(invite.id))}/resend`,
               })}>{t.RESEND}</button>
-              <button className="btn small" onClick={() => setPlan({
+              <button className="btn small tone-danger" onClick={() => setPlan({
                 action: "deleteInvite", id: String(invite.id), body: null, before: invite,
                 call: `DELETE /device-invites/${encodeURIComponent(String(invite.id))}`,
-              })}>{t.DELETE}</button>
+              })}>{t.DELETE_INVITE}</button>
             </p>
           ))}
         </>
@@ -154,6 +154,7 @@ function ExtraDialog({ tailnet, plan, cancel, done }: { tailnet: string; plan: P
   const [typed, setTyped] = useState("");
   const { sheetRef, trapTab } = useModal(() => { if (!sending) cancel(); });
   const expected = plan.action === "deleteInvite" ? plan.id : plan.confirm;
+  const tone = plan.action === "createInvite" ? "create" : plan.action === "deleteInvite" || plan.confirm ? "danger" : "primary";
   const apply = async () => {
     setSending(true);
     try {
@@ -172,8 +173,8 @@ function ExtraDialog({ tailnet, plan, cancel, done }: { tailnet: string; plan: P
         {expected && <label>{expected}<input value={typed} onChange={(e) => setTyped(e.target.value)} /></label>}
         {error && <div className="err">{error}</div>}
         <div className="foot">
-          <button className="btn small" disabled={sending} onClick={cancel}>{t.CANCEL}</button>
-          <button className="btn small" disabled={sending || (!!expected && typed !== expected)}
+          <button className="btn small tone-ghost" disabled={sending} onClick={cancel}>{t.CANCEL}</button>
+          <button className={`btn small tone-${tone}`} disabled={sending || (!!expected && typed !== expected)}
             onClick={() => void apply()}>{t.APPLY}</button>
         </div>
       </div>

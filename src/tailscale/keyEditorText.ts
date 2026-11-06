@@ -1,5 +1,7 @@
 export const CREATE = "키 만들기";
 export const EDIT = "키 편집";
+export const CREATE_OPEN = "키 만들기…";
+export const EDIT_OPEN = "키 편집…";
 export const TYPE = "종류";
 export const DESCRIPTION = "설명";
 export const REUSABLE = "재사용";

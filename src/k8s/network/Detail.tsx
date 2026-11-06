@@ -21,7 +21,7 @@ export function NetDetail({ title, subtitle, widthPct, onClose, toolbar, childre
       <div className="k8s-detail-head">
         <b>{title}</b>
         <span className="mono k8s-wrap">{subtitle}</span>
-        <button className="icon k8s-push" aria-label={CLOSE} title={CLOSE} onClick={onClose}>
+        <button className="icon k8s-push tone-ghost" aria-label={CLOSE} title={CLOSE} onClick={onClose}>
           ✕
         </button>
       </div>

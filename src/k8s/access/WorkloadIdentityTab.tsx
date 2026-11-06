@@ -40,7 +40,7 @@ function Status({ check }: { check: Check }) {
 function RoleLink({ arn, onOpenIam }: { arn: string; onOpenIam?: (arn: string) => void }) {
   if (!onOpenIam) return <span className="mono">{roleName(arn)}</span>;
   return (
-    <button className="link mono" title={`${OPEN_IAM}: ${arn}`} onClick={(e) => {
+    <button className="link mono tone-nav" title={`${OPEN_IAM}: ${arn}`} onClick={(e) => {
       e.stopPropagation();
       onOpenIam(arn);
     }}>
@@ -137,7 +137,7 @@ export function WorkloadIdentityTab({ target, context, ssoProfile, live, onOpenI
           <div className="k8s-detail-head">
             <b>{H_SA}</b>
             <span className="mono k8s-wrap">{key(chosen)}</span>
-            <button className="icon k8s-push" aria-label={CLOSE} title={CLOSE} onClick={() => setSelected(null)}>
+            <button className="icon k8s-push tone-ghost" aria-label={CLOSE} title={CLOSE} onClick={() => setSelected(null)}>
               ✕
             </button>
           </div>

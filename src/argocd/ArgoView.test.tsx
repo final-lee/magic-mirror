@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { dispatchKey } from "../keymap/registry";
 import { renderWithClient } from "../test/utils";
 import { argocdApi } from "./api";
+import { changeApi } from "./change/api";
 import { ArgoView } from "./ArgoView";
 import {
   ARGO_APPS_LABEL, ARGO_CLUSTER_FILTER, ARGO_ENV_GROUP, ARGO_ENV_SOURCE, ARGO_GROUP_BY, ARGO_GROUP_THEN, ARGO_HEALTH_GROUP, ARGO_IN_CLUSTER, ARGO_LABEL_FILTER, ARGO_NO_APPS,
@@ -11,7 +12,9 @@ import {
 import type { ArgoApp, ArgoAppRow, ArgoAppSetRow, ArgoViewState } from "./types";
 
 vi.mock("./api", () => ({ argocdApi: { apps: vi.fn(), appsets: vi.fn(), app: vi.fn(), tree: vi.fn(), refresh: vi.fn(), sync: vi.fn() } }));
+vi.mock("./change/api", () => ({ changeApi: { preview: vi.fn(), apply: vi.fn(), can: vi.fn() } }));
 const m = vi.mocked(argocdApi);
+const changes = vi.mocked(changeApi);
 const URL = "https://argocd.example";
 const NOW = Date.parse("2026-10-30T12:00:00Z");
 
@@ -22,7 +25,7 @@ const appRow = (name: string, values: Record<string, string> = {}, labels: Recor
   values: { sync: "Synced", health: "Healthy", project: "default", destination: "in-cluster", destNamespace: "web", revision: "0123456", ...values },
   labels,
 });
-const setRow = (name: string, over: Partial<ArgoAppSetRow> = {}): ArgoAppSetRow => ({ name, namespace: "argocd", status: null, message: null, generators: [], ...over });
+const setRow = (name: string, over: Partial<ArgoAppSetRow> = {}): ArgoAppSetRow => ({ name, namespace: "argocd", status: null, message: null, errorSince: null, generators: [], requeueSeconds: null, project: null, ...over });
 
 function setup(apps: ArgoAppRow[], sets: ArgoAppSetRow[] = [], props: Partial<Parameters<typeof ArgoView>[0]> = {}) {
   m.apps.mockResolvedValue(apps);
@@ -248,6 +251,19 @@ describe("grouping by ApplicationSet", () => {
     expect(within(groups[4]).getByText(argoAppCount(1))).toBeInTheDocument();
     // 묶음 순서대로 앱이 따라오고, 묶음 안에서는 문제 앱이 먼저
     expect(names()).toEqual(["web-b", "web-a", "db-a", "orphan", "solo"]);
+  });
+
+  test("an SCM API error is summarised with when it started and how often it retries; the raw text folds away and 다시 시도 previews an ApplicationSet refresh", async () => {
+    const raw = "error listing repos: error listing pull requests for acme/web: GET https://api.github.com/repos/acme/web/pulls?per_page=100: 502 Server Error []";
+    changes.preview.mockReturnValue(new Promise(() => {}));
+    await ready([appRow("solo")], [setRow("previews", { generators: ["pullRequest"], status: "Error", message: raw, errorSince: "2026-10-30T11:58:00Z", requeueSeconds: 60, project: "web" })]);
+    const card = cards()[0];
+    expect(within(card).getByText("GitHub API가 502 오류를 돌려줬어요 (pull request 목록)")).toBeInTheDocument();
+    expect(within(card).getByText("2m 전부터")).toBeInTheDocument();
+    expect(within(card).getByText("1분마다 다시 시도 중")).toBeInTheDocument();
+    expect(within(card).getByText(raw).closest("details")).not.toHaveAttribute("open");
+    fireEvent.click(within(card).getByRole("button", { name: "다시 시도" }));
+    await waitFor(() => expect(changes.preview).toHaveBeenCalledWith(URL, { namespace: "argocd", name: "previews", project: "web", env: "unknown" }, { kind: "appSetRefresh" }));
   });
 
   test("cards are colored by their worst app: red for errors (or an ApplicationSet Error), yellow for other problems, blue otherwise", async () => {
@@ -935,4 +951,19 @@ describe("remembered filters and grouping", () => {
       thenBy: "env",
     });
   });
+});
+
+test("matrix respects list filters and returns to the filtered list after selecting a cell", async () => {
+  await ready([
+    appRow("api-dev", { destination: "cluster-a", sync: "OutOfSync" }),
+    appRow("api-prd", { destination: "cluster-b", sync: "OutOfSync" }),
+    appRow("web-dev", { destination: "cluster-a" }),
+  ]);
+  fireEvent.click(chip(ARGO_SYNC_GROUP, "OutOfSync"));
+  fireEvent.click(screen.getByRole("button", { name: "플릿 매트릭스" }));
+  const devRow = screen.getByRole("row", { name: /^dev / });
+  fireEvent.click(within(devRow).getByRole("button"));
+  expect(screen.getByRole("button", { name: "목록", pressed: true })).toBeInTheDocument();
+  expect(names()).toEqual(["api-dev"]);
+  expect(chipN(ARGO_ENV_GROUP, "dev")).toHaveAttribute("aria-pressed", "true");
 });

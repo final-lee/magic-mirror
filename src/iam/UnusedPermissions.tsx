@@ -73,7 +73,7 @@ export function UnusedPermissions({ profile, arn, onOpenPolicy, onOpenGroup, onF
         <div className="up-intro">
           <p>AWS가 기록한 마지막 사용 시각을 보고, 허용받고도 쓰지 않은 서비스와 정책을 찾아요.</p>
           <p className="dim">AWS가 집계하는 동안 10~30초 걸릴 수 있어요.</p>
-          <button className="btn primary" disabled={q.isFetching} onClick={load}>
+          <button className="btn plain tone-refresh" disabled={q.isFetching} onClick={load}>
             {q.isFetching ? "불러오는 중…" : "불러오기"}
           </button>
           {progress}
@@ -92,7 +92,7 @@ export function UnusedPermissions({ profile, arn, onOpenPolicy, onOpenGroup, onF
         <span className="dim">
           최근 {data.trackingDays}일 사용 기록{completed && ` · 집계 ${completed}`}
         </span>
-        <button className="btn small" disabled={q.isFetching} onClick={load}>
+        <button className="btn small tone-refresh" disabled={q.isFetching} onClick={load}>
           {q.isFetching ? "불러오는 중…" : "다시 불러오기"}
         </button>
       </div>
@@ -171,16 +171,16 @@ export function UnusedPermissions({ profile, arn, onOpenPolicy, onOpenGroup, onF
       ) : (
         <div className="up-draft">
           <div className="iam-json-bar">
-            <button className="btn small" aria-label="초안 복사" onClick={() => void desktop.copy(pretty)}>
+            <button className="btn small tone-secondary" aria-label="초안 복사" onClick={() => void desktop.copy(pretty)}>
               복사
             </button>
             <button
-              className="btn small"
+              className="btn small tone-secondary"
               disabled={!!blockedReason}
               title={blockedReason ?? undefined}
               onClick={() => onFix({ op: "putInlinePolicy", target: arn, name: draftName(), document: pretty })}
             >
-              인라인 정책으로 저장
+              인라인 정책으로 저장…
             </button>
           </div>
           <pre className="raw" data-testid="draft-json">
@@ -224,8 +224,8 @@ function PolicyRow({
       </td>
       <td className="dim">{policy.reason}</td>
       <td className="up-act">
-        <button className="btn small" disabled={!!policy.via || !!blockedReason} title={blockedReason ?? undefined} onClick={() => onFix(change)}>
-          {inline ? "삭제" : "떼기"}
+        <button className="btn small tone-danger" disabled={!!policy.via || !!blockedReason} title={blockedReason ?? undefined} onClick={() => onFix(change)}>
+          {inline ? "삭제…" : "떼기…"}
         </button>
         {policy.via && (
           <span className="dim up-via">

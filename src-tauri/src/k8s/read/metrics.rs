@@ -181,7 +181,7 @@ pub fn owner_chain(namespace: &str, first: Option<Owner>, parents: &Parents) -> 
 }
 
 /// 사용량 읽기 한 번의 결과: 읽었거나, 읽지 못하는 까닭(`Unavailable`), 아니면 오류(연결·SSO 만료 등)
-async fn read<T>(fut: impl Future<Output = Result<T, kube::Error>>, resource: &str, endpoint: Endpoint) -> Result<Result<T, Unavailable>, AppError> {
+pub(crate) async fn read<T>(fut: impl Future<Output = Result<T, kube::Error>>, resource: &str, endpoint: Endpoint) -> Result<Result<T, Unavailable>, AppError> {
     let result = tokio::time::timeout(REQUEST_TIMEOUT, fut).await.map_err(|_| describe(&Failure::Unreachable, endpoint))?;
     match result {
         Ok(v) => Ok(Ok(v)),
@@ -223,7 +223,7 @@ async fn list_meta(api: &Api<DynamicObject>, lp: &ListParams, resource: &str, en
     Ok(out)
 }
 
-fn scoped_api(client: &Client, group: &str, version: &str, kind: &str, plural: &str, namespace: Option<&str>) -> Api<DynamicObject> {
+pub(crate) fn scoped_api(client: &Client, group: &str, version: &str, kind: &str, plural: &str, namespace: Option<&str>) -> Api<DynamicObject> {
     let ar = ApiResource::from_gvk_with_plural(&GroupVersionKind::gvk(group, version, kind), plural);
     match namespace.filter(|n| !n.is_empty()) {
         Some(ns) => Api::namespaced_with(client.clone(), ns, &ar),

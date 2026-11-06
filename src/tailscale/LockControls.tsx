@@ -6,6 +6,7 @@ import { useModal } from "../iam/useModal";
 import { tailscaleApi } from "./api";
 import type { TsLock } from "./keyTypes";
 import * as t from "./lockControlsText";
+import { lockTone } from "./tone";
 
 interface Operation {
   kind: string;
@@ -13,6 +14,7 @@ interface Operation {
   command: string;
   confirm?: string;
   init?: { keys: string[]; count: number };
+  revert?: boolean;
 }
 const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
 
@@ -57,7 +59,7 @@ function LockSheet({ operation, close, done }: { operation: Operation; close: ()
                 {secrets.map((secret) => (
                   <li key={secret}>
                     <code>{secret}</code>{" "}
-                    <button className="btn small" onClick={() => void desktop.copy(secret).then(
+                    <button className="btn small tone-secondary" onClick={() => void desktop.copy(secret).then(
                       () => setCopied(secret), (e) => setError(errorMessage(e))
                     )}>{copied === secret ? t.COPIED : t.COPY}</button>
                   </li>
@@ -67,9 +69,9 @@ function LockSheet({ operation, close, done }: { operation: Operation; close: ()
           </section>
         )}
         {result !== null && !operation.init && <pre>{result}</pre>}
-        <button className="btn small" onClick={dismiss} disabled={busy}>{t.CANCEL}</button>
+        <button className="btn small tone-ghost" onClick={dismiss} disabled={busy}>{t.CANCEL}</button>
         {result === null && (
-          <button className="btn small" onClick={() => void apply()} disabled={busy || (!!operation.confirm && typed !== operation.confirm)}>
+          <button className={`btn small tone-${lockTone(operation.kind, operation.revert)}`} onClick={() => void apply()} disabled={busy || (!!operation.confirm && typed !== operation.confirm)}>
             {t.CONFIRM}
           </button>
         )}
@@ -90,6 +92,7 @@ export function LockControls({ lock }: { lock: TsLock }) {
   const [undo, setUndo] = useState<Operation | null>(null);
   const trusted = lock.enabled && lock.thisKeyTrusted === true;
   const initialKeys = [...new Set([lock.publicKey ?? "", ...extraKeys.split(/\s+/)].filter(Boolean))];
+  const untrusted = trusted ? undefined : t.NOT_TRUSTED;
   const initCount = Number(count);
   const canInit = !!lock.publicKey && initialKeys.every((value) => /^tlpub:[0-9a-f]{64}$/i.test(value))
     && Number.isInteger(initCount) && initCount > 0 && initCount <= 0xffffffff;
@@ -100,7 +103,7 @@ export function LockControls({ lock }: { lock: TsLock }) {
       <h3>{t.HISTORY}</h3>
       <p className="ts-desc">{lock.enabled ? t.HISTORY_DESC : t.HISTORY_DISABLED}</p>
       <div className="ts-connect-acts">
-        <button className="btn small" disabled={!lock.enabled} onClick={() => void getHistory()}>{t.HISTORY}</button>
+        <button className="btn small tone-refresh" disabled={!lock.enabled} title={lock.enabled ? undefined : t.HISTORY_DISABLED} onClick={() => void getHistory()}>{t.HISTORY}</button>
       </div>
       {history && <pre className="raw">{history}</pre>}
     </section>
@@ -125,13 +128,13 @@ export function LockControls({ lock }: { lock: TsLock }) {
           </label>
         </div>
         <div className="ts-connect-acts">
-          <button className="btn small" disabled={!canInit} onClick={() => setOperation({
+          <button className="btn small tone-warn" disabled={!canInit} title={lock.publicKey ? undefined : t.INIT_NO_KEY} onClick={() => setOperation({
             kind: "initialize",
             value: "",
             command: `tailscale lock init --confirm --gen-disablements=${initCount} ${initialKeys.map(quote).join(" ")}`,
             confirm: "init",
             init: { keys: initialKeys, count: initCount },
-          })}>{t.INIT}</button>
+          })}>{t.INIT_OPEN}</button>
         </div>
       </section>
     )}
@@ -149,7 +152,7 @@ export function LockControls({ lock }: { lock: TsLock }) {
                   <td>{peer.name}</td>
                   <td>{peer.nodeKey ? <code>{peer.nodeKey}</code> : t.PEER_KEY_MISSING}</td>
                   <td className="end">
-                    <button className="btn small" aria-label={t.signPeer(peer.name)} disabled={!trusted || !peer.nodeKey}
+                    <button className="btn small tone-primary" aria-label={t.signPeer(peer.name)} disabled={!trusted || !peer.nodeKey} title={untrusted}
                       onClick={() => {
                         if (peer.nodeKey) open("sign-node", peer.nodeKey, `tailscale lock sign ${quote(peer.nodeKey)}`);
                       }}>{t.SIGN}</button>
@@ -173,7 +176,7 @@ export function LockControls({ lock }: { lock: TsLock }) {
           </label>
         </div>
         <div className="ts-connect-acts">
-          <button className="btn small" disabled={!trusted || !node}
+          <button className="btn small tone-primary" disabled={!trusted || !node} title={untrusted}
             onClick={() => open("sign-node", node, `tailscale lock sign ${quote(node)}`)}>{t.SIGN}</button>
         </div>
         <h4>{t.TRUST_GROUP}</h4>
@@ -184,11 +187,11 @@ export function LockControls({ lock }: { lock: TsLock }) {
           </label>
         </div>
         <div className="ts-connect-acts">
-          <button className="btn small" disabled={!trusted || !key}
+          <button className="btn small tone-create" disabled={!trusted || !key} title={untrusted}
             onClick={() => open("trust-key", key, `tailscale lock add ${quote(key)}`)}>{t.ADD}</button>
-          <button className="btn small" disabled={!trusted || !key}
+          {undo && <button className={`btn small tone-${lockTone(undo.kind, true)}`} disabled={!trusted} title={untrusted} onClick={() => setOperation(undo)}>{t.UNDO}</button>}
+          <button className="btn small tone-danger" disabled={!trusted || !key} title={untrusted}
             onClick={() => open("untrust-key", key, `tailscale lock remove ${quote(key)}`, key)}>{t.REMOVE}</button>
-          {undo && <button className="btn small" disabled={!trusted} onClick={() => setOperation(undo)}>{t.UNDO}</button>}
         </div>
         <h4>{t.RECOVERY}</h4>
         <p className="ts-hint">{t.RECOVERY_HINT}</p>
@@ -199,12 +202,12 @@ export function LockControls({ lock }: { lock: TsLock }) {
           </label>
         </div>
         <div className="ts-connect-acts">
-          <button className="btn small" disabled={!trusted || !recovery} onClick={() => open(
+          <button className="btn small tone-danger" disabled={!trusted || !recovery} title={untrusted} onClick={() => open(
             "revoke-start", recovery, `tailscale lock revoke-keys ${recovery.trim().split(/\s+/).map(quote).join(" ")}`, "revoke"
           )}>{t.START}</button>
-          <button className="btn small" disabled={!trusted || !recovery}
+          <button className="btn small tone-danger" disabled={!trusted || !recovery} title={untrusted}
             onClick={() => open("revoke-cosign", recovery, `tailscale lock revoke-keys --cosign ${quote(recovery)}`)}>{t.COSIGN}</button>
-          <button className="btn small" disabled={!trusted || !recovery}
+          <button className="btn small tone-danger" disabled={!trusted || !recovery} title={untrusted}
             onClick={() => open("revoke-finish", recovery, `tailscale lock revoke-keys --finish ${quote(recovery)}`, "revoke")}>{t.FINISH}</button>
         </div>
         <h4>{t.OFF_GROUP}</h4>
@@ -216,18 +219,18 @@ export function LockControls({ lock }: { lock: TsLock }) {
           </label>
         </div>
         <div className="ts-connect-acts">
-          <button className="btn small" disabled={!lock.enabled}
+          <button className="btn small tone-warn" disabled={!lock.enabled}
             onClick={() => open("local-off", "", "tailscale lock local-disable", "local-disable")}>{t.LOCAL_OFF}</button>
-          <button className="btn small" disabled={!lock.enabled || !secret}
+          <button className="btn small tone-warn" disabled={!lock.enabled || !secret}
             onClick={() => open("tailnet-off", secret, `tailscale lock disable ${quote(secret)}`, "disable")}>{t.DISABLE}</button>
         </div>
       </section>
     )}
     {operation && <LockSheet operation={operation} close={() => { setOperation(null); setSecret(""); }} done={() => {
       if (operation.kind === "trust-key") {
-        setUndo({ kind: "untrust-key", value: operation.value, command: `tailscale lock remove ${quote(operation.value)}`, confirm: operation.value });
+        setUndo({ kind: "untrust-key", value: operation.value, command: `tailscale lock remove ${quote(operation.value)}`, confirm: operation.value, revert: true });
       } else if (operation.kind === "untrust-key") {
-        setUndo({ kind: "trust-key", value: operation.value, command: `tailscale lock add ${quote(operation.value)}` });
+        setUndo({ kind: "trust-key", value: operation.value, command: `tailscale lock add ${quote(operation.value)}`, revert: true });
       }
     }} />}
   </>;

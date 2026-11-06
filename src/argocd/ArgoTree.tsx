@@ -1,11 +1,16 @@
 import { ArgoBadge } from "./argoParts";
 import { ARGO_HEALTH_BADGE_TITLE, ARGO_HOOK, ARGO_NO_RESOURCES, ARGO_PRUNING, ARGO_SYNC_BADGE_TITLE, ARGO_TREE_LABEL } from "./text";
+import { ARGO_NODE_OPEN } from "./detail/text";
 import type { ArgoResource, ArgoTreeNode } from "./types";
 
 /** 트리 한 줄: 들여쓴 깊이와 보여 줄 값 */
 export interface TreeRow {
   key: string;
   depth: number;
+  /** 리소스를 가리키는 값(group/version/kind/namespace/name)과 트리 노드의 uid(트리에 없는 항목은 null) */
+  group: string;
+  version: string;
+  uid: string | null;
   kind: string;
   name: string;
   namespace: string | null;
@@ -55,6 +60,9 @@ export function buildTreeRows(nodes: ArgoTreeNode[], resources: ArgoResource[]):
     rows.push({
       key: node.uid,
       depth,
+      group: node.group,
+      version: node.version,
+      uid: node.uid,
       kind: node.kind,
       name: node.name,
       namespace: node.namespace,
@@ -78,6 +86,9 @@ export function buildTreeRows(nodes: ArgoTreeNode[], resources: ArgoResource[]):
     rows.push({
       key: `resource:${key}`,
       depth: 0,
+      group: r.group,
+      version: r.version,
+      uid: null,
       kind: r.kind,
       name: r.name,
       namespace: r.namespace,
@@ -93,14 +104,14 @@ export function buildTreeRows(nodes: ArgoTreeNode[], resources: ArgoResource[]):
 }
 
 /** 리소스 트리: 부모 → 자식으로 들여 쓰고, 노드의 Health와 Application의 Sync 상태를 함께 보인다. */
-export function ArgoTree({ nodes, resources }: { nodes: ArgoTreeNode[]; resources: ArgoResource[] }) {
+export function ArgoTree({ nodes, resources, onSelect, selectedKey = null }: { nodes: ArgoTreeNode[]; resources: ArgoResource[]; onSelect?: (row: TreeRow) => void; selectedKey?: string | null }) {
   const rows = buildTreeRows(nodes, resources);
   if (rows.length === 0) return <p className="dim">{ARGO_NO_RESOURCES}</p>;
   return (
     <div className="argo-tree" role="tree" aria-label={ARGO_TREE_LABEL}>
-      {rows.map((row) => (
-        <div key={row.key} className="argo-node" role="treeitem" aria-level={row.depth + 1} aria-selected={false} style={{ paddingLeft: `${row.depth * 20}px` }}>
-          <div className="argo-node-head">
+      {rows.map((row) => {
+        const head = (
+          <>
             <span className="dim">{row.kind}</span>
             <span className="mono k8s-wrap">{row.name}</span>
             {row.namespace && <span className="dim">{row.namespace}</span>}
@@ -108,15 +119,26 @@ export function ArgoTree({ nodes, resources }: { nodes: ArgoTreeNode[]; resource
             <ArgoBadge status={row.sync} title={ARGO_SYNC_BADGE_TITLE} />
             {row.hook && <span className="k8s-chip">{ARGO_HOOK}</span>}
             {row.requiresPruning && <span className="k8s-chip argo-chip-warn">{ARGO_PRUNING}</span>}
+          </>
+        );
+        return (
+          <div key={row.key} className="argo-node" role="treeitem" aria-level={row.depth + 1} aria-selected={row.key === selectedKey} style={{ paddingLeft: `${row.depth * 20}px` }}>
+            {onSelect ? (
+              <button type="button" className="argo-node-head argo-node-pick" title={ARGO_NODE_OPEN} onClick={() => onSelect(row)}>
+                {head}
+              </button>
+            ) : (
+              <div className="argo-node-head">{head}</div>
+            )}
+            {row.healthMessage && <div className="argo-pre dim">{row.healthMessage}</div>}
+            {row.info.map((line, i) => (
+              <div key={i} className="dim argo-pre">
+                {line}
+              </div>
+            ))}
           </div>
-          {row.healthMessage && <div className="argo-pre dim">{row.healthMessage}</div>}
-          {row.info.map((line, i) => (
-            <div key={i} className="dim argo-pre">
-              {line}
-            </div>
-          ))}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

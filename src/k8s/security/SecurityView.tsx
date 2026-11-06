@@ -147,7 +147,7 @@ export function SecurityView({ target, context, ssoProfile, live, setting, onSet
             <button className={`btn small tone-secondary${panel ? " on" : ""}`} aria-expanded={panel} title={CHECKS_PANEL_TITLE} onClick={() => setPanel((p) => !p)}>
               {CHECKS_PANEL}
             </button>
-            <button className="btn small tone-secondary" disabled={q.isFetching} onClick={refetch}>
+            <button className="btn small tone-refresh" disabled={q.isFetching} onClick={refetch}>
               {REFRESH}
             </button>
           </div>
@@ -160,7 +160,7 @@ export function SecurityView({ target, context, ssoProfile, live, setting, onSet
                 const open = !closed.has(g.check);
                 return (
                   <section key={g.check} className="sec-group" aria-label={title}>
-                    <button className="sec-group-head" aria-expanded={open} aria-label={GROUP_COLLAPSE(title, open)} title={GROUP_COLLAPSE(title, open)} onClick={() => toggleGroup(g.check)}>
+                    <button className="sec-group-head tone-secondary" aria-expanded={open} aria-label={GROUP_COLLAPSE(title, open)} title={GROUP_COLLAPSE(title, open)} onClick={() => toggleGroup(g.check)}>
                       <span aria-hidden="true">{open ? "▾" : "▸"}</span>
                       <SeverityChip severity={g.severity} />
                       <b>{title}</b>

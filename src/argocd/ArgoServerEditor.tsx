@@ -1,4 +1,6 @@
 import { useState, type FormEvent } from "react";
+import { SERVER_KUBE_CONTEXT, SERVER_KUBE_CONTEXT_NONE, serverKubeContextLabel } from "./ops/text";
+import type { KubeContext } from "./ops/types";
 import { normalizeUrl } from "./servers";
 import { SERVER_ADD, SERVER_DUPLICATE, SERVER_INVALID, SERVER_NAME, SERVER_NAME_PLACEHOLDER, SERVER_REMOVE, SERVER_URL, SERVER_URL_PLACEHOLDER, serverRemoveLabel } from "./text";
 import type { ArgocdServer } from "./types";
@@ -57,16 +59,33 @@ interface Props {
   servers: ArgocdServer[];
   onAdd: (server: ArgocdServer) => void;
   onRemove: (url: string) => void;
+  /** ArgoCD가 자기 클러스터(in-cluster)에 배포할 때 터미널이 붙을 kubeconfig context의 후보. 주면 서버마다 고르는 칸이 생긴다 */
+  kubeContexts?: KubeContext[];
+  onKubeContext?: (url: string, context: string | null) => void;
 }
 
-/** 서버 목록 편집: 줄마다 삭제, 아래에서 추가한다. */
-export function ArgoServerEditor({ servers, onAdd, onRemove }: Props) {
+/** 서버 목록 편집: 줄마다 삭제(와 in-cluster context 고르기), 아래에서 추가한다. */
+export function ArgoServerEditor({ servers, onAdd, onRemove, kubeContexts, onKubeContext }: Props) {
   return (
     <div className="argo-servers">
       <ul className="argo-server-list">
         {servers.map((s) => (
           <li key={s.url}>
             <b>{s.name}</b> <span className="dim mono">{s.url}</span>
+            {onKubeContext && (
+              <label className="k8s-field">
+                {SERVER_KUBE_CONTEXT}
+                <select aria-label={serverKubeContextLabel(s.name)} value={s.kubeContext ?? ""} onChange={(e) => onKubeContext(s.url, e.target.value || null)}>
+                  <option value="">{SERVER_KUBE_CONTEXT_NONE}</option>
+                  {s.kubeContext && !kubeContexts?.some((c) => c.name === s.kubeContext) && <option value={s.kubeContext}>{s.kubeContext}</option>}
+                  {kubeContexts?.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <button className="btn small tone-danger" aria-label={serverRemoveLabel(s.name)} onClick={() => onRemove(s.url)}>
               {SERVER_REMOVE}
             </button>

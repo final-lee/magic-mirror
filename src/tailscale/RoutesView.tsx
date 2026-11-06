@@ -53,7 +53,7 @@ function Routes({ tailnet, profile, region }: { tailnet: string; profile: string
       <div className="awc-bar">
         <h2 className="awc-title">{text.ROUTES_TITLE}</h2>
         <span className="awc-stat">{text.DEVICE} <b>{routers.length}</b></span>
-        <div className="awc-bar-end"><button className="btn small" onClick={() => void devices.refetch()}>{t.REFRESH}</button></div>
+        <div className="awc-bar-end"><button className="btn small tone-refresh" onClick={() => void devices.refetch()}>{t.REFRESH}</button></div>
       </div>
       <div className="awc-scroll">
         <div className="awc-filters">{text.ROUTES_DESCRIPTION}</div>
@@ -108,8 +108,8 @@ function RouteTable({ routers, busy, onApprove }: { routers: Device[]; busy: boo
               <td>{row.enabled ? row.label : text.PENDING}</td>
               <td>
                 {row.advertised && !row.enabled && (
-                  <button className="btn small" disabled={busy} onClick={() => onApprove(device, row.routes)}>
-                    {text.AUTHORIZE}
+                  <button className="btn small tone-create" disabled={busy} onClick={() => onApprove(device, row.routes)}>
+                    {text.AUTHORIZE_OPEN}
                   </button>
                 )}
               </td>

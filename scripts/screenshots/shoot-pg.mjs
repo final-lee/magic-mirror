@@ -13,7 +13,7 @@ export async function shootPg(page, out) {
   await page.screenshot({ path: `${out}/pg-privileges.png` });
   await page.getByRole('button', { name: '바꾸기', exact: true }).last().click();
   await page.getByRole('button', { name: /^analytics_reader · analytics:/ }).click();
-  await page.getByRole('button', { name: '미리보기', exact: true }).click();
+  await page.getByRole('button', { name: '미리보기…', exact: true }).click();
   await page.getByRole('list', { name: '실행할 SQL' }).waitFor();
   await page.screenshot({ path: `${out}/pg-preview.png` });
   await page.getByRole('button', { name: '취소', exact: true }).click();

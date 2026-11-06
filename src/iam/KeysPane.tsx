@@ -35,14 +35,14 @@ function KeyRow({ k, userName, onFix }: { k: AccessKeyInfo; userName: string; on
       <td>{where || <span className="dim">—</span>}</td>
       <td className="key-act">
         <button
-          className="btn small"
-          aria-label={`${k.id} ${active ? "비활성화" : "활성화"}`}
+          className="btn small tone-warn"
+          aria-label={`${k.id} ${active ? "비활성화…" : "활성화…"}`}
           onClick={() => onFix({ op: "setAccessKeyStatus", userName, accessKeyId: k.id, status: active ? "Inactive" : "Active" })}
         >
-          {active ? "비활성화" : "활성화"}
+          {active ? "비활성화…" : "활성화…"}
         </button>
-        <button className="btn small danger" aria-label={`${k.id} 삭제`} onClick={() => onFix({ op: "deleteAccessKey", userName, accessKeyId: k.id })}>
-          삭제
+        <button className="btn small tone-danger" aria-label={`${k.id} 삭제…`} onClick={() => onFix({ op: "deleteAccessKey", userName, accessKeyId: k.id })}>
+          삭제…
         </button>
       </td>
     </tr>

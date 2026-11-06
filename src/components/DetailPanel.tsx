@@ -25,7 +25,7 @@ export function DetailPanel({ detail, onShowRaw, onClose, actions, children }: {
           )}
           {detail.raw && (
             <button className="btn small tone-secondary" onClick={onShowRaw}>
-              원본 데이터 보기
+              원본 데이터 보기…
             </button>
           )}
           <button className="icon" aria-label="닫기" title="닫기" onClick={onClose}>

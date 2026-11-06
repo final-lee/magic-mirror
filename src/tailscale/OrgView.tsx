@@ -34,7 +34,7 @@ function Organization({ tailnet }: { tailnet: string }) {
           <b>{query.data?.length ?? 0}</b>
         </span>
         <div className="awc-bar-end">
-          <button className="btn small" onClick={() => void query.refetch()}>
+          <button className="btn small tone-refresh" onClick={() => void query.refetch()}>
             {t.REFRESH}
           </button>
         </div>
@@ -49,7 +49,7 @@ function Organization({ tailnet }: { tailnet: string }) {
             <input value={name} onChange={(e) => setName(e.target.value)} />
           </label>
           <button
-            className="btn small"
+            className="btn small tone-create"
             disabled={!name.trim()}
             onClick={() => setAction({ kind: "create", name: name.trim() })}
           >
@@ -72,7 +72,7 @@ function Organization({ tailnet }: { tailnet: string }) {
                   <td>{item.displayName}</td>
                   <td>{item.id}</td>
                   <td>
-                    <button className="btn small" onClick={() => setAction({ kind: "delete", tailnet: item })}>
+                    <button className="btn small tone-danger" onClick={() => setAction({ kind: "delete", tailnet: item })}>
                       {t.DELETE}
                     </button>
                   </td>
@@ -175,7 +175,7 @@ function OrgConfirmation({
               </>
             )}
             <button
-              className="btn small"
+              className={`btn small tone-${action.kind === "create" ? "create" : "danger"}`}
               disabled={busy || (action.kind === "delete" && typed !== action.tailnet.displayName)}
               onClick={() => void apply()}
             >
@@ -188,17 +188,17 @@ function OrgConfirmation({
             <p>{t.SECRET_ONCE}</p>
             <div>{created.oauthClient.id}</div>
             <code>{created.oauthClient.secret}</code>
-            <button className="btn small" onClick={() => void desktop.copy(created.oauthClient!.secret)}>
+            <button className="btn small tone-secondary" onClick={() => void desktop.copy(created.oauthClient!.secret)}>
               {t.COPY}
             </button>
           </>
         )}
         {created && !created.alreadyExists && created.id && (
-          <button className="btn small" onClick={() => onUndo({ id: created.id, displayName: created.displayName })}>
+          <button className="btn small tone-danger" onClick={() => onUndo({ id: created.id, displayName: created.displayName })}>
             {t.UNDO}
           </button>
         )}
-        <button className="btn small" disabled={busy} onClick={close}>
+        <button className="btn small tone-ghost" disabled={busy} onClick={close}>
           {done ? t.CLOSE : t.CANCEL}
         </button>
         {error && <p role="alert">{error}</p>}

@@ -165,9 +165,9 @@ describe("the 바꾸기 toggle", () => {
     setup();
     await connected();
     fireEvent.click(modeToggle());
-    expect(modeToggleOn()).toHaveClass("primary");
+    expect(modeToggleOn()).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(modeToggleOn());
-    expect(modeToggle()).not.toHaveClass("primary");
+    expect(modeToggle()).toHaveAttribute("aria-pressed", "false");
   });
 
   test("turns the brush group of the privileges on and off", async () => {
@@ -271,7 +271,7 @@ describe("the tray", () => {
     setup();
     await editPrivileges();
     expect(tray()).toBeNull();
-    expect(screen.queryByRole("button", { name: "미리보기" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "미리보기…" })).not.toBeInTheDocument();
   });
 
   test("shows what was queued from a cell of the privileges table", async () => {
@@ -301,7 +301,7 @@ describe("the tray", () => {
     fireEvent.click(modeToggleOn());
     expect(brushGroup()).not.toBeInTheDocument();
     expect(tray()).toBe("변경 1개 · 권한 주기: alice · audit 스키마의 모든 테이블 SELECT");
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     expect(await screen.findByRole("dialog", { name: "변경 1개" })).toBeInTheDocument();
   });
 
@@ -346,7 +346,7 @@ describe("미리보기 and 적용 of the tray", () => {
   test("opens the batch preview in the database the changes are for, with the changes in the order they were queued", async () => {
     setup();
     await queueTwo();
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     expect(await screen.findByRole("dialog", { name: "변경 2개" })).toBeInTheDocument();
     expect(m.previewBatch).toHaveBeenCalledWith(pgTarget, "orders", [readAudit("alice"), readAudit("bob")]);
     expect(screen.getByText("적용할 DB 사용자: iam_admin")).toBeInTheDocument();
@@ -356,7 +356,7 @@ describe("미리보기 and 적용 of the tray", () => {
     m.applyBatch.mockResolvedValue({ batchId: "b-9", logIds: ["b-9-1", "b-9-2"], summary: "변경 2개" });
     setup();
     await queueTwo();
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     fireEvent.click(await screen.findByRole("button", { name: "적용" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(m.applyBatch).toHaveBeenCalledWith(pgTarget, "orders", [readAudit("alice"), readAudit("bob")], null, null);
@@ -372,7 +372,7 @@ describe("미리보기 and 적용 of the tray", () => {
     m.overview.mockRejectedValue({ kind: "other", message: "먼저 연결해 주세요" });
     setup();
     await queueTwo();
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     fireEvent.click(await screen.findByRole("button", { name: "적용" }));
     const note = "적용은 됐지만 목록을 다시 읽지 못했어요. [다시 읽기]를 눌러 주세요";
     expect(await screen.findByText(note)).toBeInTheDocument();
@@ -389,7 +389,7 @@ describe("미리보기 and 적용 of the tray", () => {
     m.applyBatch.mockRejectedValue({ kind: "other", message: "미리보기 뒤에 바뀌었어요. 미리보기를 다시 받아 주세요" });
     setup();
     await queueTwo();
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     fireEvent.click(await screen.findByRole("button", { name: "적용" }));
     expect(await screen.findByText("미리보기 뒤에 바뀌었어요. 미리보기를 다시 받아 주세요")).toBeInTheDocument();
     expect(tray()).toBe("변경 2개 · 권한 주기: alice · audit 스키마의 모든 테이블 SELECT 외 1개");
@@ -398,7 +398,7 @@ describe("미리보기 and 적용 of the tray", () => {
   test("closing the preview leaves the tray as it was", async () => {
     setup();
     await queueTwo();
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     fireEvent.click(await screen.findByRole("button", { name: "취소" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(m.applyBatch).not.toHaveBeenCalled();
@@ -411,7 +411,7 @@ describe("미리보기 and 적용 of the tray", () => {
     );
     setup();
     await queueTwo();
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     fireEvent.click(await screen.findByRole("button", { name: "기본 권한도 담기" }));
     expect(tray()).toBe("변경 3개 · 권한 주기: alice · audit 스키마의 모든 테이블 SELECT 외 2개");
     expect(screen.getByText("기본 권한 1개를 담았어요")).toBeInTheDocument();
@@ -431,7 +431,7 @@ describe("미리보기 and 적용 of the tray", () => {
     openMenu("변경 기록");
     await screen.findByRole("table", { name: "변경 기록" });
     const member = screen.getAllByRole("row").find((r) => r.textContent?.includes("그룹에 넣기: bob → app_write") && !r.className.includes("cl-batch"))!;
-    fireEvent.click(within(member).getByRole("button", { name: "되돌리기" }));
+    fireEvent.click(within(member).getByRole("button", { name: "되돌리기…" }));
     await screen.findByRole("dialog", { name: "되돌리기 미리보기" });
     expect(screen.getByText("새로 만드는 테이블에는 적용되지 않아요")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "기본 권한도 담기" })).not.toBeInTheDocument();
@@ -444,7 +444,7 @@ describe("미리보기 and 적용 of the tray", () => {
     await connected();
     openMenu("변경 기록");
     await screen.findByRole("table", { name: "변경 기록" });
-    fireEvent.click(screen.getByRole("button", { name: "묶음 되돌리기" }));
+    fireEvent.click(screen.getByRole("button", { name: "묶음 되돌리기…" }));
     await screen.findByRole("dialog", { name: "되돌리기 미리보기" });
     expect(screen.getByText("새로 만드는 테이블에는 적용되지 않아요")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "기본 권한도 담기" })).not.toBeInTheDocument();
@@ -494,7 +494,7 @@ describe("what the tray refuses", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "데이터베이스" }), { target: { value: "analytics" } });
     await waitFor(() => expect(m.database).toHaveBeenCalledWith(pgTarget, "analytics", false));
     await loadedGrid();
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     await screen.findByRole("dialog", { name: "변경 1개" });
     expect(m.previewBatch).toHaveBeenCalledWith(pgTarget, "orders", [readAudit("alice")]);
   });
@@ -508,13 +508,13 @@ describe("editing in the cell panel, the default privileges and the role detail"
     fireEvent.click(cellOf("alice", "app"));
     fireEvent.click(await screen.findByRole("tab", { name: "시퀀스 1" }));
     await screen.findByText("app.orders_id_seq");
-    expect(screen.queryByRole("button", { name: "객체에 권한 주기" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "객체에 권한 주기…" })).not.toBeInTheDocument();
     fireEvent.click(modeToggle());
     fireEvent.click(within(screen.getByText("USAGE").closest("[data-testid=privilege-edit]") as HTMLElement).getByRole("button", { name: "빼기" }));
     expect(tray()).toBe("변경 1개 · 권한 빼기: alice · app.orders_id_seq USAGE");
 
     openMenu("기본 권한");
-    fireEvent.click(await screen.findByRole("button", { name: "기본 권한 추가" }));
+    fireEvent.click(await screen.findByRole("button", { name: "기본 권한 추가…" }));
     const form = screen.getByRole("dialog", { name: "기본 권한 추가" });
     fireEvent.change(within(form).getByRole("combobox", { name: "받는 역할" }), { target: { value: "PUBLIC" } });
     fireEvent.click(within(form).getByRole("checkbox", { name: "SELECT" }));

@@ -69,7 +69,7 @@ export function UserInfoView({ conn, session, onTokenError }: { conn: ArgoWfConn
           </p>
         )}
         <div className="awc-userinfo-acts">
-          <button className="btn small" onClick={() => void copy()}>
+          <button className="btn small tone-secondary" onClick={() => void copy()}>
             토큰 복사
           </button>
           {note && (

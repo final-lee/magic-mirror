@@ -8,6 +8,7 @@ interface Props {
   confirmLabel: string;
   /** 빨간 버튼(삭제·Terminate) */
   danger?: boolean;
+  tone?: string;
   /** 이 글을 그대로 쳐야 [적용]이 켜진다(이름·네임스페이스에 prod가 들어간 대상). 없으면 null */
   requireName?: string | null;
   busy?: boolean;
@@ -35,6 +36,7 @@ export function ActionDialog({
   note,
   confirmLabel,
   danger = false,
+  tone,
   requireName = null,
   busy = false,
   error = null,
@@ -75,10 +77,10 @@ export function ActionDialog({
           </p>
         )}
         <div className="foot">
-          <button ref={cancelRef} className="btn plain" onClick={onCancel} disabled={busy}>
+          <button ref={cancelRef} className="btn plain tone-ghost" onClick={onCancel} disabled={busy}>
             {ACTION_CANCEL}
           </button>
-          <button className={`btn ${danger ? "danger" : "primary"}`} disabled={blocked} onClick={onConfirm}>
+          <button className={`btn plain ${tone ?? (danger ? "tone-danger" : "tone-primary")}`} disabled={blocked} onClick={onConfirm}>
             {error ? ACTION_RETRY : confirmLabel}
           </button>
         </div>

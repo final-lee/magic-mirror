@@ -78,7 +78,7 @@ beforeEach(() => {
 describe("역할 만들기", () => {
   const openCreate = async () => {
     await connected();
-    await user().click(screen.getByRole("button", { name: "역할 만들기" }));
+    await user().click(screen.getByRole("button", { name: "역할 만들기…" }));
     return screen.findByRole("dialog", { name: "역할 만들기" });
   };
 
@@ -86,7 +86,7 @@ describe("역할 만들기", () => {
     setup();
     await openCreate();
     await user().type(screen.getByRole("textbox", { name: "이름" }), "carol");
-    await user().click(screen.getByRole("button", { name: "미리보기" }));
+    await user().click(screen.getByRole("button", { name: "미리보기…" }));
     await waitFor(() => expect(m.preview).toHaveBeenCalledWith(pgTarget, { ...createCarol, groups: [] }));
     expect(await screen.findByRole("dialog", { name: "미리보기" })).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "역할 만들기" })).toBeInTheDocument();
@@ -100,7 +100,7 @@ describe("역할 만들기", () => {
     setup();
     await openCreate();
     await user().type(screen.getByRole("textbox", { name: "이름" }), "carol");
-    await user().click(screen.getByRole("button", { name: "미리보기" }));
+    await user().click(screen.getByRole("button", { name: "미리보기…" }));
     const preview = await screen.findByRole("dialog", { name: "미리보기" });
     await user().click(within(preview).getByRole("button", { name: "적용" }));
     const result = await screen.findByRole("dialog", { name: "새 비밀번호" });
@@ -114,7 +114,7 @@ describe("역할 만들기", () => {
     m.open.mockResolvedValue(sampleOverview({ target: sampleTargetInfo({ readReplica: true }), canManage: false, manageReason: MANAGE_REASON }));
     setup();
     await connected();
-    const button = screen.getByRole("button", { name: "역할 만들기" });
+    const button = screen.getByRole("button", { name: "역할 만들기…" });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("title", READ_REPLICA);
   });
@@ -128,8 +128,8 @@ describe("비밀번호 재설정", () => {
     openMenu("역할");
     await user().click(await screen.findByText("alice"));
     await user().dblClick(screen.getByText("alice"));
-    await screen.findByRole("button", { name: "비밀번호 재설정" });
-    await user().click(screen.getByRole("button", { name: "비밀번호 재설정" }));
+    await screen.findByRole("button", { name: "비밀번호 재설정…" });
+    await user().click(screen.getByRole("button", { name: "비밀번호 재설정…" }));
     await waitFor(() => expect(m.preview).toHaveBeenCalledWith(pgTarget, resetAlicePassword));
     const preview = await screen.findByRole("dialog", { name: "미리보기" });
     await user().click(within(preview).getByRole("button", { name: "적용" }));
@@ -142,7 +142,7 @@ describe("역할 삭제", () => {
     await connected();
     openMenu("역할");
     await user().dblClick(await screen.findByText("alice"));
-    await user().click(await screen.findByRole("button", { name: "삭제" }));
+    await user().click(await screen.findByRole("button", { name: "삭제…" }));
     return screen.findByRole("dialog", { name: "역할 삭제" });
   }
 
@@ -201,7 +201,7 @@ describe("역할 삭제", () => {
     await connected();
     openMenu("역할");
     await user().dblClick(await screen.findByText("alice"));
-    const button = await screen.findByRole("button", { name: "삭제" });
+    const button = await screen.findByRole("button", { name: "삭제…" });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("title", READ_REPLICA);
   });
@@ -216,7 +216,7 @@ describe("세션 끊기", () => {
     const sessions = sampleSessions();
     const target = sessions.find((s) => !s.own && s.role)!;
     const row = within(table).getAllByRole("row").slice(1)[sessions.indexOf(target)];
-    await user().click(within(row).getByRole("button", { name: "끊기" }));
+    await user().click(within(row).getByRole("button", { name: "끊기…" }));
     await waitFor(() => expect(m.preview).toHaveBeenCalledWith(pgTarget, { kind: "terminate", pid: target.pid, role: target.role, backendStart: target.backendStart }));
   });
 
@@ -226,6 +226,6 @@ describe("세션 끊기", () => {
     await connected();
     openMenu("세션");
     await screen.findByRole("table", { name: "세션 목록" });
-    for (const button of screen.getAllByRole("button", { name: "끊기" })) expect(button).toBeDisabled();
+    for (const button of screen.getAllByRole("button", { name: "끊기…" })) expect(button).toBeDisabled();
   });
 });

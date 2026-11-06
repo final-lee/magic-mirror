@@ -209,8 +209,8 @@ describe("비밀번호 재설정 and 삭제", () => {
     setup({ editing: false, draft: undefined, ...handlers, ...props });
     return handlers;
   };
-  const resetButton = () => screen.getByRole("button", { name: "비밀번호 재설정" });
-  const dropButton = () => screen.getByRole("button", { name: "삭제" });
+  const resetButton = () => screen.getByRole("button", { name: "비밀번호 재설정…" });
+  const dropButton = () => screen.getByRole("button", { name: "삭제…" });
 
   test("비밀번호 재설정 starts a password change for the role", async () => {
     const { onChange } = actions();
@@ -229,7 +229,7 @@ describe("비밀번호 재설정 and 삭제", () => {
   test("a group has no 비밀번호 재설정 (it can not log in) but can be dropped", async () => {
     actions({ role: "app_read" });
     await screen.findByRole("heading", { name: "app_read" });
-    expect(screen.queryByRole("button", { name: "비밀번호 재설정" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "비밀번호 재설정…" })).not.toBeInTheDocument();
     expect(dropButton()).toBeEnabled();
   });
 
@@ -258,6 +258,6 @@ describe("비밀번호 재설정 and 삭제", () => {
     setup({ editing: false, draft: undefined });
     await screen.findByRole("heading", { name: "alice" });
     expect(screen.queryByRole("button", { name: "삭제" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "비밀번호 재설정" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "비밀번호 재설정…" })).not.toBeInTheDocument();
   });
 });

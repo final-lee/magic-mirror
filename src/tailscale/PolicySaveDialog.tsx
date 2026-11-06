@@ -83,15 +83,15 @@ export function PolicySaveDialog({ tailnet, before, etag, after, onCancel, onSav
         </div>
         {error && <PreviewAlerts error={{ kind: "apply", message: error }} stale={false} />}
         <div className="foot">
-          <button ref={cancelRef} className="btn plain" disabled={phase === "applying"} onClick={onCancel}>
+          <button ref={cancelRef} className="btn plain tone-ghost" disabled={phase === "applying"} onClick={onCancel}>
             {p.CANCEL}
           </button>
           {error === p.CHANGED_ELSEWHERE && (
-            <button ref={retryRef} className="btn" onClick={onReload}>
+            <button ref={retryRef} className="btn plain tone-ghost-danger" onClick={onReload}>
               {p.RELOAD_DISCARD}
             </button>
           )}
-          <button className="btn danger" disabled={!canSave} onClick={() => void save()}>
+          <button className="btn plain tone-primary" disabled={!canSave} title={etag === null ? p.NO_ETAG : undefined} onClick={() => void save()}>
             {phase === "applying" ? p.SAVING : p.SAVE}
           </button>
         </div>

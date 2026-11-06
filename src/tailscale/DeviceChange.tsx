@@ -4,6 +4,7 @@ import { useModal } from "../iam/useModal";
 import { devicesApi } from "./api";
 import type { Preview, ResultItem } from "./devicesApi";
 import * as text from "./devicesText";
+import { deviceChangeTone } from "./tone";
 
 export function DeviceChange({ tailnet, preview, onClose, onDone }: {
   tailnet: string;
@@ -16,6 +17,7 @@ export function DeviceChange({ tailnet, preview, onClose, onDone }: {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const deleting = preview.items.some((item) => item.action === "delete");
+  const tone = deviceChangeTone(preview.items.map((item) => item.action));
   const expected = preview.items.length === 1 ? preview.items[0].device.name : text.selectedDevices(preview.items.length);
   // 보내는 중에는 닫지 않는다(Esc·바깥 누르기·취소 모두)
   const cancel = () => {
@@ -70,13 +72,13 @@ export function DeviceChange({ tailnet, preview, onClose, onDone }: {
           )}
           <div className="foot">
             <button
-              className={`btn ${deleting ? "danger" : "primary"}`}
+              className={`btn plain tone-${tone}`}
               disabled={busy || (deleting && confirmation !== expected)}
               onClick={() => void apply()}
             >
               {text.APPLY}
             </button>{" "}
-            <button className="btn" disabled={busy} onClick={cancel}>{text.CANCEL}</button>
+            <button className="btn plain tone-ghost" disabled={busy} onClick={cancel}>{text.CANCEL}</button>
           </div>
         </>
       )}
@@ -90,7 +92,7 @@ export function DeviceChange({ tailnet, preview, onClose, onDone }: {
               ))}
             </tbody>
           </table></div>
-          <div className="foot"><button className="btn primary" onClick={onClose}>{text.CLOSE}</button></div>
+          <div className="foot"><button className="btn plain tone-ghost" onClick={onClose}>{text.CLOSE}</button></div>
         </>
       )}
       {error && <p role="alert">{error}</p>}

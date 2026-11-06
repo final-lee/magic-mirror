@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "./api/errors";
 import { GLOBAL, hardResetResourceCache, resourceTtlMs, useAccount, useProfiles, useServices, useSettings } from "./api/queries";
 import type { Favorite } from "./api/types";
@@ -21,9 +21,13 @@ import { closeK8s, refreshK8s } from "./k8s/queries";
 import { k8sTabId } from "./k8s/targets";
 import { tabTitle } from "./k8s/text";
 import type { K8sTarget } from "./k8s/types";
+import type { K8sOpen } from "./k8s/open";
 import { IamTab } from "./iam/IamTab";
 import { refreshIam, useIamOverview } from "./iam/queries";
 import { ArgocdTab } from "./argocd/ArgocdTab";
+import { argoPaletteItems } from "./argocd/search/palette";
+import type { ArgoJump } from "./argocd/types";
+import { ArgoShellContext, type ShellHost } from "./argocd/ops/ShellHost";
 import { ARGOCD_TITLE } from "./argocd/text";
 import { ArgoWfTab } from "./argowf/ArgoWfTab";
 import { ARGOWF_TITLE } from "./argowf/text";
@@ -72,6 +76,9 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [focus, setFocus] = useState<ResourceFocus | null>(null);
   const focusNonce = useRef(0);
+  // ⌘K에서 고른 ArgoCD 앱·리소스. ArgoCD 탭이 받아 가면 비운다. 항목은 팔레트를 열 때 캐시에서 한 번 만든다.
+  const [argoJump, setArgoJump] = useState<ArgoJump | null>(null);
+  const argoItems = useMemo(() => (paletteOpen ? argoPaletteItems(qc, settings?.argocdServers ?? []) : []), [paletteOpen, qc, settings?.argocdServers]);
   const account = useAccount(profile);
   const [activeTab, setActiveTab] = useState<string>("resources");
   const [explorerTabs, setExplorerTabs] = useState<{ id: string; location: S3Location }[]>([]);
@@ -80,7 +87,8 @@ export default function App() {
   // 대상(프로필·리전·종류·식별자)마다 탭 하나. 탭을 닫거나 프로필을 바꾸면 그 대상의 DB 연결도 닫는다.
   const [pgTabs, setPgTabs] = useState<{ id: string; target: PgTarget; title: string }[]>([]);
   // 클러스터마다 탭 하나(id는 리전과 이름). 탭을 닫거나 프로필을 바꾸면 그 클러스터의 연결과 감시도 닫는다.
-  const [k8sTabs, setK8sTabs] = useState<{ id: string; target: K8sTarget }[]>([]);
+  const [k8sTabs, setK8sTabs] = useState<{ id: string; target: K8sTarget; open?: K8sOpen }[]>([]);
+  const k8sOpenNonce = useRef(0);
   // 대상(프로필·리전·종류·식별자)마다 탭 하나(ElastiCache의 Valkey·Redis OSS). 탭을 닫거나 프로필을 바꾸면 그 대상의 연결도 닫는다.
   const [kvTabs, setKvTabs] = useState<{ id: string; target: KvTarget }[]>([]);
   // IAM 탭은 하나뿐이다(id "iam"). focus는 리소스 목록에서 넘어온 대상 ARN, nonce는 열 때마다 올라가 같은 대상도 다시 이동시킨다.
@@ -165,7 +173,7 @@ export default function App() {
     return (
       <div className="empty full">
         <div className="err">{errorMessage(failed[0].error)}</div>
-        <button className="btn" onClick={() => failed.forEach((q) => void q.refetch())}>
+        <button className="btn plain tone-refresh" onClick={() => failed.forEach((q) => void q.refetch())}>
           다시 시도
         </button>
       </div>
@@ -198,10 +206,16 @@ export default function App() {
     setPgTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs : [...tabs, { id, target, title }]));
     setActiveTab(id);
   };
-  const openK8s = (target: K8sTarget) => {
+  // open은 다른 탭이 이 탭에 부탁하는 일(Pod 셸 등). 이미 열린 탭이면 부탁만 새로 건넨다.
+  const openK8s = (target: K8sTarget, open?: K8sOpen) => {
     const id = k8sTabId(target);
-    setK8sTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs : [...tabs, { id, target }]));
+    setK8sTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs.map((t) => (t.id === id && open ? { ...t, open } : t)) : [...tabs, { id, target, open }]));
     setActiveTab(id);
+  };
+  // ArgoCD 탭의 "터미널 열기": 대상 클러스터의 EKS 탭에서 그 Pod의 셸을 연다
+  const argoShell: ShellHost = {
+    profile,
+    open: (target, shell) => openK8s(target, { kind: "shell", ...shell, nonce: ++k8sOpenNonce.current }),
   };
   const openKv = (target: KvTarget) => {
     const id = kvTabId(target);
@@ -318,6 +332,13 @@ export default function App() {
     setFocus({ id: p.id, nonce: focusNonce.current });
   };
 
+  // ⌘K에서 고른 ArgoCD 앱·리소스로 간다: ArgoCD 탭(닫혀 있으면 열고), 그 서버, 그 앱과 리소스
+  const pickArgo = (jump: ArgoJump) => {
+    setPaletteOpen(false);
+    openArgocd();
+    setArgoJump({ ...jump });
+  };
+
   const toggleFavorite = (sel: Favorite) => {
     const exists = settings.favorites.some((f) => sameFav(f, sel));
     update({ favorites: exists ? settings.favorites.filter((f) => !sameFav(f, sel)) : [...settings.favorites, sel] });
@@ -399,7 +420,9 @@ export default function App() {
         )}
         {argocdTab && (
           <div className="tabpane argo-pane" hidden={activeTab !== "argocd"}>
-            <ArgocdTab active={activeTab === "argocd"} />
+            <ArgoShellContext.Provider value={argoShell}>
+              <ArgocdTab active={activeTab === "argocd"} jump={argoJump} onJumpDone={() => setArgoJump(null)} />
+            </ArgoShellContext.Provider>
           </div>
         )}
         {argowfTab && (
@@ -436,7 +459,7 @@ export default function App() {
         ))}
         {k8sTabs.map((t) => (
           <div key={t.id} className="tabpane k8s-pane" hidden={activeTab !== t.id}>
-            <K8sTab target={t.target} active={activeTab === t.id} onOpenIam={openIam} onOpenVpc={openVpc} />
+            <K8sTab target={t.target} active={activeTab === t.id} onOpenIam={openIam} onOpenVpc={openVpc} open={t.open} />
           </div>
         ))}
         {kvTabs.map((t) => (
@@ -481,7 +504,15 @@ export default function App() {
           />
         )}
         {paletteOpen && profile && (
-          <ResourcePalette profile={profile} services={enabled} ttlMs={resourceTtlMs(settings.resourceCacheTtlMinutes)} onPick={pickResource} onClose={() => setPaletteOpen(false)} />
+          <ResourcePalette
+            profile={profile}
+            services={enabled}
+            ttlMs={resourceTtlMs(settings.resourceCacheTtlMinutes)}
+            onPick={pickResource}
+            argo={argoItems}
+            onPickArgo={pickArgo}
+            onClose={() => setPaletteOpen(false)}
+          />
         )}
         {commandsOpen && (
           <CommandPalette

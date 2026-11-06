@@ -131,15 +131,15 @@ export function PolicyEditor({ profile, mode, name: fixedName = "", existingName
       <div className="dim pe-tip">Tab·Shift+Tab은 들여쓰기·내어쓰기예요. 다른 칸으로 나가려면 Esc를 누른 뒤 Tab을 누르세요</div>
 
       <div className="pe-actions">
-        <button className="btn small" disabled={!!parsed.error || shown?.state === "running"} onClick={() => void validate()}>
+        <button className="btn small tone-primary" disabled={!!parsed.error || shown?.state === "running"} onClick={() => void validate()}>
           검사
         </button>
         <span className="pe-end">
-          <button className="btn plain" onClick={onCancel}>
+          <button className="btn plain tone-ghost" onClick={onCancel}>
             취소
           </button>
-          <button className="btn primary" disabled={!canSubmit} onClick={() => onSubmit(nameValue, doc)}>
-            미리보기
+          <button className="btn plain tone-primary" disabled={!canSubmit} onClick={() => onSubmit(nameValue, doc)}>
+            미리보기…
           </button>
         </span>
       </div>

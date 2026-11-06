@@ -19,7 +19,7 @@ beforeEach(() => {
 
 test("reset previews the command and requires typed confirmation before applying", async () => {
   renderWithClient(<ShareView />);
-  fireEvent.click(screen.getByRole("button", { name: "Funnel 초기화" }));
+  fireEvent.click(screen.getByRole("button", { name: "Funnel 초기화…" }));
   const dialog = await screen.findByRole("dialog");
   expect(dialog).toHaveTextContent("tailscale funnel reset");
   expect(tailscaleApi.shareApply).not.toHaveBeenCalled();

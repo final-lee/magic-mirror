@@ -31,7 +31,7 @@ export function YamlCreate({ kinds, namespace, onPreview, onClose }: Props) {
     if (docs.length > MAX_DOCUMENTS) found.push(t.yamlTooMany(MAX_DOCUMENTS));
     for (const doc of docs) {
       const resolved = doc.object ? resolveChange(doc.object, kinds, namespace) : null;
-      if (resolved?.change) entries.push({ change: resolved.change, undoOf: null });
+      if (resolved?.change) entries.push({ change: resolved.change, undoOf: null, create: true });
       else found.push(t.yamlDocumentError(doc.index, resolved?.error ?? doc.error ?? t.YAML_NOT_OBJECT));
     }
     setErrors(found);

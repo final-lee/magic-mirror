@@ -52,7 +52,7 @@ export function NodesSubnets({ network, onOpenObject, host }: Props) {
                 {nodes.map((n) => (
                   <tr key={n.name}>
                     <td>
-                      <button className="link mono" aria-label={openLink("Node", n.name)} title={openLink("Node", n.name)} onClick={() => onOpenObject({ kind: NODES, namespace: null, name: n.name })}>
+                      <button className="link mono tone-nav" aria-label={openLink("Node", n.name)} title={openLink("Node", n.name)} onClick={() => onOpenObject({ kind: NODES, namespace: null, name: n.name })}>
                         {n.name}
                       </button>
                     </td>

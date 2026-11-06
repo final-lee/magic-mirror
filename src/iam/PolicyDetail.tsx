@@ -78,7 +78,7 @@ export function PolicyDetail({ profile, policyId, onOpen, initialTab, onViewStat
           <h2>{view.name}</h2>
           <span className="iam-kind">{SCOPE_TEXT[view.scope]}</span>
           {!editing && canEdit(view) && (
-            <button className="btn small" onClick={() => setEditing(true)}>
+            <button className="btn small tone-secondary" onClick={() => setEditing(true)}>
               편집
             </button>
           )}
@@ -210,7 +210,7 @@ function JsonPane({ document }: { document: string }) {
   return (
     <div className="iam-json">
       <div className="iam-json-bar">
-        <button className="btn small" aria-label="JSON 복사" onClick={() => void desktop.copy(pretty)}>
+        <button className="btn small tone-secondary" aria-label="JSON 복사" onClick={() => void desktop.copy(pretty)}>
           복사
         </button>
       </div>

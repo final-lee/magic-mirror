@@ -226,13 +226,13 @@ export function WhoCanTab({ target, context, ssoProfile, namespaces, canReview, 
             <span className="k8s-wrap">
               <SubjectName subject={chosen.subject} label={chosen.label} />
             </span>
-            <button className="icon k8s-push" aria-label={CLOSE} title={CLOSE} onClick={() => setSelected(null)}>
+            <button className="icon k8s-push tone-ghost" aria-label={CLOSE} title={CLOSE} onClick={() => setSelected(null)}>
               ✕
             </button>
           </div>
           <div className="k8s-actions k8s-toolbar">
             {chosen.subject.kind === "iam" && onOpenIam && (
-              <button className="btn small tone-secondary" onClick={() => onOpenIam(chosen.subject.name)}>
+              <button className="btn small tone-nav" onClick={() => onOpenIam(chosen.subject.name)}>
                 {OPEN_IAM}
               </button>
             )}

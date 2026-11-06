@@ -169,12 +169,13 @@ export function DropRoleDialog({ target, role, overview, onClose, onDropped }: P
         </div>
         {stopped ? (
           <div className="foot">
-            <button ref={cancelRef} className="btn primary" onClick={onClose}>
+            <button ref={cancelRef} className="btn plain tone-ghost" onClick={onClose}>
               닫기
             </button>
           </div>
         ) : (
           <PreviewFooter
+            applyTone="danger"
             gated={plan ?? null}
             phase={phase === "applying" ? "applying" : plan && !q.isFetching ? "ready" : "loading"}
             error={error}

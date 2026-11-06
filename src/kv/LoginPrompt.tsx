@@ -156,11 +156,11 @@ export function LoginPrompt({ info, initial, message, onSubmit, onCancel }: Prop
       )}
       <div className="kv-login-foot">
         {onCancel && (
-          <button type="button" className="btn plain" onClick={onCancel}>
+          <button type="button" className="btn plain tone-ghost" onClick={onCancel}>
             {t.CANCEL}
           </button>
         )}
-        <button type="submit" className="btn primary" disabled={!ready}>
+        <button type="submit" className="btn plain tone-primary" disabled={!ready}>
           {t.CONNECT}
         </button>
       </div>

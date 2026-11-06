@@ -1280,6 +1280,72 @@ describe("🐙 ArgoCD 탭", () => {
   });
 });
 
+describe("🐙 ArgoCD 앱·리소스를 ⌘K로 찾기", () => {
+  const argocd = vi.mocked(argocdApi);
+  const URL = "https://argocd.example";
+  const row = (name: string) => ({
+    name,
+    namespace: "argocd",
+    resourceVersion: "1",
+    values: { sync: "OutOfSync", health: "Healthy", project: "default", destination: "in-cluster", destNamespace: "shop" },
+    labels: {},
+    resources: [{ group: "apps", version: "v1", kind: "Deployment", namespace: "shop", name: "checkout-api" }],
+  });
+
+  beforeEach(() => {
+    m.listServices.mockResolvedValue([...sampleServices, eksService]);
+    m.getSettings.mockResolvedValue({ enabledServices: ["ec2", "eks"], favorites: [], lastProfile: "prod", lastRegion: null, argocdServers: [{ name: "prod-argo", url: URL }] });
+    m.resourceIndex.mockResolvedValue([]);
+    argocd.session.mockResolvedValue({ url: URL, username: "admin", version: "v3.4.5" });
+    argocd.apps.mockResolvedValue([row("storefront")]);
+    argocd.appsets.mockResolvedValue([]);
+    argocd.app.mockReturnValue(new Promise(() => {}));
+  });
+
+  const loadArgocd = async () => {
+    renderWithClient(<App />);
+    fireEvent.click(await screen.findByText("EKS"));
+    fireEvent.click(await screen.findByText(ARGOCD_TITLE));
+    await screen.findByText("storefront");
+  };
+  const pick = async (query: string) => {
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    const box = await screen.findByRole("searchbox", { name: "리소스 찾기" });
+    fireEvent.change(box, { target: { value: query } });
+    fireEvent.keyDown(box, { key: "Enter" });
+  };
+
+  test("picking an indexed resource from another tab switches to the ArgoCD tab and opens its app", async () => {
+    await loadArgocd();
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    expect(screen.getByRole("tab", { name: ARGOCD_TITLE })).toHaveAttribute("aria-selected", "false");
+    await pick("checkout");
+    expect(screen.getByRole("tab", { name: ARGOCD_TITLE })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(argocd.app).toHaveBeenCalledWith(URL, "argocd", "storefront"));
+    expect(screen.queryByRole("dialog", { name: "리소스 찾기" })).not.toBeInTheDocument();
+  });
+
+  test("the cached lists outlive the tab: a closed ArgoCD tab is opened again for the pick", async () => {
+    await loadArgocd();
+    const tab = screen.getByRole("tab", { name: ARGOCD_TITLE });
+    fireEvent.click(within(tab.parentElement as HTMLElement).getByRole("button", { name: /닫기/ }));
+    expect(screen.queryByRole("tab", { name: ARGOCD_TITLE })).not.toBeInTheDocument();
+    await pick("storefront");
+    expect(await screen.findByRole("tab", { name: ARGOCD_TITLE })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(argocd.app).toHaveBeenCalledWith(URL, "argocd", "storefront"));
+  });
+
+  test("servers whose app list was never read add nothing to the palette", async () => {
+    renderWithClient(<App />);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "프로필" })).toHaveValue("prod"));
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    const box = await screen.findByRole("searchbox", { name: "리소스 찾기" });
+    fireEvent.change(box, { target: { value: "storefront" } });
+    expect(await screen.findByText(/아직 읽어 둔 목록이 없어요/)).toBeInTheDocument();
+    expect(argocd.apps).not.toHaveBeenCalled();
+  });
+});
+
 describe("⌘K 리소스 찾기와 캐시 비우기", () => {
   const cached = (region: string, id: string, name: string) => ({ region, service: "ec2", typeId: "instances", fetchedAt: Date.now(), truncated: false, items: [{ id, name, arn: null, values: { name, id }, tags: {} }] });
 

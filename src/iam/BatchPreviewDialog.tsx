@@ -2,8 +2,8 @@ import { memo, useEffect, useRef, useState } from "react";
 import { errorMessage } from "../api/errors";
 import { iamApi } from "./api";
 import { CallList, ConfirmField, GATE_HINT, ImpactList, PreviewAlerts, ReversibleNote, useSheetFocus, WarningList } from "./previewParts";
-import type { BatchItem, BatchPreview, BatchResult, IamChange } from "./types";
-import { batchGate, batchWarnings, stopMessage, type PendingBatch } from "./useIamBatch";
+import { iamChangeTone, type BatchItem, type BatchPreview, type BatchResult, type IamChange } from "./types";
+import { batchGate, stopMessage, type PendingBatch } from "./useIamBatch";
 
 interface Props {
   pending: PendingBatch;
@@ -39,7 +39,8 @@ function Sheet({ pending, onApply, onRetry, onCancel, onStart }: Props) {
   const gate = preview ? batchGate(preview, typed) : null;
   const canApply = !!preview && gate?.ok === true && phase === "ready" && !stale;
   const needsRetry = (error?.kind === "preview" || stale) && !applying;
-  const danger = !!preview && (!!preview.confirmText || batchWarnings(preview).some((w) => w.level !== "block"));
+  const danger = pending.changes.some((change) => iamChangeTone(change) === "danger");
+  const tone = danger ? "danger" : pending.undoOf ? "caution" : pending.changes.some((change) => iamChangeTone(change) === "warn") ? "warn" : "primary";
   const count = preview?.changes.length ?? pending.changes.length;
   const title = `변경 ${count}개 미리보기`;
   const hint = gate && !gate.ok && gate.reason !== "text" ? GATE_HINT[gate.reason] : null;
@@ -72,22 +73,22 @@ function Sheet({ pending, onApply, onRetry, onCancel, onStart }: Props) {
         <PreviewAlerts error={error} stale={stale} />
         <div className="foot">
           {hint && <span className="cp-hint">{hint}</span>}
-          <button ref={cancelRef} className="btn plain" disabled={applying} onClick={onCancel}>
+          <button ref={cancelRef} className="btn plain tone-ghost" disabled={applying} onClick={onCancel}>
             {failed ? "닫기" : "취소"}
           </button>
           {needsRetry && (
-            <button ref={retryRef} className="btn" onClick={onRetry}>
+            <button ref={retryRef} className="btn plain tone-refresh" onClick={onRetry}>
               미리보기 다시 받기
             </button>
           )}
           {failed ? (
             undoable > 0 && (
-              <button className="btn" disabled={undo.busy} onClick={() => void undo.run()}>
-                {undo.busy ? "준비 중…" : `적용된 ${undoable}개 되돌리기`}
+              <button className="btn plain tone-caution" disabled={undo.busy} onClick={() => void undo.run()}>
+                {undo.busy ? "준비 중…" : `적용된 ${undoable}개 되돌리기…`}
               </button>
             )
           ) : (
-            <button className={`btn ${danger ? "danger" : "primary"}`} disabled={!canApply} onClick={() => onApply(typed)}>
+            <button className={`btn plain tone-${tone}`} disabled={!canApply} onClick={() => onApply(typed)}>
               {applying ? "적용 중…" : "적용"}
             </button>
           )}

@@ -95,14 +95,14 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, shel
               }}
             />
           </label>
-          <ActionButton action="scale" label={t.CHANGE_SCALE} tone="primary" reason={patch} invalid={!validReplicas}
+          <ActionButton action="scale" label={t.CHANGE_SCALE} tone="warn" reason={patch} invalid={!validReplicas}
             onClick={() => onStart({ ...objectRef, type: "scale", replicas: Number(replicas) })} />
         </>
       )}
       {workload && (
         <>
           <ActionButton action="restart" label={t.CHANGE_RESTART} tone="warn" reason={patch} onClick={() => onStart({ ...objectRef, type: "restart" })} />
-          <ActionButton label={t.CHANGE_ROLLOUT_UNDO} tone="warn" reason={revisionDenied} onClick={() => setPicking(true)} />
+          <ActionButton label={t.CHANGE_ROLLOUT_UNDO} tone="caution" reason={revisionDenied} onClick={() => setPicking(true)} />
           {picking && (
             <>
               <label>
@@ -126,7 +126,7 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, shel
             invalid={!jobName.trim()} onClick={() => onStart({ ...objectRef, type: "rerun", jobName })} />
         </>
       )}
-      {cron && <ActionButton label={suspended ? t.CHANGE_RESUME : t.CHANGE_SUSPEND} tone="warn" reason={patch}
+      {cron && <ActionButton label={suspended ? t.CHANGE_RESUME : t.CHANGE_SUSPEND} tone={suspended ? "warn" : "caution"} reason={patch}
         onClick={() => onStart({ ...objectRef, type: "suspend", suspend: !suspended })} />}
       {node && (
         <>
@@ -142,7 +142,7 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, shel
           </label>
           <ActionButton
             label={t.CHANGE_NODE_SHELL}
-            tone="warn"
+            tone="primary"
             reason={nodeShellDenied}
             invalid={!shellImage.trim() || /\s/.test(shellImage.trim())}
             onClick={() => onStart({ kind: PODS, namespace: shellNamespace, name: nodeShellPodName(), type: "nodeShell", node: name, image: shellImage.trim() })}
@@ -160,8 +160,7 @@ export function ChangeActions({ target, ssoProfile, objectRef, view, rules, shel
   );
 }
 
-/** 버튼 색: primary(파랑) 실행·미리보기, warn(노랑) 상태를 바꾸는 조작, danger(빨강) 지우기·비우기 */
-type ActionTone = "primary" | "warn" | "danger";
+type ActionTone = "primary" | "warn" | "caution" | "danger";
 
 /** 권한이 없으면 이유를 함께 보여 주는 변경 버튼이다. */
 function ActionButton({ action, label, tone, reason, invalid, onClick }: {
@@ -169,7 +168,7 @@ function ActionButton({ action, label, tone, reason, invalid, onClick }: {
   action?: string; label: string; tone: ActionTone; reason?: string; invalid?: boolean; onClick: () => void;
 }) {
   return (
-    <button className={`btn small tone-${tone}`} data-k8s-action={action} disabled={!!reason || invalid} title={reason} aria-description={reason} onClick={onClick}>
+    <button className={`btn small tone-${tone}`} data-k8s-action={action} disabled={!!reason || invalid} title={reason ?? (invalid ? "입력값을 확인해 주세요" : undefined)} aria-description={reason} onClick={onClick}>
       {label}
     </button>
   );

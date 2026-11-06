@@ -59,7 +59,7 @@ test("rollout progress follows the watched deployment and disappears once ready"
   await vi.waitFor(() => expect(m.watch).toHaveBeenCalled());
   send("deployments", { type: "reset", rows: [initial] });
   fireEvent.click(screen.getByText("web"));
-  fireEvent.click(await screen.findByRole("button", { name: "롤아웃 재시작" }));
+  fireEvent.click(await screen.findByRole("button", { name: "롤아웃 재시작…" }));
   const change = onChange.mock.calls[0][0];
   rerender({ appliedChange: change });
   expect(await screen.findByText("롤아웃 상태를 기다리는 중이에요")).toBeInTheDocument();

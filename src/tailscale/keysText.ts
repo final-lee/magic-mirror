@@ -55,7 +55,7 @@ export const findingShort: Record<TsKeyFinding["kind"], string> = {
   allScope: "all 스코프",
 };
 
-export const DELETE = "삭제";
+export const DELETE = "삭제…";
 export const deleteLabel = (name: string) => `${name} 삭제`;
 export const DELETE_PREVIEW = "키 삭제 미리보기";
 export const DELETE_PREVIEW_LOADING = "미리보기를 만드는 중이에요…";

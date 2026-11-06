@@ -57,7 +57,7 @@ export function TransitionsPanel({ target, prefix, name, counts }: Props) {
           </button>
         ))}
       </div>
-      <button type="button" className="btn small" disabled={q.isFetching} onClick={() => void q.refetch()}>
+      <button type="button" className="btn small tone-refresh" disabled={q.isFetching} onClick={() => void q.refetch()}>
         {q.isFetching ? t.READING : t.REREAD}
       </button>
       {data && <span className="dim">{t.TRANSITIONS_EVENTS(formatCount(data.events), formatCount(model?.moves ?? 0))}</span>}
