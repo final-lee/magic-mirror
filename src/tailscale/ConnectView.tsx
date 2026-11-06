@@ -85,11 +85,11 @@ function ConnectForm({ initialTailnet, initialKind, busy, error, onSubmit, onCan
         </p>
       )}
       <div className="ts-connect-acts">
-        <button className="btn primary small" type="submit" disabled={busy || !complete}>
+        <button className="btn small tone-primary" type="submit" disabled={busy || !complete}>
           {busy ? t.CONNECTING : t.CONNECT}
         </button>
         {onCancel && (
-          <button className="btn small" type="button" onClick={onCancel} disabled={busy}>
+          <button className="btn small tone-ghost" type="button" onClick={onCancel} disabled={busy}>
             {t.CANCEL_CHANGE}
           </button>
         )}
@@ -186,10 +186,10 @@ export function ConnectView({ node }: { node: TsNode }) {
     <div className="awc-body"><div className="ts-connect">
       <div className="ts-connect-status">
         <strong>{t.connected(tailnet, KIND_NAME[kind])}</strong>
-        <button className="btn small" onClick={() => setEditing(true)} disabled={busy}>
+        <button className="btn small tone-secondary" onClick={() => setEditing(true)} disabled={busy}>
           {t.CHANGE}
         </button>
-        <button className="btn small" onClick={() => void forget()} disabled={busy}>
+        <button className="btn small tone-danger" onClick={() => void forget()} disabled={busy}>
           {t.FORGET}
         </button>
       </div>

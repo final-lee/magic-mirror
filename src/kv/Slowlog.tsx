@@ -33,7 +33,7 @@ export function Slowlog({ target, overview, active }: { target: KvTarget; overvi
     <section className="center kv-screen kv-slowlog" ref={box}>
       <div className="kv-bar">
         <span className="kv-bar-end">
-          <button className="btn small" onClick={() => void q.refetch()} disabled={q.isFetching}>
+          <button className="btn small tone-refresh" onClick={() => void q.refetch()} disabled={q.isFetching}>
             {q.isFetching ? t.READING : t.REREAD}
           </button>
         </span>

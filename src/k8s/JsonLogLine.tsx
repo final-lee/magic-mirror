@@ -19,7 +19,7 @@ export const JsonLogLine = memo(function JsonLogLine({ line, query, lead }: { li
   return (
     <div className={`lj-row${log.tone ? ` lj-${log.tone}` : ""}`}>
       {lead}
-      <button className="lj-tw" aria-expanded={open} aria-label={open ? LOG_FIELDS_HIDE : LOG_FIELDS_SHOW} onClick={() => setOpen((o) => !o)}>
+      <button className="lj-tw tone-secondary" aria-expanded={open} aria-label={open ? LOG_FIELDS_HIDE : LOG_FIELDS_SHOW} onClick={() => setOpen((o) => !o)}>
         {open ? "▾" : "▸"}
       </button>
       {log.time !== null && (
@@ -47,7 +47,7 @@ export const JsonLogLine = memo(function JsonLogLine({ line, query, lead }: { li
             ))}
           </dl>
           <button
-            className="link"
+            className="link tone-secondary"
             onClick={() => void desktop.copy(JSON.stringify(log.value, null, 2)).then(() => setCopied(true))}
             onBlur={() => setCopied(false)}
           >

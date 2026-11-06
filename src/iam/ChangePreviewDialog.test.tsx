@@ -125,16 +125,16 @@ describe("applying", () => {
   test("a clean preview can be applied with one click, in the primary style", () => {
     const { props } = setup(previewOf(attachReadOnlyToBob));
     expect(applyButton()).toBeEnabled();
-    expect(applyButton()).toHaveClass("primary");
-    expect(applyButton()).not.toHaveClass("danger");
+    expect(applyButton()).toHaveClass("tone-primary");
+    expect(applyButton()).not.toHaveClass("tone-danger");
     fireEvent.click(applyButton());
     expect(props.onApply).toHaveBeenCalledWith("");
   });
 
-  test("a warn warning keeps the apply enabled but turns it into the danger style", () => {
+  test("a warning keeps the action tone and leaves apply enabled", () => {
     const { props } = setup(previewOf(attachReadOnlyToBob, { warnings: [{ level: "warn", message: "5명 이상" }] }));
     expect(applyButton()).toBeEnabled();
-    expect(applyButton()).toHaveClass("danger");
+    expect(applyButton()).toHaveClass("tone-primary");
     fireEvent.click(applyButton());
     expect(props.onApply).toHaveBeenCalledTimes(1);
   });
@@ -168,7 +168,7 @@ describe("type to confirm", () => {
   test("asks for the name and keeps the apply disabled until it matches exactly", () => {
     const { props } = setup(confirmPreview());
     expect(applyButton()).toBeDisabled();
-    expect(applyButton()).toHaveClass("danger");
+    expect(applyButton()).toHaveClass("tone-primary");
     const input = confirmInput("bob");
     for (const wrong of ["b", "Bob", "BOB", "bob ", " bob", "bobb", "alice"]) {
       fireEvent.change(input, { target: { value: wrong } });

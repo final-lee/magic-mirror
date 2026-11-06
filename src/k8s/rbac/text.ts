@@ -3,7 +3,7 @@ import type { RbacSubjectSpec } from "./types";
 // ── 장바구니 ──
 export const CART_LABEL = "권한 변경 장바구니";
 export const cartCount = (count: number, max: number) => `장바구니 ${count}/${max}`;
-export const CART_PREVIEW = "한 번에 미리보기";
+export const CART_PREVIEW = "한 번에 미리보기…";
 export const CART_CLEAR = "비우기";
 export const CART_ITEMS = "담은 변경";
 export const CART_REMOVE = "빼기";
@@ -71,7 +71,7 @@ export const BINDING_SUBJECT_NAME = "이름";
 export const BINDING_SUBJECT_NAMESPACE = "네임스페이스";
 export const BINDING_SUBJECT_PICK = "뺄 주체";
 export const BINDING_NO_SUBJECTS = "주체가 없어요";
-export const BINDING_PREVIEW = "미리보기";
+export const BINDING_PREVIEW = "미리보기…";
 export const BINDING_CLOSE = "닫기";
 export const SUBJECT_KIND_LABELS: Record<RbacSubjectSpec["kind"], string> = { User: "사용자", Group: "그룹", ServiceAccount: "ServiceAccount" };
 export const subjectLabel = (s: RbacSubjectSpec) => `${SUBJECT_KIND_LABELS[s.kind]} ${s.kind === "ServiceAccount" ? `${s.namespace ?? ""}/` : ""}${s.name}`;
@@ -88,18 +88,18 @@ export const CELL_GRANT_TITLE = "권한 주기";
 export const CELL_GRANT_ROLE = "ClusterRole";
 export const CELL_GRANT_NAME = "바인딩 이름";
 export const CELL_GRANT_ADD = "권한 주기 담기";
-export const CELL_GRANT_PREVIEW = "미리보기";
+export const CELL_GRANT_PREVIEW = "미리보기…";
 export const CELL_GRANT_IAM = "IAM 주체는 access entry의 그룹이나 access policy로 권한을 줘요. 신원 탭에서 바꿔요";
 export const cellGrantHint = (cluster: boolean, namespace: string | null) =>
   cluster ? "ClusterRoleBinding을 만들어 모든 네임스페이스에 줘요" : `${namespace} 네임스페이스에 RoleBinding을 만들어요`;
 export const CELL_GRANT_ROLE_EMPTY = "ClusterRole 이름을 입력해 주세요";
 
 // ── access entry ──
-export const ENTRY_CREATE = "access entry 만들기";
-export const ENTRY_GROUPS = "그룹 변경";
-export const ENTRY_ASSOCIATE = "정책 연결";
+export const ENTRY_CREATE = "access entry 만들기…";
+export const ENTRY_GROUPS = "그룹 변경…";
+export const ENTRY_ASSOCIATE = "정책 연결…";
 export const ENTRY_DISASSOCIATE = "해제";
-export const ENTRY_DELETE = "삭제";
+export const ENTRY_DELETE = "삭제…";
 export const ENTRY_CREATE_TITLE = "access entry 만들기";
 export const ENTRY_GROUPS_TITLE = "쿠버네티스 그룹 바꾸기";
 export const ENTRY_ASSOCIATE_TITLE = "access policy 연결";
@@ -121,7 +121,7 @@ export const ENTRY_CONFIG_MAP = "인증 모드가 CONFIG_MAP이라 access entry�
 export const ENTRY_API_NOTE = "EKS 권한은 미리 확인할 수 없어요. 권한이 없으면 적용할 때 EKS의 오류를 그대로 보여 줘요";
 export const ENTRY_AWS_AUTH_NOTE = "aws-auth는 직접 고치지 않아요. access entry로 옮기세요";
 export const ENTRY_UNREADABLE = "자세히 읽지 못한 항목이에요";
-export const entryPolicyUndo = (name: string) => `${name} 연결 해제`;
+export const entryPolicyUndo = (name: string) => `${name} 연결 해제…`;
 export const ENTRY_GROUPS_REQUIRED = "그룹 이름이 비어 있어요";
 export const ENTRY_PRINCIPAL_REQUIRED = "IAM 주체 ARN을 입력해 주세요";
 export const ENTRY_POLICY_REQUIRED = "정책 ARN을 입력해 주세요";

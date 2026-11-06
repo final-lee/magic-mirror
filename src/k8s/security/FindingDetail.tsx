@@ -38,7 +38,7 @@ export function FindingDetail({ finding, target, context, ssoProfile, live, widt
         <SeverityChip severity={finding.severity} />
         <b>{info.title}</b>
         <span className="mono k8s-wrap">{targetLabel(finding.target)}</span>
-        <button className="icon k8s-push" aria-label={CLOSE} title={CLOSE} onClick={onClose}>
+        <button className="icon k8s-push tone-ghost" aria-label={CLOSE} title={CLOSE} onClick={onClose}>
           ✕
         </button>
       </div>

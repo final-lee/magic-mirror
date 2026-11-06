@@ -143,7 +143,7 @@ export function BullQueues({ target, prefix, onPrefix, onOpenQueue, active }: Pr
             <small className="dim">{bt.PREFIX_LABEL}</small>
             <input className="field-input mono" aria-label={bt.PREFIX_LABEL} value={input} onChange={(e) => setInput(e.target.value)} spellCheck={false} autoComplete="off" />
           </label>
-          <button type="submit" className="btn small">
+          <button type="submit" className="btn small tone-primary">
             {bt.PREFIX_FIND}
           </button>
         </form>
@@ -164,7 +164,7 @@ export function BullQueues({ target, prefix, onPrefix, onOpenQueue, active }: Pr
             <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
             {bt.AUTO_REFRESH}
           </label>
-          <button className="btn small" onClick={() => void q.refetch()} disabled={q.isFetching}>
+          <button className="btn small tone-refresh" onClick={() => void q.refetch()} disabled={q.isFetching}>
             {q.isFetching ? t.READING : t.REREAD}
           </button>
         </span>
@@ -172,7 +172,7 @@ export function BullQueues({ target, prefix, onPrefix, onOpenQueue, active }: Pr
       {partial && (
         <div className="notice kv-partial" role="status">
           <span>{bt.PARTIAL}</span>
-          <button className="btn small" disabled={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>
+          <button className="btn small tone-secondary" disabled={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>
             {q.isFetchingNextPage ? t.READING : bt.FIND_MORE}
           </button>
         </div>

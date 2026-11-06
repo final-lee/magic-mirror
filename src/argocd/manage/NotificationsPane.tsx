@@ -59,10 +59,10 @@ export function NotificationsPane({ url, annotations, onPatch, disabled, disable
                   <td className="mono">{s.service}</td>
                   <td className="mono k8s-wrap">{s.recipients}</td>
                   <td className="mg-acts">
-                    <button className="btn small tone-ghost" disabled={disabled} title={disabled ? disabledReason : undefined} onClick={() => edit(s)}>
+                    <button className="btn small tone-secondary" disabled={disabled} title={disabled ? disabledReason : undefined} onClick={() => edit(s)}>
                       {MANAGE_NOTIFY_EDIT}
                     </button>
-                    <button className="btn small tone-warn" disabled={disabled} title={disabled ? disabledReason : undefined} aria-label={`${s.trigger} ${s.service} ${MANAGE_REMOVE}`} onClick={() => onPatch(removeSubscription(s.key))}>
+                    <button className="btn small tone-danger" disabled={disabled} title={disabled ? disabledReason : undefined} aria-label={`${s.trigger} ${s.service} ${MANAGE_REMOVE}`} onClick={() => onPatch(removeSubscription(s.key))}>
                       {MANAGE_REMOVE}
                     </button>
                   </td>

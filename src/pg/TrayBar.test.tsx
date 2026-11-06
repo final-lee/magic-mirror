@@ -107,7 +107,7 @@ describe("미리보기", () => {
   test("opens the batch in the database of the tray, with the changes in the order they were put in", () => {
     const { start } = setup("analytics"); // the tab shows analytics, but the tray belongs to orders
     put(grantAuditRead, addBobToWriters);
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     expect(start).toHaveBeenCalledTimes(1);
     expect(start).toHaveBeenCalledWith("orders", [grantAuditRead, addBobToWriters], { onApplied: draft.removeApplied });
   });
@@ -116,14 +116,14 @@ describe("미리보기", () => {
     const { start } = setup("analytics");
     put(addBobToWriters);
     expect(draft.database).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     expect(start).toHaveBeenCalledWith("analytics", [addBobToWriters], { onApplied: draft.removeApplied });
   });
 
   test("takes the applied changes out of the tray when the batch is applied, and only those", () => {
     const { start } = setup();
     put(grantAuditRead, addBobToWriters, defaultAuditRead);
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     const { onApplied } = start.mock.calls[0][2];
     // the user added one more change while the preview was open; it was not part of the batch
     put({ ...defaultAuditRead, grantee: "app_write" });
@@ -134,14 +134,14 @@ describe("미리보기", () => {
   test("does not touch the tray by itself: nothing leaves it until the batch is applied", () => {
     setup();
     put(grantAuditRead);
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     expect(draft.items).toHaveLength(1);
   });
 
   test("sends the changes as they were queued: a revoke goes as a revoke", () => {
     const { start } = setup();
     put(revokeAuditRead, removeBobFromWriters);
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     expect(start.mock.calls[0][1]).toEqual([revokeAuditRead, removeBobFromWriters]);
   });
 });
@@ -155,6 +155,6 @@ test("uses the markup and the classes of the tray of the assignment table", () =
   expect(tray.querySelector(".asg-tray-list")).toBeInTheDocument();
   expect(tray.querySelector(".asg-tray-bar")).toBeInTheDocument();
   expect(tray.querySelector(".asg-tray-toggle")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "미리보기" })).toHaveClass("btn", "small", "primary");
+  expect(screen.getByRole("button", { name: "미리보기…" })).toHaveClass("btn", "small", "tone-primary");
   expect(screen.getByRole("button", { name: "모두 취소" })).toHaveClass("btn", "small");
 });

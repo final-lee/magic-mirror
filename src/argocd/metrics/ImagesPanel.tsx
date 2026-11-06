@@ -36,11 +36,11 @@ export function ImagesPanel({ url, rows, onOpen }: { url: string; rows: ArgoAppR
         <input aria-label={T.imageSearch} placeholder={T.imageSearch} value={query} onChange={(e) => setQuery(e.target.value)} />
         <label><input type="checkbox" checked={flaggedOnly} onChange={(e) => setFlaggedOnly(e.target.checked)} /> {T.imageFilter}</label>
         {loader.progress === null ? (
-          <button className="btn small tone-secondary" disabled={cached.size >= rows.length} onClick={() => void loader.start()}>{T.loadTrees}</button>
+          <button className="btn small tone-refresh" disabled={cached.size >= rows.length} onClick={() => void loader.start()}>{T.loadTrees}</button>
         ) : (
           <>
             <span>{T.loadingTrees(loader.progress.done, loader.progress.total)}</span>
-            <button className="btn small tone-secondary" onClick={loader.stop}>{T.stopLoading}</button>
+            <button className="btn small tone-caution" onClick={loader.stop}>{T.stopLoading}</button>
           </>
         )}
       </div>

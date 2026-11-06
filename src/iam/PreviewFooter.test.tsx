@@ -29,7 +29,7 @@ describe("the apply button", () => {
   test("is on for a preview with nothing to confirm, and hands over what was typed", () => {
     const { onApply } = setup({ typed: "abc" });
     expect(applyButton()).toBeEnabled();
-    expect(applyButton()).toHaveClass("primary");
+    expect(applyButton()).toHaveClass("tone-primary");
     fireEvent.click(applyButton());
     expect(onApply).toHaveBeenCalledWith("abc");
   });
@@ -72,15 +72,15 @@ describe("the apply button", () => {
 
   test("is the danger button for a confirm text or any warning that is not a block; plain primary otherwise", () => {
     const { rerender } = setup({ gated: { warnings: [warn], confirmText: null } });
-    expect(applyButton()).toHaveClass("danger");
+    expect(applyButton()).toHaveClass("tone-danger");
     rerender({ gated: { warnings: [], confirmText: "app_read" } });
-    expect(applyButton()).toHaveClass("danger");
+    expect(applyButton()).toHaveClass("tone-danger");
     rerender({ gated: { warnings: [block], confirmText: null } });
-    expect(applyButton()).toHaveClass("primary");
+    expect(applyButton()).toHaveClass("tone-primary");
     rerender({ gated: clean });
-    expect(applyButton()).toHaveClass("primary");
+    expect(applyButton()).toHaveClass("tone-primary");
     rerender({ gated: null });
-    expect(applyButton()).toHaveClass("primary");
+    expect(applyButton()).toHaveClass("tone-primary");
   });
 });
 

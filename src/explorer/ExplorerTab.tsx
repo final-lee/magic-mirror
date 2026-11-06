@@ -201,7 +201,7 @@ export function ExplorerTab(p: Props) {
         title: "새 폴더",
         input: { label: "폴더 이름", initial },
         error,
-        actions: [{ label: "만들기", value: "ok", primary: true }],
+        actions: [{ label: "만들기", value: "ok", primary: true, create: true }],
         onResult: async (value, text) => {
           if (value === null) return setDialog(null);
           try {
@@ -426,13 +426,13 @@ export function ExplorerTab(p: Props) {
         />
       </div>
       <div className="actions">
-        <button className="btn small" disabled={!location || localSel.selected.length === 0} onClick={() => uploadPaths(localSel.selected)}>
+        <button className="btn small tone-primary" disabled={!location || localSel.selected.length === 0} onClick={() => uploadPaths(localSel.selected)}>
           복사 →
         </button>
-        <button className="btn small" disabled={!location || s3Sel.selected.length === 0} onClick={() => downloadKeys(s3Sel.selected)}>
+        <button className="btn small tone-primary" disabled={!location || s3Sel.selected.length === 0} onClick={() => downloadKeys(s3Sel.selected)}>
           ← 복사
         </button>
-        <button className="btn small primary" disabled={!targets} onClick={compare}>
+        <button className="btn small tone-nav" disabled={!targets} onClick={compare}>
           비교 ⌘D
         </button>
         {notice && <span className="err">{notice}</span>}

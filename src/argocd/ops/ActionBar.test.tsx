@@ -45,26 +45,26 @@ beforeEach(() => {
 
 test("workload actions show one button per kind with Korean names and counts", async () => {
   open();
-  expect(await button("재시작 · Deployment 3")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "일시정지 · Rollout 1" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "지금 실행 · CronJob 1" })).toBeInTheDocument();
+  expect(await button("재시작… · Deployment 3")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "일시정지… · Rollout 1" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "지금 실행… · CronJob 1" })).toBeInTheDocument();
   // 모르는 액션은 서버 표시 이름
-  expect(screen.getByRole("button", { name: "Frobnicate · Widget 1" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Frobnicate… · Widget 1" })).toBeInTheDocument();
 });
 
 test("a group with nothing runnable is disabled with a reason; workload actions never wait on can-i, which answers no to action checks even for admin", async () => {
   open({}, (a) => !a.startsWith("action"));
-  const widget = await button("Frobnicate · Widget 1");
-  await waitFor(() => expect(screen.getByRole("button", { name: "재시작 · Deployment 3" })).toBeEnabled());
+  const widget = await button("Frobnicate… · Widget 1");
+  await waitFor(() => expect(screen.getByRole("button", { name: "재시작… · Deployment 3" })).toBeEnabled());
   expect(widget).toBeDisabled();
   expect(widget.getAttribute("title")).toMatch(/실행할 수 있는 리소스가 없어요/);
-  expect(screen.getByRole("button", { name: "일시정지 · Rollout 1" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "일시정지… · Rollout 1" })).toBeEnabled();
   expect(change.can.mock.calls.flatMap(([, checks]) => checks.map((c) => c.action)).some((a) => a.startsWith("action"))).toBe(false);
 });
 
 test("the batch form preselects runnable resources, greys the disabled one and sends the chosen ones with params", async () => {
   const { onChange } = open();
-  const restart = await button("재시작 · Deployment 3");
+  const restart = await button("재시작… · Deployment 3");
   await waitFor(() => expect(restart).toBeEnabled());
   fireEvent.click(restart);
   expect(screen.getByLabelText("a 선택")).toBeChecked();
@@ -73,7 +73,7 @@ test("the batch form preselects runnable resources, greys the disabled one and s
   fireEvent.click(screen.getByRole("button", { name: "미리 보기" }));
   expect(onChange).toHaveBeenCalledWith({ kind: "resourceActionBatch", action: "restart", resources: [r("Deployment", "a")], params: [] });
 
-  const job = screen.getByRole("button", { name: "지금 실행 · CronJob 1" });
+  const job = screen.getByRole("button", { name: "지금 실행… · CronJob 1" });
   await waitFor(() => expect(job).toBeEnabled());
   fireEvent.click(job);
   fireEvent.change(screen.getByLabelText("jobName"), { target: { value: "adhoc" } });

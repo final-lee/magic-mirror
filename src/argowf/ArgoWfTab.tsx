@@ -188,11 +188,11 @@ export function ArgoWfTab({ active }: { active: boolean }) {
           )}
           {conn && !infoQuery.isPending && <NamespaceBox conn={conn} value={namespace} lockedBy={managed} onCommit={(ns) => patchServer({ namespace: ns })} />}
           {session.data && !needsAuth && (
-            <button className="btn small" onClick={() => setChoose(true)}>
+            <button className="btn small tone-warn" onClick={() => setChoose(true)}>
               인증 변경
             </button>
           )}
-          <button className="btn small k8s-push" onClick={() => setEditing(!editing)}>
+          <button className="btn small k8s-push tone-secondary" onClick={() => setEditing(!editing)}>
             서버 편집
           </button>
         </div>
@@ -222,7 +222,7 @@ export function ArgoWfTab({ active }: { active: boolean }) {
                 }}
               />
               <button
-                className="btn plain"
+                className="btn plain tone-secondary"
                 onClick={() => {
                   setTokenMode(false);
                   setForced(null);
@@ -266,7 +266,7 @@ export function ArgoWfTab({ active }: { active: boolean }) {
               </label>
               <div className="argo-token-acts">
                 <button
-                  className="btn primary"
+                  className="btn plain tone-primary"
                   disabled={!(contextChoice || server.context)}
                   onClick={() => {
                     setContext(contextChoice || server.context);
@@ -276,7 +276,7 @@ export function ArgoWfTab({ active }: { active: boolean }) {
                   연결
                 </button>
                 <button
-                  className="btn plain"
+                  className="btn plain tone-secondary"
                   onClick={() => {
                     setContext(null);
                     setForced({ url, message: null });
@@ -285,7 +285,7 @@ export function ArgoWfTab({ active }: { active: boolean }) {
                   API 토큰으로
                 </button>
                 {session.data && choose && (
-                  <button className="btn plain" onClick={() => setChoose(false)}>
+                  <button className="btn plain tone-ghost" onClick={() => setChoose(false)}>
                     취소
                   </button>
                 )}
@@ -296,7 +296,7 @@ export function ArgoWfTab({ active }: { active: boolean }) {
       ) : session.isError ? (
         <div className="argowf-session-err">
           <ErrorState error={session.error} profile={ssoProfile ?? ""} onRetry={() => void session.refetch()} onLoggedIn={() => void session.refetch()} />
-          <button className="btn small" onClick={() => setChoose(true)}>
+          <button className="btn small tone-warn" onClick={() => setChoose(true)}>
             인증 변경
           </button>
         </div>

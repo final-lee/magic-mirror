@@ -133,7 +133,7 @@ describe("바꾸기 mode: held privileges", () => {
     setup({ draft: undefined });
     await screen.findByText("app.orders");
     expect(screen.queryByRole("button", { name: /빼기/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "객체에 권한 주기" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "객체에 권한 주기…" })).not.toBeInTheDocument();
   });
 });
 
@@ -199,7 +199,7 @@ describe("a system role's cell", () => {
   test("cannot be revoked from or granted to, with the system-role text as the reason", async () => {
     setup(system);
     const text = "시스템 역할이라 바꿀 수 없어요: pg_read_all_data";
-    const grant = await screen.findByRole("button", { name: "객체에 권한 주기" });
+    const grant = await screen.findByRole("button", { name: "객체에 권한 주기…" });
     expect(grant).toBeDisabled();
     expect(grant).toHaveAttribute("title", text);
     expect(grant).toHaveAttribute("aria-description", text);
@@ -221,7 +221,7 @@ describe("객체에 권한 주기", () => {
   const open = async () => {
     setup();
     await screen.findByText("app.orders");
-    fireEvent.click(screen.getByRole("button", { name: "객체에 권한 주기" }));
+    fireEvent.click(screen.getByRole("button", { name: "객체에 권한 주기…" }));
     return screen.findByRole("dialog", { name: "객체에 권한 주기" });
   };
 
@@ -277,7 +277,7 @@ describe("the sheet", () => {
   test("closes when 바꾸기 mode is turned off", async () => {
     const utils = setup();
     await screen.findByText("app.orders");
-    fireEvent.click(screen.getByRole("button", { name: "객체에 권한 주기" }));
+    fireEvent.click(screen.getByRole("button", { name: "객체에 권한 주기…" }));
     expect(await screen.findByRole("dialog", { name: "객체에 권한 주기" })).toBeInTheDocument();
     utils.rerender(
       <QueryClientProvider client={utils.qc as QueryClient}>
@@ -306,7 +306,7 @@ describe("a brush that covers the object", () => {
     setup();
     await screen.findByText("app.orders");
     readBrush();
-    fireEvent.click(screen.getByRole("button", { name: "객체에 권한 주기" }));
+    fireEvent.click(screen.getByRole("button", { name: "객체에 권한 주기…" }));
     const dialog = await screen.findByRole("dialog", { name: "객체에 권한 주기" });
     fireEvent.click(await within(dialog).findByRole("button", { name: /^app\.orders 테이블$/ }));
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "SELECT" }));

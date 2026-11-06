@@ -14,9 +14,9 @@ test("signing requires a trusted node and an explicit command confirmation", asy
   vi.mocked(tailscaleApi.lockChange).mockResolvedValue("");
   const view = renderWithClient(<LockControls lock={{ ...lock, thisKeyTrusted: false }} />);
   fireEvent.change(screen.getByLabelText("서명할 노드 키"), { target: { value: "nodekey:abc" } });
-  expect(screen.getByRole("button", { name: "노드 서명" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "노드 서명…" })).toBeDisabled();
   view.rerender(<QueryClientProvider client={view.qc}><LockControls lock={lock} /></QueryClientProvider>);
-  fireEvent.click(screen.getByRole("button", { name: "노드 서명" }));
+  fireEvent.click(screen.getByRole("button", { name: "노드 서명…" }));
   const dialog = screen.getByRole("dialog");
   expect(dialog).toHaveTextContent("tailscale lock sign 'nodekey:abc'");
   expect(tailscaleApi.lockChange).not.toHaveBeenCalled();
@@ -34,7 +34,7 @@ test("initialization previews the self key and shows generated secrets only in t
   expect(screen.getByRole("button", { name: "변경 이력" })).toBeDisabled();
   fireEvent.change(screen.getByLabelText("추가로 신뢰할 공개 키 (한 줄에 하나)"), { target: { value: extra } });
   fireEvent.change(screen.getByLabelText("생성할 비활성화 비밀값 개수"), { target: { value: "2" } });
-  fireEvent.click(screen.getByRole("button", { name: "Tailnet Lock 켜기" }));
+  fireEvent.click(screen.getByRole("button", { name: "Tailnet Lock 켜기…" }));
   const dialog = screen.getByRole("dialog");
   expect(dialog).toHaveTextContent(`tailscale lock init --confirm --gen-disablements=2 '${own}' '${extra}'`);
   expect(tailscaleApi.lockInit).not.toHaveBeenCalled();

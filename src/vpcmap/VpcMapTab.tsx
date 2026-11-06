@@ -194,16 +194,16 @@ export function VpcMapTab({ profile, region, vpcId, name, active, highlight }: P
             {title}
           </span>
           <span className="vm-zoom">
-            <button className="btn small" onClick={fit} disabled={!layout}>
+            <button className="btn small tone-secondary" onClick={fit} disabled={!layout}>
               맞춤
             </button>
-            <button className="btn small" onClick={() => layout && zoomAt(1 / viewRef.current.k, (boxRef.current?.clientWidth ?? 0) / 2, (boxRef.current?.clientHeight ?? 0) / 2)} disabled={!layout}>
+            <button className="btn small tone-secondary" onClick={() => layout && zoomAt(1 / viewRef.current.k, (boxRef.current?.clientWidth ?? 0) / 2, (boxRef.current?.clientHeight ?? 0) / 2)} disabled={!layout}>
               100%
             </button>
-            <button className="btn small" aria-label="축소" onClick={() => zoomCenter(1 / 1.25)} disabled={!layout}>
+            <button className="btn small tone-secondary" aria-label="축소" onClick={() => zoomCenter(1 / 1.25)} disabled={!layout}>
               −
             </button>
-            <button className="btn small" aria-label="확대" onClick={() => zoomCenter(1.25)} disabled={!layout}>
+            <button className="btn small tone-secondary" aria-label="확대" onClick={() => zoomCenter(1.25)} disabled={!layout}>
               +
             </button>
             <span className="vm-pct" data-testid="vpc-zoom">
@@ -228,10 +228,10 @@ export function VpcMapTab({ profile, region, vpcId, name, active, highlight }: P
           )}
           <span className="sp">
             {saveMsg && <span className={saveMsg.ok ? "ok" : "err"}>{saveMsg.text}</span>}
-            <button className="btn small" onClick={refresh} disabled={q.isFetching}>
+            <button className="btn small tone-refresh" onClick={refresh} disabled={q.isFetching}>
               {q.isFetching ? "불러오는 중…" : "새로고침"}
             </button>
-            <button className="btn small" onClick={() => void savePng()} disabled={!layout || saving}>
+            <button className="btn small tone-secondary" onClick={() => void savePng()} disabled={!layout || saving}>
               PNG로 저장
             </button>
           </span>

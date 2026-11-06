@@ -6,6 +6,7 @@ import { useModal } from "../iam/useModal";
 import { ApiRequired } from "./ApiRequired";
 import { useTailscaleApi } from "./useTailscaleApi";
 import * as t from "./servicesText";
+import { revertTone, type Tone } from "./tone";
 
 type Service = {
   name: string;
@@ -22,6 +23,7 @@ type Operation = {
   body: Service | { approved: boolean } | null;
   before: Service | { approved: boolean } | null;
   device?: string;
+  revert?: boolean;
 };
 const list = (value: string) =>
   value
@@ -29,6 +31,23 @@ const list = (value: string) =>
     .map((s) => s.trim())
     .filter(Boolean);
 const path = (name: string) => `/tailnet/-/services/${encodeURIComponent(name)}`;
+function toneOf(operation: Operation): Tone {
+  const base = operation.kind === "delete" ? "danger" : operation.kind === "approval" ? "warn" : operation.before ? "primary" : "create";
+  return operation.revert ? revertTone(base) : base;
+}
+/** 직전 변경을 되돌리는 요청 */
+function inverseOf(operation: Operation): Operation {
+  if (operation.kind === "approval") return { ...operation, body: operation.before, before: operation.body, revert: true };
+  if (operation.before)
+    return {
+      kind: "put",
+      name: operation.kind === "put" ? (operation.body as Service).name : operation.name,
+      body: operation.before,
+      before: operation.body,
+      revert: true,
+    };
+  return { kind: "delete", name: (operation.body as Service).name, before: operation.body, body: null, revert: true };
+}
 
 export function ServicesView() {
   const { tailnet, connected, isLoading } = useTailscaleApi();
@@ -66,15 +85,15 @@ function Services({ tailnet }: { tailnet: string }) {
         />
         <div className="awc-bar-end">
           <button
-            className="btn small"
+            className="btn small tone-create"
             onClick={() => {
               setCreating(true);
               setEdit({ name: "", addrs: [], ports: [], tags: [], comment: "" });
             }}
           >
-            {t.CREATE}
+            {t.CREATE_OPEN}
           </button>
-          <button className="btn small" onClick={() => void query.refetch()}>
+          <button className="btn small tone-refresh" onClick={() => void query.refetch()}>
             {t.REFRESH}
           </button>
         </div>
@@ -179,16 +198,16 @@ function ServicePanel({
     <section className="awc-panel">
       <div className="ts-panel-head">
         <strong>{service.name}</strong>
-        <button className="btn small" onClick={onEdit}>
-          {t.EDIT}
+        <button className="btn small tone-primary" onClick={onEdit}>
+          {t.EDIT_OPEN}
         </button>
         <button
-          className="btn small"
+          className="btn small tone-danger"
           onClick={() => onOperation({ kind: "delete", name: service.name, before: service, body: null })}
         >
           {t.DELETE}
         </button>
-        <button className="btn small" onClick={onClose} aria-label={t.CLOSE}>
+        <button className="btn small tone-ghost" onClick={onClose} aria-label={t.CLOSE}>
           ✕
         </button>
       </div>
@@ -252,7 +271,7 @@ function HostRow({
       {query.error && <span role="alert">{errorMessage(query.error)}</span>}
       {query.data && (
         <button
-          className="btn small"
+          className="btn small tone-warn"
           onClick={() =>
             onOperation({
               kind: "approval",
@@ -335,7 +354,7 @@ function ServiceEditor({
         </div>
         <div className="foot">
           <button
-            className="btn small"
+            className={`btn small tone-${creating ? "create" : "primary"}`}
             disabled={!name.trim()}
             onClick={() =>
               onPreview({
@@ -348,9 +367,9 @@ function ServiceEditor({
               })
             }
           >
-            {t.PREVIEW}
+            {t.PREVIEW_OPEN}
           </button>
-          <button className="btn small" onClick={onClose}>
+          <button className="btn small tone-ghost" onClick={onClose}>
             {t.CANCEL}
           </button>
         </div>
@@ -412,17 +431,8 @@ function ServiceConfirmation({
       setBusy(false);
     }
   }
-  function undo() {
-    if (operation.kind === "approval") onUndo({ ...operation, body: operation.before, before: operation.body });
-    else if (operation.before)
-      onUndo({
-        kind: "put",
-        name: operation.kind === "put" ? (operation.body as Service).name : operation.name,
-        body: operation.before,
-        before: operation.body,
-      });
-    else onUndo({ kind: "delete", name: (operation.body as Service).name, before: operation.body, body: null });
-  }
+  const tone = toneOf(operation);
+  const inverse = inverseOf(operation);
   return (
     <div
       className="modal"
@@ -452,7 +462,7 @@ function ServiceConfirmation({
               </label>
             )}
             <button
-              className="btn small"
+              className={`btn small tone-${tone}`}
               disabled={busy || (operation.kind === "delete" && typed !== operation.name)}
               onClick={() => void apply()}
             >
@@ -461,11 +471,11 @@ function ServiceConfirmation({
           </>
         )}
         {done && (
-          <button className="btn small" onClick={undo}>
+          <button className={`btn small tone-${toneOf(inverse)}`} onClick={() => onUndo(inverse)}>
             {t.UNDO}
           </button>
         )}
-        <button className="btn small" disabled={busy} onClick={close}>
+        <button className="btn small tone-ghost" disabled={busy} onClick={close}>
           {done ? t.CLOSE : t.CANCEL}
         </button>
         {error && <p role="alert">{error}</p>}

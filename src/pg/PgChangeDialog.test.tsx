@@ -190,8 +190,8 @@ describe("applying", () => {
   test("a clean preview can be applied with one click, in the primary style", () => {
     const { props } = setup(clean());
     expect(applyButton()).toBeEnabled();
-    expect(applyButton()).toHaveClass("primary");
-    expect(applyButton()).not.toHaveClass("danger");
+    expect(applyButton()).toHaveClass("tone-primary");
+    expect(applyButton()).not.toHaveClass("tone-danger");
     fireEvent.click(applyButton());
     expect(props.onApply).toHaveBeenCalledWith("");
   });
@@ -199,7 +199,7 @@ describe("applying", () => {
   test("a warn warning keeps the apply enabled but turns it into the danger style", () => {
     const { props } = setup(samplePreview());
     expect(applyButton()).toBeEnabled();
-    expect(applyButton()).toHaveClass("danger");
+    expect(applyButton()).toHaveClass("tone-danger");
     fireEvent.click(applyButton());
     expect(props.onApply).toHaveBeenCalledTimes(1);
   });
@@ -233,7 +233,7 @@ describe("type to confirm", () => {
   test("asks for the name and keeps the apply disabled until it matches exactly", () => {
     const { props } = setup(confirmPreview());
     expect(applyButton()).toBeDisabled();
-    expect(applyButton()).toHaveClass("danger");
+    expect(applyButton()).toHaveClass("tone-danger");
     const input = confirmInput("app_read");
     for (const wrong of ["a", "App_read", "APP_READ", "app_read ", " app_read", "app_readd", "alice"]) {
       fireEvent.change(input, { target: { value: wrong } });

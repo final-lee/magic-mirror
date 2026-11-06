@@ -39,13 +39,13 @@ export function CellDetailPane({ target, context, ssoProfile, selected, mapping,
           <SubjectName subject={selected.subject} label={mapping?.label} />
         </span>
         <span className="dim">· {DETAIL_COLUMN(selected.namespace)}</span>
-        <button className="icon k8s-push" aria-label={CLOSE} title={CLOSE} onClick={onClose}>
+        <button className="icon k8s-push tone-ghost" aria-label={CLOSE} title={CLOSE} onClick={onClose}>
           ✕
         </button>
       </div>
       <div className="k8s-actions k8s-toolbar">
         {iamArn && onOpenIam && (
-          <button className="btn small tone-secondary" onClick={() => onOpenIam(iamArn)}>
+          <button className="btn small tone-nav" onClick={() => onOpenIam(iamArn)}>
             {OPEN_IAM}
           </button>
         )}

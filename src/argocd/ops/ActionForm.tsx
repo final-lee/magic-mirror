@@ -2,6 +2,7 @@ import { useState } from "react";
 import { FormSheet } from "../change/FormSheet";
 import { ACT_PARAMS_HINT, ACT_PREVIEW, actParamsTitle } from "./text";
 import type { ActionParam, ResourceAction } from "./types";
+import { actionTone } from "./tone";
 
 interface Props {
   action: ResourceAction;
@@ -42,7 +43,7 @@ export function ActionForm({ action, onCancel, onPreview }: Props) {
     <FormSheet
       label={actParamsTitle(action.displayName ?? action.name)}
       onCancel={onCancel}
-      submit={{ label: ACT_PREVIEW, onClick: () => onPreview(filledParams(action.params, values)) }}
+      submit={{ label: ACT_PREVIEW, tone: actionTone(action.name), onClick: () => onPreview(filledParams(action.params, values)) }}
     >
       <p>{ACT_PARAMS_HINT}</p>
       {action.params.map((p) => (

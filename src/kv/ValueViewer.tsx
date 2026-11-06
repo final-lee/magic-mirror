@@ -242,7 +242,7 @@ export function ValueViewer({ value, total, hasMore, fetching, onMore }: Props) 
       <div className="kv-more">
         <span className="dim">{t.VALUE_READ(read, total)}</span>
         {hasMore && (
-          <button type="button" className="btn small" disabled={fetching} onClick={onMore}>
+          <button type="button" className="btn small tone-secondary" disabled={fetching} onClick={onMore}>
             {fetching ? t.READING : t.MORE}
           </button>
         )}

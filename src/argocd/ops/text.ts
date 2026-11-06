@@ -93,7 +93,7 @@ export const BATCH_DISABLED = "지금은 이 리소스에서 실행할 수 없�
 export const BATCH_PREVIEW = "미리 보기";
 export const batchTitle = (label: string, kind: string) => `${label} · ${kind}`;
 export const batchPick = (name: string) => `${name} 선택`;
-export const batchButton = (label: string, kind: string, count: number) => `${label} · ${kind} ${count}`;
+export const batchButton = (label: string, kind: string, count: number) => `${label}… · ${kind} ${count}`;
 
 /** 널리 쓰는 액션 이름의 한국어 표시. 모르면 서버가 준 표시 이름, 그것도 없으면 이름 그대로 */
 const ACTION_NAMES: Record<string, string> = {

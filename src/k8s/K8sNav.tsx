@@ -69,7 +69,7 @@ export function K8sNav({ view, onSelect, bookmarks, onMoveBookmark, onRemoveBook
                   <span className="iam-nav-ico" aria-hidden="true">★</span>
                   <span className="iam-nav-label">{b.label}</span>
                 </button>
-                <button className="k8s-bm-x" aria-label={bookmarkRemove(b.label)} title={bookmarkRemove(b.label)} onMouseDown={(e) => e.stopPropagation()} onClick={() => onRemoveBookmark(b.key)}>
+                <button className="k8s-bm-x tone-ghost-danger" aria-label={bookmarkRemove(b.label)} title={bookmarkRemove(b.label)} onMouseDown={(e) => e.stopPropagation()} onClick={() => onRemoveBookmark(b.key)}>
                   ✕
                 </button>
               </div>

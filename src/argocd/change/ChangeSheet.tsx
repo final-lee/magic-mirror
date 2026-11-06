@@ -5,6 +5,7 @@ import { TextDiffView } from "../../explorer/TextDiffView";
 import type { ArgoChange, ArgoPreview, ArgoTarget } from "./types";
 import { useArgoChange } from "./useArgoChange";
 import { CHANGE_APPLY, CHANGE_CALLS, CHANGE_CANCEL, CHANGE_CONFIRM, CHANGE_DIFF, CHANGE_IMPACT, CHANGE_LOADING, CHANGE_PREVIEW, CHANGE_WARNINGS } from "./text";
+import { changeTone } from "../ops/tone";
 export function ChangeSheet({ url, target, change, onClose, onDone }: { url: string; target: ArgoTarget; change: ArgoChange; onClose: () => void; onDone: (message: string) => void }) {
   const flow = useArgoChange(url);
   const [preview, setPreview] = useState<ArgoPreview | null>(null);
@@ -24,6 +25,6 @@ export function ChangeSheet({ url, target, change, onClose, onDone }: { url: str
       <details><summary>{CHANGE_CALLS}</summary>{preview.calls.map((c,i) => <div key={i}><div className="mono">{c.verb} {c.path}</div>{c.body !== null && <pre className="mono">{JSON.stringify(c.body, null, 2)}</pre>}</div>)}</details>
       {preview.confirmName && <label>{CHANGE_CONFIRM}: <span className="mono">{preview.confirmName}</span><input value={name} onChange={(e) => setName(e.target.value)} /></label>}
     </>}
-    <div className="foot"><button className="btn plain tone-ghost" onClick={onClose}>{CHANGE_CANCEL}</button><button className="btn plain tone-primary" disabled={!preview || !!preview.blocked || flow.pending || (!!preview.confirmName && name !== preview.confirmName)} onClick={() => { if (preview) void flow.apply(target,change,preview,name || null).then((r) => onDone(r.message)).catch(() => {}); }}>{CHANGE_APPLY}</button></div>
+    <div className="foot"><button className="btn plain tone-ghost" onClick={onClose}>{CHANGE_CANCEL}</button><button className={`btn plain ${changeTone(change)}`} disabled={!preview || !!preview.blocked || flow.pending || (!!preview.confirmName && name !== preview.confirmName)} onClick={() => { if (preview) void flow.apply(target,change,preview,name || null).then((r) => onDone(r.message)).catch(() => {}); }}>{CHANGE_APPLY}</button></div>
   </div></div>;
 }

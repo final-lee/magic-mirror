@@ -5,6 +5,7 @@ import { resourceKey } from "../change/syncModel";
 import { ParamInput, filledParams, initialParams } from "./ActionForm";
 import { ACT_PARAMS_HINT, BATCH_DISABLED, BATCH_PREVIEW, BATCH_TARGETS, actionLabel, batchPick, batchTitle } from "./text";
 import type { AppActionGroup } from "./types";
+import { actionTone } from "./tone";
 
 export type Batch = Extract<ArgoChange, { kind: "resourceActionBatch" }>;
 
@@ -27,7 +28,9 @@ export function BatchForm({ group, onCancel, onPreview }: Props) {
       onCancel={onCancel}
       submit={{
         label: BATCH_PREVIEW,
+        tone: actionTone(group.action),
         disabled: chosen.length === 0,
+        title: chosen.length === 0 ? BATCH_DISABLED : undefined,
         onClick: () => onPreview({ kind: "resourceActionBatch", action: group.action, resources: chosen.map((r) => r.res), params: filledParams(group.params, values) }),
       }}
     >

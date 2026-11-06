@@ -36,13 +36,13 @@ export function TerminalView({ target, context, ssoProfile, visible, tabs, activ
               <button role="tab" aria-selected={tab.id === active} title={tab.command ?? undefined} onClick={() => onSelect(tab.id)}>
                 {tab.title}
               </button>
-              <button className="icon" aria-label={terminalClose(tab.title)} title={terminalClose(tab.title)} onClick={() => onClose(tab.id)}>
+              <button className="icon tone-ghost-danger" aria-label={terminalClose(tab.title)} title={terminalClose(tab.title)} onClick={() => onClose(tab.id)}>
                 ✕
               </button>
             </span>
           ))}
         </div>
-        <button className="btn small tone-secondary" onClick={onNew}>{TERMINAL_NEW}</button>
+        <button className="btn small tone-primary" onClick={onNew}>{TERMINAL_NEW}</button>
       </div>
       {current?.command != null && (
         <p className="dim mono k8s-term-command" aria-label={TERMINAL_COMMAND_LABEL}>{current.command}</p>

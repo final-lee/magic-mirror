@@ -147,7 +147,7 @@ export function ArchiveList({ conn, live, namespace = null, selected, onOpen, on
         )}
       </div>
       {q.hasNextPage && (
-        <button className="btn more" disabled={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>
+        <button className="btn more tone-secondary" disabled={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>
           더 보기
         </button>
       )}

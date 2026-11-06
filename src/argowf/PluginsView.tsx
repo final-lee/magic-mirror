@@ -29,7 +29,7 @@ export function PluginsView({
   const find = useListFind(listRef);
   const visible = fuzzyKeep(rows, find.query, (p) => [p.name, p.namespace, p.description, p.image]);
   const docs = (
-    <button className="btn small" onClick={() => void desktop.openUrl(PLUGINS_DOCS)}>
+    <button className="btn small tone-nav" onClick={() => void desktop.openUrl(PLUGINS_DOCS)}>
       문서 열기 ↗
     </button>
   );

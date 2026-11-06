@@ -67,7 +67,7 @@ export function DescribeView({ target, context, objectRef, resourceVersion, ssoP
             <button aria-pressed={!raw} onClick={() => setRaw(false)}>{DESCRIBE_PRETTY}</button>
             <button aria-pressed={raw} onClick={() => setRaw(true)}>{DESCRIBE_RAW}</button>
           </div>
-          <button className="btn tone-secondary" onClick={() => secret ? onRefreshObject() : void query.refetch()} disabled={!secret && query.isFetching}>{DESCRIBE_REFRESH}</button>
+          <button className="btn tone-refresh" onClick={() => secret ? onRefreshObject() : void query.refetch()} disabled={!secret && query.isFetching}>{DESCRIBE_REFRESH}</button>
         </>,
         toolbar,
       )}

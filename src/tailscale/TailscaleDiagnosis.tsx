@@ -62,10 +62,10 @@ export function TailscaleDiagnosis({ url, inWorkspace = false }: { url: string; 
         </>
       )}
       <div className="tailscale-actions">
-        <button className="btn small tone-secondary" disabled={diagnosis.isFetching || busy} onClick={() => void diagnosis.refetch()}>{t.REDIAGNOSE}</button>
+        <button className="btn small tone-refresh" disabled={diagnosis.isFetching || busy} onClick={() => void diagnosis.refetch()}>{t.REDIAGNOSE}</button>
         {confirm === null && (applied || data?.fix === "acceptRoutes") && (
-          <button className="btn small tone-warn" disabled={busy || diagnosis.isFetching} onClick={() => { setApplyError(null); setConfirm(!applied); }}>
-            {applied ? t.UNDO : t.ENABLE_ROUTES}
+          <button className={`btn small ${applied ? "tone-caution" : "tone-warn"}`} disabled={busy || diagnosis.isFetching} onClick={() => { setApplyError(null); setConfirm(!applied); }}>
+            {applied ? t.UNDO_OPEN : t.ENABLE_ROUTES_OPEN}
           </button>
         )}
       </div>
@@ -77,8 +77,8 @@ export function TailscaleDiagnosis({ url, inWorkspace = false }: { url: string; 
             <p>{confirm ? t.EFFECT_ENABLE : t.EFFECT_DISABLE}</p>
             {applyError && <p className="err" role="alert">{applyError}</p>}
             <div className="foot">
-              <button className="btn" disabled={busy} onClick={cancel}>{t.CANCEL}</button>
-              <button className="btn primary" disabled={busy} onClick={() => void apply(confirm)}>{t.APPLY}</button>
+              <button className="btn plain tone-ghost" disabled={busy} onClick={cancel}>{t.CANCEL}</button>
+              <button className={`btn plain ${confirm ? "tone-warn" : "tone-caution"}`} disabled={busy} onClick={() => void apply(confirm)}>{t.APPLY}</button>
             </div>
           </div>
         </div>
@@ -88,8 +88,8 @@ export function TailscaleDiagnosis({ url, inWorkspace = false }: { url: string; 
           <code className="raw">tailscale set --accept-routes={String(confirm)}</code>
           <p>{confirm ? t.EFFECT_ENABLE : t.EFFECT_DISABLE}</p>
           <div className="tailscale-actions">
-            <button className="btn small tone-warn" disabled={busy} onClick={() => void apply(confirm)}>{t.APPLY}</button>
-            <button className="btn small tone-secondary" disabled={busy} onClick={cancel}>{t.CANCEL}</button>
+            <button className={`btn small ${confirm ? "tone-warn" : "tone-caution"}`} disabled={busy} onClick={() => void apply(confirm)}>{t.APPLY}</button>
+            <button className="btn small tone-ghost" disabled={busy} onClick={cancel}>{t.CANCEL}</button>
           </div>
         </div>
       )}

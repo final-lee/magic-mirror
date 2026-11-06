@@ -99,7 +99,7 @@ export function CellActions({ target, context, ssoProfile, subject, cell, namesp
                   <PathLine grant={p.grant} />
                   <span className="rbac-cell-actions">
                     <ActionButton
-                      tone="warn"
+                      tone="secondary"
                       reason={p.removable ? denied("patch", plural, p.binding.name) : t.CELL_NO_SUBJECT_REMOVE}
                       onClick={() => p.removable && addToCart(editSubjects(p.binding, [], [p.removable]))}
                     >

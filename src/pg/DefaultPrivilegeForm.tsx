@@ -104,10 +104,10 @@ export function DefaultPrivilegeForm({ database, creators, grantees, schemas, dr
         </select>
         <PrivilegeChecks label="권한" options={DEFAULT_PRIVILEGES[objectType]} value={privileges} onChange={setPrivileges} />
         <div className="foot">
-          <button className="btn plain" onClick={onClose}>
+          <button className="btn plain tone-ghost" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={!ready} onClick={submit}>
+          <button className="btn plain tone-secondary" disabled={!ready} onClick={submit}>
             담기
           </button>
         </div>

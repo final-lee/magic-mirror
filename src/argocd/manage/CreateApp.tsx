@@ -18,7 +18,7 @@ export function CreateApp({ url, rows, onDone }: Props) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button className="btn small tone-primary" onClick={() => setOpen(true)}>
+      <button className="btn small tone-create" onClick={() => setOpen(true)}>
         {MANAGE_CREATE}
       </button>
       {open && <CreateSheet url={url} rows={rows} onClose={() => setOpen(false)} onDone={onDone} />}
@@ -104,7 +104,7 @@ function CreateSheet({ url, rows, onClose, onDone }: Props & { onClose: () => vo
           <button className="btn plain tone-ghost" onClick={onClose}>
             {MANAGE_CANCEL}
           </button>
-          <button className="btn plain tone-primary" disabled={!gate.ok} onClick={() => setPreviewing(true)}>
+          <button className="btn plain tone-create" disabled={!gate.ok} onClick={() => setPreviewing(true)}>
             {MANAGE_PREVIEW}
           </button>
         </div>

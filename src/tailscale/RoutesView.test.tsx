@@ -15,7 +15,7 @@ beforeEach(() => {
 test("previews the complete enabled route list and VPC coverage", async () => {
   renderWithClient(<RoutesView profile="profile" region="us-east-1" />);
   expect(await screen.findByText("전부")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "승인" }));
+  fireEvent.click(screen.getByRole("button", { name: "승인…" }));
   expect(await screen.findByText("POST /device/d1/routes")).toBeInTheDocument();
   expect(devicesApi.preview).toHaveBeenCalledWith("example.com", ["d1"], "routes", ["10.0.0.0/16", "10.1.0.0/16"]);
   expect(devicesApi.apply).not.toHaveBeenCalled();
@@ -33,7 +33,7 @@ test("combines exit routes and previews approval of both without counting them a
   expect(screen.getAllByText("Exit node")).toHaveLength(1);
   expect(within(row).getByText("승인 대기")).toBeInTheDocument();
   expect(screen.getByText("없음")).toBeInTheDocument();
-  fireEvent.click(within(row).getByRole("button", { name: "승인" }));
+  fireEvent.click(within(row).getByRole("button", { name: "승인…" }));
   expect(devicesApi.preview).toHaveBeenCalledWith(
     "example.com", ["d1"], "routes", ["192.168.0.0/16", "0.0.0.0/0", "::/0"],
   );
@@ -47,5 +47,5 @@ test("shows exit as approved only when both routes are enabled", async () => {
   const labels = await screen.findAllByText("Exit node");
   expect(labels).toHaveLength(2);
   expect(labels[0].closest("tr")).toBe(labels[1].closest("tr"));
-  expect(screen.queryByRole("button", { name: "승인" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "승인…" })).not.toBeInTheDocument();
 });

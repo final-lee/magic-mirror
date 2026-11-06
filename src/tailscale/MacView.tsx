@@ -34,7 +34,7 @@ export function MacView({ node }: { node: TsNode }) {
         ? node.self.ips.map((ip) => (
             <div key={ip}>
               {ip}{" "}
-              <button className="btn small" aria-label={`${t.COPY_IP}: ${ip}`} onClick={() => void desktop.copy(ip)}>
+              <button className="btn small tone-secondary" aria-label={`${t.COPY_IP}: ${ip}`} onClick={() => void desktop.copy(ip)}>
                 복사
               </button>
             </div>

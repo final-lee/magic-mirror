@@ -39,7 +39,7 @@ export function Clients({ target, overview, active }: { target: KvTarget; overvi
           ))}
         </div>
         <span className="kv-bar-end">
-          <button className="btn small" onClick={() => void q.refetch()} disabled={q.isFetching}>
+          <button className="btn small tone-refresh" onClick={() => void q.refetch()} disabled={q.isFetching}>
             {q.isFetching ? t.READING : t.REREAD}
           </button>
         </span>

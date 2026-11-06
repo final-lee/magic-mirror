@@ -395,7 +395,7 @@ export function LogPane({ state, ssoProfile, name, workload, options, nonce, onR
           ))}
         </div>
         {query && <span className="dim k8s-log-count">{logMatches(matches)}</span>}
-        <button className="btn tone-secondary" aria-pressed={paused !== null} onClick={() => setPaused((p) => (p ? null : buf))}>
+        <button className="btn" aria-pressed={paused !== null} onClick={() => setPaused((p) => (p ? null : buf))}>
           {paused ? LOG_RESUME : LOG_PAUSE}
         </button>
         {paused && buf.received > paused.received && <span className="dim k8s-log-count">{logPending(buf.received - paused.received)}</span>}
@@ -421,7 +421,7 @@ export function LogPane({ state, ssoProfile, name, workload, options, nonce, onR
         <p className="dim k8s-hint" role="status">
           {"path" in saved ? logSaved(saved.path) : logSaveFailed(saved.error)}{" "}
           {"path" in saved && (
-            <button className="link" onClick={() => void desktop.reveal(saved.path)}>
+            <button className="link tone-nav" onClick={() => void desktop.reveal(saved.path)}>
               {LOG_REVEAL}
             </button>
           )}
@@ -452,7 +452,7 @@ export function LogPane({ state, ssoProfile, name, workload, options, nonce, onR
       {status === "ended" && (
         <p className="dim k8s-hint">
           {shown.size === 0 ? LOG_EMPTY : LOG_ENDED}{" "}
-          <button className="link" onClick={restart}>
+          <button className="link tone-refresh" onClick={restart}>
             {LOG_RESTART}
           </button>
         </p>

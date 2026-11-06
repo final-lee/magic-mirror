@@ -69,10 +69,10 @@ test("주석이 든 정책 원문을 편집기에 그대로 채우고 지적을 
 
 test("바꾼 것이 없으면 미리보기가 꺼져 있고, 바꾸면 켜져요", async () => {
   await open();
-  expect(button("미리보기")).toBeDisabled();
+  expect(button("미리보기…")).toBeDisabled();
   expect(screen.getByText("바꾼 내용이 없어요")).toBeInTheDocument();
   edit(EDITED);
-  expect(button("미리보기")).toBeEnabled();
+  expect(button("미리보기…")).toBeEnabled();
 });
 
 test("[검사]는 편집 중인 글로 부르고 결과를 보이며, 글을 고치면 옛 결과를 감춰요", async () => {
@@ -110,7 +110,7 @@ describe("저장 흐름", () => {
   async function review() {
     await open();
     edit(EDITED);
-    fireEvent.click(button("미리보기"));
+    fireEvent.click(button("미리보기…"));
     return await screen.findByRole("dialog", { name: "정책 저장 미리보기" });
   }
 
@@ -140,7 +140,7 @@ describe("저장 흐름", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     await waitFor(() => expect(editorView("정책 HuJSON").state.doc.toString()).toBe(EDITED));
     expect(api.policy).toHaveBeenCalledTimes(2);
-    expect(button("미리보기")).toBeDisabled();
+    expect(button("미리보기…")).toBeDisabled();
   });
 
   test("변경 기록을 남기지 못했으면 저장 뒤에 그 안내를 보여요", async () => {
@@ -177,7 +177,7 @@ describe("저장 흐름", () => {
   test("버전(ETag)을 받지 못했으면 저장할 수 없어요", async () => {
     await open({ etag: null });
     edit(EDITED);
-    fireEvent.click(button("미리보기"));
+    fireEvent.click(button("미리보기…"));
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "example.com" } });
     expect(within(dialog).getByRole("button", { name: "저장" })).toBeDisabled();
@@ -238,7 +238,7 @@ describe("다른 곳에서 관리하는 정책", () => {
     // 구문 색은 입히되 고칠 수는 없다
     expect(screen.getByLabelText("정책 HuJSON")).toHaveAttribute("aria-readonly", "true");
     expect(screen.getByLabelText("정책 HuJSON")).toHaveAttribute("contenteditable", "false");
-    for (const name of ["검사", "미리보기", "저장"]) expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    for (const name of ["검사", "미리보기…", "저장"]) expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
     fireEvent.click(button("관리하는 곳 열기"));
     expect(desktop.openUrl).toHaveBeenCalledWith("https://github.com/acme/tailnet-policy");
   });

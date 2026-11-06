@@ -5,8 +5,9 @@ import { useModal } from "../iam/useModal";
 import { tailscaleApi } from "./api";
 import * as t from "./macControlsText";
 import * as base from "./text";
+import { macActionTone, type Tone } from "./tone";
 
-interface Pending { kind: string; value: string; command: string; warning?: string; confirm?: string; undo?: { key: string; value: string } }
+interface Pending { kind: string; value: string; command: string; tone: Tone; warning?: string; confirm?: string; undo?: { key: string; value: string } }
 interface Account { id: string; nickname: string; account: string; tailnet: string; selected: boolean }
 const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
 
@@ -31,9 +32,9 @@ function Sheet({ pending, tailnet, onClose, onDone }: { pending: Pending; tailne
       {pending.confirm && <label>{t.TYPE_CONFIRM}: {pending.confirm}<input value={typed} onChange={(e) => setTyped(e.target.value)} /></label>}
       {error && <div className="err">{error}</div>}
       {result !== null && <pre>{result}</pre>}
-      <button className="btn small" onClick={close} disabled={busy}>{t.CANCEL}</button>
+      <button className="btn small tone-ghost" onClick={close} disabled={busy}>{t.CANCEL}</button>
       {result === null && (
-        <button className="btn small" onClick={() => void apply()} disabled={busy || (!!pending.confirm && typed !== pending.confirm)}>
+        <button className={`btn small tone-${pending.tone}`} onClick={() => void apply()} disabled={busy || (!!pending.confirm && typed !== pending.confirm)}>
           {t.CONFIRM}
         </button>
       )}
@@ -84,13 +85,14 @@ export function MacControls({ tailnet }: { tailnet: string }) {
     try { setMetrics("…"); setMetrics(await tailscaleApi.localRead("metrics")); }
     catch (e) { setMetrics(errorMessage(e)); }
   };
-  const preference = (key: string, value: string, previous: string) => setPending({
+  const preference = (key: string, value: string, previous: string, tone: Tone) => setPending({
     kind: "preference",
     value: `--${key}=${value}`,
     command: `tailscale set ${quote(`--${key}=${value}`)}`,
     undo: { key, value: previous },
+    tone,
   });
-  const action = (kind: string, command: string, warning?: string, confirm?: string, value = "") => setPending({ kind, command, warning, confirm, value });
+  const action = (kind: string, command: string, warning?: string, confirm?: string, value = "") => setPending({ kind, command, warning, confirm, value, tone: macActionTone(kind) });
   const exitList = exits.data ?? [];
   const suggested = suggestion.data ? exitList.find((exit) => exit.name === suggestion.data) ?? { ip: suggestion.data, name: suggestion.data } : null;
   const exitRow = (current: string) => {
@@ -104,9 +106,9 @@ export function MacControls({ tailnet }: { tailnet: string }) {
             {current && !known && <option value={current}>{current}</option>}
             {exitList.map((exit) => <option key={exit.ip} value={exit.ip}>{exit.name} ({exit.ip})</option>)}
           </select>
-          <button className="btn small" disabled={selected === (known?.ip ?? current)}
+          <button className="btn small tone-warn" disabled={selected === (known?.ip ?? current)}
             aria-label={`${t.prefLabel("exit-node")} ${t.APPLY}`}
-            onClick={() => preference("exit-node", selected, current)}>
+            onClick={() => preference("exit-node", selected, current, "warn")}>
             {t.APPLY}
           </button>
         </div>
@@ -114,7 +116,7 @@ export function MacControls({ tailnet }: { tailnet: string }) {
         {suggested && (
           <div className="ts-hint">
             {t.EXIT_SUGGESTED}: {suggested.name}{" "}
-            <button className="btn small" disabled={selected === suggested.ip}
+            <button className="btn small tone-secondary" disabled={selected === suggested.ip}
               onClick={() => setDraft((old) => ({ ...old, "exit-node": suggested.ip }))}>
               {t.USE_SUGGESTED}
             </button>
@@ -128,12 +130,12 @@ export function MacControls({ tailnet }: { tailnet: string }) {
       <h3>{t.SEC_CONNECT}</h3>
       <p className="ts-desc">{t.SEC_CONNECT_DESC}</p>
       <div className="ts-connect-acts">
-        <button className="btn small" onClick={() => action("connect", "tailscale up")}>{t.CONNECT}</button>
-        <button className="btn small" onClick={() => action("disconnect", "tailscale down", t.DISCONNECT_WARNING)}>{t.DISCONNECT}</button>
-        <button className="btn small" onClick={() => action("authenticate", "tailscale login")}>{t.LOGIN}</button>
-        <button className="btn small" onClick={() => action("sign-out", "tailscale logout", t.LOGOUT_WARNING, "logout")}>{t.LOGOUT}</button>
-        <button className="btn small" onClick={() => void checkVersion()}>{t.UPDATE_CHECK}</button>
-        <button className="btn small" onClick={() => action("upgrade", "tailscale update --yes")}>{t.UPDATE}</button>
+        <button className="btn small tone-refresh" onClick={() => void checkVersion()}>{t.UPDATE_CHECK}</button>
+        <button className="btn small tone-primary" onClick={() => action("connect", "tailscale up")}>{t.CONNECT}</button>
+        <button className="btn small tone-primary" onClick={() => action("authenticate", "tailscale login")}>{t.LOGIN}</button>
+        <button className="btn small tone-primary" onClick={() => action("upgrade", "tailscale update --yes")}>{t.UPDATE}</button>
+        <button className="btn small tone-caution" onClick={() => action("disconnect", "tailscale down", t.DISCONNECT_WARNING)}>{t.DISCONNECT}</button>
+        <button className="btn small tone-caution" onClick={() => action("sign-out", "tailscale logout", t.LOGOUT_WARNING, "logout")}>{t.LOGOUT}</button>
       </div>
       {versionCheck && <pre className="raw">{versionCheck}</pre>}
     </section>
@@ -157,8 +159,8 @@ export function MacControls({ tailnet }: { tailnet: string }) {
                     <>
                       <td className={current ? undefined : "dim"}>{current ? base.ON : base.OFF}</td>
                       <td>
-                        <button className="btn small" aria-label={`${label} ${current ? t.TURN_OFF : t.TURN_ON}`}
-                          onClick={() => preference(key, String(!current), String(current))}>
+                        <button className="btn small tone-warn" aria-label={`${label} ${current ? t.TURN_OFF : t.TURN_ON}`}
+                          onClick={() => preference(key, String(!current), String(current), "warn")}>
                           {current ? t.TURN_OFF : t.TURN_ON}
                         </button>
                       </td>
@@ -171,9 +173,9 @@ export function MacControls({ tailnet }: { tailnet: string }) {
                           <div className="ts-inline">
                             <input aria-label={label} value={draft[key] ?? String(current)}
                               onChange={(e) => setDraft((old) => ({ ...old, [key]: e.target.value }))} />
-                            <button className="btn small" disabled={(draft[key] ?? String(current)) === String(current)}
+                            <button className="btn small tone-primary" disabled={(draft[key] ?? String(current)) === String(current)}
                               aria-label={`${label} ${t.APPLY}`}
-                              onClick={() => preference(key, draft[key] ?? String(current), String(current))}>
+                              onClick={() => preference(key, draft[key] ?? String(current), String(current), "primary")}>
                               {t.APPLY}
                             </button>
                           </div>
@@ -189,8 +191,8 @@ export function MacControls({ tailnet }: { tailnet: string }) {
       )}
       {undo && (
         <div className="ts-connect-acts">
-          <button className="btn small" onClick={() => preference(undo.key, undo.value, String(prefs.data?.[undo.key] ?? ""))}>
-            {t.UNDO}: {t.prefLabel(undo.key)}
+          <button className="btn small tone-caution" onClick={() => preference(undo.key, undo.value, String(prefs.data?.[undo.key] ?? ""), "caution")}>
+            {t.undoPreference(t.prefLabel(undo.key))}
           </button>
         </div>
       )}
@@ -213,11 +215,11 @@ export function MacControls({ tailnet }: { tailnet: string }) {
                 <td>{account.selected ? t.IN_USE : <span className="dim">—</span>}</td>
                 <td className="end">
                   <div className="ts-inline">
-                    <button className="btn small" disabled={account.selected}
+                    <button className="btn small tone-warn" disabled={account.selected} title={account.selected ? t.IN_USE : undefined}
                       onClick={() => action("account-select", `tailscale switch ${quote(account.id)}`, undefined, undefined, account.id)}>
                       {t.SWITCH}
                     </button>
-                    <button className="btn small"
+                    <button className="btn small tone-danger"
                       onClick={() => action("account-remove", `tailscale switch remove ${quote(account.id)}`, undefined, account.id, account.id)}>
                       {t.REMOVE}
                     </button>

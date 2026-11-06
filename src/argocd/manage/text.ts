@@ -92,7 +92,7 @@ export const MANAGE_DELETE_PICK = "삭제 방식";
 export const MANAGE_DELETE_GO = "삭제 미리 보기";
 
 // 앱 만들기
-export const MANAGE_CREATE = "앱 만들기";
+export const MANAGE_CREATE = "앱 만들기…";
 export const MANAGE_CREATE_TITLE = "새 Application";
 export const MANAGE_CREATE_HINT = "YAML을 채운 뒤 미리 보기에서 서버에 보낼 내용을 확인해요. 이미 있는 이름이면 만들지 않아요.";
 export const MANAGE_CREATE_PROJECT = "프로젝트";
@@ -114,7 +114,7 @@ export const APPSET_TAB_EVENTS = "Events";
 export const APPSET_TAB_YAML = "YAML";
 export const APPSET_TAB_PREVIEW = "미리 보기";
 export const APPSET_SAVE = "저장";
-export const APPSET_DELETE = "삭제";
+export const APPSET_DELETE = "삭제…";
 export const APPSET_CONDITIONS = "조건";
 export const APPSET_NO_CONDITIONS = "조건이 아직 없어요";
 export const APPSET_GENERATORS = "Generator";

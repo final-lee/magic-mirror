@@ -337,7 +337,7 @@ function LogsPanel({ tailnet }: { tailnet: string }) {
         <span className="awc-stat">{l.auditRange(days)} <b>{audit.data?.total ?? 0}</b></span>
         <input className="k8s-filter" aria-label={l.AUDIT_FILTER} placeholder={l.AUDIT_FILTER} value={query} onChange={(e) => setQuery(e.target.value)} />
         <div className="awc-bar-end">
-          <button className="btn small" onClick={() => void qc.invalidateQueries({ queryKey: ["tailscale", "logs"] })}>{l.REFRESH}</button>
+          <button className="btn small tone-refresh" onClick={() => void qc.invalidateQueries({ queryKey: ["tailscale", "logs"] })}>{l.REFRESH}</button>
         </div>
       </div>
       <div className="awc-body ts-logs">

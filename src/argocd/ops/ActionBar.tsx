@@ -15,6 +15,7 @@ import {
   APP_DELETE, AUTO_SYNC_OFF, AUTO_SYNC_ON, BAR_DANGER, BAR_DEPLOY, BAR_LABEL, BAR_SYNC, BAR_WORKLOADS, ROLLBACK_NO_PREVIOUS, ROLLBACK_PREVIOUS, ROLLBACK_RUNNING, TERMINATE, actionLabel, batchButton,
 } from "./text";
 import type { AppActionGroup } from "./types";
+import { actionTone } from "./tone";
 
 interface Props {
   url: string;
@@ -77,29 +78,29 @@ export function ActionBar({ url, app, target, version, pending, now, onRefresh, 
         <button className="btn small tone-primary" disabled={pending || running || !allowed(1)} title={running ? ARGO_SYNC_RUNNING : denied(1)} onClick={() => setForm({ kind: "sync" })}>
           {ARGO_SYNC}
         </button>
-        <button className="btn small tone-secondary" disabled={pending || !allowed(0)} title={denied(0)} onClick={() => onRefresh(false)}>
+        <button className="btn small tone-refresh" disabled={pending || !allowed(0)} title={denied(0)} onClick={() => onRefresh(false)}>
           {ARGO_REFRESH}
         </button>
-        <button className="btn small tone-warn" disabled={pending || !allowed(0)} title={denied(0)} onClick={() => onRefresh(true)}>
+        <button className="btn small tone-refresh" disabled={pending || !allowed(0)} title={denied(0)} onClick={() => onRefresh(true)}>
           {ARGO_HARD_REFRESH}
         </button>
         {running && (
-          <button className="btn small tone-danger" disabled={pending || !allowed(1)} title={denied(1)} onClick={() => onChange({ kind: "terminate" })}>
+          <button className="btn small tone-caution" disabled={pending || !allowed(1)} title={denied(1)} onClick={() => onChange({ kind: "terminate" })}>
             {TERMINATE}
           </button>
         )}
       </Group>
       <Group label={BAR_DEPLOY}>
-        <button className="btn small tone-warn" disabled={!!rollbackReason || !allowed(1)} title={rollbackReason} onClick={() => setForm({ kind: "rollback" })}>
-          {ROLLBACK_PREVIOUS}
-        </button>
         <button
-          className="btn small tone-secondary"
+          className="btn small tone-warn"
           disabled={!allowed(2)}
           title={denied(2)}
           onClick={() => onChange({ kind: "appPatch", patch: { spec: { syncPolicy: { automated: auto ? null : { prune: false, selfHeal: false } } } } })}
         >
           {auto ? AUTO_SYNC_OFF : AUTO_SYNC_ON}
+        </button>
+        <button className="btn small tone-caution" disabled={!!rollbackReason || !allowed(1)} title={rollbackReason} onClick={() => setForm({ kind: "rollback" })}>
+          {ROLLBACK_PREVIOUS}
         </button>
       </Group>
       {groups.length > 0 && (
@@ -110,7 +111,7 @@ export function ActionBar({ url, app, target, version, pending, now, onRefresh, 
             return (
               <button
                 key={`${g.group}/${g.kind}/${g.action}`}
-                className="btn small tone-secondary"
+                className={`btn small ${actionTone(g.action)}`}
                 disabled={eligible === 0}
                 title={eligible === 0 ? `${g.kind}: 지금은 실행할 수 있는 리소스가 없어요` : undefined}
                 onClick={() => setForm({ kind: "batch", group: g })}

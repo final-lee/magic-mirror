@@ -11,7 +11,7 @@ export function ApiRequired({ title }: { title: string }) {
       <div>
         <p>{t.API_REQUIRED}</p>
         {tabs && (
-          <button className="btn" onClick={() => tabs.select("connect")}>
+          <button className="btn tone-nav" onClick={() => tabs.select("connect")}>
             {t.API_REQUIRED_BUTTON}
           </button>
         )}

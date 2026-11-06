@@ -27,8 +27,8 @@ export function MembershipPane({ kind, summary, names, overview, onOpen, onFix }
   return (
     <>
       <div className="pol-bar">
-        <button className="btn small" onClick={() => setPicking(true)}>
-          {ofUser ? "그룹에 추가" : "사용자 추가"}
+        <button className="btn small tone-primary" onClick={() => setPicking(true)}>
+          {ofUser ? "그룹에 추가…" : "사용자 추가…"}
         </button>
       </div>
       {names.length === 0 ? (
@@ -47,8 +47,8 @@ export function MembershipPane({ kind, summary, names, overview, onOpen, onFix }
                   <span>{name}</span>
                 )}
                 {p && <BadgeList badges={p.badges} />}
-                <button className="btn small row-end" aria-label={`${name} 빼기`} onClick={() => onFix({ op: "removeFromGroup", ...pair(name) })}>
-                  빼기
+                <button className="btn small row-end tone-danger" aria-label={`${name} 빼기…`} onClick={() => onFix({ op: "removeFromGroup", ...pair(name) })}>
+                  빼기…
                 </button>
               </li>
             );

@@ -30,7 +30,7 @@ export function KeyNote({ note, onDismiss }: { note: { text: string; id: number 
       {note && (
         <div key={note.id} className="k8s-key-note">
           <span>{note.text}</span>
-          <button className="icon" aria-label={KEY_NOTE_DISMISS} title={KEY_NOTE_DISMISS} onClick={onDismiss}>
+          <button className="icon tone-ghost" aria-label={KEY_NOTE_DISMISS} title={KEY_NOTE_DISMISS} onClick={onDismiss}>
             ✕
           </button>
         </div>

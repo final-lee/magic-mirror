@@ -85,24 +85,24 @@ export function DiffTab({ profile, left, right, transfers }: Props) {
             +{d.stats.added} −{d.stats.removed} ~{d.stats.changed}
           </span>
         )}
-        <button className="btn small" title={shortcutTitle("이전 차이", "diff.prev")} disabled={hunks.length === 0} onClick={() => go(-1)}>
+        <button className="btn small tone-secondary" title={shortcutTitle("이전 차이", "diff.prev")} disabled={hunks.length === 0} onClick={() => go(-1)}>
           ▲ 이전
         </button>
-        <button className="btn small" title={shortcutTitle("다음 차이", "diff.next")} disabled={hunks.length === 0} onClick={() => go(1)}>
+        <button className="btn small tone-secondary" title={shortcutTitle("다음 차이", "diff.next")} disabled={hunks.length === 0} onClick={() => go(1)}>
           ▼ 다음
         </button>
         <span className="sp">
           {localRef && s3Ref && (
             <>
-              <button className="btn small" onClick={() => transferTo("download")}>
+              <button className="btn small tone-primary" onClick={() => transferTo("download")}>
                 ← 로컬로 내려받기
               </button>
-              <button className="btn small" onClick={() => transferTo("upload")}>
+              <button className="btn small tone-primary" onClick={() => transferTo("upload")}>
                 S3로 업로드 →
               </button>
             </>
           )}
-          <button className="btn small" onClick={openExternal}>
+          <button className="btn small tone-nav" onClick={openExternal}>
             외부 도구로 열기
           </button>
         </span>

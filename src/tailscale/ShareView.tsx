@@ -6,6 +6,7 @@ import { tailscaleApi } from "./api";
 import { parseServeStatus, parseServices, parseTargets, rowRequest, type ServeRow } from "./shareStatus";
 import type { ShareRequest } from "./shareTypes";
 import * as t from "./shareText";
+import { shareTone } from "./tone";
 
 const quote = (value: string) => /^[a-zA-Z0-9_./:=+-]+$/.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`;
 interface Preview { request: ShareRequest; args: string[]; confirm?: string }
@@ -33,9 +34,9 @@ function ShareSheet({ preview, onClose }: { preview: Preview; onClose: () => voi
         )}
         {error && <div className="err">{error}</div>}
         {result !== null && <pre>{result}</pre>}
-        <button className="btn small" disabled={busy} onClick={close}>{t.CANCEL}</button>
+        <button className="btn small tone-ghost" disabled={busy} onClick={close}>{t.CANCEL}</button>
         {result === null && (
-          <button className="btn small" disabled={busy || (!!preview.confirm && preview.confirm !== typed)} onClick={() => void apply()}>
+          <button className={`btn small tone-${shareTone(preview.request)}`} disabled={busy || (!!preview.confirm && preview.confirm !== typed)} onClick={() => void apply()}>
             {t.CONFIRM}
           </button>
         )}
@@ -86,12 +87,12 @@ function ServeTable({ rows, remove }: { rows: ServeRow[]; remove: (request: Shar
                 {removeRequest ? (
                   <div className="ts-inline">
                     {funnelRequest && (
-                      <button className="btn small" aria-label={`${t.FUNNEL_OFF}: ${address}${row.path}`}
+                      <button className="btn small tone-warn" aria-label={t.funnelOffLabel(`${address}${row.path}`)}
                         onClick={() => remove(funnelRequest)}>
                         {t.FUNNEL_OFF}
                       </button>
                     )}
-                    <button className="btn small" aria-label={`${t.REMOVE}: ${address}${row.path}`}
+                    <button className="btn small tone-danger" aria-label={t.removeLabel(`${address}${row.path}`)}
                       onClick={() => remove(removeRequest)}>
                       {t.REMOVE}
                     </button>
@@ -158,8 +159,9 @@ export function ShareView() {
     try { const selected = await tailscaleApi.pickFolder(); if (selected) setFolder(selected); }
     catch (e) { setError(errorMessage(e)); }
   };
+  const mappingService = scope === "service" ? service : scope;
   const mapping = (action: string) => void open(
-    { action, target, port, mode, path, service: scope === "service" ? service : scope },
+    { action, target, port, mode, path, service: mappingService },
     action === "mapping-off" ? port : undefined
   );
   const rows = serve.data === undefined && funnel.data === undefined ? null : parseServeStatus(serve.data, funnel.data);
@@ -176,7 +178,7 @@ export function ShareView() {
     <div className="awc-bar">
       <h2 className="awc-title">{t.TITLE}</h2>
       <div className="awc-bar-end">
-        <button className="btn small" onClick={refresh}>{t.REFRESH}</button>
+        <button className="btn small tone-refresh" onClick={refresh}>{t.REFRESH}</button>
       </div>
     </div>
     <div className="awc-scroll"><div className="awc-body">
@@ -228,10 +230,10 @@ export function ShareView() {
         </label>
       </div>
       <div className="ts-connect-acts">
-        <button className="btn small" onClick={() => mapping("mapping")}>{t.ADD}</button>
-        <button className="btn small" onClick={() => mapping("mapping-off")}>{t.OFF}</button>
-        <button className="btn small" onClick={() => void open({ action: "serve-reset" }, "Serve")}>{t.RESET_SERVE}</button>
-        <button className="btn small" onClick={() => void open({ action: "funnel-reset" }, "Funnel")}>{t.RESET_FUNNEL}</button>
+        <button className="btn small tone-create" onClick={() => mapping("mapping")}>{t.ADD}</button>
+        <button className={`btn small tone-${shareTone({ action: "mapping-off", service: mappingService })}`} onClick={() => mapping("mapping-off")}>{t.OFF}</button>
+        <button className="btn small tone-danger" onClick={() => void open({ action: "serve-reset" }, "Serve")}>{t.RESET_SERVE}</button>
+        <button className="btn small tone-danger" onClick={() => void open({ action: "funnel-reset" }, "Funnel")}>{t.RESET_FUNNEL}</button>
       </div>
     </section>
     <section className="ts-sec">
@@ -263,9 +265,9 @@ export function ShareView() {
           {t.SERVICE}
           <input value={service} onChange={(e) => setService(e.target.value)} />
         </label>
-        <button className="btn small" onClick={() => void open({ action: "advertise", service })}>{t.ADVERTISE}</button>
-        <button className="btn small" onClick={() => void open({ action: "drain", service }, service)}>{t.DRAIN}</button>
-        <button className="btn small" onClick={() => void open({ action: "clear", service }, service)}>{t.CLEAR}</button>
+        <button className="btn small tone-warn" onClick={() => void open({ action: "advertise", service })}>{t.ADVERTISE}</button>
+        <button className="btn small tone-danger" onClick={() => void open({ action: "drain", service }, service)}>{t.DRAIN}</button>
+        <button className="btn small tone-danger" onClick={() => void open({ action: "clear", service }, service)}>{t.CLEAR}</button>
       </div>
     </section>
     <section className="ts-sec">
@@ -312,8 +314,8 @@ export function ShareView() {
         </label>
       </div>
       <div className="ts-connect-acts">
-        <button className="btn small" onClick={() => void pickFiles()}>{t.PICK_FILES}</button>
-        <button className="btn small" onClick={() => void open({
+        <button className="btn small tone-secondary" onClick={() => void pickFiles()}>{t.PICK_FILES}</button>
+        <button className="btn small tone-primary" onClick={() => void open({
           action: "send", files: files.split("\n").map((v) => v.trim()).filter(Boolean), target: peer,
         })}>{t.SEND}</button>
       </div>
@@ -323,8 +325,8 @@ export function ShareView() {
         {folderField}
       </div>
       <div className="ts-connect-acts">
-        <button className="btn small" onClick={() => void pickFolder()}>{t.PICK_FOLDER}</button>
-        <button className="btn small" onClick={() => void open({ action: "receive", folder })}>{t.RECEIVE}</button>
+        <button className="btn small tone-secondary" onClick={() => void pickFolder()}>{t.PICK_FOLDER}</button>
+        <button className="btn small tone-primary" onClick={() => void open({ action: "receive", folder })}>{t.RECEIVE}</button>
       </div>
     </section>
     <section className="ts-sec">
@@ -341,8 +343,8 @@ export function ShareView() {
         {folderField}
       </div>
       <div className="ts-connect-acts">
-        <button className="btn small" onClick={() => void pickFolder()}>{t.PICK_FOLDER}</button>
-        <button className="btn small" onClick={() => void open({ action: "certificate", folder, domain }, domain)}>{t.CERT}</button>
+        <button className="btn small tone-secondary" onClick={() => void pickFolder()}>{t.PICK_FOLDER}</button>
+        <button className="btn small tone-primary" onClick={() => void open({ action: "certificate", folder, domain }, domain)}>{t.CERT}</button>
       </div>
     </section>
     </div></div>

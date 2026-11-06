@@ -220,7 +220,7 @@ describe("policies that are not used at all", () => {
   test("[떼기] hands a detach change for this principal to onFix", async () => {
     const { props } = setup();
     await load();
-    fireEvent.click(within(policyRow("ReadOnlyAccess")).getByRole("button", { name: "떼기" }));
+    fireEvent.click(within(policyRow("ReadOnlyAccess")).getByRole("button", { name: "떼기…" }));
     expect(props.onFix).toHaveBeenCalledTimes(1);
     expect(props.onFix).toHaveBeenCalledWith({ op: "detachPolicy", target: alice.arn, policyArn: readOnlyPolicy.id });
   });
@@ -229,7 +229,7 @@ describe("policies that are not used at all", () => {
     const { props } = setup();
     await load();
     const row = policyRow("app-deploy");
-    expect(within(row).getByRole("button", { name: "떼기" })).toBeDisabled();
+    expect(within(row).getByRole("button", { name: "떼기…" })).toBeDisabled();
     expect(row).toHaveTextContent("그룹 dev-team에서 떼야 해요");
     fireEvent.click(within(row).getByRole("button", { name: "dev-team" }));
     expect(props.onOpenGroup).toHaveBeenCalledWith("dev-team");
@@ -245,15 +245,15 @@ describe("policies that are not used at all", () => {
     const { props } = setup();
     await load();
     const row = policyRow("s3-scratch");
-    expect(within(row).queryByRole("button", { name: "떼기" })).not.toBeInTheDocument();
-    fireEvent.click(within(row).getByRole("button", { name: "삭제" }));
+    expect(within(row).queryByRole("button", { name: "떼기…" })).not.toBeInTheDocument();
+    fireEvent.click(within(row).getByRole("button", { name: "삭제…" }));
     expect(props.onFix).toHaveBeenCalledWith({ op: "deleteInlinePolicy", target: alice.arn, name: "s3-scratch" });
   });
 
   test("the buttons are plain action buttons: no 'coming soon' placeholder state", async () => {
     setup();
     await load();
-    const button = within(policyRow("ReadOnlyAccess")).getByRole("button", { name: "떼기" });
+    const button = within(policyRow("ReadOnlyAccess")).getByRole("button", { name: "떼기…" });
     expect(button).toBeEnabled();
     expect(button).not.toHaveAttribute("title");
   });
@@ -291,7 +291,7 @@ describe("reduced policy draft", () => {
     vi.setSystemTime(new Date(2026, 9, 26, 10, 30));
     const { props } = setup();
     await load();
-    fireEvent.click(screen.getByRole("button", { name: "인라인 정책으로 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "인라인 정책으로 저장…" }));
     expect(props.onFix).toHaveBeenCalledTimes(1);
     expect(props.onFix).toHaveBeenCalledWith({
       op: "putInlinePolicy",
@@ -311,8 +311,8 @@ describe("reduced policy draft", () => {
   test("the save button is a plain action button: no 'coming soon' placeholder state", async () => {
     setup();
     await load();
-    expect(screen.getByRole("button", { name: "인라인 정책으로 저장" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "인라인 정책으로 저장" })).not.toHaveAttribute("title");
+    expect(screen.getByRole("button", { name: "인라인 정책으로 저장…" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "인라인 정책으로 저장…" })).not.toHaveAttribute("title");
   });
 
   test("without a draft there is nothing to copy or save, but the notes still show", async () => {
@@ -322,7 +322,7 @@ describe("reduced policy draft", () => {
     expect(screen.getByText("만들 수 있는 초안이 없어요")).toBeInTheDocument();
     expect(screen.getByText("사용 기록이 없어서 초안을 만들지 못했어요")).toBeInTheDocument();
     expect(screen.queryByTestId("draft-json")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "인라인 정책으로 저장" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "인라인 정책으로 저장…" })).not.toBeInTheDocument();
   });
 
   test("a draft that is not valid JSON is shown as received", async () => {
@@ -349,15 +349,15 @@ describe("principals that cannot be changed", () => {
     await load();
     expect(screen.getByText(reason)).toBeInTheDocument();
     for (const [row, name] of [
-      [policyRow("ReadOnlyAccess"), "떼기"],
-      [policyRow("s3-scratch"), "삭제"],
+      [policyRow("ReadOnlyAccess"), "떼기…"],
+      [policyRow("s3-scratch"), "삭제…"],
     ] as const) {
       const button = within(row).getByRole("button", { name });
       expect(button).toBeDisabled();
       expect(button).toHaveAttribute("title", reason);
       fireEvent.click(button);
     }
-    const save = screen.getByRole("button", { name: "인라인 정책으로 저장" });
+    const save = screen.getByRole("button", { name: "인라인 정책으로 저장…" });
     expect(save).toBeDisabled();
     expect(save).toHaveAttribute("title", reason);
     fireEvent.click(save);
@@ -369,7 +369,7 @@ describe("principals that cannot be changed", () => {
     setup({ blockedReason: null });
     await load();
     expect(screen.queryByText(reason)).not.toBeInTheDocument();
-    expect(within(policyRow("ReadOnlyAccess")).getByRole("button", { name: "떼기" })).toBeEnabled();
+    expect(within(policyRow("ReadOnlyAccess")).getByRole("button", { name: "떼기…" })).toBeEnabled();
   });
 });
 

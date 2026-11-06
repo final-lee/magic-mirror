@@ -41,7 +41,7 @@ export function ControllerPanel({ url, live, onSettings }: { url: string; live: 
     return (
       <div className="argo-metrics-scroll">
         <div>{T.ctlNeedContext}</div>
-        <div><button className="btn small tone-primary" disabled={contexts.isError} onClick={onSettings}>{T.settings}</button></div>
+        <div><button className="btn small tone-nav" disabled={contexts.isError} onClick={onSettings}>{T.settings}</button></div>
       </div>
     );
   }
@@ -53,7 +53,7 @@ export function ControllerPanel({ url, live, onSettings }: { url: string; live: 
         <span>{T.ctlContext}: <b className="mono">{kubeContext}</b> · {T.ctlNamespace}: <b className="mono">{namespace}</b></span>
         <span className="argo-metrics-note">{T.ctlPoll}</span>
         <span className="argo-metrics-note">{T.ctlHistory(history.length)}</span>
-        <button className="btn small tone-secondary" onClick={onSettings}>{T.settings}</button>
+        <button className="btn small tone-nav" onClick={onSettings}>{T.settings}</button>
       </div>
       {metrics.isError && <div className="err" role="alert">{errorMessage(metrics.error)}</div>}
       {!point && !metrics.isError && <div className="argo-metrics-note">{metrics.isFetching || !live ? T.ctlWaiting : T.loading}</div>}

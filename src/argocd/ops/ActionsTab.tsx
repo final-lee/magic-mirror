@@ -14,6 +14,7 @@ import { useResourceActions } from "./queries";
 import { ShellSection } from "./ShellSection";
 import { ACT_DISABLED, ACT_NONE, ACT_RUN, ACT_TITLE, DEL_OPEN, EDIT_TITLE, PATCH_OPEN, actRunLabel } from "./text";
 import type { ResourceAction } from "./types";
+import { actionTone } from "./tone";
 
 interface Props {
   url: string;
@@ -70,7 +71,7 @@ export function ActionsTab({ url, app, target, version, res, containers, onToken
               <li key={a.name}>
                 <span>{a.displayName ?? a.name}</span>
                 <button
-                  className="btn small tone-secondary"
+                  className={`btn small ${actionTone(a.name)}`}
                   aria-label={actRunLabel(a.displayName ?? a.name)}
                   disabled={a.disabled}
                   title={a.disabled ? ACT_DISABLED : undefined}
@@ -86,7 +87,7 @@ export function ActionsTab({ url, app, target, version, res, containers, onToken
       <section aria-label={EDIT_TITLE}>
         <h4>{EDIT_TITLE}</h4>
         <div className="k8s-list-bar">
-          <button className="btn small tone-secondary" {...gate(base.data?.[0])} onClick={() => setForm({ kind: "patch" })}>
+          <button className="btn small tone-primary" {...gate(base.data?.[0])} onClick={() => setForm({ kind: "patch" })}>
             {PATCH_OPEN}
           </button>
           <button className="btn small tone-danger" {...gate(base.data?.[1])} onClick={() => setForm({ kind: "delete" })}>

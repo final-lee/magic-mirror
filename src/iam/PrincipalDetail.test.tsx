@@ -403,7 +403,7 @@ describe("unused permissions", () => {
     expect(props.onOpen).toHaveBeenLastCalledWith({ view: "groups", id: devTeam.arn });
 
     const direct = screen.getByRole("button", { name: "ReadOnlyAccess" }).closest("tr") as HTMLElement;
-    fireEvent.click(within(direct).getByRole("button", { name: "떼기" }));
+    fireEvent.click(within(direct).getByRole("button", { name: "떼기…" }));
     expect(props.onFix).toHaveBeenCalledWith({ op: "detachPolicy", target: alice.arn, policyArn: readOnlyPolicy.id });
   });
 });
@@ -428,7 +428,7 @@ describe("policy changes", () => {
 
   test("[정책 붙이기] opens the picker; the chosen policy starts attachPolicy for this principal", async () => {
     const { props } = await openPolicies();
-    fireEvent.click(screen.getByRole("button", { name: "정책 붙이기" }));
+    fireEvent.click(screen.getByRole("button", { name: "정책 붙이기…" }));
     expect(await screen.findByRole("dialog", { name: "정책 붙이기" })).toBeInTheDocument();
     expect(m.listPolicies).toHaveBeenCalledWith("prod", "");
     // 이미 직접 붙은 정책은 고를 수 없다
@@ -441,7 +441,7 @@ describe("policy changes", () => {
 
   test("closing the picker changes nothing", async () => {
     const { props } = await openPolicies();
-    fireEvent.click(screen.getByRole("button", { name: "정책 붙이기" }));
+    fireEvent.click(screen.getByRole("button", { name: "정책 붙이기…" }));
     fireEvent.click(await screen.findByRole("button", { name: "취소" }));
     expect(screen.queryByRole("dialog", { name: "정책 붙이기" })).not.toBeInTheDocument();
     expect(props.onFix).not.toHaveBeenCalled();
@@ -450,13 +450,13 @@ describe("policy changes", () => {
   test("the toolbar is there even when nothing is attached yet", async () => {
     await openPolicies(aliceView({ policies: [] }));
     expect(screen.getByText("붙은 정책이 없어요")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "정책 붙이기" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "정책 붙이기…" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "인라인 정책 추가" })).toBeEnabled();
   });
 
   test("[떼기] on a directly attached managed policy starts detachPolicy", async () => {
     const { props } = await openPolicies();
-    fireEvent.click(within(rowOf("ReadOnlyAccess")).getByRole("button", { name: "ReadOnlyAccess 떼기" }));
+    fireEvent.click(within(rowOf("ReadOnlyAccess")).getByRole("button", { name: "ReadOnlyAccess 떼기…" }));
     expect(props.onFix).toHaveBeenCalledTimes(1);
     expect(props.onFix).toHaveBeenCalledWith({ op: "detachPolicy", target: alice.arn, policyArn: readOnlyPolicy.id });
   });
@@ -487,8 +487,8 @@ describe("policy changes", () => {
   test("an inline policy has [편집] and [삭제]; [삭제] starts deleteInlinePolicy", async () => {
     const { props } = await openPolicies();
     const row = rowOf("s3-scratch");
-    expect(buttonNames(row)).toEqual(["s3-scratch", "편집", "삭제"]);
-    fireEvent.click(within(row).getByRole("button", { name: "s3-scratch 삭제" }));
+    expect(buttonNames(row)).toEqual(["s3-scratch", "편집", "삭제…"]);
+    fireEvent.click(within(row).getByRole("button", { name: "s3-scratch 삭제…" }));
     expect(props.onFix).toHaveBeenCalledWith({ op: "deleteInlinePolicy", target: alice.arn, name: "s3-scratch" });
   });
 
@@ -499,7 +499,7 @@ describe("policy changes", () => {
     expect(screen.queryByRole("table", { name: "붙은 정책" })).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("textbox", { name: "정책 이름" }), { target: { value: "queue-access" } });
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     expect(props.onFix).toHaveBeenCalledTimes(1);
     expect(props.onFix).toHaveBeenCalledWith(
       { op: "putInlinePolicy", target: alice.arn, name: "queue-access", document: NEW_POLICY_TEMPLATE },
@@ -517,7 +517,7 @@ describe("policy changes", () => {
     fireEvent.click(screen.getByRole("button", { name: "인라인 정책 추가" }));
     fireEvent.change(screen.getByRole("textbox", { name: "정책 이름" }), { target: { value: "s3-scratch" } });
     expect(screen.getByText(/같은 이름의 인라인 정책이 이미 있어요/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "미리보기" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "미리보기…" })).toBeDisabled();
   });
 
   test("[편집] on an inline policy loads its document; the preview starts putInlinePolicy with the same name", async () => {
@@ -527,11 +527,11 @@ describe("policy changes", () => {
     const text = editorView("정책 JSON").state.doc.toString();
     expect(m.policy).toHaveBeenCalledWith("prod", scratchInline.id);
     expect(JSON.parse(text)).toEqual(JSON.parse(scratchInlineView().document));
-    expect(screen.getByRole("button", { name: "미리보기" })).toBeDisabled(); // 바꾼 게 없다
+    expect(screen.getByRole("button", { name: "미리보기…" })).toBeDisabled(); // 바꾼 게 없다
 
     const changed = text.replace("s3:PutObject", "s3:PutObjectAcl");
     typeYaml(changed, "정책 JSON");
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     expect(props.onFix).toHaveBeenCalledWith(
       { op: "putInlinePolicy", target: alice.arn, name: "s3-scratch", document: changed },
       { onApplied: expect.any(Function) },
@@ -553,7 +553,7 @@ describe("policy changes", () => {
   ])("a %s role has every change button off, with the reason on screen", async (_label, summary, reason) => {
     const { props } = await openPolicies(appRoleView({ summary }), summary.arn);
     expect(screen.getByText(reason)).toBeInTheDocument();
-    for (const name of ["정책 붙이기", "인라인 정책 추가", "ReadOnlyAccess 떼기", "queue-access 편집", "queue-access 삭제"]) {
+    for (const name of ["정책 붙이기…", "인라인 정책 추가", "ReadOnlyAccess 떼기…", "queue-access 편집", "queue-access 삭제…"]) {
       const button = screen.getByRole("button", { name });
       expect(button).toBeDisabled();
       expect(button).toHaveAttribute("title", reason);
@@ -569,8 +569,8 @@ describe("policy changes", () => {
     fireEvent.click(await tab("안 쓰는 권한"));
     fireEvent.click(screen.getByRole("button", { name: "불러오기" }));
     await screen.findByRole("table", { name: "서비스별 마지막 사용" });
-    expect(within(screen.getByRole("button", { name: "ReadOnlyAccess" }).closest("tr") as HTMLElement).getByRole("button", { name: "떼기" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "인라인 정책으로 저장" })).toBeDisabled();
+    expect(within(screen.getByRole("button", { name: "ReadOnlyAccess" }).closest("tr") as HTMLElement).getByRole("button", { name: "떼기…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "인라인 정책으로 저장…" })).toBeDisabled();
     expect(props.onFix).not.toHaveBeenCalled();
   });
 
@@ -578,7 +578,7 @@ describe("policy changes", () => {
     const sso = { ...appRole, name: "AWSReservedSSO_Admin_0123", arn: "arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_Admin_0123", path: "/aws-reserved/sso.amazonaws.com/" };
     await openPolicies(appRoleView({ summary: sso }), sso.arn);
     expect(screen.getByText("Identity Center가 관리하는 역할이라 바꿀 수 없어요")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "정책 붙이기" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "정책 붙이기…" })).toBeDisabled();
   });
 });
 
@@ -593,7 +593,7 @@ describe("saving the reduced policy draft", () => {
     fireEvent.click(await tab("안 쓰는 권한"));
     fireEvent.click(screen.getByRole("button", { name: "불러오기" }));
     await screen.findByRole("table", { name: "서비스별 마지막 사용" });
-    fireEvent.click(screen.getByRole("button", { name: "인라인 정책으로 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "인라인 정책으로 저장…" }));
     return utils;
   }
   const inlineNamed = (name: string) => ({ ...scratchInline, id: `inline:${alice.arn}:${name}`, name });
@@ -616,7 +616,7 @@ describe("saving the reduced policy draft", () => {
 
   test("other changes from the tab are handed over untouched", async () => {
     const { props } = await saveDraft();
-    fireEvent.click(within(screen.getByRole("button", { name: "ReadOnlyAccess" }).closest("tr") as HTMLElement).getByRole("button", { name: "떼기" }));
+    fireEvent.click(within(screen.getByRole("button", { name: "ReadOnlyAccess" }).closest("tr") as HTMLElement).getByRole("button", { name: "떼기…" }));
     expect(props.onFix).toHaveBeenLastCalledWith({ op: "detachPolicy", target: alice.arn, policyArn: readOnlyPolicy.id });
   });
 });
@@ -625,7 +625,7 @@ describe("group membership changes", () => {
   test("a user's [그룹에 추가] picks from the account's groups, without the ones the user is already in", async () => {
     const { props } = setup();
     fireEvent.click(await tab(/^그룹/));
-    fireEvent.click(screen.getByRole("button", { name: "그룹에 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "그룹에 추가…" }));
     expect(screen.getByRole("dialog", { name: "그룹에 추가" })).toBeInTheDocument();
     const current = screen.getByRole("option", { name: /dev-team/ });
     expect(current).toHaveAttribute("aria-disabled", "true");
@@ -639,7 +639,7 @@ describe("group membership changes", () => {
   test("a user's [빼기] starts removeFromGroup", async () => {
     const { props } = setup();
     fireEvent.click(await tab(/^그룹/));
-    fireEvent.click(screen.getByRole("button", { name: "dev-team 빼기" }));
+    fireEvent.click(screen.getByRole("button", { name: "dev-team 빼기…" }));
     expect(props.onFix).toHaveBeenCalledWith({ op: "removeFromGroup", userName: "alice", groupName: "dev-team" });
   });
 
@@ -647,7 +647,7 @@ describe("group membership changes", () => {
     m.principal.mockResolvedValue(devTeamView());
     const { props } = setup(devTeam.arn);
     fireEvent.click(await tab(/^구성원/));
-    fireEvent.click(screen.getByRole("button", { name: "사용자 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "사용자 추가…" }));
     expect(screen.getByRole("option", { name: /alice/ })).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(screen.getByRole("option", { name: /ci-bot/ }));
     expect(props.onFix).toHaveBeenCalledWith({ op: "addToGroup", userName: "ci-bot", groupName: "dev-team" });
@@ -657,7 +657,7 @@ describe("group membership changes", () => {
     m.principal.mockResolvedValue(devTeamView());
     const { props } = setup(devTeam.arn);
     fireEvent.click(await tab(/^구성원/));
-    fireEvent.click(screen.getByRole("button", { name: "bob 빼기" }));
+    fireEvent.click(screen.getByRole("button", { name: "bob 빼기…" }));
     expect(props.onFix).toHaveBeenCalledWith({ op: "removeFromGroup", userName: "bob", groupName: "dev-team" });
   });
 
@@ -665,7 +665,7 @@ describe("group membership changes", () => {
     m.principal.mockResolvedValue(aliceView({ groups: ["ghost"] }));
     const { props } = setup();
     fireEvent.click(await tab(/^그룹/));
-    fireEvent.click(screen.getByRole("button", { name: "ghost 빼기" }));
+    fireEvent.click(screen.getByRole("button", { name: "ghost 빼기…" }));
     expect(props.onFix).toHaveBeenCalledWith({ op: "removeFromGroup", userName: "alice", groupName: "ghost" });
   });
 });
@@ -682,21 +682,21 @@ describe("access key changes", () => {
 
   test("an active key can be deactivated", async () => {
     const { props } = await openKeys();
-    expect(buttonNames(keyRow("AKIAIOSFODNN7EXAMPLE"))).toEqual(["비활성화", "삭제"]);
-    fireEvent.click(within(keyRow("AKIAIOSFODNN7EXAMPLE")).getByRole("button", { name: "AKIAIOSFODNN7EXAMPLE 비활성화" }));
+    expect(buttonNames(keyRow("AKIAIOSFODNN7EXAMPLE"))).toEqual(["비활성화…", "삭제…"]);
+    fireEvent.click(within(keyRow("AKIAIOSFODNN7EXAMPLE")).getByRole("button", { name: "AKIAIOSFODNN7EXAMPLE 비활성화…" }));
     expect(props.onFix).toHaveBeenCalledWith({ op: "setAccessKeyStatus", userName: "bob", accessKeyId: "AKIAIOSFODNN7EXAMPLE", status: "Inactive" });
   });
 
   test("an inactive key can be activated", async () => {
     const { props } = await openKeys();
-    expect(buttonNames(keyRow("AKIAI44QH8DHBEXAMPLE"))).toEqual(["활성화", "삭제"]);
-    fireEvent.click(within(keyRow("AKIAI44QH8DHBEXAMPLE")).getByRole("button", { name: "AKIAI44QH8DHBEXAMPLE 활성화" }));
+    expect(buttonNames(keyRow("AKIAI44QH8DHBEXAMPLE"))).toEqual(["활성화…", "삭제…"]);
+    fireEvent.click(within(keyRow("AKIAI44QH8DHBEXAMPLE")).getByRole("button", { name: "AKIAI44QH8DHBEXAMPLE 활성화…" }));
     expect(props.onFix).toHaveBeenCalledWith({ op: "setAccessKeyStatus", userName: "bob", accessKeyId: "AKIAI44QH8DHBEXAMPLE", status: "Active" });
   });
 
   test("[삭제] starts deleteAccessKey", async () => {
     const { props } = await openKeys();
-    fireEvent.click(within(keyRow("AKIAI44QH8DHBEXAMPLE")).getByRole("button", { name: "AKIAI44QH8DHBEXAMPLE 삭제" }));
+    fireEvent.click(within(keyRow("AKIAI44QH8DHBEXAMPLE")).getByRole("button", { name: "AKIAI44QH8DHBEXAMPLE 삭제…" }));
     expect(props.onFix).toHaveBeenCalledWith({ op: "deleteAccessKey", userName: "bob", accessKeyId: "AKIAI44QH8DHBEXAMPLE" });
   });
 });

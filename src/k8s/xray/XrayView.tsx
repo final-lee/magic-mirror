@@ -35,7 +35,7 @@ function Row({ node, parent, kinds, onOpen }: { node: XrayNode; parent: XrayEdge
       <span className="xray-kind">{node.kind}</span>
       {openable ? (
         <button
-          className="link mono"
+          className="link mono tone-nav"
           aria-label={xrayOpen(node.kind, node.name)}
           title={xrayOpen(node.kind, node.name)}
           onClick={() => onOpen({ kind, namespace: kind.namespaced ? node.namespace : null, name: node.name })}
@@ -88,7 +88,7 @@ export function XrayView({ target, context, ssoProfile, live, objectRef, resourc
         <button aria-pressed={view === "map"} onClick={() => setView("map")}>{XRAY_VIEW_MAP}</button>
         <button aria-pressed={view === "list"} onClick={() => setView("list")}>{XRAY_VIEW_LIST}</button>
       </div>
-      <button className="btn tone-secondary" onClick={() => void q.refetch()} disabled={q.isFetching}>{XRAY_REFRESH}</button>
+      <button className="btn tone-refresh" onClick={() => void q.refetch()} disabled={q.isFetching}>{XRAY_REFRESH}</button>
     </>,
     toolbar,
   );

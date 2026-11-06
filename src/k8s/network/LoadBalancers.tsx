@@ -175,7 +175,7 @@ function TargetGroup({ group, onOpenObject }: { group: TargetGroupView; onOpenOb
                   </td>
                   <td>
                     {t.link && ref ? (
-                      <button className="link mono" aria-label={openLink(t.link.kind, t.link.name)} title={openLink(t.link.kind, t.link.name)} onClick={() => onOpenObject(ref)}>
+                      <button className="link mono tone-nav" aria-label={openLink(t.link.kind, t.link.name)} title={openLink(t.link.kind, t.link.name)} onClick={() => onOpenObject(ref)}>
                         {t.link.kind}/{t.link.namespace ? `${t.link.namespace}/` : ""}{t.link.name}
                       </button>
                     ) : (

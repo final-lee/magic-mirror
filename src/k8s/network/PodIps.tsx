@@ -79,7 +79,7 @@ export function PodIps({ network, namespace, onOpenObject, host }: Props) {
                 <tr key={`${p.namespace}/${p.name}`}>
                   <td className="mono">{p.namespace}</td>
                   <td>
-                    <button className="link mono" aria-label={openLink("Pod", p.name)} title={openLink("Pod", p.name)} onClick={() => onOpenObject({ kind: PODS, namespace: p.namespace, name: p.name })}>
+                    <button className="link mono tone-nav" aria-label={openLink("Pod", p.name)} title={openLink("Pod", p.name)} onClick={() => onOpenObject({ kind: PODS, namespace: p.namespace, name: p.name })}>
                       {p.name}
                     </button>
                   </td>

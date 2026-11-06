@@ -83,7 +83,7 @@ export function HelmDetail({ target, context, ssoProfile, live, namespace, name,
         <b>Helm</b>
         <span className="mono k8s-wrap">{namespace}/{name}</span>
         {detail && <StatusBadge status={detail.status} />}
-        <button className="icon k8s-push" aria-label={t.CLOSE} title={t.CLOSE} onClick={onClose}>
+        <button className="icon k8s-push tone-ghost" aria-label={t.CLOSE} title={t.CLOSE} onClick={onClose}>
           ✕
         </button>
       </div>
@@ -114,7 +114,7 @@ export function HelmDetail({ target, context, ssoProfile, live, namespace, name,
           <button className="btn small tone-primary" disabled={!!write} title={write} aria-description={write} onClick={() => setUpgrading(true)}>
             {t.ACT_UPGRADE}
           </button>
-          <button className="btn small tone-warn" disabled={!!rollbackReason} title={rollbackReason} aria-description={rollbackReason} onClick={() => setRolling(true)}>
+          <button className="btn small tone-caution" disabled={!!rollbackReason} title={rollbackReason} aria-description={rollbackReason} onClick={() => setRolling(true)}>
             {t.ACT_ROLLBACK}
           </button>
           <button className="btn small tone-danger" disabled={!!remove} title={remove} aria-description={remove} onClick={() => start({ type: "helmUninstall", keepHistory })}>
@@ -135,7 +135,7 @@ export function HelmDetail({ target, context, ssoProfile, live, namespace, name,
       {detail && !latest && (
         <p className="helm-banner" role="status">
           {t.VIEWING_OLD(detail.revision, detail.latest)}{" "}
-          <button className="link" onClick={() => setViewing(null)}>{t.VIEW_LATEST}</button>
+          <button className="link tone-secondary" onClick={() => setViewing(null)}>{t.VIEW_LATEST}</button>
         </p>
       )}
       <div role="tablist" className="k8s-tabs">
@@ -225,7 +225,7 @@ function Summary({ detail, kinds, onOpenObject }: { detail: HelmReleaseDetail; k
                     <td>{r.kind}</td>
                     <td className="mono k8s-wrap">
                       {ref ? (
-                        <button className="link mono" title={t.OPEN_OBJECT} aria-label={`${t.OPEN_OBJECT}: ${r.kind}/${r.name}`} onClick={() => onOpenObject(ref)}>
+                        <button className="link mono tone-nav" title={t.OPEN_OBJECT} aria-label={`${t.OPEN_OBJECT}: ${r.kind}/${r.name}`} onClick={() => onOpenObject(ref)}>
                           {r.name}
                         </button>
                       ) : (
@@ -272,7 +272,7 @@ function Values({ detail, canEdit, onEdit, editReason }: { detail: HelmReleaseDe
         <h4>{t.VALUES_USER}</h4>
         <p className="dim">{t.VALUES_USER_NOTE}</p>
         {detail.userValues === "" ? <p className="dim">{t.VALUES_USER_EMPTY}</p> : <YamlView text={detail.userValues} />}
-        <button className="btn small tone-primary" disabled={!canEdit} title={editReason} aria-description={editReason} onClick={onEdit}>
+        <button className="btn small tone-secondary" disabled={!canEdit} title={editReason} aria-description={editReason} onClick={onEdit}>
           {t.VALUES_EDIT}
         </button>
       </section>
@@ -314,7 +314,7 @@ function History({ detail, viewing, writeReason, onView, onRollback }: {
                 </button>
               )}
               {h.revision !== detail.latest && detail.revision === detail.latest && (
-                <button className="btn small tone-warn" disabled={!!writeReason} title={writeReason} aria-description={writeReason} onClick={() => onRollback(h.revision)}>
+                <button className="btn small tone-caution" disabled={!!writeReason} title={writeReason} aria-description={writeReason} onClick={() => onRollback(h.revision)}>
                   {t.HISTORY_ROLLBACK}
                 </button>
               )}

@@ -44,13 +44,13 @@ function TerminateButton({ session, role, terminate }: { session: PgSession; rol
   return (
     <button
       type="button"
-      className="btn small"
+      className="btn small tone-danger"
       disabled={reason !== null}
       title={reason ?? undefined}
       aria-description={reason ?? undefined}
       onClick={() => terminate.onTerminate({ kind: "terminate", pid: session.pid, role, backendStart: session.backendStart })}
     >
-      끊기
+      끊기…
     </button>
   );
 }
@@ -142,7 +142,7 @@ export function Sessions({ target, terminate }: { target: PgTarget; terminate?: 
           </select>
         </label>
         <span className="pg-bar-end">
-          <button className="btn small" onClick={() => void q.refetch()} disabled={q.isFetching}>
+          <button className="btn small tone-refresh" onClick={() => void q.refetch()} disabled={q.isFetching}>
             {q.isFetching ? "읽는 중…" : "다시 읽기"}
           </button>
         </span>

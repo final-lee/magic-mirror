@@ -68,7 +68,7 @@ export function LocalPane({ path, onPathChange, selection, onSelectionChange, fo
         <div className="empty">
           <div>
             <p className="err">{errorMessage(q.error)}</p>
-            <button className="btn" onClick={() => void explorerApi.localHome().then(onPathChange)}>
+            <button className="btn plain tone-nav" onClick={() => void explorerApi.localHome().then(onPathChange)}>
               홈으로
             </button>
           </div>

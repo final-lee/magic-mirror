@@ -74,8 +74,8 @@ function DatabaseDefaults({ target, database, edit }: { target: PgTarget; databa
       <p className="iam-hint pg-builtin">{BUILTIN_NOTE}</p>
       {edit && (
         <div className="pg-def-act">
-          <button type="button" className="btn small" onClick={() => setAdding(true)}>
-            기본 권한 추가
+          <button type="button" className="btn small tone-secondary" onClick={() => setAdding(true)}>
+            기본 권한 추가…
           </button>
         </div>
       )}

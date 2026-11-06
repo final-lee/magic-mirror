@@ -66,7 +66,7 @@ export function ErrorState({ error, profile, onRetry, onLoggedIn, compact = fals
       <div className={box}>
         <div>
           <p>SSO 세션이 만료됐어요 ({profile})</p>
-          <button className="btn primary" disabled={running} onClick={login}>
+          <button className="btn plain tone-primary" disabled={running} onClick={login}>
             {running ? "브라우저에서 로그인을 완료하세요…" : "로그인"}
           </button>
           {loginError && <p className="err">{loginError}</p>}
@@ -82,12 +82,12 @@ export function ErrorState({ error, profile, onRetry, onLoggedIn, compact = fals
         <p className="err">{errorMessage(error)}</p>
         <div className="error-state-actions">
           {retryable && (
-            <button className="btn" onClick={onRetry}>
+            <button className="btn plain tone-refresh" onClick={onRetry}>
               다시 시도
             </button>
           )}
           {target && isAppError(error) && error.kind === "network" && (
-            <button className="btn" aria-expanded={diagnosing} onClick={() => setDiagnosing(!diagnosing)}>
+            <button className="btn plain tone-secondary" aria-expanded={diagnosing} onClick={() => setDiagnosing(!diagnosing)}>
               {DIAGNOSE}
             </button>
           )}

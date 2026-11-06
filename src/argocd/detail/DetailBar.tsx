@@ -51,7 +51,7 @@ export function DetailBar({ url, namespace, name, version, live, onTokenError }:
   useTokenGuard([links.error, windows.error], onTokenError);
   return (
     <div className="argo-bar-links">
-      <button className="btn small tone-secondary" title={ARGO_OPEN_UI_TITLE} onClick={() => void desktop.openUrl(argoWebUrl(url, namespace, name))}>
+      <button className="btn small tone-nav" title={ARGO_OPEN_UI_TITLE} onClick={() => void desktop.openUrl(argoWebUrl(url, namespace, name))}>
         {ARGO_OPEN_UI}
       </button>
       {links.data && <LinkButtons links={links.data} label={APP_LINKS_LABEL} />}

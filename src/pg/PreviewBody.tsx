@@ -35,7 +35,7 @@ export const PreviewBody = memo(function PreviewBody({ preview, items, onAddDefa
 /** 경고 옆의 [기본 권한도 담기]: 그 경고가 담아 둔 변경을 장바구니에 담는다. 이미 담긴 것은 담는 쪽이 건너뛴다. */
 function AddDefaults({ changes, onAdd }: { changes: PgChange[]; onAdd: (changes: PgChange[]) => void }) {
   return (
-    <button className="btn small cp-add" onClick={() => onAdd(changes)}>
+    <button className="btn small cp-add tone-secondary" onClick={() => onAdd(changes)}>
       기본 권한도 담기
     </button>
   );

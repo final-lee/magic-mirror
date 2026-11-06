@@ -95,7 +95,7 @@ export function AppSetPanel({ url, namespace, name, rows, live, onClose, onOpenA
           {namespace}/{name}
         </span>
         <span className="argo-acts k8s-push">
-          <button className="btn small tone-warn" disabled={!set} onClick={() => setConfirmDelete(true)}>
+          <button className="btn small tone-danger" disabled={!set} onClick={() => setConfirmDelete(true)}>
             {APPSET_DELETE}
           </button>
         </span>
@@ -324,7 +324,7 @@ function DeleteSheet({ set, count, onCancel, onContinue }: { set: AppSetDetail; 
           <button className="btn plain tone-ghost" onClick={onCancel}>
             {MANAGE_CANCEL}
           </button>
-          <button className="btn plain tone-warn" onClick={onContinue}>
+          <button className="btn plain tone-danger" onClick={onContinue}>
             {APPSET_DELETE_CONTINUE}
           </button>
         </div>

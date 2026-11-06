@@ -202,7 +202,7 @@ describe("editing", () => {
     expect(screen.getByRole("heading", { name: "정책 편집 · app-deploy" })).toBeInTheDocument();
     expect(editorText()).toBe(prettyJson());
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "미리보기" })).toBeDisabled(); // 바꾼 게 없다
+    expect(screen.getByRole("button", { name: "미리보기…" })).toBeDisabled(); // 바꾼 게 없다
   });
 
   test("the preview hands updateManagedPolicy to the change flow; the editor closes once it is applied", async () => {
@@ -211,7 +211,7 @@ describe("editing", () => {
     await editor();
     const changed = editorText().replace("s3:GetObject", "s3:GetObjectVersion");
     typeYaml(changed, "정책 JSON");
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     expect(props.onFix).toHaveBeenCalledTimes(1);
     expect(props.onFix).toHaveBeenCalledWith({ op: "updateManagedPolicy", policyArn: deployPolicy.arn, document: changed }, { onApplied: expect.any(Function) });
     expect(screen.getByRole("textbox", { name: "정책 JSON" })).toBeInTheDocument(); // 미리보기를 취소하면 편집기는 그대로
@@ -237,7 +237,7 @@ describe("editing", () => {
     expect(screen.getByRole("heading", { name: "인라인 정책 편집 · s3-scratch" })).toBeInTheDocument();
     const changed = editorText().replace("s3:PutObject", "s3:PutObjectAcl");
     typeYaml(changed, "정책 JSON");
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     expect(props.onFix).toHaveBeenCalledWith({ op: "putInlinePolicy", target: alice.arn, name: "s3-scratch", document: changed }, { onApplied: expect.any(Function) });
   });
 

@@ -42,7 +42,7 @@ export function RollbackForm({ url, namespace, name, entry, current, autoSync, n
       label={rollbackTitle(entry.id)}
       wide
       onCancel={onCancel}
-      submit={{ label: ROLLBACK_PREVIEW, disabled: blocked, title: blocked ? ROLLBACK_AUTO_ON : undefined, onClick: () => onPreview({ kind: "rollback", id: entry.id, prune, dryRun, disableAutoSync: autoSync && disableAutoSync }) }}
+      submit={{ label: ROLLBACK_PREVIEW, tone: "tone-caution", disabled: blocked, title: blocked ? ROLLBACK_AUTO_ON : undefined, onClick: () => onPreview({ kind: "rollback", id: entry.id, prune, dryRun, disableAutoSync: autoSync && disableAutoSync }) }}
     >
       <h4>{ROLLBACK_TARGET}</h4>
       {entry.revisions.map((r) => (

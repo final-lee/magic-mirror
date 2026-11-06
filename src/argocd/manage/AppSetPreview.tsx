@@ -72,7 +72,7 @@ export function AppSetPreview({ url, set, onChange }: Props) {
         >
           {APPSET_RESET}
         </button>
-        <button className="btn small tone-secondary" disabled={!ready || generate.isPending} onClick={() => generate.mutate(text)}>
+        <button className="btn small tone-primary" disabled={!ready || generate.isPending} onClick={() => generate.mutate(text)}>
           {generate.isPending ? APPSET_GENERATING : APPSET_GENERATE}
         </button>
         <button

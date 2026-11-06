@@ -135,7 +135,7 @@ export function Reports({
           onChange={(e) => setLabel(e.target.value)}
         />
         {label.trim() && (
-          <button className="btn small" disabled={report.isFetching} onClick={() => void report.refetch()}>
+          <button className="btn small tone-refresh" disabled={report.isFetching} onClick={() => void report.refetch()}>
             다시 읽기
           </button>
         )}

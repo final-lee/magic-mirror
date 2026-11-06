@@ -45,6 +45,10 @@
   --log-c7: #5eead4;
   --log-c8: #ff8a7a;
   --orange: #ff9f0a;
+  /* 버튼 바탕용: 멈춤·되돌림(주황), 만들기(초록)의 바탕과 글자 */
+  --orange-fill: #ff9f0a;
+  --on-caution: #1c1c1e;
+  --on-create: #0b2a14;
   --tone-00000040: #00000040;
   --tone-00000073: #00000073;
   --accent-alpha-0f: #0a84ff0f;
@@ -189,6 +193,9 @@
   --log-c7: #0b7a6e;
   --log-c8: #b42318;
   --orange: #a24600;
+  --orange-fill: #c25700;
+  --on-caution: #fff;
+  --on-create: #fff;
   --tone-00000040: #0000000d;
   --tone-00000073: #00000033;
   --accent-alpha-0f: #0071e30f;
@@ -391,7 +398,6 @@ tbody tr.on td { background: var(--accent) !important; color: var(--on-accent); 
 .link { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; }
 .btn { display: block; width: 100%; background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--foreground-strong); border-radius: 6px; padding: 6px; margin-top: 8px; cursor: pointer; font-size: 12px; }
 .btn:hover { background: var(--surface-3); }
-.btn.primary { color: var(--on-accent); background: var(--accent); border-color: var(--accent); width: auto; padding: 6px 16px; display: inline-block; }
 .btn.more { width: auto; margin: 8px auto; padding: 6px 20px; }
 .btn:disabled { opacity: .6; cursor: default; }
 .empty { color: var(--dim); display: grid; place-items: center; flex: 1; text-align: center; padding: 20px; }
@@ -433,7 +439,7 @@ tbody tr.on td { background: var(--accent) !important; color: var(--on-accent); 
 .pane-head .path { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
 .path-input { flex: 1; background: var(--code-bg); border: 1px solid var(--accent); border-radius: 4px; color: var(--text); padding: 2px 6px; font: inherit; }
 .btn.small { width: auto; display: inline-block; margin-top: 0; padding: 3px 9px; font-size: 11px; }
-.btn.danger { color: var(--red); }
+.pg-edit-toggle[aria-pressed="true"] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
 .btn.plain { width: auto; display: inline-block; }
 .actions { display: flex; gap: 6px; align-items: center; padding: 6px 10px; border-top: 1px solid var(--line); background: var(--tone-232325); }
 .queue { border-top: 1px solid var(--line); background: var(--tone-1f1f21); max-height: 140px; overflow: auto; font-size: 11px; }
@@ -719,8 +725,6 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .sheet.cp { display: flex; flex-direction: column; padding: 0; max-height: 86vh; max-width: calc(100vw - 32px); overflow: hidden; }
 .cp-body { overflow: auto; padding: 18px 18px 8px; user-select: text; }
 .cp .foot { margin: 0; padding: 12px 18px; border-top: 1px solid var(--line); }
-.cp .btn.danger { background: var(--red-soft); border-color: var(--red-alpha-70); color: var(--tone-ff8a82); }
-.cp .btn.danger:disabled { background: var(--surface-2); border-color: var(--border-strong); color: var(--dim); }
 .cp-hint { margin-right: auto; color: var(--dim); font-size: 12px; }
 .cp .cp-sum { color: var(--text); font-size: 13px; margin: 0 0 12px; }
 .cp h4 { margin: 14px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }
@@ -1608,13 +1612,20 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .k8s-toolbar input:not([type="checkbox"]) { width: 9em; }
 .k8s-toolbar input[type="number"] { width: 5em; }
 .k8s-toolbar-slot { display: contents; }
-/* 버튼 색: 파랑 실행·미리보기, 노랑 상태를 바꾸는 조작, 빨강 지우기·비우기 */
+/* 버튼 색은 버튼이 끝까지 실행됐을 때 대상(서버, 앱에 남는 데이터)에 일어나는 일로 정한다:
+   파랑 실행 · 초록 만들기 · 노랑 상태 변경 · 주황 멈춤·되돌림 · 빨강 없애기 · 초록 테두리 새로고침 · 파랑 테두리 이동 · 회색 보조 · 투명 취소 · 빨강 테두리 버리기·끊기 */
 .btn.tone-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .btn.tone-primary:hover:not(:disabled) { background: var(--tone-3d9bff); }
+.btn.tone-create { background: var(--green); border-color: var(--green); color: var(--on-create); }
+.btn.tone-create:hover:not(:disabled) { filter: brightness(1.1); }
 .btn.tone-warn { background: var(--warn-fill); border-color: var(--warn-fill); color: var(--on-warn); }
 .btn.tone-warn:hover:not(:disabled) { background: var(--tone-ffe14d); }
+.btn.tone-caution { background: var(--orange-fill); border-color: var(--orange-fill); color: var(--on-caution); }
+.btn.tone-caution:hover:not(:disabled) { filter: brightness(1.1); }
 .btn.tone-danger { background: var(--red); border-color: var(--red); color: var(--on-accent); }
 .btn.tone-danger:hover:not(:disabled) { background: var(--tone-ff6b62); }
+.btn.tone-refresh { background: transparent; border-color: var(--green); color: var(--green-text); }
+.btn.tone-refresh:hover:not(:disabled) { background: var(--green-soft); }
 .btn.tone-secondary { background: var(--surface-2); border-color: var(--border-strong); color: var(--foreground-strong); }
 .btn.tone-secondary:hover:not(:disabled) { background: var(--surface-3); }
 .btn.tone-nav { background: transparent; border-color: var(--accent); color: var(--accent); }
@@ -1623,7 +1634,8 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .btn.tone-ghost:hover:not(:disabled) { background: transparent; color: var(--text); }
 .btn.tone-ghost-danger { background: transparent; border-color: var(--red-alpha-66); color: var(--red); }
 .btn.tone-ghost-danger:hover:not(:disabled) { background: transparent; color: var(--text); }
-.btn.tone-primary:disabled, .btn.tone-warn:disabled, .btn.tone-danger:disabled { opacity: .4; }
+/* 누를 수 없는 버튼은 색을 빼고 흐린 회색으로: 색이 남아 있으면 누를 수 있어 보인다. 이유는 title에 둔다 */
+.btn.btn:disabled:is(.tone-primary, .tone-create, .tone-warn, .tone-caution, .tone-danger, .tone-refresh, .tone-nav, .tone-ghost-danger) { background: var(--surface-2); border-color: var(--border-strong); color: var(--dim); filter: none; }
 /* EKS·ArgoCD 탭의 버튼은 크기가 하나다(사용자 결정 2026-11-03): 높이 24px, 글자 12px, 내용만큼의 너비. 색은 tone-* 가 정한다 */
 :is(.k8s-pane, .argo-pane, .detail-tools) .btn.btn {
   display: inline-flex;

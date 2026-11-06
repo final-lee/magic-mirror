@@ -132,7 +132,7 @@ export function ResourceSearch({ url, live, onOpen }: Props) {
                   {e.refs.slice(0, APPS_SHOWN).map((r) => (
                     <button
                       key={`${r.app.namespace}/${r.app.name}`}
-                      className="btn small tone-secondary argo-app-link"
+                      className="btn small tone-nav argo-app-link"
                       aria-label={searchOpenApp(r.app.name)}
                       onClick={(ev) => {
                         ev.stopPropagation();

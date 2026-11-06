@@ -7,7 +7,7 @@ export function LinkButtons({ links, label, empty }: { links: LinkRow[]; label: 
   return (
     <div className="argo-links" role="group" aria-label={label}>
       {links.map((l) => (
-        <button key={l.url} className="btn small tone-secondary" title={l.description ?? l.url} onClick={() => void desktop.openUrl(l.url)}>
+        <button key={l.url} className="btn small tone-nav" title={l.description ?? l.url} onClick={() => void desktop.openUrl(l.url)}>
           {l.title}
         </button>
       ))}

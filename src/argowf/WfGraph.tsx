@@ -49,14 +49,14 @@ export function WfGraph({ nodes, selected, onSelect }: { nodes: WfNode[]; select
         <button className="btn small" aria-pressed={direction === "TB"} onClick={() => setDirection("TB")}>
           세로
         </button>
-        <button className="btn small" aria-label="확대" onClick={() => setZoom((z) => clampZoom(z * 1.25))}>
+        <button className="btn small tone-secondary" aria-label="확대" onClick={() => setZoom((z) => clampZoom(z * 1.25))}>
           ＋
         </button>
-        <button className="btn small" aria-label="축소" onClick={() => setZoom((z) => clampZoom(z / 1.25))}>
+        <button className="btn small tone-secondary" aria-label="축소" onClick={() => setZoom((z) => clampZoom(z / 1.25))}>
           －
         </button>
         <button
-          className="btn small"
+          className="btn small tone-secondary"
           onClick={() => {
             setZoom(1);
             setPan({ x: 0, y: 0 });

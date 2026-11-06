@@ -58,8 +58,8 @@ function Confirm({ pending, context, onRun, onCancel }: { pending: Pending; cont
           <pre className="mono k8s-plugin-command" aria-label={PLUGIN_COMMAND}>{pending.command}</pre>
         </div>
         <div className="foot">
-          <button ref={cancelRef} className="btn tone-secondary" onClick={onCancel}>{PLUGIN_CANCEL}</button>
-          <button className="btn tone-primary" onClick={onRun}>{PLUGIN_RUN}</button>
+          <button ref={cancelRef} className="btn plain tone-ghost" onClick={onCancel}>{PLUGIN_CANCEL}</button>
+          <button className="btn plain tone-primary" onClick={onRun}>{PLUGIN_RUN}</button>
         </div>
       </div>
     </div>,
@@ -127,7 +127,7 @@ export function PluginActions({ plugins, context, objectRef, container, host, on
         {open && (
           <div className="k8s-plugin-pop" role="menu" aria-label={PLUGIN_MENU_LABEL}>
             {matching.map(({ plugin }) => (
-              <button key={plugin.name} role="menuitem" className="k8s-plugin-item" title={plugin.description ?? undefined} onClick={() => request(plugin)}>
+              <button key={plugin.name} role="menuitem" className="k8s-plugin-item tone-primary" title={plugin.description ?? undefined} onClick={() => request(plugin)}>
                 <span>{plugin.name}</span>
                 {plugin.key && <kbd>{keyLabel(plugin.key)}</kbd>}
               </button>

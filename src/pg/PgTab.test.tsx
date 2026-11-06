@@ -1519,7 +1519,7 @@ describe("변경 기록", () => {
   test("되돌리기 of one change opens the undo preview in the tab; applying it announces the summary and reads the screens again", async () => {
     await openLog();
     const member = rowsOf().find((r) => r.textContent?.includes("그룹에 넣기: bob → app_write") && !r.className.includes("cl-batch"))!;
-    fireEvent.click(within(member).getByRole("button", { name: "되돌리기" }));
+    fireEvent.click(within(member).getByRole("button", { name: "되돌리기…" }));
     expect(await dialog("되돌리기 미리보기")).toBeInTheDocument();
     expect(m.undo).toHaveBeenCalledWith("b-1-2");
     expect(m.preview).toHaveBeenCalledWith(pgTarget, removeBobFromWriters);
@@ -1544,7 +1544,7 @@ describe("변경 기록", () => {
   test("묶음 되돌리기 opens the batch preview in the database of the undo, and applies it with the ids it undoes", async () => {
     await openLog();
     const head = screen.getByText(/^묶음 · 변경 2개 · /).closest("tr") as HTMLElement;
-    fireEvent.click(within(head).getByRole("button", { name: "묶음 되돌리기" }));
+    fireEvent.click(within(head).getByRole("button", { name: "묶음 되돌리기…" }));
     expect(await dialog("되돌리기 미리보기")).toBeInTheDocument();
     expect(m.undoBatch).toHaveBeenCalledWith("b-1");
     expect(m.previewBatch).toHaveBeenCalledWith(pgTarget, "orders", [removeBobFromWriters, revokeAuditRead]);
@@ -1560,7 +1560,7 @@ describe("변경 기록", () => {
     m.undo.mockResolvedValue({ database: "analytics", changes: [removeBobFromWriters, revokeAuditRead], undoOf: ["log-3"] });
     await openLog();
     const created = rowsOf().find((r) => r.textContent?.includes("역할 만들기: app_audit"))!;
-    fireEvent.click(within(created).getByRole("button", { name: "되돌리기" }));
+    fireEvent.click(within(created).getByRole("button", { name: "되돌리기…" }));
     expect(await dialog("되돌리기 미리보기")).toBeInTheDocument();
     expect(m.previewBatch).toHaveBeenCalledWith(pgTarget, "analytics", [removeBobFromWriters, revokeAuditRead]);
     expect(m.preview).not.toHaveBeenCalled();
@@ -1569,7 +1569,7 @@ describe("변경 기록", () => {
   test("Escape closes an undo preview without applying anything", async () => {
     await openLog();
     const member = rowsOf().find((r) => r.textContent?.includes("그룹에 넣기: bob → app_write") && !r.className.includes("cl-batch"))!;
-    fireEvent.click(within(member).getByRole("button", { name: "되돌리기" }));
+    fireEvent.click(within(member).getByRole("button", { name: "되돌리기…" }));
     await dialog("되돌리기 미리보기");
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -1580,7 +1580,7 @@ describe("변경 기록", () => {
     m.apply.mockRejectedValue({ kind: "other", message: "미리보기 뒤에 바뀌었어요. 미리보기를 다시 받아 주세요" });
     await openLog();
     const member = rowsOf().find((r) => r.textContent?.includes("그룹에 넣기: bob → app_write") && !r.className.includes("cl-batch"))!;
-    fireEvent.click(within(member).getByRole("button", { name: "되돌리기" }));
+    fireEvent.click(within(member).getByRole("button", { name: "되돌리기…" }));
     fireEvent.click(await screen.findByRole("button", { name: "적용" }));
     expect(await screen.findByText("미리보기 뒤에 바뀌었어요. 미리보기를 다시 받아 주세요")).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "되돌리기 미리보기" })).toBeInTheDocument();
@@ -1591,7 +1591,7 @@ describe("변경 기록", () => {
     m.apply.mockResolvedValue({ logId: "log-20", summary: "그룹에서 빼기: bob → app_write", notes: ["연결이 끊겼지만 적용된 것을 확인했어요"] });
     await openLog();
     const member = rowsOf().find((r) => r.textContent?.includes("그룹에 넣기: bob → app_write") && !r.className.includes("cl-batch"))!;
-    fireEvent.click(within(member).getByRole("button", { name: "되돌리기" }));
+    fireEvent.click(within(member).getByRole("button", { name: "되돌리기…" }));
     fireEvent.click(await screen.findByRole("button", { name: "적용" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     const notes = within(screen.getByRole("status")).getByRole("list", { name: "함께 알릴 일" });
@@ -1601,7 +1601,7 @@ describe("변경 기록", () => {
   test("the notice does not mention the propagation delay IAM has: a commit shows at once", async () => {
     await openLog();
     const member = rowsOf().find((r) => r.textContent?.includes("그룹에 넣기: bob → app_write") && !r.className.includes("cl-batch"))!;
-    fireEvent.click(within(member).getByRole("button", { name: "되돌리기" }));
+    fireEvent.click(within(member).getByRole("button", { name: "되돌리기…" }));
     fireEvent.click(await screen.findByRole("button", { name: "적용" }));
     await waitFor(() => expect(screen.getByRole("status")).toBeInTheDocument());
     expect(screen.queryByText(/반영까지/)).not.toBeInTheDocument();
@@ -1610,7 +1610,7 @@ describe("변경 기록", () => {
   test("the notice stays when the user moves to another screen", async () => {
     await openLog();
     const member = rowsOf().find((r) => r.textContent?.includes("그룹에 넣기: bob → app_write") && !r.className.includes("cl-batch"))!;
-    fireEvent.click(within(member).getByRole("button", { name: "되돌리기" }));
+    fireEvent.click(within(member).getByRole("button", { name: "되돌리기…" }));
     fireEvent.click(await screen.findByRole("button", { name: "적용" }));
     await waitFor(() => expect(screen.getByRole("status")).toBeInTheDocument());
     openMenu("역할");
@@ -1674,7 +1674,7 @@ describe("변경 기록", () => {
     async function applyAnUndo() {
       await openLog();
       const member = rowsOf().find((r) => r.textContent?.includes("그룹에 넣기: bob → app_write") && !r.className.includes("cl-batch"))!;
-      fireEvent.click(within(member).getByRole("button", { name: "되돌리기" }));
+      fireEvent.click(within(member).getByRole("button", { name: "되돌리기…" }));
       fireEvent.click(await screen.findByRole("button", { name: "적용" }));
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     }

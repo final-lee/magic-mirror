@@ -6,6 +6,7 @@ export interface DialogAction {
   value: string;
   primary?: boolean;
   danger?: boolean;
+  create?: boolean;
 }
 
 interface Props {
@@ -65,13 +66,13 @@ export function ConfirmDialog({ title, message, details, input, error, actions, 
         )}
         {error && <p className="err">{error}</p>}
         <div className="foot">
-          <button ref={cancelRef} className="btn plain" onClick={() => onResult(null, text)}>
+          <button ref={cancelRef} className="btn plain tone-ghost" onClick={() => onResult(null, text)}>
             취소
           </button>
           {actions.map((a) => (
             <button
               key={a.value}
-              className={`btn ${a.primary ? "primary" : ""} ${a.danger ? "danger" : ""}`}
+              className={`btn plain ${a.danger ? "tone-danger" : a.create ? "tone-create" : a.primary ? "tone-primary" : "tone-secondary"}`}
               onClick={() => onResult(a.value, text)}
             >
               {a.label}

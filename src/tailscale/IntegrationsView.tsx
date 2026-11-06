@@ -7,6 +7,7 @@ import { useModal } from "../iam/useModal";
 import { ApiRequired } from "./ApiRequired";
 import { useTailscaleApi } from "./useTailscaleApi";
 import * as t from "./integrationsText";
+import { integrationTone, revertTone } from "./tone";
 
 type ObjectValue = Record<string, unknown>;
 type Area = "webhook" | "posture" | "app" | "stream";
@@ -18,6 +19,7 @@ type Operation = {
   body: ObjectValue | null;
   before: ObjectValue | null;
   inverse?: Operation;
+  revert?: boolean;
 };
 type Field = { key: string; options?: string[]; array?: boolean; secret?: boolean; number?: boolean };
 const fields: Record<Area, Field[]> = {
@@ -111,7 +113,7 @@ function Integrations({ tailnet }: { tailnet: string }) {
       <div className="awc-bar">
         <h2 className="awc-title">{t.TITLE}</h2>
         <div className="awc-bar-end">
-          <button className="btn small" onClick={refresh}>
+          <button className="btn small tone-refresh" onClick={refresh}>
             {t.REFRESH}
           </button>
         </div>
@@ -206,7 +208,7 @@ function Integrations({ tailnet }: { tailnet: string }) {
             refresh();
           }}
           onUndo={(next) => {
-            setOperation(next);
+            setOperation({ ...next, revert: true });
             setRevision((value) => value + 1);
           }}
         />
@@ -240,8 +242,8 @@ function IntegrationSection({
     <section className="awc-body" style={{ flex: "none" }}>
       <div className="ts-sec-head">
         <h3>{title}</h3>
-        <button className="btn small" onClick={() => onEdit({ area, id: "", initial: null })}>
-          {t.CREATE}
+        <button className="btn small tone-create" onClick={() => onEdit({ area, id: "", initial: null })}>
+          {t.CREATE_OPEN}
         </button>
       </div>
       <p className="dim">{t.SECTION_DESCRIPTIONS[area]}</p>
@@ -257,22 +259,22 @@ function IntegrationSection({
                   <td>{String(item.name ?? item.provider ?? id)}</td>
                   <td>{id}</td>
                   <td>
-                    <button className="btn small" onClick={() => onEdit({ area, id, initial: item })}>
-                      {t.EDIT}
-                    </button>
-                    <button className="btn small" onClick={() => onOperation(request(`${area}Delete`, id, null, item))}>
-                      {t.DELETE}
+                    <button className="btn small tone-primary" onClick={() => onEdit({ area, id, initial: item })}>
+                      {t.EDIT_OPEN}
                     </button>
                     {area === "webhook" && (
                       <>
-                        <button className="btn small" onClick={() => onOperation(request("webhookTest", id, null))}>
+                        <button className="btn small tone-primary" onClick={() => onOperation(request("webhookTest", id, null))}>
                           {t.TEST}
                         </button>
-                        <button className="btn small" onClick={() => onOperation(request("webhookRotate", id, null))}>
+                        <button className="btn small tone-warn" onClick={() => onOperation(request("webhookRotate", id, null))}>
                           {t.ROTATE}
                         </button>
                       </>
                     )}
+                    <button className="btn small tone-danger" onClick={() => onOperation(request(`${area}Delete`, id, null, item))}>
+                      {t.DELETE}
+                    </button>
                   </td>
                 </tr>
               );
@@ -313,8 +315,8 @@ function StreamRow({
         )}
       </td>
       <td>
-        <button className="btn small" onClick={() => onEdit({ area: "stream", id, initial: query.data ?? null })}>{t.CONFIGURE}</button>
-        {query.data && <button className="btn small" onClick={() => onOperation(request("streamDelete", id, null, query.data))}>{t.DISABLE}</button>}
+        <button className="btn small tone-primary" onClick={() => onEdit({ area: "stream", id, initial: query.data ?? null })}>{t.CONFIGURE}</button>
+        {query.data && <button className="btn small tone-danger" onClick={() => onOperation(request("streamDelete", id, null, query.data))}>{t.DISABLE}</button>}
       </td>
     </tr>
   );
@@ -441,9 +443,9 @@ function IntegrationEditor({
                   </label>
                 </div>
                 <div className="awc-editor-opts">
-                  <button className="btn small" onClick={() => onOperation(request("externalCreate", "", { reusable: true }))}>{t.EXTERNAL_ID}</button>
+                  <button className="btn small tone-create" onClick={() => onOperation(request("externalCreate", "", { reusable: true }))}>{t.EXTERNAL_ID}</button>
                   <button
-                    className="btn small"
+                    className="btn small tone-refresh"
                     disabled={!externalId || !roleArn}
                     onClick={() => onOperation(request("externalValidate", externalId, { roleArn }))}
                   >
@@ -454,10 +456,13 @@ function IntegrationEditor({
             )}
           </>
         )}
-        <button className="btn small" onClick={preview}>
-          {t.PREVIEW}
+        <button
+          className={`btn small tone-${area !== "stream" && !initial ? "create" : "primary"}`}
+          onClick={preview}
+        >
+          {t.PREVIEW_OPEN}
         </button>
-        <button className="btn small" onClick={onClose}>
+        <button className="btn small tone-ghost" onClick={onClose}>
           {t.CANCEL}
         </button>
       </div>
@@ -487,6 +492,8 @@ function IntegrationConfirmation({
   };
   const { sheetRef, trapTab } = useModal(close);
   const deleting = operation.action.endsWith("Delete") && operation.action !== "streamDelete";
+  const baseTone = integrationTone(operation.action);
+  const tone = operation.revert ? revertTone(baseTone) : baseTone;
   async function apply() {
     setBusy(true);
     setError("");
@@ -545,7 +552,7 @@ function IntegrationConfirmation({
               </label>
             )}
             <button
-              className="btn small"
+              className={`btn small tone-${tone}`}
               disabled={busy || (deleting && typed !== operation.id)}
               onClick={() => void apply()}
             >
@@ -557,7 +564,7 @@ function IntegrationConfirmation({
           <>
             <p>{t.ONCE}</p>
             <code>{secret}</code>
-            <button className="btn small" onClick={() => void desktop.copy(secret)}>
+            <button className="btn small tone-secondary" onClick={() => void desktop.copy(secret)}>
               {t.COPY}
             </button>
           </>
@@ -569,16 +576,19 @@ function IntegrationConfirmation({
           </dl>
         )}
         {done && operation.inverse && (
-          <button className="btn small" onClick={() => onUndo(operation.inverse!)}>
+          <button
+            className={`btn small tone-${revertTone(integrationTone(operation.inverse.action))}`}
+            onClick={() => onUndo(operation.inverse!)}
+          >
             {t.UNDO}
           </button>
         )}
         {done && createdArea && typeof createdId === "string" && (
-          <button className="btn small" onClick={() => onUndo(request(`${createdArea}Delete`, createdId, null))}>
+          <button className="btn small tone-danger" onClick={() => onUndo(request(`${createdArea}Delete`, createdId, null))}>
             {t.UNDO}
           </button>
         )}
-        <button className="btn small" disabled={busy} onClick={close}>
+        <button className="btn small tone-ghost" disabled={busy} onClick={close}>
           {done ? t.CLOSE : t.CANCEL}
         </button>
         {error && <p role="alert">{error}</p>}

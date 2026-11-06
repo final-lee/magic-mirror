@@ -63,14 +63,14 @@ export function S3Pane(p: Props) {
           <button className="icon" aria-label="상위 폴더" title="상위 폴더" disabled={!location} onClick={up}>
             ↑
           </button>
-          <button className="btn small" disabled={!location} onClick={p.onNewFolder}>
-            + 폴더
+          <button className="btn small tone-create" disabled={!location} onClick={p.onNewFolder}>
+            + 폴더…
           </button>
-          <button className="btn small" disabled={!location || selection.selected.length !== 1} onClick={p.onRename}>
-            이름 변경
+          <button className="btn small tone-primary" disabled={!location || selection.selected.length !== 1} onClick={p.onRename}>
+            이름 변경…
           </button>
-          <button className="btn small danger" disabled={!location || selection.selected.length === 0} onClick={p.onDelete}>
-            삭제
+          <button className="btn small tone-danger" disabled={!location || selection.selected.length === 0} onClick={p.onDelete}>
+            삭제…
           </button>
         </span>
       </div>
@@ -127,7 +127,7 @@ function ObjectList(p: Props & { location: S3Location; up: () => void }) {
         focused={p.focused}
       />
       {q.hasNextPage && (
-        <button className="btn more" disabled={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>
+        <button className="btn more plain tone-secondary" disabled={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>
           더 보기
         </button>
       )}

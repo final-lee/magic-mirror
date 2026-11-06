@@ -140,7 +140,7 @@ export function WfLogs({
         <label>
           최근 줄 <input type="number" min={1} value={tail} onChange={(e) => setTail(Math.max(1, Number(e.target.value)))} />
         </label>
-        <button className="btn small" onClick={() => setPaused(paused ? null : lines)}>
+        <button className="btn small tone-secondary" onClick={() => setPaused(paused ? null : lines)}>
           {paused ? "재개" : "일시정지"}
         </button>
         <label>
@@ -164,7 +164,7 @@ export function WfLogs({
           />
           초
         </label>
-        <button className="btn small" disabled={shown.length === 0} onClick={() => void save()}>
+        <button className="btn small tone-secondary" disabled={shown.length === 0} onClick={() => void save()}>
           파일로 저장
         </button>
       </div>

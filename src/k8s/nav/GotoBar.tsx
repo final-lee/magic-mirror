@@ -142,7 +142,7 @@ export function GotoBar({ ctx, onGo, onClose }: Props) {
           onKeyDown={onKeyDown}
         />
         <span className="k8s-goto-hint dim">{nsKind ? gotoNamespaceHint(nsKind.kind) : GOTO_HINT}</span>
-        <button className="icon" aria-label={GOTO_CLOSE} title={GOTO_CLOSE} onMouseDown={(e) => e.preventDefault()} onClick={() => onClose(false)}>
+        <button className="icon tone-ghost" aria-label={GOTO_CLOSE} title={GOTO_CLOSE} onMouseDown={(e) => e.preventDefault()} onClick={() => onClose(false)}>
           ✕
         </button>
       </div>

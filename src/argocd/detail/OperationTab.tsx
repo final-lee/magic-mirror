@@ -76,7 +76,7 @@ export function OperationTab({ url, app, now, onOpen, onTokenError, terminate }:
           <>
             <p className="dim">{OP_RUNNING_NOTE}</p>
             <p className="dim">{TERMINATE_NOTE}</p>
-            <button className="btn small tone-danger" disabled={!terminate.allowed} title={terminate.reason ?? undefined} onClick={terminate.onTerminate}>
+            <button className="btn small tone-caution" disabled={!terminate.allowed} title={terminate.reason ?? undefined} onClick={terminate.onTerminate}>
               {TERMINATE}
             </button>
           </>

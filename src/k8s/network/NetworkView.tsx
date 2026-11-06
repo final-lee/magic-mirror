@@ -85,7 +85,7 @@ export function NetworkView({ target, context, ssoProfile, live, namespace, onOp
             >
               {OPEN_VPC}
             </button>
-            <button className="btn tone-secondary" onClick={refetch} disabled={q.isFetching}>
+            <button className="btn tone-refresh" onClick={refetch} disabled={q.isFetching}>
               {REFRESH}
             </button>
           </div>

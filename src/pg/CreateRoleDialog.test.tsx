@@ -20,7 +20,7 @@ function setup(props: Partial<React.ComponentProps<typeof CreateRoleDialog>> = {
 
 const user = () => userEvent.setup();
 const name = () => screen.getByRole("textbox", { name: "이름" });
-const previewButton = () => screen.getByRole("button", { name: "미리보기" });
+const previewButton = () => screen.getByRole("button", { name: "미리보기…" });
 const type = async (text: string) => user().type(name(), text);
 const pickPreset = (label: string) => user().click(screen.getByRole("radio", { name: new RegExp(`^${label}`) }));
 const pickSchemas = async (...names: string[]) => {

@@ -42,7 +42,7 @@ beforeEach(() => {
 
 test("bucket list opens a bucket with its own region; actions disabled", async () => {
   renderWithClient(<S3Pane {...base} />);
-  expect(screen.getByRole("button", { name: "+ 폴더" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "+ 폴더…" })).toBeDisabled();
   fireEvent.doubleClick(await screen.findByText("assets"));
   expect(base.onLocationChange).toHaveBeenCalledWith({ bucket: "assets", region: "us-west-2", prefix: "" });
   expect(screen.getByTestId("pane-s3")).toHaveAttribute("data-pane", "s3");
@@ -58,18 +58,18 @@ test("inside a bucket: folders open, breadcrumb and up navigate, buttons follow 
   expect(base.onLocationChange).toHaveBeenLastCalledWith({ ...loc, prefix: "" });
   fireEvent.click(screen.getByRole("button", { name: "버킷 목록" }));
   expect(base.onLocationChange).toHaveBeenLastCalledWith(null);
-  fireEvent.click(screen.getByRole("button", { name: "이름 변경" }));
+  fireEvent.click(screen.getByRole("button", { name: "이름 변경…" }));
   expect(base.onRename).toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+  fireEvent.click(screen.getByRole("button", { name: "삭제…" }));
   expect(base.onDelete).toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "+ 폴더" }));
+  fireEvent.click(screen.getByRole("button", { name: "+ 폴더…" }));
   expect(base.onNewFolder).toHaveBeenCalled();
 });
 
 test("rename disabled with multiple selection; up at bucket root goes to bucket list", async () => {
   const loc = { bucket: "assets", region: "us-west-2", prefix: "" };
   renderWithClient(<S3Pane {...base} location={loc} selection={{ selected: ["a", "b"], anchor: "b" }} />);
-  expect(screen.getByRole("button", { name: "이름 변경" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "이름 변경…" })).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: "상위 폴더" }));
   expect(base.onLocationChange).toHaveBeenLastCalledWith(null);
 });

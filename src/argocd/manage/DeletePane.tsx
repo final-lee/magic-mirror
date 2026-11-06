@@ -34,7 +34,7 @@ export function DeletePane({ onPreview, disabled, disabledReason }: { onPreview:
         </div>
       </section>
       <div className="mg-foot">
-        <button className="btn small tone-warn" disabled={disabled} title={disabled ? disabledReason : undefined} onClick={() => onPreview(MODES.find((m) => m.mode === mode)!.change)}>
+        <button className="btn small tone-danger" disabled={disabled} title={disabled ? disabledReason : undefined} onClick={() => onPreview(MODES.find((m) => m.mode === mode)!.change)}>
           {MANAGE_DELETE_GO}
         </button>
       </div>

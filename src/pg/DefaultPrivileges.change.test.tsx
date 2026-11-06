@@ -25,7 +25,7 @@ const table = () => screen.findByRole("table", { name: "기본 권한" });
 const dialog = () => screen.getByRole("dialog", { name: "기본 권한 추가" });
 const open = async () => {
   await table();
-  fireEvent.click(screen.getByRole("button", { name: "기본 권한 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "기본 권한 추가…" }));
 };
 const select = (name: string, value: string) => fireEvent.change(within(dialog()).getByRole("combobox", { name }), { target: { value } });
 const check = (name: string) => fireEvent.click(within(dialog()).getByRole("checkbox", { name }));
@@ -58,7 +58,7 @@ describe("each grant line", () => {
     setup({ editing: false });
     await table();
     expect(screen.queryByRole("button", { name: "빼기" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "기본 권한 추가" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "기본 권한 추가…" })).not.toBeInTheDocument();
   });
 });
 
@@ -140,7 +140,7 @@ describe("기본 권한 추가", () => {
     const t = await table();
     const line = within(t).getAllByText("app_read")[0].closest("li") as HTMLElement;
     fireEvent.click(within(line).getByRole("button", { name: "빼기" }));
-    fireEvent.click(screen.getByRole("button", { name: "기본 권한 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "기본 권한 추가…" }));
     select("만드는 역할", "app_owner");
     select("스키마", "app");
     select("받는 역할", "app_read");

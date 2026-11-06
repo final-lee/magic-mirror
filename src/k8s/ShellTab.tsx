@@ -139,7 +139,7 @@ export function ShellTab({ target, ssoProfile, namespace, pod, containers, rules
             <span className="mono">
               {session.container} · {session.mode === "attach" ? SHELL_MODE_ATTACH : SHELL_MODE_EXEC}
             </span>
-            <button className="btn k8s-push tone-ghost" onClick={() => setSession(null)}>
+            <button className="btn k8s-push tone-ghost-danger" onClick={() => setSession(null)}>
               {SHELL_CLOSE}
             </button>
           </div>

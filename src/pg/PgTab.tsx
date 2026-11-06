@@ -97,7 +97,7 @@ function TopBar({ info, loginUser, connection, fetchedAt, reading, canChange, on
       <span className="pg-top-end">
         {at && !Number.isNaN(at.getTime()) && <span className="dim">읽은 시각 {at.toLocaleTimeString("ko-KR")}</span>}
         {fetchedAt && (
-          <button className="btn small" onClick={onReread} disabled={reading}>
+          <button className="btn small tone-refresh" onClick={onReread} disabled={reading}>
             {reading ? "읽는 중…" : "다시 읽기"}
           </button>
         )}
@@ -231,7 +231,7 @@ export function PgTab({ target, active }: Props) {
             {/* 연결 정보 줄의 [바꾸기](DB 사용자)와 다른 버튼이다. 이 버튼은 눌림 상태(aria-pressed)가 있다 */}
             <button
               type="button"
-              className={`btn small${editing ? " primary" : ""}`}
+              className="btn small pg-edit-toggle"
               aria-pressed={editing}
               disabled={!!blockReason}
               title={blockReason ?? undefined}

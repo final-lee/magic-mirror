@@ -277,7 +277,7 @@ describe("끊기", () => {
     m.sessions.mockResolvedValue([hidden({ pid: 4001, role: "carol", state: "idle", backendStart: "2026-10-29T08:00:00Z" })]);
     const onTerminate = withButtons();
     await loaded();
-    fireEvent.click(within(bodyRows()[0]).getByRole("button", { name: "끊기" }));
+    fireEvent.click(within(bodyRows()[0]).getByRole("button", { name: "끊기…" }));
     expect(onTerminate).toHaveBeenCalledWith({ kind: "terminate", pid: 4001, role: "carol", backendStart: "2026-10-29T08:00:00Z" });
   });
 
@@ -285,7 +285,7 @@ describe("끊기", () => {
     m.sessions.mockResolvedValue([hidden({ pid: 4001, role: "carol", backendStart: null })]);
     const onTerminate = withButtons();
     await loaded();
-    fireEvent.click(within(bodyRows()[0]).getByRole("button", { name: "끊기" }));
+    fireEvent.click(within(bodyRows()[0]).getByRole("button", { name: "끊기…" }));
     expect(onTerminate).toHaveBeenCalledWith({ kind: "terminate", pid: 4001, role: "carol", backendStart: null });
   });
 
@@ -293,7 +293,7 @@ describe("끊기", () => {
     m.sessions.mockResolvedValue([hidden({ pid: 1, role: "iam_admin", own: true, state: "active" })]);
     const onTerminate = withButtons();
     await loaded();
-    const button = within(bodyRows()[0]).getByRole("button", { name: "끊기" });
+    const button = within(bodyRows()[0]).getByRole("button", { name: "끊기…" });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("title", OWN);
     fireEvent.click(button);
@@ -304,7 +304,7 @@ describe("끊기", () => {
     m.sessions.mockResolvedValue([hidden({ pid: 4002, role: null })]);
     withButtons();
     await loaded();
-    expect(within(bodyRows()[0]).queryByRole("button", { name: "끊기" })).not.toBeInTheDocument();
+    expect(within(bodyRows()[0]).queryByRole("button", { name: "끊기…" })).not.toBeInTheDocument();
   });
 
   test("with a block reason every button is off and the reason is its title (the own session keeps its own text)", async () => {
@@ -312,7 +312,7 @@ describe("끊기", () => {
     const reason = "읽기 전용 복제본이라 바꿀 수 없어요";
     const onTerminate = withButtons(reason);
     await loaded();
-    const [other, own] = bodyRows().map((r) => within(r).getByRole("button", { name: "끊기" }));
+    const [other, own] = bodyRows().map((r) => within(r).getByRole("button", { name: "끊기…" }));
     expect(other).toBeDisabled();
     expect(other).toHaveAttribute("title", reason);
     expect(own).toHaveAttribute("title", OWN);
@@ -323,7 +323,7 @@ describe("끊기", () => {
   test("without the prop there is no button column", async () => {
     setup();
     await loaded();
-    expect(screen.queryByRole("button", { name: "끊기" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "끊기…" })).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "조치" })).not.toBeInTheDocument();
   });
 });

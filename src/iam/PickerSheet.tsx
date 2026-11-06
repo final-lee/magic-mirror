@@ -117,7 +117,7 @@ export function PickerSheet({ title, intro, searchLabel, placeholder, query, onQ
         )}
         {footnote && <p className="pk-note">{footnote}</p>}
         <div className="foot">
-          <button className="btn plain" onClick={onClose}>
+          <button className="btn plain tone-ghost" onClick={onClose}>
             취소
           </button>
         </div>

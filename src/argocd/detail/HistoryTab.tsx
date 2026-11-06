@@ -62,7 +62,7 @@ function ServerHistory({ entries, picked, onPick, at, rollback, onRollback }: { 
             <td>{who(e.initiatedBy)}</td>
             {rollback && (
               <td>
-                <button className="btn small tone-warn" aria-label={histRollbackLabel(e.id)} disabled={!rollback.allowed} title={rollback.reason ?? undefined} onClick={() => onRollback(e)}>
+                <button className="btn small tone-caution" aria-label={histRollbackLabel(e.id)} disabled={!rollback.allowed} title={rollback.reason ?? undefined} onClick={() => onRollback(e)}>
                   {HIST_ROLLBACK}
                 </button>
               </td>

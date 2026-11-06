@@ -83,7 +83,7 @@ test("운영 템플릿 삭제는 이름 확인이 필요하다", async () => {
   m.remove.mockResolvedValue();
   const { onClose } = setup({ row });
   await screen.findByRole("button", { name: TPL_RUN });
-  fireEvent.click(screen.getByRole("button", { name: "삭제" }));
+  fireEvent.click(screen.getByRole("button", { name: "삭제…" }));
   const dialog = screen.getByRole("dialog");
   const confirm = within(dialog).getByRole("button", { name: "삭제" });
   expect(confirm).toBeDisabled();

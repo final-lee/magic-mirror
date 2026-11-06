@@ -588,14 +588,14 @@ describe("changing IAM", () => {
     setup();
     await findingCards();
     fireEvent.click(screen.getByRole("button", { name: /오래된 액세스 키/ }));
-    fireEvent.click(screen.getByRole("button", { name: "키 비활성화" }));
+    fireEvent.click(screen.getByRole("button", { name: "키 비활성화…" }));
     await previewDialog();
   };
 
   test("attaching a policy goes picker → preview → apply, with exactly the previewed change", async () => {
     m.apply.mockResolvedValue({ logId: "log-9", summary: "alice에 AdministratorAccess를 붙였어요" });
     await openAlice(/^정책/);
-    fireEvent.click(screen.getByRole("button", { name: "정책 붙이기" }));
+    fireEvent.click(screen.getByRole("button", { name: "정책 붙이기…" }));
     fireEvent.click(await screen.findByRole("option", { name: /AdministratorAccess/ }));
 
     await previewDialog();
@@ -618,7 +618,7 @@ describe("changing IAM", () => {
       notes: ["변경 기록을 저장하지 못했어요: 권한이 없어요"],
     });
     await openAlice(/^정책/);
-    fireEvent.click(screen.getByRole("button", { name: "정책 붙이기" }));
+    fireEvent.click(screen.getByRole("button", { name: "정책 붙이기…" }));
     fireEvent.click(await screen.findByRole("option", { name: /AdministratorAccess/ }));
     await previewDialog();
     await readyToApply();
@@ -634,7 +634,7 @@ describe("changing IAM", () => {
     await openAlice(/^정책/);
     await screen.findByRole("table", { name: "붙은 정책" });
     const reads = { overview: m.overview.mock.calls.length, principal: m.principal.mock.calls.length };
-    fireEvent.click(screen.getByRole("button", { name: "ReadOnlyAccess 떼기" }));
+    fireEvent.click(screen.getByRole("button", { name: "ReadOnlyAccess 떼기…" }));
     await previewDialog();
     await readyToApply();
     fireEvent.click(applyButton());
@@ -656,7 +656,7 @@ describe("changing IAM", () => {
     );
     setup({ focus: bob.arn, nonce: 1 });
     fireEvent.click(await screen.findByRole("tab", { name: "액세스 키" }));
-    fireEvent.click(await screen.findByRole("button", { name: "AKIAIOSFODNN7EXAMPLE 삭제" }));
+    fireEvent.click(await screen.findByRole("button", { name: "AKIAIOSFODNN7EXAMPLE 삭제…" }));
     await previewDialog();
     const input = await screen.findByLabelText("확인하려면 AKIAIOSFODNN7EXAMPLE를 입력하세요");
     expect(applyButton()).toBeDisabled();
@@ -715,7 +715,7 @@ describe("changing IAM", () => {
     fireEvent.click(screen.getByRole("button", { name: "불러오기" }));
     await screen.findByRole("table", { name: "서비스별 마지막 사용" });
     const row = screen.getByRole("button", { name: "ReadOnlyAccess" }).closest("tr") as HTMLElement;
-    fireEvent.click(within(row).getByRole("button", { name: "떼기" }));
+    fireEvent.click(within(row).getByRole("button", { name: "떼기…" }));
     await previewDialog();
     expect(m.preview).toHaveBeenCalledWith("prod", { op: "detachPolicy", target: alice.arn, policyArn: readOnlyPolicy.id });
   });
@@ -725,7 +725,7 @@ describe("changing IAM", () => {
     m.undoChange.mockResolvedValue(activateBobKey);
     setup();
     fireEvent.click(await nav(/변경 기록/));
-    fireEvent.click(await screen.findByRole("button", { name: "되돌리기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "되돌리기…" }));
     await screen.findByRole("dialog", { name: "되돌리기 미리보기" });
     expect(m.undoChange).toHaveBeenCalledWith("log-1");
     expect(m.preview).toHaveBeenCalledWith("prod", activateBobKey);
@@ -744,7 +744,7 @@ describe("changing IAM", () => {
     await screen.findByRole("textbox", { name: "정책 JSON" });
     const changed = editorView("정책 JSON").state.doc.toString().replace("s3:GetObject", "s3:GetObjectVersion");
     typeYaml(changed, "정책 JSON");
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     await previewDialog();
     const update: IamChange = { op: "updateManagedPolicy", policyArn: deployPolicy.arn, document: changed };
     expect(m.preview).toHaveBeenCalledWith("prod", update);
@@ -756,7 +756,7 @@ describe("changing IAM", () => {
 
   test("with the preview open, ⌘[ does not navigate; Escape closes it without applying", async () => {
     await openAlice(/^정책/);
-    fireEvent.click(screen.getByRole("button", { name: "ReadOnlyAccess 떼기" }));
+    fireEvent.click(screen.getByRole("button", { name: "ReadOnlyAccess 떼기…" }));
     await previewDialog();
     metaKey("[");
     expect(screen.getByRole("heading", { name: "alice" })).toBeInTheDocument();
@@ -828,7 +828,7 @@ describe("assignments", () => {
   test("another profile does not keep the columns added in the first one", async () => {
     m.listPolicies.mockResolvedValue([{ arn: "arn:aws:iam::123456789012:policy/legacy-unused", name: "legacy-unused", scope: "local", description: null, badges: [] }]);
     const { update } = await openAssignments();
-    fireEvent.click(screen.getByRole("button", { name: "열 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "열 추가…" }));
     fireEvent.click(await screen.findByRole("option", { name: /legacy-unused/ }));
     expect(cell("bob", "legacy-unused")).toBeInTheDocument();
     update({ profile: "dev" });
@@ -844,7 +844,7 @@ describe("assignments", () => {
     expect(await screen.findByRole("grid", { name: "할당 표" })).toBeInTheDocument();
     update({ profile: "prod" }); // 이미 불러온 개요라서 불러오는 화면을 거치지 않는다
     expect(screen.getByRole("grid", { name: "할당 표" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "열 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "열 추가…" }));
     fireEvent.click(await screen.findByRole("option", { name: /legacy-unused/ }));
     expect(cell("bob", "legacy-unused")).toBeInTheDocument();
     update({ profile: "dev" });
@@ -854,7 +854,7 @@ describe("assignments", () => {
 
   const legacyRef: PolicyRef = { arn: "arn:aws:iam::123456789012:policy/legacy-unused", name: "legacy-unused", scope: "local", description: null, badges: [] };
   const addColumn = async (name: RegExp) => {
-    fireEvent.click(screen.getByRole("button", { name: "열 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "열 추가…" }));
     fireEvent.click(await screen.findByRole("option", { name }));
   };
   const headNames = () =>
@@ -989,7 +989,7 @@ describe("assignments", () => {
       fireEvent.click(cell("alice", "ReadOnlyAccess"));
       fireEvent.click(cell("bob", "ReadOnlyAccess"));
       fireEvent.click(cell("ci-bot", "ReadOnlyAccess"));
-      fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+      fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
       await batchDialog(3);
       return utils;
     };
@@ -1074,7 +1074,7 @@ describe("assignments", () => {
 
       const inverse: IamChange = { op: "detachPolicy", target: bob.arn, policyArn: readOnlyPolicy.arn };
       m.undoBatch.mockResolvedValue({ changes: [inverse], undoOf: ["l-1"] });
-      fireEvent.click(screen.getByRole("button", { name: "적용된 1개 되돌리기" }));
+      fireEvent.click(screen.getByRole("button", { name: "적용된 1개 되돌리기…" }));
       await batchDialog(1);
       expect(m.undoBatch).toHaveBeenCalledWith("batch-9");
       expect(m.previewBatch).toHaveBeenLastCalledWith("prod", [inverse]);
@@ -1098,7 +1098,7 @@ describe("assignments", () => {
       fireEvent.click(screen.getByRole("button", { name: "닫기" }));
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       expect(trayText()).toBe("변경 3개 · ReadOnlyAccess 떼기 · alice 외 2개");
-      fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+      fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
       await batchDialog(3);
       expect(m.previewBatch).toHaveBeenCalledTimes(2);
     });
@@ -1141,7 +1141,7 @@ describe("assignments", () => {
       m.undoBatch.mockResolvedValue({ changes: inverses, undoOf: ["m-2", "m-1"] });
       setup();
       fireEvent.click(await nav(/변경 기록/));
-      fireEvent.click(await screen.findByRole("button", { name: "묶음 되돌리기" }));
+      fireEvent.click(await screen.findByRole("button", { name: "묶음 되돌리기…" }));
       await batchDialog(2);
       expect(m.undoBatch).toHaveBeenCalledWith("b-1");
       expect(m.previewBatch).toHaveBeenCalledWith("prod", inverses);

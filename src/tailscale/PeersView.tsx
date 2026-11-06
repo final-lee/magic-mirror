@@ -44,7 +44,7 @@ function CliPeersView({ node, onConnect }: { node: TsNode; onConnect: () => void
         <div className="awc-bar-end">
           <button className="btn small" aria-pressed={view === "table"} onClick={() => setView("table")}>{deviceText.MAP_TABLE}</button>
           <button className="btn small" aria-pressed={view === "map"} onClick={() => setView("map")}>{deviceText.MAP}</button>
-          <button className="btn small" onClick={onConnect}>{t.API_REQUIRED_BUTTON}</button>
+          <button className="btn small tone-nav" onClick={onConnect}>{t.API_REQUIRED_BUTTON}</button>
         </div>
       </div>
       <div className="argowf-filters">

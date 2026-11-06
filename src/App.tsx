@@ -173,7 +173,7 @@ export default function App() {
     return (
       <div className="empty full">
         <div className="err">{errorMessage(failed[0].error)}</div>
-        <button className="btn" onClick={() => failed.forEach((q) => void q.refetch())}>
+        <button className="btn plain tone-refresh" onClick={() => failed.forEach((q) => void q.refetch())}>
           다시 시도
         </button>
       </div>

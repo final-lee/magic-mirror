@@ -122,7 +122,7 @@ function SourceSection({ title, source, onChange }: { title: string; source: Sou
                 <input type="checkbox" checked={p.forceString} onChange={(e) => setParam(i, { forceString: e.target.checked })} />
                 {MANAGE_PARAM_FORCE}
               </label>
-              <button className="btn small tone-ghost" onClick={() => onChange({ params: source.params.filter((_, n) => n !== i) })}>
+              <button className="btn small tone-secondary" onClick={() => onChange({ params: source.params.filter((_, n) => n !== i) })}>
                 {MANAGE_REMOVE}
               </button>
             </div>
@@ -140,7 +140,7 @@ function SourceSection({ title, source, onChange }: { title: string; source: Sou
           {source.images.map((image, i) => (
             <div key={i} className="mg-row">
               <input aria-label={MANAGE_KUSTOMIZE_IMAGES} value={image} onChange={(e) => setImage(i, e.target.value)} />
-              <button className="btn small tone-ghost" onClick={() => onChange({ images: source.images.filter((_, n) => n !== i) })}>
+              <button className="btn small tone-secondary" onClick={() => onChange({ images: source.images.filter((_, n) => n !== i) })}>
                 {MANAGE_REMOVE}
               </button>
             </div>

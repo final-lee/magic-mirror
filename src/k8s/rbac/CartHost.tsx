@@ -33,7 +33,7 @@ export function CartHost({ target, ssoProfile, onApplied }: Props) {
                 return (
                   <li key={index}>
                     <span className="mono k8s-wrap">{title}</span>
-                    <button className="link" aria-label={t.cartRemoveLabel(title)} onClick={() => cart.remove(index)}>
+                    <button className="link tone-ghost-danger" aria-label={t.cartRemoveLabel(title)} onClick={() => cart.remove(index)}>
                       {t.CART_REMOVE}
                     </button>
                   </li>
@@ -45,7 +45,7 @@ export function CartHost({ target, ssoProfile, onApplied }: Props) {
             <button className="btn tone-primary" disabled={batch !== null} onClick={() => api.start(cart.changes.map((change) => ({ change, undoOf: null })))}>
               {t.CART_PREVIEW}
             </button>
-            <button className="btn tone-ghost" onClick={cart.clear}>
+            <button className="btn tone-ghost-danger" onClick={cart.clear}>
               {t.CART_CLEAR}
             </button>
           </span>

@@ -109,7 +109,7 @@ export function HelmView({ target, context, ssoProfile, live, visible, namespace
             </label>
             {problemCount > 0 && <span className="k8s-chip warn">{t.PROBLEM_COUNT(problemCount)}</span>}
             <span className="dim helm-refresh">{t.REFRESH_HINT}</span>
-            <button className="btn small tone-primary" disabled={!!blocked} title={blocked} aria-description={blocked} onClick={() => setInstalling(true)}>
+            <button className="btn small tone-create" disabled={!!blocked} title={blocked} aria-description={blocked} onClick={() => setInstalling(true)}>
               {t.ACT_INSTALL}
             </button>
           </div>

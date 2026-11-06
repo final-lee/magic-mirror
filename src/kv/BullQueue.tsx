@@ -119,7 +119,7 @@ function JobTable({ target, prefix, name, state, onOpen }: { target: KvTarget; p
           <div className="kv-more">
             <span className="dim">{bt.JOBS_READ(rows.length, total)}</span>
             {q.hasNextPage && (
-              <button type="button" className="btn small" disabled={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>
+              <button type="button" className="btn small tone-secondary" disabled={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>
                 {q.isFetchingNextPage ? t.READING : t.MORE}
               </button>
             )}
@@ -168,7 +168,7 @@ export function BullQueue({ target, prefix, name, state, jobId, onBack, onState,
   return (
     <section className="center detail-host kv-screen kv-bull-queue" aria-label={name}>
       <div className="kv-bar">
-        <button className="btn small" onClick={onBack}>
+        <button className="btn small tone-nav" onClick={onBack}>
           ‹ {bt.BACK_TO_LIST}
         </button>
         <b className="mono">{name}</b>
@@ -186,7 +186,7 @@ export function BullQueue({ target, prefix, name, state, jobId, onBack, onState,
             <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
             {bt.AUTO_REFRESH}
           </label>
-          <button className="btn small" onClick={() => void q.refetch()} disabled={q.isFetching}>
+          <button className="btn small tone-refresh" onClick={() => void q.refetch()} disabled={q.isFetching}>
             {q.isFetching ? t.READING : t.REREAD}
           </button>
         </span>

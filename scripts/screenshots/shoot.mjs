@@ -62,7 +62,7 @@ async function shootCore(page, out) {
   await page.waitForTimeout(300);
   await page.screenshot({ path: `${out}/iam-whocan.png` });
   await page.getByRole("tab", { name: "리소스" }).click();
-  await page.locator(".side .cost-open").click();
+  await page.locator(".side .cost-open").first().click();
   await page.getByRole("table", { name: "비용 분해" }).waitFor();
   await page.getByLabel(/^10월 20일 /).hover();
   await page.waitForTimeout(300);

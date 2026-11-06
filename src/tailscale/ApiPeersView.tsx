@@ -14,6 +14,7 @@ import { isExitRoute } from "./coverage";
 import type { Change, Device, Preview } from "./devicesApi";
 import * as text from "./devicesText";
 import { useDeviceView } from "./TabContext";
+import { deviceActionTone } from "./tone";
 import * as t from "./text";
 import type { TsNode, TsPeer } from "./types";
 
@@ -177,15 +178,16 @@ function BulkActionBar({
         />
       )}
       <button
-        className="btn primary small"
+        className={`btn small tone-${deviceActionTone(action)}`}
         disabled={
           busy || !selected.length || (["name", "ip"].includes(action) && (selected.length !== 1 || !value.trim()))
         }
+        title={["name", "ip"].includes(action) && selected.length !== 1 ? text.ONLY_ONE_DEVICE : undefined}
         onClick={preview}
       >
         {text.PREVIEW}
       </button>
-      <button className="btn plain small" onClick={clear}>
+      <button className="btn plain small tone-ghost" onClick={clear}>
         {text.CLEAR_SELECTION}
       </button>
     </div>
@@ -312,7 +314,7 @@ function ChangeLog({
                     ].includes(change.action) ||
                       (["shareConfig", "serviceConfig"].includes(change.action) &&
                         shareCommands(change.before) !== null)) && (
-                      <button className="btn small" disabled={busy} onClick={() => setUndoId(change.id)}>
+                      <button className="btn small tone-caution" disabled={busy} onClick={() => setUndoId(change.id)}>
                         {text.UNDO}
                       </button>
                     )}
@@ -348,10 +350,10 @@ function ChangeLog({
               <p>{text.undoDescription(change.target.name)}</p>
               <pre>{undoCall(change.action, change.target.deviceId, change.before, change.after)}</pre>
               <div className="foot">
-                <button className="btn" disabled={busy} onClick={closeUndo}>
+                <button className="btn plain tone-ghost" disabled={busy} onClick={closeUndo}>
                   {text.CANCEL}
                 </button>
-                <button className="btn primary" disabled={busy} onClick={() => undo(change.id)}>
+                <button className="btn plain tone-caution" disabled={busy} onClick={() => undo(change.id)}>
                   {text.APPLY_UNDO}
                 </button>
               </div>
@@ -476,10 +478,10 @@ export function ApiPeersView({
           <button className="btn small" aria-pressed={view === "map"} onClick={() => setView("map")}>
             {text.MAP}
           </button>
-          <button className="btn small" aria-expanded={logOpen} onClick={() => setLogOpen(!logOpen)}>
+          <button className="btn small tone-secondary" aria-expanded={logOpen} onClick={() => setLogOpen(!logOpen)}>
             {text.CHANGE_LOG}
           </button>
-          <button className="btn small" onClick={refresh}>
+          <button className="btn small tone-refresh" onClick={refresh}>
             {t.REFRESH}
           </button>
         </div>
@@ -504,7 +506,7 @@ export function ApiPeersView({
         />
       )}
       {selected.length > 0 && (
-        <button className="btn small" onClick={() => setExtras(!extras)}>
+        <button className="btn small tone-secondary" onClick={() => setExtras(!extras)}>
           {extraText.OPEN}
         </button>
       )}

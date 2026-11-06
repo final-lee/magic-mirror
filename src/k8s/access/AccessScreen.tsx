@@ -79,7 +79,7 @@ export function AccessScreen({ target, context, ssoProfile, live, namespace, onO
           <button className="btn small tone-secondary" title={MY_PERMISSIONS_TITLE} onClick={onOpenMyRules}>
             {MY_PERMISSIONS}
           </button>
-          <button className="btn small tone-secondary" disabled={refreshing} onClick={() => void refresh()}>
+          <button className="btn small tone-refresh" disabled={refreshing} onClick={() => void refresh()}>
             {REFRESH}
           </button>
         </div>

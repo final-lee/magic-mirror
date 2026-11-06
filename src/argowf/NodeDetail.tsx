@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { workflowActionTone } from "./tone";
 import { desktop } from "../api/desktop";
 import { errorMessage } from "../api/errors";
 import { formatDate } from "../lib/format";
@@ -155,31 +156,31 @@ export function NodeDetail({
       {node.podName && (
         <p>
           Pod: {node.podName}{" "}
-          <button className="btn small" onClick={() => onLogs(node)}>
+          <button className="btn small tone-secondary" onClick={() => onLogs(node)}>
             로그
           </button>
           {podLinks.map((l) => (
-            <button key={`${l.scope}/${l.name}`} className="btn small" onClick={() => void desktop.openUrl(expandLink(l, podLinkVars(row, node)))}>
+            <button key={`${l.scope}/${l.name}`} className="btn small tone-nav" onClick={() => void desktop.openUrl(expandLink(l, podLinkVars(row, node)))}>
               {l.name} ↗
             </button>
           ))}
         </p>
       )}
       <div className="argowf-node-acts">
-        <button className="btn small" disabled={!["Failed", "Error"].includes(node.phase)} onClick={() => open("retry")}>
-          이 노드만 Retry
+        <button className="btn small tone-primary" disabled={!["Failed", "Error"].includes(node.phase)} title={!["Failed", "Error"].includes(node.phase) ? "실패한 노드만 다시 시도할 수 있어요" : undefined} onClick={() => open("retry")}>
+          이 노드만 Retry…
         </button>
         {live && (
           <>
-            <button className="btn small" disabled={!suspended} onClick={() => open("resume")}>
-              노드 Resume
+            <button className="btn small tone-warn" disabled={!suspended} title={!suspended ? "일시정지된 노드만 재개할 수 있어요" : undefined} onClick={() => open("resume")}>
+              노드 Resume…
             </button>
-            <button className="btn small" disabled={!["Running", "Pending"].includes(node.phase)} onClick={() => open("stop")}>
-              노드 Stop
+            <button className="btn small tone-caution" disabled={!["Running", "Pending"].includes(node.phase)} title={!["Running", "Pending"].includes(node.phase) ? "실행 중인 노드만 중지할 수 있어요" : undefined} onClick={() => open("stop")}>
+              노드 Stop…
             </button>
             {suspended && node.outputs.length > 0 && (
-              <button className="btn small primary" onClick={() => open("values")}>
-                값 넣고 이어 가기
+              <button className="btn small tone-warn" onClick={() => open("values")}>
+                값 넣고 이어 가기…
               </button>
             )}
           </>
@@ -194,7 +195,7 @@ export function NodeDetail({
           title={`${node.displayName} ${title[dialog]}`}
           note={dialog === "values" ? "출력 파라미터 값을 넣고 이 노드를 이어 가요." : `이 노드(${node.id})에만 ${title[dialog]} 동작을 적용할까요?`}
           confirmLabel="적용"
-          danger={dialog === "stop"}
+          tone={workflowActionTone(dialog)}
           requireName={dialog === "stop" && needsTypedName(row.namespace, row.name) ? row.name : null}
           busy={busy}
           error={failure}

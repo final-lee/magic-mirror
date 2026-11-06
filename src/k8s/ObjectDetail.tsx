@@ -104,7 +104,7 @@ function Links({ title, links, kinds, onOpen }: { title: string; links: K8sLink[
           return (
             <li key={l.uid}>
               {kind ? (
-                <button className="link" onClick={() => onOpen({ kind, namespace: kind.namespaced ? l.namespace : null, name: l.name })}>
+                <button className="link tone-nav" onClick={() => onOpen({ kind, namespace: kind.namespaced ? l.namespace : null, name: l.name })}>
                   {label}
                 </button>
               ) : (
@@ -137,7 +137,7 @@ function Summary({ view, now, kinds, onOpen, onOpenIam, containerUsage, usage, c
               <dd>
                 {k === "node" && node ? (
                   // 노드는 소유자 링크처럼 이름을 눌러 연다
-                  <button className="link mono" aria-label={openNode(node)} title={openNode(node)} onClick={() => onOpen({ kind: NODES, namespace: null, name: node })}>
+                  <button className="link mono tone-nav" aria-label={openNode(node)} title={openNode(node)} onClick={() => onOpen({ kind: NODES, namespace: null, name: node })}>
                     {node}
                   </button>
                 ) : (
@@ -274,7 +274,7 @@ function Annotation({ name, value }: { name: string; value: string }) {
         </div>
       )}
       {long && (
-        <button className="link" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <button className="link tone-secondary" aria-expanded={open} onClick={() => setOpen(!open)}>
           {open ? ANNOTATION_FOLD_LABEL : annotationExpand(value.length)}
         </button>
       )}
@@ -365,13 +365,13 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
     <aside className="k8s-detail" aria-label={DETAIL_LABEL} style={{ width: `${widthPct}%` }} ref={aside}>
       <div className="k8s-detail-head">
         {onBack && (
-          <button className="icon" aria-label={BACK} title={BACK} onClick={onBack}>
+          <button className="icon tone-nav" aria-label={BACK} title={BACK} onClick={onBack}>
             ‹
           </button>
         )}
         <b>{objectRef.kind.kind}</b>
         <span className="mono k8s-wrap">{objectRef.namespace ? `${objectRef.namespace}/` : ""}{objectRef.name}</span>
-        <button className="icon k8s-push" aria-label={CLOSE} title={CLOSE} onClick={onClose}>
+        <button className="icon k8s-push tone-ghost" aria-label={CLOSE} title={CLOSE} onClick={onClose}>
           ✕
         </button>
       </div>
@@ -393,7 +393,7 @@ export function ObjectDetail({ target, context, ssoProfile, live, objectRef, res
             <span className="k8s-toolbar-slot" ref={setEditSlot} />
           ) : (
             <button
-              className="btn small tone-primary"
+              className="btn small tone-secondary"
               data-k8s-action="edit"
               disabled={!!editDenied}
               title={editDenied}

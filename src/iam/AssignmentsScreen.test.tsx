@@ -108,7 +108,7 @@ describe("kind chips and the ⌘F find line", () => {
 describe("adding a column", () => {
   test("opens the policy search without an intro, and a policy that is already a column cannot be picked", async () => {
     setup();
-    fireEvent.click(screen.getByRole("button", { name: "열 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "열 추가…" }));
     const dialog = screen.getByRole("dialog", { name: "열 추가" });
     expect(within(dialog).queryByText(/붙일 정책을 고르세요/)).not.toBeInTheDocument();
     const shown = await screen.findByRole("option", { name: /ReadOnlyAccess/ });
@@ -123,7 +123,7 @@ describe("adding a column", () => {
 
   test("a picked policy becomes the last column, with every cell empty", async () => {
     setup();
-    fireEvent.click(screen.getByRole("button", { name: "열 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "열 추가…" }));
     fireEvent.click(await screen.findByRole("option", { name: /legacy-unused/ }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
@@ -140,7 +140,7 @@ describe("adding a column", () => {
 
   test("a policy the overview does not list is named by its ARN and has its scope", async () => {
     setup();
-    fireEvent.click(screen.getByRole("button", { name: "열 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "열 추가…" }));
     fireEvent.click(await screen.findByRole("option", { name: /AmazonS3FullAccess/ }));
     const head = columnHeads().pop() as HTMLElement;
     expect(within(head).getByRole("button")).toHaveTextContent("AmazonS3FullAccess");
@@ -150,9 +150,9 @@ describe("adding a column", () => {
 
   test("the next search cannot pick an added column again, and the columns stay when the tab changes", async () => {
     setup();
-    fireEvent.click(screen.getByRole("button", { name: "열 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "열 추가…" }));
     fireEvent.click(await screen.findByRole("option", { name: /legacy-unused/ }));
-    fireEvent.click(screen.getByRole("button", { name: "열 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "열 추가…" }));
     expect(await screen.findByRole("option", { name: /legacy-unused/ })).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(screen.getByRole("button", { name: "취소" }));
 
@@ -164,9 +164,9 @@ describe("adding a column", () => {
   test("the columns that were added are still there after leaving the screen and coming back", async () => {
     // 더한 열의 목록은 이 화면 밖(IamTab)에 있다. 다른 화면을 보고 돌아와도 같은 순서로 남는다
     setup();
-    fireEvent.click(screen.getByRole("button", { name: "열 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "열 추가…" }));
     fireEvent.click(await screen.findByRole("option", { name: /legacy-unused/ }));
-    fireEvent.click(screen.getByRole("button", { name: "열 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "열 추가…" }));
     fireEvent.click(await screen.findByRole("option", { name: /AmazonS3FullAccess/ }));
     const names = () => columnHeads().map((h) => within(h).getByRole("button").textContent);
     const all = ["AdministratorAccess", "ReadOnlyAccess", "app-deploy", "legacy-unused", "AmazonS3FullAccess"];
@@ -201,7 +201,7 @@ describe("adding a column", () => {
 
   test("Escape closes the search without adding anything", async () => {
     setup();
-    fireEvent.click(screen.getByRole("button", { name: "열 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "열 추가…" }));
     await screen.findByRole("option", { name: /legacy-unused/ });
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -233,7 +233,7 @@ describe("the members tab", () => {
   test("has no kind chips, no column button and no end of row", () => {
     setup(sampleOverview(), { initialTab: "members" });
     expect(screen.queryByRole("checkbox", { name: "사용자" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "열 추가" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "열 추가…" })).not.toBeInTheDocument();
     expect(within(rowOf("alice")).queryByText(/인라인/)).not.toBeInTheDocument();
     expect(within(rowOf("alice")).queryByText("경계")).not.toBeInTheDocument();
   });
@@ -501,7 +501,7 @@ describe("the tray", () => {
     expect(tray()).toBe("변경 2개 · ReadOnlyAccess 떼기 · alice 외 1개");
     expect(cellOf("bob", "ReadOnlyAccess")).toHaveAccessibleName("bob · ReadOnlyAccess: 없음");
 
-    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기…" }));
     expect(props.onPreview).toHaveBeenCalledTimes(1);
     expect(props.onPreview).toHaveBeenCalledWith([
       { op: "detachPolicy", target: alice.arn, policyArn: readOnlyPolicy.arn },
@@ -511,7 +511,7 @@ describe("the tray", () => {
     fireEvent.click(screen.getByRole("button", { name: "모두 취소" }));
     expect(tray()).toBeNull();
     expect(screen.queryByRole("list", { name: "담긴 변경" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "미리보기" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "미리보기…" })).not.toBeInTheDocument();
     expect(cellOf("alice", "ReadOnlyAccess")).toHaveAccessibleName("alice · ReadOnlyAccess: 직접 붙음");
     expect(cellOf("ci-bot", "ReadOnlyAccess")).toHaveAccessibleName("ci-bot · ReadOnlyAccess: 없음");
   });

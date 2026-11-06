@@ -14,7 +14,7 @@ export function DeleteForm({ res, onCancel, onPreview }: Props) {
   const [force, setForce] = useState(false);
   const [orphan, setOrphan] = useState(false);
   return (
-    <FormSheet label={delTitle(res.kind, res.name)} onCancel={onCancel} submit={{ label: DEL_PREVIEW, onClick: () => onPreview({ force, orphan }) }}>
+    <FormSheet label={delTitle(res.kind, res.name)} onCancel={onCancel} submit={{ label: DEL_PREVIEW, tone: "tone-danger", onClick: () => onPreview({ force, orphan }) }}>
       <p>{DEL_NOTE}</p>
       <label className="k8s-check argo-opt">
         <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />

@@ -150,27 +150,27 @@ export function TemplateDetail({ conn, kind, namespace, name, workflows, crons, 
         title={namespace ? `${namespace}/${name}` : name}
         actions={
           <>
-            <button className="btn small" disabled={!row} onClick={() => setForm(true)}>
+            <button className="btn small tone-primary" disabled={!row} onClick={() => setForm(true)}>
               {TPL_RUN}
             </button>
-            <button className="btn small" onClick={() => setEditing(true)}>
+            <button className="btn small tone-secondary" onClick={() => setEditing(true)}>
               고치기
             </button>
-            <button className="btn small danger" onClick={() => setDeleting(true)}>
-              삭제
+            <button className="btn small tone-danger" onClick={() => setDeleting(true)}>
+              삭제…
             </button>
             <button
-              className="btn small"
+              className="btn small tone-nav"
               onClick={() => void desktop.openUrl(argoUiUrl(conn.url, kind === "ClusterWorkflowTemplate" ? "clusterTemplate" : "template", namespace, name))}
             >
               Argo UI에서 열기
             </button>
             {widgetNamespace && (
               <>
-                <button className="btn small" onClick={() => void desktop.copy(widgetUrls(conn.url, widgetNamespace, widgetLabel).badge)}>
+                <button className="btn small tone-secondary" onClick={() => void desktop.copy(widgetUrls(conn.url, widgetNamespace, widgetLabel).badge)}>
                   상태 배지 주소 복사
                 </button>
-                <button className="btn small" onClick={() => void desktop.copy(widgetUrls(conn.url, widgetNamespace, widgetLabel).graph)}>
+                <button className="btn small tone-secondary" onClick={() => void desktop.copy(widgetUrls(conn.url, widgetNamespace, widgetLabel).graph)}>
                   그래프 위젯 주소 복사
                 </button>
               </>

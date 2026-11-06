@@ -73,7 +73,7 @@ export function WhoCan({ profile, overview, onOpen, initial, onViewState }: Prop
             }}
           />
         </div>
-        <button className="btn primary wc-go" disabled={!action.trim() || q.isFetching} onClick={run}>
+        <button className="btn wc-go plain tone-primary" disabled={!action.trim() || q.isFetching} onClick={run}>
           찾기
         </button>
       </div>
@@ -126,7 +126,7 @@ function Results({ profile, result, overview, onOpen }: ResultsProps) {
         {result.resource && <span className="mono dim wc-arn">{result.resource}</span>}
         <span className="dim">{hits.length}개</span>
         <span className="wc-sum-end">
-          <button className="btn small" disabled={sim.isFetching || hits.length === 0} onClick={() => void sim.refetch()}>
+          <button className="btn small tone-refresh" disabled={sim.isFetching || hits.length === 0} onClick={() => void sim.refetch()}>
             {sim.isFetching ? "확인하는 중…" : asked ? "다시 확인" : "AWS로 확인"}
           </button>
         </span>

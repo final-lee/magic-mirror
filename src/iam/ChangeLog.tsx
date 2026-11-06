@@ -135,7 +135,7 @@ export function ChangeLog({ profile, accountId, onStart, onStartBatch }: Props) 
 function Blocked({ label, reason }: { label: string; reason: string }) {
   return (
     <>
-      <button className="btn small" disabled>
+      <button className="btn small tone-caution" disabled>
         {label}
       </button>
       <div className="dim cl-why">{reason}</div>
@@ -149,22 +149,22 @@ const otherAccountReason = (accountId: string) => `다른 계정(${accountId})�
 function Action({ entry, sameAccount, busy, onUndo }: { entry: ChangeLogEntry; sameAccount: boolean; busy: boolean; onUndo: () => void }) {
   if (!entry.ok || entry.undone) return null;
   if (!entry.inverse) return <span className="dim">되돌릴 수 없어요</span>;
-  if (!sameAccount) return <Blocked label="되돌리기" reason={otherAccountReason(entry.accountId)} />;
+  if (!sameAccount) return <Blocked label="되돌리기…" reason={otherAccountReason(entry.accountId)} />;
   return (
-    <button className="btn small" disabled={busy} onClick={onUndo}>
-      {busy ? "준비 중…" : "되돌리기"}
+    <button className="btn small tone-caution" disabled={busy} onClick={onUndo}>
+      {busy ? "준비 중…" : "되돌리기…"}
     </button>
   );
 }
 
 /** 묶음 머리의 [묶음 되돌리기]. 되돌릴 것이 하나도 없거나 다른 계정에서 한 묶음이면 이유와 함께 끈다 */
 function BatchAction({ entries, accountId, busy, onUndo }: { entries: ChangeLogEntry[]; accountId: string; busy: boolean; onUndo: () => void }) {
-  if (!entries.some(canUndo)) return <Blocked label="묶음 되돌리기" reason="되돌릴 변경이 없어요" />;
+  if (!entries.some(canUndo)) return <Blocked label="묶음 되돌리기…" reason="되돌릴 변경이 없어요" />;
   const other = entries.find((e) => e.accountId !== accountId);
-  if (other) return <Blocked label="묶음 되돌리기" reason={otherAccountReason(other.accountId)} />;
+  if (other) return <Blocked label="묶음 되돌리기…" reason={otherAccountReason(other.accountId)} />;
   return (
-    <button className="btn small" disabled={busy} onClick={onUndo}>
-      {busy ? "준비 중…" : "묶음 되돌리기"}
+    <button className="btn small tone-caution" disabled={busy} onClick={onUndo}>
+      {busy ? "준비 중…" : "묶음 되돌리기…"}
     </button>
   );
 }

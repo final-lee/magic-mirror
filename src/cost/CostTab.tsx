@@ -95,7 +95,7 @@ export function CostTab({ profile }: Props) {
               {dataAge(fetchedAt)}
             </span>
           )}
-          <button className="btn small" onClick={() => void refreshCost(qc, profile)} disabled={busy}>
+          <button className="btn small tone-refresh" onClick={() => void refreshCost(qc, profile)} disabled={busy}>
             {busy ? LOADING : REFRESH}
           </button>
         </span>
@@ -141,7 +141,7 @@ export function CostTab({ profile }: Props) {
               <div className="empty small">
                 <div>
                   <p>{NO_DATA_YET}</p>
-                  <button className="btn plain" onClick={() => setPeriod("lastMonth")}>
+                  <button className="btn plain tone-secondary" onClick={() => setPeriod("lastMonth")}>
                     {SHOW_LAST_MONTH}
                   </button>
                 </div>

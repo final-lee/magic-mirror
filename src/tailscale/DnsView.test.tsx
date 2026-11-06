@@ -17,13 +17,13 @@ test("previews the full DNS request and can restore the previous configuration",
   });
   renderWithClient(<DnsView />);
   const magic = await screen.findByText("MagicDNS: 꺼짐");
-  fireEvent.click(within(magic.parentElement!).getByRole("button", { name: "켜기" }));
+  fireEvent.click(within(magic.parentElement!).getByRole("button", { name: "켜기…" }));
   expect(screen.getByText("POST /tailnet/-/dns/configuration")).toBeInTheDocument();
   expect(tailscaleApi.dnsSave).not.toHaveBeenCalled();
   fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "적용" }));
-  await screen.findByRole("button", { name: "이전 구성으로 되돌리기" });
+  await screen.findByRole("button", { name: "이전 구성으로 되돌리기…" });
   expect(current.preferences).toEqual({ magicDNS: true, overrideLocalDNS: false });
-  fireEvent.click(screen.getByRole("button", { name: "이전 구성으로 되돌리기" }));
+  fireEvent.click(screen.getByRole("button", { name: "이전 구성으로 되돌리기…" }));
   fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "적용" }));
   await waitFor(() => expect(current.preferences).toEqual({ magicDNS: false }));
 });
@@ -44,16 +44,16 @@ test("split resolver edits preview PATCH and restore resolver options through un
   const row = domain.closest("tr")!;
   fireEvent.change(within(row).getByLabelText("네임서버 주소"), { target: { value: "10.0.0.2" } });
   fireEvent.click(within(row).getByLabelText("Exit node에서도 사용"));
-  fireEvent.click(within(row.closest("section")!).getByRole("button", { name: "변경 미리보기" }));
+  fireEvent.click(within(row.closest("section")!).getByRole("button", { name: "변경 미리보기…" }));
   let dialog = screen.getByRole("dialog");
   expect(within(dialog).getByText("PATCH /tailnet/-/dns/split-dns")).toBeInTheDocument();
   expect(within(dialog).getByText("POST /tailnet/-/dns/configuration")).toBeInTheDocument();
   fireEvent.click(within(dialog).getByRole("button", { name: "적용" }));
-  await screen.findByRole("button", { name: "이전 구성으로 되돌리기" });
+  await screen.findByRole("button", { name: "이전 구성으로 되돌리기…" });
   expect(tailscaleApi.dnsSplitSave).toHaveBeenCalledWith("example.com", expect.anything(), expect.anything(), {
     "corp.test": ["10.0.0.2"],
   });
-  fireEvent.click(screen.getByRole("button", { name: "이전 구성으로 되돌리기" }));
+  fireEvent.click(screen.getByRole("button", { name: "이전 구성으로 되돌리기…" }));
   dialog = screen.getByRole("dialog");
   expect(within(dialog).getByText("PATCH /tailnet/-/dns/split-dns")).toBeInTheDocument();
   fireEvent.click(within(dialog).getByRole("button", { name: "적용" }));

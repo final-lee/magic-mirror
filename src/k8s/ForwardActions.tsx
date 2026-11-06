@@ -33,7 +33,7 @@ export function ForwardActions({ forward, onClose }: { forward: K8sForward; onCl
   const [copied, setCopied] = useState(false);
   return (
     <>
-      <button className="btn small tone-secondary" onClick={() => void desktop.openUrl(forwardUrl(forward))}>
+      <button className="btn small tone-nav" onClick={() => void desktop.openUrl(forwardUrl(forward))}>
         {FORWARD_OPEN_BROWSER}
       </button>
       <button

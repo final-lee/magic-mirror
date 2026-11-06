@@ -10,7 +10,7 @@ export function RawModal({ title, text, onClose }: { title: string; text: string
         <h3>{title}</h3>
         <pre className="raw">{text}</pre>
         <div className="foot">
-          <button className="btn primary" onClick={onClose}>
+          <button className="btn plain tone-ghost" onClick={onClose}>
             닫기
           </button>
         </div>

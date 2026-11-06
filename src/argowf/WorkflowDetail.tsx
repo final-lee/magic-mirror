@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { workflowActionTone } from "./tone";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { desktop } from "../api/desktop";
 import { errorMessage } from "../api/errors";
@@ -99,7 +100,7 @@ export function WorkflowDetail({
   if (!d || !row)
     return (
       <aside className="argowf-detail">
-        <button className="btn small" onClick={onClose}>
+        <button className="btn small tone-ghost" onClick={onClose}>
           닫기
         </button>
         {q.isError ? <p className="err">{errorMessage(q.error)}</p> : <p className="dim">불러오는 중…</p>}
@@ -216,7 +217,7 @@ export function WorkflowDetail({
     <>
       {failed && (
         <button
-          className="btn small"
+          className="btn small tone-nav"
           onClick={() => {
             setSelected(failed.id);
             setLogPod(failed.podName);
@@ -227,14 +228,20 @@ export function WorkflowDetail({
           실패 단계로
         </button>
       )}
-      {buttons.map((b) => (
-        <button key={b.kind} className="btn small" disabled={!b.enabled} onClick={() => openAction(b.kind)}>
-          {labels[b.kind]}
-        </button>
-      ))}
-      <button className="btn small" onClick={() => void resubmitYaml()}>
+      <button className="btn small tone-primary" onClick={() => void resubmitYaml()}>
         YAML로 고쳐 다시 제출
       </button>
+      {[...buttons].sort((a, b) => {
+        const rank = (kind: string) => {
+          const tone = workflowActionTone(kind);
+          return tone === "tone-danger" ? 2 : tone === "tone-caution" ? 1 : 0;
+        };
+        return rank(a.kind) - rank(b.kind);
+      }).map((b) => (
+        <button key={b.kind} className={`btn small ${workflowActionTone(b.kind)}`} disabled={!b.enabled} title={!b.enabled ? "현재 Workflow 상태에서는 실행할 수 없어요" : undefined} onClick={() => openAction(b.kind)}>
+          {labels[b.kind]}…
+        </button>
+      ))}
     </>
   );
   return (
@@ -264,18 +271,18 @@ export function WorkflowDetail({
       <div className="argowf-share">
         {target.kind === "live" && (
           <>
-            <button className="btn small" onClick={() => void desktop.openUrl(argoUiUrl(conn.url, "workflow", row.namespace, row.name))}>
+            <button className="btn small tone-nav" onClick={() => void desktop.openUrl(argoUiUrl(conn.url, "workflow", row.namespace, row.name))}>
               Argo UI에서 열기
             </button>
-            <button className="btn small" onClick={() => copy(argoUiUrl(conn.url, "workflow", row.namespace, row.name), "링크를 복사했어요")}>
+            <button className="btn small tone-secondary" onClick={() => copy(argoUiUrl(conn.url, "workflow", row.namespace, row.name), "링크를 복사했어요")}>
               링크 복사
             </button>
             {origin && (
               <>
-                <button className="btn small" onClick={() => copy(widgetUrls(conn.url, row.namespace, origin).badge, "상태 배지 주소를 복사했어요")}>
+                <button className="btn small tone-secondary" onClick={() => copy(widgetUrls(conn.url, row.namespace, origin).badge, "상태 배지 주소를 복사했어요")}>
                   상태 배지 주소 복사
                 </button>
-                <button className="btn small" onClick={() => copy(widgetUrls(conn.url, row.namespace, origin).graph, "그래프 위젯 주소를 복사했어요")}>
+                <button className="btn small tone-secondary" onClick={() => copy(widgetUrls(conn.url, row.namespace, origin).graph, "그래프 위젯 주소를 복사했어요")}>
                   그래프 위젯 주소 복사
                 </button>
               </>
@@ -283,7 +290,7 @@ export function WorkflowDetail({
           </>
         )}
         {linksFor(info.links, "workflow").map((l) => (
-          <button key={l.name} className="btn small" onClick={() => void desktop.openUrl(expandLink(l, workflowLinkVars(row)))}>
+          <button key={l.name} className="btn small tone-nav" onClick={() => void desktop.openUrl(expandLink(l, workflowLinkVars(row)))}>
             {l.name} ↗
           </button>
         ))}
@@ -489,7 +496,7 @@ export function WorkflowDetail({
           title={`${row.name} ${labels[action]}`}
           note={`${labels[action]} 동작을 적용할까요?`}
           confirmLabel="적용"
-          danger={action === "delete" || action === "terminate"}
+          tone={workflowActionTone(action)}
           requireName={DANGEROUS.includes(action) && needsTypedName(row.namespace, row.name) ? row.name : null}
           busy={busy}
           error={failure}

@@ -384,7 +384,7 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave, open, on
           {g.set && (open || g.set.message) && (
             <span className="argo-set-acts">
               <button
-                className="btn small tone-secondary"
+                className="btn small tone-nav"
                 onClick={() => {
                   setSelected(null);
                   setSelectedSet({ namespace: g.set!.namespace, name: g.set!.name });
@@ -393,7 +393,7 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave, open, on
                 {APPSET_OPEN}
               </button>
               {g.set.status === "Error" && (
-                <button className="btn small tone-warn" title={ARGO_SET_RETRY_HINT} onClick={() => setRefreshSet(g.set!)}>
+                <button className="btn small tone-refresh" title={ARGO_SET_RETRY_HINT} onClick={() => setRefreshSet(g.set!)}>
                   {ARGO_SET_RETRY}
                 </button>
               )}
@@ -427,8 +427,8 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave, open, on
       {sets.isError && <ErrorState error={sets.error} profile="" compact onRetry={() => void sets.refetch()} />}
       <div className="argo-bar">
         <div role="group" aria-label={MAP_TEXT.listDisplay}>
-          <button className="btn small tone-secondary" aria-pressed={display === "list"} onClick={() => setDisplay("list")}>{MAP_TEXT.list}</button>
-          <button className="btn small tone-secondary" aria-pressed={display === "matrix"} onClick={() => setDisplay("matrix")}>{MAP_TEXT.matrix}</button>
+          <button className="btn small" aria-pressed={display === "list"} onClick={() => setDisplay("list")}>{MAP_TEXT.list}</button>
+          <button className="btn small" aria-pressed={display === "matrix"} onClick={() => setDisplay("matrix")}>{MAP_TEXT.matrix}</button>
         </div>
         <ArgoChips label={ARGO_SYNC_GROUP} statuses={ARGO_SYNC_STATUSES} counts={view.syncCounts} picked={syncPick} onToggle={(s) => setSyncPick((p) => toggled(p, s))} dot={(s) => `argo-lvl-${s}`} />
         <ArgoChips label={ARGO_HEALTH_GROUP} statuses={ARGO_HEALTH_STATUSES} counts={view.healthCounts} picked={healthPick} onToggle={(s) => setHealthPick((p) => toggled(p, s))} dot={(s) => `argo-lvl-${s}`} />

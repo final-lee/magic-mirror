@@ -73,8 +73,8 @@ export function CronList({ conn, live, namespace = null, workflows, selected, on
       <div className="awc-bar">
         <h2 className="awc-title">CronWorkflows</h2>
         <div className="awc-bar-end">
-          <button className="btn primary small" onClick={() => setCreating(true)}>
-            만들기
+          <button className="btn tone-create small" onClick={() => setCreating(true)}>
+            만들기…
           </button>
         </div>
       </div>
