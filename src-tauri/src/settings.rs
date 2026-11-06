@@ -152,6 +152,8 @@ pub struct Settings {
     pub argocd_views: BTreeMap<String, ArgocdView>,
     pub argo_workflows_servers: Vec<ArgoWorkflowsServer>,
     pub argo_workflows_views: BTreeMap<String, ArgoWorkflowsView>,
+    /// Tailscale API를 쓸 테일넷 이름. 자격 증명은 설정이 아니라 키체인(계정 = 이 이름)에 저장한다.
+    pub tailscale_tailnet: Option<String>,
     /// 리소스 목록 캐시 유효 시간(분). 없으면 앱 기본값(15분), 0이면 무제한. Rust는 저장만 하고 프론트엔드가 해석한다.
     pub resource_cache_ttl_minutes: Option<u32>,
 }
@@ -183,6 +185,7 @@ struct RawSettings {
     argocd_views: BTreeMap<String, ArgocdView>,
     argo_workflows_servers: Vec<ArgoWorkflowsServer>,
     argo_workflows_views: BTreeMap<String, ArgoWorkflowsView>,
+    tailscale_tailnet: Option<String>,
     resource_cache_ttl_minutes: Option<u32>,
 }
 
@@ -240,6 +243,7 @@ pub fn load(path: &Path, all_services: &[&str]) -> Settings {
                     argocd_views: raw.argocd_views,
                     argo_workflows_servers: raw.argo_workflows_servers,
                     argo_workflows_views: raw.argo_workflows_views,
+                    tailscale_tailnet: raw.tailscale_tailnet,
                     resource_cache_ttl_minutes: raw.resource_cache_ttl_minutes,
                 }
             }
@@ -326,6 +330,21 @@ mod tests {
         assert_eq!(load(&path, &[]).argocd_servers, settings.argocd_servers);
         let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
         assert_eq!(json["argocdServers"][0]["name"], "stg");
+    }
+
+    #[test]
+    fn tailscale_tailnet_roundtrip_and_default() {
+        assert_eq!(load_text("{}").tailscale_tailnet, None);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let settings = Settings {
+            tailscale_tailnet: Some("example.com".into()),
+            ..Default::default()
+        };
+        save(&path, &settings).unwrap();
+        assert_eq!(load(&path, &[]).tailscale_tailnet.as_deref(), Some("example.com"));
+        let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(json["tailscaleTailnet"], "example.com");
     }
 
     #[test]

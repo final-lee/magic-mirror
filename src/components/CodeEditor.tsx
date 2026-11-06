@@ -1,7 +1,7 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { json, jsonParseLinter } from "@codemirror/lang-json";
 import { yaml } from "@codemirror/lang-yaml";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { HighlightStyle, StreamLanguage, syntaxHighlighting, type StreamParser } from "@codemirror/language";
 import { linter, lintGutter, type Diagnostic } from "@codemirror/lint";
 import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
@@ -31,6 +31,38 @@ const theme = (minHeight: string) =>
     { dark: false },
   );
 
+/** HuJSON(주석·마지막 쉼표를 허용하는 JSON). 구문 색만 입히고 문법 검사는 서버가 한다 */
+const hujsonParser: StreamParser<{ block: boolean }> = {
+  startState: () => ({ block: false }),
+  token(stream, state) {
+    if (state.block) {
+      if (stream.skipTo("*/")) {
+        stream.match("*/");
+        state.block = false;
+      } else stream.skipToEnd();
+      return "comment";
+    }
+    if (stream.eatSpace()) return null;
+    if (stream.match("//")) {
+      stream.skipToEnd();
+      return "comment";
+    }
+    if (stream.match("/*")) {
+      state.block = true;
+      return "comment";
+    }
+    if (stream.match(/^"(?:[^"\\]|\\.)*"/)) return stream.match(/^\s*:/, false) ? "propertyName" : "string";
+    if (stream.eat('"')) {
+      stream.skipToEnd();
+      return "string";
+    }
+    if (stream.match(/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/)) return "number";
+    if (stream.match(/^(?:true|false|null)\b/)) return "keyword";
+    stream.next();
+    return "punctuation";
+  },
+};
+
 const yamlDiagnostics = (view: EditorView): Diagnostic[] => {
   const length = view.state.doc.length;
   return yamlProblems(view.state.doc.toString()).map((problem) => ({
@@ -43,13 +75,16 @@ const yamlDiagnostics = (view: EditorView): Diagnostic[] => {
 
 interface Props {
   value: string;
-  onChange: (text: string) => void;
+  /** 읽기 전용이면 없어도 된다 */
+  onChange?: (text: string) => void;
   /** 보조 기기에 알리는 편집기 이름 */
   label: string;
-  /** yaml·json: 줄 번호·구문 색·구문 오류 밑줄. text: 여러 줄 글(파라미터·Secret 값 등) */
-  language?: "yaml" | "json" | "text";
+  /** yaml·json: 줄 번호·구문 색·구문 오류 밑줄. hujson: 줄 번호·구문 색만(주석 허용). text: 여러 줄 글(파라미터·Secret 값 등) */
+  language?: "yaml" | "json" | "hujson" | "text";
   /** 비었을 때의 높이. 기본은 문서용 240px, 글은 60px */
   minHeight?: string;
+  /** 고칠 수 없게 보여 준다(구문 색·줄 번호는 그대로, 고르기·복사는 된다) */
+  readOnly?: boolean;
 }
 
 /**
@@ -58,7 +93,7 @@ interface Props {
  * text에서는 Tab이 평소처럼 다음 칸으로 간다.
  * 글은 처음 값으로만 채우고 이후에는 편집기가 쥔다: 바깥에서 글을 갈아 끼우려면 key를 바꿔 다시 만든다.
  */
-export function CodeEditor({ value, onChange, label, language = "yaml", minHeight = language === "text" ? "60px" : "240px" }: Props) {
+export function CodeEditor({ value, onChange, label, language = "yaml", minHeight = language === "text" ? "60px" : "240px", readOnly = false }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const changed = useRef(onChange);
   changed.current = onChange;
@@ -70,7 +105,9 @@ export function CodeEditor({ value, onChange, label, language = "yaml", minHeigh
         ? [...document, yaml(), linter(yamlDiagnostics, { delay: 200 })]
         : language === "json"
           ? [...document, json(), linter(jsonParseLinter(), { delay: 200 })]
-          : [EditorView.lineWrapping];
+          : language === "hujson"
+            ? [...document, StreamLanguage.define(hujsonParser)]
+            : [EditorView.lineWrapping];
     const view = new EditorView({
       parent: host.current!,
       state: EditorState.create({
@@ -80,9 +117,10 @@ export function CodeEditor({ value, onChange, label, language = "yaml", minHeigh
           keymap.of([...defaultKeymap, ...historyKeymap]),
           ...languageExtensions,
           theme(minHeight),
-          EditorView.contentAttributes.of({ "aria-label": label, "aria-multiline": "true" }),
+          EditorView.contentAttributes.of({ "aria-label": label, "aria-multiline": "true", ...(readOnly ? { "aria-readonly": "true" } : {}) }),
+          ...(readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
           EditorView.updateListener.of((update) => {
-            if (update.docChanged) changed.current(update.state.doc.toString());
+            if (update.docChanged) changed.current?.(update.state.doc.toString());
           }),
         ],
       }),

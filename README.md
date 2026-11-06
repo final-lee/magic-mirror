@@ -20,7 +20,7 @@ Everything is read-only until you ask for a change, and every change starts with
 
 - [Features](#features)
   - [Resource browser](#resource-browser-read-only) · [VPC network diagram](#vpc-network-diagram) · [IAM workspace](#iam-workspace) · [Cost dashboard](#cost-dashboard)
-  - [EKS (Kubernetes)](#eks-kubernetes) · [ArgoCD](#argocd) · [Argo Workflows](#argo-workflows) · [Tailscale connection check](#tailscale-connection-check) · [PostgreSQL users (RDS)](#postgresql-users-rds) · [Valkey and Redis OSS (ElastiCache)](#valkey-and-redis-oss-elasticache)
+  - [EKS (Kubernetes)](#eks-kubernetes) · [ArgoCD](#argocd) · [Argo Workflows](#argo-workflows) · [Tailscale](#tailscale) · [PostgreSQL users (RDS)](#postgresql-users-rds) · [Valkey and Redis OSS (ElastiCache)](#valkey-and-redis-oss-elasticache)
   - [S3 explorer](#s3-explorer) · [File diff](#file-diff) · [Auto-update](#auto-update)
 - [What can change things](#what-can-change-things)
 - [Settings](#settings)
@@ -58,7 +58,7 @@ Everything is read-only until you ask for a change, and every change starts with
   S3, IAM, CloudFront, and Route 53 are global; the rest follow the selected region.
 - Uses the profiles in `~/.aws/config`, including SSO. Pick a profile and region and the list loads. The last profile and region are remembered.
 - **SSO sign-in**: when an SSO session has expired — when you pick the profile, when the app starts, or while you work — the app runs `aws sso login` for you. Approve it in the browser that opens and the lists reload. A banner shows the progress and lets you cancel. Profiles that share an SSO session sign in once, and role profiles sign in through their `source_profile`. The same sign-in starts when an EKS kubeconfig context or an Argo Workflows connection hits an expired session.
-- **Sidebar**: services in the official AWS Architecture icon set, with a count per resource type. Turn on only the services you use (Settings → 표시할 서비스), and pin resource types as favorites; favorites sit at the top. Under each service the resource types run from the largest unit down, clusters first (RDS: DB Clusters before DB Instances; ElastiCache: Replication Groups, Serverless Caches, then Cache Clusters, which are the groups' nodes). Drag favorites, services (by their name row), and the rows under a service to put them in your own order; the order is kept across restarts. **💰 비용** opens the cost tab, **IAM → 🔐 IAM 관리** the IAM workspace, and **EKS → 🐙 ArgoCD** / **⚙️ Argo Workflows** those tabs.
+- **Sidebar**: services in the official AWS Architecture icon set, with a count per resource type. Turn on only the services you use (Settings → 표시할 서비스), and pin resource types as favorites; favorites sit at the top. Under each service the resource types run from the largest unit down, clusters first (RDS: DB Clusters before DB Instances; ElastiCache: Replication Groups, Serverless Caches, then Cache Clusters, which are the groups' nodes). Drag favorites, services (by their name row), and the rows under a service to put them in your own order; the order is kept across restarts. **💰 비용** opens the cost tab, **Tailscale** shows Tailscale next to the sidebar (no extra tab), **IAM → 🔐 IAM 관리** the IAM workspace, and **EKS → 🐙 ArgoCD** / **⚙️ Argo Workflows** those tabs.
 - **Detail panel**: key fields, tags, raw JSON, a link to the AWS console, and ID copy (⌘C). It opens as an overlay over the list; click the selected row again or an empty spot to close it. An EKS cluster's detail also shows its usage summary. Double-clicking opens a workspace for some types: a bucket opens the S3 explorer, a VPC its diagram, an IAM user, role, or policy the IAM workspace, an EKS cluster the EKS tab, an RDS PostgreSQL cluster or instance the PostgreSQL tab, and a Valkey or Redis OSS cache the `⚡` tab.
 - **Fuzzy filter (⌘F)**: type letters in order, skipping any — `poa` finds `prod-orders-api`. Space-separated words must all match. In the resource list it looks at the name, ID, text columns, and tags (`team=pay`); matched letters are highlighted. While filtering, the best matches come first until you click a column header. The same filter works on the other tabs (IAM, PostgreSQL, ArgoCD, Kubernetes, S3 explorer).
 - **Find anything you've opened (⌘K)**: searches every list this profile has read, in every region, without calling AWS. Words can also match the service, type, or region (`west web`). Pick a result to jump to its region and type with the row selected. Results show how old the list is; lists past the cache TTL are marked and reload when opened.
@@ -263,7 +263,41 @@ Open **EKS → ⚙️ Argo Workflows** in the sidebar for a single tab that does
 
 ![Argo Workflows graph](docs/screenshots/argowf-graph.png)
 
-### Tailscale connection check
+### Tailscale
+
+The **Tailscale** sidebar entry shows Tailscale in the resources tab's right pane, next to the sidebar, instead of opening another tab; picking a resource type switches the pane back to the list, and picking Tailscale again returns to the screen you left. It doesn't depend on the AWS profile and stays as you switch profiles. It shows this Mac's tailnet, connection state, health warnings, addresses and CLI version. This Mac controls connect and disconnect, local preferences, exit nodes, accounts and updates; preferences can be undone and metrics can be filtered. The device list shows peers and can be filtered by role or searched. The diagnosis screen checks any URL or host and port and can query DNS and Tailscale identities. Local status refreshes every ten seconds while Tailscale is shown; this Mac, sharing and diagnosis use the local CLI.
+
+**공유** shows Serve, Funnel and reachable Services, and can configure mappings, send and receive Taildrop files, and obtain HTTPS certificates. Serve/Funnel changes keep snapshots in the change history; undo previews reconstructed commands and refuses unsupported configurations or stale state. Service mappings save the service configuration for restoration; advertise and drain changes are recorded without undo when the previous advertisement state cannot be determined. **키** includes Tailnet Lock history and controls; signing and trusted-key operations require this Mac to be a trusted signing node. Every local write previews its CLI command before confirmation. Disconnecting can interrupt this app's connections to tailnet servers, and logging out expires this node's key.
+
+Tailnet Lock can also be initialized from this Mac using its own signing key and any additional trusted keys. The command and number of disablement secrets are confirmed first; the secrets are shown only in the result sheet, with copy buttons, and must be saved before closing it. They are not logged or stored. When Lock is enabled, peers awaiting signatures are listed with their node keys and individual signing actions.
+
+The **지도** mode draws the devices the table would show (same filter and search). On the left are this Mac and its direct and relay (DERP region) paths with device counts; hovering a path fades every device that doesn't use it. In the middle, device groups (first tag; untagged devices by owner when the owner has three or more, the rest together) sit in aligned rows: bigger groups get more chip columns, and boxes in a row share their top and height. On the right are the subnet routes, pending routes (dashed) and exit nodes next to the devices that carry them, and the current AWS region's VPCs those routes cover. It fits the window when opened. Like the other maps, click it once to grab it; then the wheel zooms around the pointer and dragging pans (the buttons zoom around the middle any time). Hovering a device highlights its route lines; clicking it opens its details below the map with **표에서 보기** and **✕**. Click the same device again, an empty spot of the grabbed map, or press Esc to close them. The table or map choice stays while you move between Tailscale screens. Every confirmation sheet in the Tailscale workspace also closes on a click outside it or Esc, except while a change is being sent.
+
+With the API connected, **기기** combines tailnet devices with this Mac's live peer status and flags expiring or expired keys, disabled expiry, stale devices, untagged Linux devices, available updates and pending authorization. Select devices to authorize, tag, expire keys, change key expiry, rename or delete; each change previews its API calls and rechecks the device before applying. Tags, names and key expiry settings can be undone from the change history. Without the API, the CLI peer list remains available; without the CLI, API views still work.
+
+**사용자** lists users and invitations, with role and account actions and invitation creation, resend and cancellation. Device selections also expose IPv4 replacement, custom posture attributes (including batch updates), and device sharing invitations. Changing an IPv4 address interrupts existing connections. Invitation creation may require a user-owned access token.
+
+**DNS** edits global and split resolvers (including use with an exit node), search paths, MagicDNS and local DNS override. Split DNS changes preview a dedicated PATCH followed by the combined configuration call that preserves resolver options; if the second call fails, the address change may already have applied. **설정** edits individual tailnet settings and account, support and security contacts. DNS and settings changes show the previous and proposed values before applying; the previous values can be restored while the view remains open.
+
+These API changes require the applicable write scopes: `users`, `devices:core`, `devices:posture_attributes`, `device_invites`, `dns`, `feature_settings`, `logs:network`, `networking_settings`, `policy_file`, or `account_settings`. The settings API can omit fields for which the credential lacks read access.
+
+**경로** compares each device's advertised and approved subnet routes and previews approval of pending routes. It groups a device's IPv4 and IPv6 exit routes as one exit node: approving it previews enabling both routes, and it is approved only when both are enabled. When an AWS profile is selected, it also compares VPC CIDRs in the current region against approved subnet routes, excluding exit routes.
+
+**정책** reads the policy file with its comments and flags `*` sources or destinations in ACLs and grants, auto-approved routes broader than `/16` or `0.0.0.0/0` and auto-approved exit nodes, groups with no members, tags no device uses, a missing `tests` or `sshTests`, and SSH rules that let `root` in with action `accept` instead of `check`. **누가 무엇에 닿나** previews which rules apply to a user email or an `ip:port` (`POST /acl/preview`), using the text in the editor. The editor takes HuJSON (syntax colors and line numbers); **검사** validates it and runs its tests without saving, **미리보기** shows the line diff and the `POST /tailnet/-/acl` call with the `If-Match` ETag, and saving needs the tailnet name typed and the `policy_file` scope. If the policy changed elsewhere in the meantime, the save is refused with "다른 곳에서 정책이 바뀌었어요. 다시 불러와 주세요". When the tailnet's policy is managed externally (`aclsExternallyManagedOn`), the tab is read-only — the same colored view without editing — and links to where it is managed.
+
+**키** lists the tailnet's auth keys, OAuth clients, federated identities and API tokens (`GET /tailnet/-/keys?all=true`) with created and expiry dates and what each can do (reusable, ephemeral, pre-authorized and tags for auth keys; scopes and tags for the others). It flags keys that expire within 30 days or already expired, reusable pre-authorized auth keys, auth keys without tags and OAuth clients or federated identities with the `all` scope. **삭제** previews the exact `DELETE /tailnet/-/keys/{id}` call and the write scope it needs (`auth_keys`, `oauth_keys`, `federated_keys` or `api_access_tokens`) and enables only after you type the key ID; a deleted key can't be restored, and the deletion is recorded in `tailscale-changes.jsonl`. When the local CLI is present, a **Tailnet Lock** panel shows `tailscale lock status --json`: whether the lock is on, this Mac's lock key and whether it is trusted (a signing node), whether its node key is signed, how many keys are trusted and which devices still need a signature. Without the CLI the panel is hidden.
+
+**로그** has four sections, each read on its own so a missing scope only blanks that section. **설정 감사 로그** is a timeline of configuration changes (who, what, which target and property, from where, the old and new value) for the last 1, 7 or 30 days (default 7) with a fuzzy filter. **네트워크 흐름 로그** reads the last hour, and only when the tailnet has network flow logging on (`networkFlowLoggingOn` in its settings; otherwise the section says it is off); it groups connections by recording device, class, source and destination and names devices where it can. **로그 스트리밍** shows the destination and last delivery status of the `configuration` and `network` streams, or that none is set up. **웹훅** lists endpoints and their subscribed events; endpoint paths are hidden because they often carry a secret.
+
+**키 만들기** creates auth keys, OAuth clients and federated identities; existing OAuth clients and federated identities can also be edited. Generated keys and client secrets are shown once in the result sheet and can be copied; they are not recorded in change history. **연동** manages webhooks, log-streaming destinations (including S3 external ID creation and trust-policy validation), posture integrations and OAuth apps. Each section reads independently; write-only credentials are supplied only when needed. **Services** manages VIP definitions and host approvals. **조직** lists the credential's organization tailnets and can create API-only tailnets or delete one by typing its name; deletion removes all its users, devices and configuration.
+
+These operations require the relevant OAuth write scopes: `auth_keys`, `oauth_keys`, `federated_keys`, `webhooks`, `log_streaming`, `feature_settings`, `oauth_apps`, `services`, `devices:core`, `devices:posture_attributes`, `tailnets`, and, for tailnet deletion, `all`. Service host and approval calls require both `services` and `devices:core`; OAuth app creation with allowed node attributes requires both `oauth_apps` and `devices:posture_attributes`. Private log-stream endpoints additionally require `device_invites` and `policy_file`.
+
+The **연결** tab connects the app to the Tailscale API (`https://api.tailscale.com/api/v2`) for tailnet views that need more than this Mac can see. Enter the tailnet name (prefilled from this Mac's CLI), pick the credential type, and press **연결**. The app reads the device list once to check the credential, shows how many devices it found and the MagicDNS suffix, warns **이 Mac의 테일넷과 달라요** if that suffix differs from this Mac's, and only then saves the credential in the macOS keychain. **바꾸기** replaces it and **지우기** removes it from the keychain and the settings.
+
+- **OAuth client** (recommended): create it in the admin console under Settings → Trust credentials. Give it the `all:read` scope; reads request exactly that scope. If a later feature changes something, the client also needs that action's write scope (for example `devices:core`, `devices:routes`, `policy_file`, `auth_keys`); the app requests only that one scope for the write and keeps the one-hour token in memory only.
+- **API access token**: sent as the bearer token for every request, so it can't be limited per action. Prefer an OAuth client.
+- A `401` or a rejected OAuth client shows "자격 증명이 만료됐거나 맞지 않아요"; a `403` or a rejected scope shows which scope the credential lacks, with the API's reason. Features the tailnet's plan doesn't include (the API answers `feature not available on current billing plan`, as network flow logs and log streaming can) show "이 테일넷의 요금제에서는 쓸 수 없는 기능이에요" in that section only.
 
 When the EKS, ArgoCD, or Argo Workflows tab can't reach its server, the error box gets a **Tailscale 진단** button. It runs the local `tailscale` CLI and checks, in order:
 
@@ -272,7 +306,7 @@ When the EKS, ArgoCD, or Argo Workflows tab can't reach its server, the error bo
 - which tailnet device or subnet router carries the address (the longest matching approved route), whether this Mac accepts subnet routes, and whether that device is online
 - a `tailscale ping` to the address (direct or through which DERP relay, and how fast), a TCP connection to the server's port, and whether UDP works here (`netcheck`)
 
-The first failure becomes the conclusion. If subnet routes are off, **경로 받기 켜기** shows `tailscale set --accept-routes=true` and what it changes, runs it after you confirm, and checks again; **되돌리기** turns it back off. Nothing else is changed, and the tailnet itself (devices, policy, keys) isn't read through the API.
+The first failure becomes the conclusion. If subnet routes are off, **경로 받기 켜기** shows `tailscale set --accept-routes=true` and what it changes, runs it after you confirm, and checks again; **되돌리기** turns it back off. Nothing else is changed, and the diagnosis doesn't read the tailnet itself (devices, policy, keys) through the API.
 
 ### PostgreSQL users (RDS)
 ![PostgreSQL privileges](docs/screenshots/pg-privileges.png)
@@ -406,6 +440,17 @@ Everything else in the app only reads. These are the only places that write, and
 | ArgoCD tab | Refresh and sync of applications | Sync sheet with Prune and Dry run | — |
 | Argo Workflows tab | Workflows, CronWorkflows, templates, event sources, sensors | Confirmation, typed name for `prod` on stop/terminate/delete | — |
 | Tailscale check | This Mac's **accept routes** setting | Shows the `tailscale set` command and asks first | Undo button |
+| Tailscale local controls | Connection, preferences, account and update commands | Exact CLI command preview; typed confirmation for logout and account removal | Preference changes recorded in `tailscale-changes.jsonl`, with undo |
+| Tailscale sharing | Serve, Funnel, Services, Taildrop and local HTTPS certificate files | CLI command preview; typed confirmation for destructive changes | Serve/Funnel and Service configuration snapshots in `tailscale-changes.jsonl`; undo only when safely reconstructible and unchanged |
+| Tailscale Lock | Initialize, sign nodes, manage trusted keys, disable lock and revoke compromised keys | CLI command preview; signing-node check and typed confirmation for destructive changes | Trusted-key changes are recorded and undoable; disablement secrets are shown once and never saved |
+| Tailscale devices and routes | Device authorization, tags, names, keys, deletion and approved routes | API call preview, stale-device recheck, typed name for deletion | `tailscale-changes.jsonl`, tags, names and key-expiry settings undoable |
+| Tailscale users and invitations | User roles, approval, suspension, restoration, deletion, and invitations | API call preview; typed names for deletion and owner transfer | `tailscale-changes.jsonl` records user actions |
+| Tailscale DNS and settings | DNS configuration, tailnet settings and contact addresses | Call and value preview; stale-value check | `tailscale-changes.jsonl` records previous values; previous values can be restored |
+| Tailscale policy | The tailnet policy file (ACLs, grants, SSH rules, tests) | Check against the API, line diff and call preview, typed tailnet name, `If-Match` stale check; read-only when the policy is managed externally | `tailscale-changes.jsonl` keeps the whole before and after text; undo restores the old text only if the policy hasn't changed since |
+| Tailscale keys | Create auth keys and trust credentials, edit trust credentials, and delete keys | API call preview, key ID typed for deletion | Secret shown once; changes and deletions recorded without secrets, trust credential edits can be restored |
+| Tailscale integrations | Webhooks, log streaming, posture integrations and OAuth apps | API call and body preview; typed ID for deletion | Reversible settings recorded with secret fields redacted |
+| Tailscale Services | VIP definitions and device approvals | API call preview; typed Service name for deletion | Previous definitions and approvals recorded for restoration |
+| Tailscale organization | Create or delete API-only tailnets | API call preview; typed name and `all` scope for deletion | Creation secrets shown once, never recorded; deletion is irreversible |
 | S3 explorer | Objects (upload, rename, delete, new folder) | Confirmation before overwrite and delete | — |
 
 ## Settings
@@ -446,15 +491,17 @@ Under `~/Library/Application Support/dev.finallee.magicmirror/`:
 
 | File | Contents | Kept |
 | --- | --- | --- |
-| `settings.json` | Enabled services and the services the app has already shown, favorites, the sidebar order you dragged, last profile and region, theme, diff tool, kubeconfig path, cache TTL, the explorer's local folder, PostgreSQL sign-in users, ElastiCache sign-in ways and users, DB numbers, and Bull prefixes, EKS contexts, bookmarks, lane widths, and security checks turned off, ArgoCD and Argo Workflows servers and their list filters | Until changed |
+| `settings.json` | Enabled services and the services the app has already shown, favorites, the sidebar order you dragged, last profile and region, theme, diff tool, kubeconfig path, cache TTL, the explorer's local folder, PostgreSQL sign-in users, ElastiCache sign-in ways and users, DB numbers, and Bull prefixes, EKS contexts, bookmarks, lane widths, and security checks turned off, ArgoCD and Argo Workflows servers and their list filters, the Tailscale tailnet name | Until changed |
 | `resource-index.json` | The ⌘K index: names, IDs, column values, tags. No raw JSON or detail fields. Readable only by you | 7 days; wiped by ⌘⇧R |
 | `cost-cache.json` | Cost Explorer answers and the monthly request counter | Answers for 6 hours |
 | `kv-bigkeys.json` | The last 🐘 큰 키 report per ElastiCache cache and DB number: key names, types, sizes, when it was made. No values | Until the next report for that cache and DB |
 | `iam-changes.jsonl` | IAM changes applied from the app, with undo state | Until deleted |
 | `db-changes.jsonl` | PostgreSQL changes, with the DB user and SQL (never passwords) | Until deleted |
 | `k8s-changes.jsonl` | EKS changes, and when shells and node shells opened and closed (never their input or output, never Secret values) | Until deleted |
+| `tailscale-changes.jsonl` | Tailscale changes and undo state | Until deleted |
 
 - ArgoCD and Argo Workflows API tokens and ElastiCache passwords you chose to remember live only in the macOS keychain (services `magic-mirror.argocd`, `magic-mirror.argo-workflows`, and `magic-mirror.elasticache`).
+- The Tailscale API credential (OAuth client ID and secret, or API access token) lives only in the macOS keychain: service `magic-mirror.tailscale`, account = the tailnet name saved in `settings.json` (`tailscaleTailnet`). OAuth access tokens stay in memory.
 - AWS credentials are never stored by the app; it uses `~/.aws` and the AWS CLI's SSO cache.
 - Saved logs go to `~/Downloads`; files for external diff tools go to `$TMPDIR/magic-mirror-diff/` and are removed after an hour.
 - Metrics samples, Secret values you reveal, new PostgreSQL passwords, and cache keys and values are kept in memory only.
@@ -526,9 +573,10 @@ A Korean install guide is in [docs/INSTALL.md](docs/INSTALL.md) and is attached 
 
 - Network access to the Argo Server (for example over Tailscale). To sign in with a kubeconfig context, the server must run with `--auth-mode=client` and that identity needs RBAC on the Argo resources it reads or changes; events and IRSA roles also need `list events` and `get serviceaccounts` in those namespaces.
 
-**Tailscale check**
+**Tailscale and the connection check**
 
 - The Tailscale app (`/Applications/Tailscale.app`) or a `tailscale` CLI on your login shell's `PATH`.
+- For the tabs that use the Tailscale API: an OAuth client (scope `all:read`, plus the write scopes of the actions you use) or an API access token, and network access to `api.tailscale.com`.
 
 **PostgreSQL tab**
 
@@ -592,7 +640,7 @@ src/                     React frontend
   argowf/                Argo Workflows tab
   pg/                    PostgreSQL users tab
   kv/                    Valkey and Redis OSS tab, including the Bull screens
-  tailscale/             Tailscale connection check shown inside network error boxes
+  tailscale/             Tailscale pane (this Mac, devices, users, routes, Services, DNS, policy, keys, logs, integrations, sharing, diagnosis, settings, connection, org) and connection checks in network error boxes
 src-tauri/src/
   adapters/              per-service read-only adapters for the resource browser
   aws/                   profiles, SDK configs, SSO sign-in
@@ -608,7 +656,7 @@ src-tauri/src/
   argowf/                Argo Server client, kubeconfig-context and keychain auth, response shaping, cron next runs, log streams
   pg/                    PostgreSQL connection, read-only catalog snapshot, privilege evaluation, security checks, change previews and commits
   kv/                    ElastiCache target and sign-in (IAM tokens, keychain), fred connection and topology, the read-only command allow-list, keys, values, server stats, Bull queues
-  tailscale/             Tailscale connection check: runs the local CLI (cli.rs is the only place that starts it), pure decision over its output
+  tailscale/             local node and peer shaping and connection diagnosis (only cli.rs starts the CLI); api.rs is the Tailscale API client with keychain credentials and OAuth token cache; devices, users, DNS, settings, services, integrations, org, policy (findings), keys, logs; changes.rs writes tailscale-changes.jsonl
   jsonl.rs               the shared change-log file format
   mouse_nav.rs           macOS mouse back/forward buttons
 scripts/                 dev runner, release, live tests, IAM catalog updater, screenshots

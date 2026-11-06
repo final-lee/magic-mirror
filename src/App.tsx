@@ -30,6 +30,7 @@ import { ARGOWF_TITLE } from "./argowf/text";
 import { CostTab } from "./cost/CostTab";
 import { refreshCost } from "./cost/queries";
 import { COST_TITLE } from "./cost/text";
+import { TailscaleTab } from "./tailscale/TailscaleTab";
 import type { S3Location } from "./lib/s3";
 import { PgTab } from "./pg/PgTab";
 import { closePg, refreshPg } from "./pg/queries";
@@ -89,6 +90,10 @@ export default function App() {
   const [costTab, setCostTab] = useState(false);
   // ArgoCD 탭도 하나뿐이다(id "argocd"). AWS 프로필과 상관없어 프로필을 바꿔도 닫지 않는다.
   const [argocdTab, setArgocdTab] = useState(false);
+  // Tailscale은 따로 탭이 아니라 리소스 탭의 오른쪽 칸(사이드바 옆)에 연다. 한 번 연 뒤에는 상태(고른 화면 등)를 지키려고 감춰 둘 뿐 내리지 않는다.
+  // AWS 프로필과 상관없어 프로필을 바꿔도 그대로다.
+  const [tailscaleShown, setTailscaleShown] = useState(false);
+  const [tailscaleOpened, setTailscaleOpened] = useState(false);
   const [argowfTab, setArgowfTab] = useState(false);
   const onTransferSettled = useCallback(
     (_req: TransferRequest) => {
@@ -211,6 +216,11 @@ export default function App() {
     setCostTab(true);
     setActiveTab("cost");
   };
+  const openTailscale = () => {
+    setTailscaleOpened(true);
+    setTailscaleShown(true);
+    setActiveTab("resources");
+  };
   const openArgocd = () => {
     setArgocdTab(true);
     setActiveTab("argocd");
@@ -294,6 +304,7 @@ export default function App() {
   const select = (sel: Favorite) => {
     setSelection(sel);
     setFocus(null);
+    setTailscaleShown(false);
   };
 
   // ⌘K에서 고른 리소스로 간다: 리소스 탭, 그 리전(전역 서비스는 그대로), 그 종류, 그 행
@@ -302,6 +313,7 @@ export default function App() {
     setActiveTab("resources");
     if (p.region !== GLOBAL && p.region !== region) changeRegion(p.region);
     setSelection({ service: p.service, type: p.type });
+    setTailscaleShown(false);
     focusNonce.current += 1;
     setFocus({ id: p.id, nonce: focusNonce.current });
   };
@@ -334,7 +346,7 @@ export default function App() {
             services={enabled}
             profile={profile}
             region={region}
-            selection={selection}
+            selection={tailscaleShown ? null : selection}
             favorites={settings.favorites}
             onSelect={select}
             onToggleFavorite={toggleFavorite}
@@ -345,26 +357,35 @@ export default function App() {
             onFavoritesChange={(favorites) => update({ favorites })}
             onOpenIam={() => openIam()}
             onOpenCost={openCost}
+            onOpenTailscale={openTailscale}
+            tailscaleActive={tailscaleShown}
             onOpenArgocd={openArgocd}
             onOpenArgoWorkflows={openArgoWorkflows}
           />
-          <MainArea
-            key={mainKey}
-            services={enabled}
-            selection={selection}
-            profile={profile}
-            region={region}
-            account={account.data}
-            onOpenBucket={openExplorer}
-            onOpenVpc={openVpc}
-            onOpenIam={openIam}
-            onOpenPg={(target) => openPg(target, `🐘 ${target.id}`)}
-            onOpenK8s={openK8s}
-            onOpenKv={openKv}
-            onRefresh={refresh}
-            active={activeTab === "resources"}
-            focus={focus}
-          />
+          <div className="pane-slot" hidden={tailscaleShown}>
+            <MainArea
+              key={mainKey}
+              services={enabled}
+              selection={selection}
+              profile={profile}
+              region={region}
+              account={account.data}
+              onOpenBucket={openExplorer}
+              onOpenVpc={openVpc}
+              onOpenIam={openIam}
+              onOpenPg={(target) => openPg(target, `🐘 ${target.id}`)}
+              onOpenK8s={openK8s}
+              onOpenKv={openKv}
+              onRefresh={refresh}
+              active={activeTab === "resources" && !tailscaleShown}
+              focus={focus}
+            />
+          </div>
+          {tailscaleOpened && (
+            <div className="pane-slot" hidden={!tailscaleShown}>
+              <TailscaleTab active={activeTab === "resources" && tailscaleShown} profile={profile} region={region} />
+            </div>
+          )}
         </div>
         {profile && iamTab && (
           <div className="tabpane" hidden={activeTab !== "iam"}>

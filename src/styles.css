@@ -420,6 +420,8 @@ tbody tr.on td { background: var(--accent) !important; color: var(--on-accent); 
 .tab-x { background: none; border: 0; color: var(--dim); cursor: pointer; padding: 0 6px 0 0; font-size: 11px; }
 .tab-x:hover { color: var(--foreground-strong); }
 .tabpane { flex: 1; display: flex; min-height: 0; }
+/* 리소스 탭의 오른쪽 칸 자리(리소스 목록 또는 Tailscale). 레이아웃에는 끼지 않고, 고르지 않은 쪽은 [hidden]으로 감춘다 */
+.pane-slot { display: contents; }
 .explorer { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
 .panes { flex: 1; display: flex; min-height: 0; }
 .pane { flex: 1; display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--line); }
@@ -1863,7 +1865,35 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .argowf-graph-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 4px 0; font-size: 12px; }
 .argowf-graph-bar label { display: inline-flex; align-items: center; gap: 4px; }
 .argowf-graph-bar .btn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
-.argowf-graph-frame { position: relative; height: 420px; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); overflow: hidden; cursor: pointer; user-select: none; outline: none; }
+.argowf-graph-frame { position: relative; height: 420px; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); overflow: hidden; cursor: pointer; -webkit-user-select: none; user-select: none; outline: none; }
+/* WebKit(Tauri)은 SVG 글자에 바깥의 user-select를 물려주지 않아, 끌 때 칩 이름이 파랗게 선택된다(VPC 구조도의 .vm-canvas와 같은 처리) */
+.argowf-graph-frame svg text { -webkit-user-select: none; user-select: none; }
+/* Tailscale 기기 지도: Argo 그래프 틀을 쓰되 남은 높이를 모두 채운다 */
+.ts-device-map { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 8px 16px 12px; }
+.ts-device-map .argowf-graph-frame { flex: 1; height: auto; min-height: 320px; }
+/* 지도 아래 상세: 이름 오른쪽에 동작·닫기를 둬서 패널을 스크롤하지 않아도 닫을 수 있다 */
+.ts-panel-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.ts-panel-head h3 { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.ts-map-edge { fill: none; stroke: var(--tone-8e8e93); opacity: .6; }
+.ts-map-highlight .ts-map-edge { stroke: var(--accent); opacity: 1; }
+.ts-map-path { cursor: default; }
+.ts-map-path:hover > rect { stroke: var(--accent); stroke-width: 2; }
+.ts-map-group > rect { fill: var(--panel); stroke: var(--border-strong); }
+.ts-map-group > text { fill: var(--text); font-size: 12px; font-weight: 600; }
+.ts-map-node rect, .ts-map-chip > rect { fill: var(--panel); stroke: var(--border-strong); }
+.ts-map-node text, .ts-map-chip > text { fill: var(--text); font-size: 11px; }
+.ts-map-chip { cursor: pointer; }
+.ts-map-chip:hover > rect, .ts-map-chip:focus > rect { stroke: var(--accent); stroke-width: 2; }
+.ts-map-chip.selected > rect { stroke: var(--accent); stroke-width: 2; fill: var(--accent-alpha-14); }
+.ts-map-chip.offline { opacity: .5; }
+/* 연결 경로에 올렸을 때 그 경로가 아닌 기기 */
+.ts-map-chip.dimmed { opacity: .15; }
+.ts-map-chip circle.online { fill: var(--green); }
+.ts-map-chip circle.offline { fill: var(--red); }
+.ts-map-chip circle.unknown { fill: var(--dim); }
+.ts-map-badge rect { fill: var(--yellow-soft); }
+.ts-map-badge text { fill: var(--orange); font-size: 10px; }
+.awc-bar-end .btn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
 .argowf-edge { fill: none; stroke: var(--tone-8e8e93); stroke-width: 1.4; }
 .argowf-gnode rect { fill: var(--panel); stroke: var(--border-strong); stroke-width: 1.2; cursor: pointer; }
 .argowf-gnode.selected rect { stroke: var(--accent); stroke-width: 2.4; }
@@ -2341,3 +2371,85 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .tailscale-confirm { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; }
 .tailscale-confirm .raw { display: block; max-height: none; }
 .tailscale-confirm p { margin: 8px 0; }
+
+/* 이 Mac에서 보이는 Tailscale 연결 */
+.ts-details { max-width: 800px; margin: 0; }
+.ts-details > div { display: grid; grid-template-columns: minmax(130px, 200px) 1fr; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.ts-details dt { color: var(--dim); }
+.ts-details dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
+.ts-note { font-size: 12px; }
+.ts-connect { max-width: 560px; display: flex; flex-direction: column; gap: 10px; }
+.ts-connect p { margin: 0; font-size: 12px; }
+.ts-connect-form { display: flex; flex-direction: column; gap: 10px; }
+.ts-connect-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.ts-connect-form input:not([type="radio"]), .ts-connect-form select, .ts-connect-form textarea { background: var(--code-bg); border: 1px solid var(--border-input); border-radius: 6px; padding: 3px 8px; color: var(--text); font: inherit; font-size: 12px; }
+.ts-connect-form fieldset { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; border: 0; }
+.ts-connect-form legend { padding: 0; margin-bottom: 4px; font-size: 12px; }
+.ts-connect-form .ts-radio { flex-direction: row; align-items: center; gap: 6px; }
+.ts-connect-acts, .ts-connect-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ts-connect-result { padding: 10px; border: 1px solid var(--line); border-radius: 6px; display: flex; flex-direction: column; gap: 4px; }
+.ts-warn { color: var(--yellow); }
+
+/* 이 Mac · 공유 · 진단 · Tailnet Lock: 구역 하나 = 제목 + 설명 + 폼이나 표 */
+.ts-sec { margin: 0 0 26px; max-width: 960px; }
+.ts-sec > h3 { margin: 0 0 2px; font-size: 13px; }
+.ts-sec > .ts-desc { margin: 0 0 10px; font-size: 12px; color: var(--dim); }
+.ts-sec :is(input, select, textarea):not([type="radio"], [type="checkbox"]) { background: var(--code-bg); border: 1px solid var(--border-input); border-radius: 6px; padding: 4px 8px; color: var(--text); font: inherit; font-size: 12px; }
+.ts-sec textarea { min-height: 56px; resize: vertical; }
+.ts-sec .awc-form-grid { max-width: 720px; }
+.ts-sec .awc-form-grid .wide { grid-column: 1 / -1; }
+.ts-sec .awc-editor-opts { margin: 0 0 10px; }
+.ts-sec .awc-editor-opts + .raw { margin-top: 0; }
+.ts-sec .ts-connect-acts { margin-top: 4px; }
+.ts-sec .raw { margin: 8px 0 0; max-height: 40vh; }
+.ts-sec details { margin-top: 10px; font-size: 12px; }
+.ts-sec summary { cursor: pointer; color: var(--dim); }
+.ts-sec summary + .raw { margin-top: 6px; }
+.ts-sec .ts-details { margin-top: 6px; }
+.ts-sec h4 { margin: 18px 0 6px; font-size: 12px; font-weight: 600; }
+.ts-sec .ts-table :is(th, td):first-child { padding-left: 0; }
+.ts-sec .ts-table :is(th, td):last-child { padding-right: 0; }
+.ts-sec .ts-details + .awc-form-grid { margin-top: 14px; }
+.ts-sec .ts-details dd code { word-break: break-all; }
+/* 제목 줄 오른쪽에 만들기 같은 버튼을 둘 때 */
+.ts-sec-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 26px; }
+.ts-sec-head > h3 { margin: 0; }
+.ts-sec-head + .dim { margin-top: 4px; }
+/* 설정 화면: 묶음마다 표가 따로라 열 너비를 고정해 줄을 맞춘다 */
+.ts-settings { table-layout: fixed; }
+.ts-settings th:nth-child(1) { width: 50%; }
+.ts-settings th:nth-child(2) { width: 30%; }
+/* 키 화면의 Tailnet Lock 패널: 점검 결과 아래에서 구역 간격을 맞춘다 */
+.ts-lock { margin-top: 24px; }
+.ts-lock > h3 { margin: 0 0 8px; }
+.ts-lock > .ts-note { margin: 12px 0 24px; }
+.ts-lock > .ts-warn { margin: 0 0 24px; }
+/* 표 안의 값 · 한 줄 입력 */
+.ts-table tbody tr { cursor: default; }
+.ts-table tbody tr:hover { background: none; }
+.ts-table td { max-width: none; white-space: normal; overflow: visible; overflow-wrap: anywhere; vertical-align: middle; }
+.ts-table th.end, .ts-table td.end { text-align: right; white-space: nowrap; }
+.ts-inline { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.ts-inline > :is(input, select) { min-width: 0; flex: 1 1 160px; max-width: 320px; }
+.ts-table .end .ts-inline { justify-content: flex-end; }
+.ts-sec details .awc-editor-opts { margin-top: 8px; }
+.ts-hint { margin-top: 4px; font-size: 11px; color: var(--dim); }
+
+/* 정책 보기 */
+.ts-policy { display: flex; flex-direction: column; gap: 14px; max-width: 960px; }
+.ts-policy h3 { margin: 0 0 6px; font-size: 13px; }
+.ts-policy-section { display: flex; flex-direction: column; gap: 6px; }
+.ts-policy-access { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ts-policy-access input, .ts-policy-access select { background: var(--code-bg); border: 1px solid var(--border-input); border-radius: 6px; padding: 3px 8px; color: var(--text); font: inherit; font-size: 12px; }
+.ts-policy-access input { min-width: 260px; }
+.ts-policy-actions { display: flex; align-items: center; gap: 8px; }
+.ts-policy-saved { padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; }
+.ts-findings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ts-findings li { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
+.ts-findings li > div { margin-top: 3px; }
+.ts-check ul { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.ts-diff { margin: 0; padding: 8px 0; max-height: 40vh; overflow: auto; background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; font: 11px ui-monospace, Menlo, monospace; user-select: text; }
+.ts-diff > div { padding: 0 10px; white-space: pre-wrap; word-break: break-all; }
+.ts-diff-add { background: var(--green-soft); color: var(--green-text); }
+.ts-diff-del { background: var(--red-soft); color: var(--tone-ff6b62); }
+.ts-diff-gap { color: var(--dim); }

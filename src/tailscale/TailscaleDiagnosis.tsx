@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { errorMessage } from "../api/errors";
+import { useModal } from "../iam/useModal";
 import { tailscaleApi } from "./api";
 import * as t from "./text";
 
-export function TailscaleDiagnosis({ url }: { url: string }) {
+export function TailscaleDiagnosis({ url, inWorkspace = false }: { url: string; inWorkspace?: boolean }) {
   const diagnosis = useQuery({
     queryKey: ["tailscale", "diagnose", url],
     queryFn: () => tailscaleApi.diagnose(url),
@@ -16,6 +17,12 @@ export function TailscaleDiagnosis({ url }: { url: string }) {
   const [applied, setApplied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
+  const cancel = () => {
+    if (busy) return;
+    setConfirm(null);
+    setApplyError(null);
+  };
+  const { sheetRef, trapTab } = useModal(cancel);
 
   const apply = async (enabled: boolean) => {
     setBusy(true);
@@ -62,17 +69,31 @@ export function TailscaleDiagnosis({ url }: { url: string }) {
           </button>
         )}
       </div>
-      {confirm !== null && (
+      {confirm !== null && inWorkspace && (
+        <div className="modal" onClick={(e) => { if (e.target === e.currentTarget) cancel(); }}>
+          <div className="sheet" role="dialog" aria-modal="true" aria-label={confirm ? t.ENABLE_ROUTES : t.UNDO} ref={sheetRef} onKeyDown={trapTab}>
+            <h3>{confirm ? t.ENABLE_ROUTES : t.UNDO}</h3>
+            <code className="raw">tailscale set --accept-routes={String(confirm)}</code>
+            <p>{confirm ? t.EFFECT_ENABLE : t.EFFECT_DISABLE}</p>
+            {applyError && <p className="err" role="alert">{applyError}</p>}
+            <div className="foot">
+              <button className="btn" disabled={busy} onClick={cancel}>{t.CANCEL}</button>
+              <button className="btn primary" disabled={busy} onClick={() => void apply(confirm)}>{t.APPLY}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {confirm !== null && !inWorkspace && (
         <div className="tailscale-confirm">
           <code className="raw">tailscale set --accept-routes={String(confirm)}</code>
           <p>{confirm ? t.EFFECT_ENABLE : t.EFFECT_DISABLE}</p>
           <div className="tailscale-actions">
             <button className="btn small tone-warn" disabled={busy} onClick={() => void apply(confirm)}>{t.APPLY}</button>
-            <button className="btn small tone-secondary" disabled={busy} onClick={() => { setConfirm(null); setApplyError(null); }}>{t.CANCEL}</button>
+            <button className="btn small tone-secondary" disabled={busy} onClick={cancel}>{t.CANCEL}</button>
           </div>
         </div>
       )}
-      {applyError && <p className="err" role="alert">{applyError}</p>}
+      {applyError && !inWorkspace && <p className="err" role="alert">{applyError}</p>}
     </section>
   );
 }
