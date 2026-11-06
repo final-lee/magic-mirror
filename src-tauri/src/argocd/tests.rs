@@ -78,6 +78,14 @@ fn argocd_appset_row_and_tree() {
         "status":{"conditions":[{"type":"ResourcesUpToDate","status":"True"}]}
     }));
     assert_eq!(current.status.as_deref(), Some("UpToDate"));
+    assert_eq!((current.requeue_seconds, current.error_since.as_deref(), current.project.as_deref()), (None, None, None));
+    let retrying = appset_row(&json!({
+        "spec":{"generators":[{"pullRequest":{"requeueAfterSeconds":60}},{"matrix":{"requeueAfterSeconds":180}},{"list":{}}],"template":{"spec":{"project":"web"}}},
+        "status":{"conditions":[{"type":"ErrorOccurred","status":"True","message":"502","lastTransitionTime":"2026-11-06T02:31:43Z"}]}
+    }));
+    assert_eq!(retrying.requeue_seconds, Some(60));
+    assert_eq!(retrying.error_since.as_deref(), Some("2026-11-06T02:31:43Z"));
+    assert_eq!(retrying.project.as_deref(), Some("web"));
     let node = tree_node(&json!({"uid":"one","parentRefs":[{"uid":"parent"}],"health":{"status":"Healthy","message":"ok"},"info":[{"name":"k","value":"v"}],"images":["image"]}));
     assert_eq!(node.parents, ["parent"]);
     assert_eq!(node.health.as_deref(), Some("Healthy"));

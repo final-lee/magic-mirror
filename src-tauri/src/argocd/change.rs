@@ -86,6 +86,8 @@ pub enum ArgoChange {
         name: String,
         namespace: String,
     },
+    /// ApplicationSet 컨트롤러에 generator를 지금 다시 돌리라고 알린다(새로고침 annotation). 컨트롤러가 처리한 뒤 annotation을 지운다.
+    AppSetRefresh,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -311,6 +313,7 @@ fn change_kind(c: &ArgoChange) -> &'static str {
         ArgoChange::AppCreate { .. } => "appCreate",
         ArgoChange::AppSetUpsert { .. } => "appSetUpsert",
         ArgoChange::AppSetDelete { .. } => "appSetDelete",
+        ArgoChange::AppSetRefresh => "appSetRefresh",
     }
 }
 fn title(c: &ArgoChange) -> &'static str {
@@ -327,6 +330,7 @@ fn title(c: &ArgoChange) -> &'static str {
         ArgoChange::AppCreate { .. } => "앱 생성",
         ArgoChange::AppSetUpsert { .. } => "ApplicationSet 저장",
         ArgoChange::AppSetDelete { .. } => "ApplicationSet 삭제",
+        ArgoChange::AppSetRefresh => "ApplicationSet 다시 만들기",
     }
 }
 fn plan(t: &ArgoTarget, c: &ArgoChange, current: Option<&Value>, windows: Option<&Value>) -> Result<ArgoPreview, AppError> {
@@ -481,6 +485,15 @@ fn plan(t: &ArgoTarget, c: &ArgoChange, current: Option<&Value>, windows: Option
             calls.push(call("DELETE", &["api", "v1", "applicationsets", name], vec![("appsetNamespace", namespace.clone())], None));
             impact.push("ApplicationSet을 삭제해요".into());
         }
+        ArgoChange::AppSetRefresh => {
+            let old = current.ok_or_else(|| AppError::other("ApplicationSet을 읽지 못했어요"))?;
+            let new = refreshed_appset(old);
+            let annotations = |v: &Value| json!({ "metadata": { "annotations": v.pointer("/metadata/annotations") } });
+            comparison = Some(diff(&annotations(old), &annotations(&new))?);
+            calls.push(call("POST", &["api", "v1", "applicationsets"], vec![("upsert", "true".into())], Some(new)));
+            impact.push("ApplicationSet 컨트롤러가 generator를 바로 다시 돌려 앱 목록을 다시 만들어요".into());
+            impact.push("spec은 그대로 보내고 새로고침 annotation만 더해요".into());
+        }
     }
     let confirm = t.env.as_deref() == Some("prd")
         || t.name.to_lowercase().contains("prod")
@@ -518,6 +531,7 @@ pub(crate) fn fingerprint(v: &Value) -> String {
     if let Some(map) = annotations.as_object_mut() {
         map.remove("argocd.argoproj.io/refresh");
         map.remove("argocd.argoproj.io/hydrate");
+        map.remove(APPSET_REFRESH);
     }
     let config = json!({
         "spec": v.get("spec"),
@@ -528,6 +542,26 @@ pub(crate) fn fingerprint(v: &Value) -> String {
     });
     let digest = Sha256::digest(config.to_string().as_bytes());
     digest.iter().take(12).map(|b| format!("{b:02x}")).collect()
+}
+
+/// ApplicationSet 컨트롤러가 보면 바로 다시 조정하고 지우는 annotation.
+const APPSET_REFRESH: &str = "argocd.argoproj.io/application-set-refresh";
+
+/// 읽어 온 ApplicationSet에서 서버가 쓰는 필드(상태, managedFields 등)를 빼고 새로고침 annotation을 더한 upsert 본문.
+fn refreshed_appset(v: &Value) -> Value {
+    let mut annotations = v.pointer("/metadata/annotations").and_then(Value::as_object).cloned().unwrap_or_default();
+    annotations.insert(APPSET_REFRESH.into(), json!("true"));
+    json!({
+        "apiVersion": "argoproj.io/v1alpha1",
+        "kind": "ApplicationSet",
+        "metadata": {
+            "name": v.pointer("/metadata/name"),
+            "namespace": v.pointer("/metadata/namespace"),
+            "labels": v.pointer("/metadata/labels"),
+            "annotations": annotations,
+        },
+        "spec": v.get("spec"),
+    })
 }
 
 async fn current(state: &ArgocdState, url: &str, t: &ArgoTarget, c: &ArgoChange) -> Result<Option<Value>, AppError> {
@@ -542,7 +576,7 @@ async fn current(state: &ArgocdState, url: &str, t: &ArgoTarget, c: &ArgoChange)
                 .find(|v| v.pointer("/metadata/name").and_then(Value::as_str) == Some(&t.name) && v.pointer("/metadata/namespace").and_then(Value::as_str) == Some(&t.namespace))
                 .cloned())
         }
-        ArgoChange::AppSetDelete { .. } => state
+        ArgoChange::AppSetDelete { .. } | ArgoChange::AppSetRefresh => state
             .api(url, Method::GET, &["api", "v1", "applicationsets", &t.name], &[("appsetNamespace", &t.namespace)], None)
             .await
             .map(Some),

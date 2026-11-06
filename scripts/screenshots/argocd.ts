@@ -18,7 +18,7 @@ const apps: ArgoAppRow[] = services.flatMap((service, i) => ["prd", "stg", "dev"
     resources: [{ group: "apps", version: "v1", kind: "Deployment", namespace: service, name: service, status: out ? "OutOfSync" : "Synced", health: degraded ? "Degraded" : "Healthy" }, { group: "", version: "v1", kind: "Service", namespace: service, name: service, status: "Synced", health: "Healthy" }],
   };
 }));
-const appsets: ArgoAppSetRow[] = sets.map((name, i) => ({ name, namespace: "argocd", status: "UpToDate", message: null, generators: i === 1 ? ["clusters"] : ["git", "list"] }));
+const appsets: ArgoAppSetRow[] = sets.map((name, i) => ({ name, namespace: "argocd", status: "UpToDate", message: null, errorSince: null, generators: i === 1 ? ["clusters"] : ["git", "list"], requeueSeconds: null, project: null }));
 
 function tree(name: string): ArgoTreeNode[] {
   const base = name.replace(/-(prd|stg|dev)$/, "");

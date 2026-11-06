@@ -244,3 +244,26 @@ async fn batch_keeps_going_after_a_failure_and_names_the_failed_resources() {
     assert!(run_calls(&calls, false, send).await.is_err());
     assert_eq!(sent.lock().unwrap().len(), 2);
 }
+
+#[test]
+fn appset_refresh_resends_spec_with_the_refresh_annotation_only() {
+    let set = json!({
+        "metadata": {"name": "web", "namespace": "argocd", "resourceVersion": "5", "uid": "u", "managedFields": [{}], "labels": {"team": "a"}, "annotations": {"keep": "yes"}},
+        "spec": {"generators": [{"pullRequest": {"requeueAfterSeconds": 60}}]},
+        "status": {"conditions": [{"type": "ErrorOccurred"}]}
+    });
+    let p = plan(&target(), &parse(json!({"kind": "appSetRefresh"})), Some(&set), None).unwrap();
+    assert_eq!(p.calls.len(), 1);
+    assert_eq!((p.calls[0].verb.as_str(), p.calls[0].path.as_str()), ("POST", "/api/v1/applicationsets?upsert=true"));
+    let body = p.calls[0].body.as_ref().unwrap();
+    assert_eq!(body["spec"], set["spec"]);
+    assert_eq!(body["metadata"]["labels"], set["metadata"]["labels"]);
+    assert_eq!(body["metadata"]["annotations"], json!({"keep": "yes", "argocd.argoproj.io/application-set-refresh": "true"}));
+    assert!(body.get("status").is_none() && body["metadata"].get("managedFields").is_none() && body["metadata"].get("resourceVersion").is_none());
+    assert_eq!(p.diff.unwrap().stats.added, 1);
+    assert!(p.confirm_name.is_none());
+    // 컨트롤러가 annotation을 지워도 미리 본 값이 낡았다고 보지 않는다
+    let mut refreshed = set.clone();
+    refreshed["metadata"]["annotations"]["argocd.argoproj.io/application-set-refresh"] = json!("true");
+    assert_eq!(fingerprint(&set), fingerprint(&refreshed));
+}

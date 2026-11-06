@@ -16,7 +16,8 @@ export type ArgoChange =
   | { kind: "appDelete"; cascade: boolean; propagationPolicy: "foreground" | "background" | null }
   | { kind: "appCreate"; yaml: string; upsert: false }
   | { kind: "appSetUpsert"; yaml: string }
-  | { kind: "appSetDelete"; name: string; namespace: string };
+  | { kind: "appSetDelete"; name: string; namespace: string }
+  | { kind: "appSetRefresh" };
 export interface ApiCall { verb: string; path: string; body: unknown }
 export interface TextDiff { rows: DiffRow[]; hunks: number[]; stats: DiffStats }
 export interface ArgoPreview { title: string; calls: ApiCall[]; diff: TextDiff | null; impact: string[]; warnings: string[]; blocked: string | null; confirmName: string | null; expectedVersion: string | null }

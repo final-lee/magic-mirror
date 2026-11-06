@@ -177,7 +177,13 @@ pub struct ArgoAppSetRow {
     pub namespace: String,
     pub status: Option<String>,
     pub message: Option<String>,
+    /// 오류 상태가 시작된 시각(조건의 lastTransitionTime)
+    pub error_since: Option<String>,
     pub generators: Vec<String>,
+    /// generator가 다시 도는 간격 중 가장 짧은 것(초). 지정한 generator가 없으면 None
+    pub requeue_seconds: Option<u64>,
+    /// template의 프로젝트(쓰기 요청 대상에 쓴다)
+    pub project: Option<String>,
 }
 
 /// ApplicationSet 응답에서 목록 행을 만든다.
@@ -191,12 +197,16 @@ pub fn appset_row(d: &Value) -> ArgoAppSetRow {
     } else {
         None
     };
+    let generators: Vec<&serde_json::Map<String, Value>> = list(d, "/spec/generators").iter().filter_map(Value::as_object).collect();
     ArgoAppSetRow {
         name: text(d, "/metadata/name").unwrap_or_default().into(),
         namespace: text(d, "/metadata/namespace").unwrap_or_default().into(),
         status: status.map(str::to_owned),
         message: error.and_then(|c| text(c, "/message")).map(str::to_owned),
-        generators: list(d, "/spec/generators").iter().filter_map(Value::as_object).flat_map(|g| g.keys().cloned()).collect(),
+        error_since: error.and_then(|c| text(c, "/lastTransitionTime")).map(str::to_owned),
+        generators: generators.iter().flat_map(|g| g.keys().cloned()).collect(),
+        requeue_seconds: generators.iter().flat_map(|g| g.values()).filter_map(|v| v.get("requeueAfterSeconds").and_then(Value::as_u64)).min(),
+        project: text(d, "/spec/template/spec/project").filter(|p| !p.is_empty()).map(str::to_owned),
     }
 }
 

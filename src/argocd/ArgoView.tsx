@@ -23,8 +23,11 @@ import {
   ARGO_APPS_LABEL, ARGO_AUTO_OFF, ARGO_AUTO_ON, ARGO_CLUSTER_FILTER, ARGO_ENV_GROUP, ARGO_ENV_SOURCE, ARGO_ENV_TEXT, ARGO_GROUP_BY, ARGO_GROUP_THEN, ARGO_HEALTH_GROUP,
   ARGO_HEALTH_STATUSES, ARGO_NO_APPS, ARGO_NO_MATCH, ARGO_PROJECT, ARGO_SEARCH, ARGO_SYNC_GROUP, ARGO_SYNC_STATUSES, COL_NAME, H_ARGO_AUTO, H_ARGO_DEST, H_ARGO_ENV,
   H_ARGO_LAST_SYNC, H_ARGO_OPERATION, H_ARGO_REVISION, LOADING, ARGO_EXPAND_ALL, ARGO_FOLD_OK, argoAppCount, argoCaution, argoErrors, argoGenerators, argoOk, argoOkApps, argoOutOfSync, argoWarnings,
+  ARGO_SET_RAW, ARGO_SET_RETRY, ARGO_SET_RETRY_HINT, argoSetErrorSince, argoSetRequeue,
 } from "./text";
-import type { ArgoAppRow, ArgoOpenRequest, ArgoResourceFocus, ArgoViewState } from "./types";
+import type { ArgoAppRow, ArgoAppSetRow, ArgoOpenRequest, ArgoResourceFocus, ArgoViewState } from "./types";
+import { ChangeSheet } from "./change/ChangeSheet";
+import { summarizeAppSetError } from "./appsetError";
 
 interface Props {
   /** ArgoCD 서버 주소 */
@@ -107,6 +110,24 @@ function count(rows: ArgoAppRow[], of: (r: ArgoAppRow) => string): Record<string
   return n;
 }
 
+/** ApplicationSet 오류 줄: 요약(원문은 펼쳐서), 언제부터, 다시 시도 간격 */
+function SetError({ message, set, at }: { message: string; set: ArgoAppSetRow; at: number }) {
+  const summary = summarizeAppSetError(message);
+  return (
+    <div className="argo-set-err">
+      <span className="err">{summary ?? message}</span>
+      {set.errorSince && <span className="dim">{argoSetErrorSince(age(set.errorSince, at))}</span>}
+      {set.requeueSeconds !== null && <span className="dim">{argoSetRequeue(set.requeueSeconds)}</span>}
+      {summary && (
+        <details>
+          <summary className="dim">{ARGO_SET_RAW}</summary>
+          <pre className="argo-pre">{message}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
 /** 묶기 기준 목록: 데이터에 있는 레이블 키마다 하나씩. exclude는 1단계에서 이미 고른 기준 */
 const dimsFor = (keys: string[], exclude: GroupDim | null): GroupDim[] =>
   (["set", "env", "cluster", "project", "namespace", ...keys.map(labelDim), "none"] as GroupDim[]).filter((d) => d === "none" || d !== exclude);
@@ -146,6 +167,7 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave, open, on
   // 앱 상세와 ApplicationSet 상세는 같은 자리를 쓰므로 하나만 열린다
   const [selectedSet, setSelectedSet] = useState<{ namespace: string; name: string } | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [refreshSet, setRefreshSet] = useState<ArgoAppSetRow | null>(null);
   // 리소스 검색·⌘K에서 온 요청: 그 앱의 상세를 열고(필요하면 리소스도 고르게) 한 번만 받는다. 같은 앱·리소스를 다시 열어도 새로 그리도록 nonce를 키에 넣는다.
   const [focus, setFocus] = useState<{ resource: ArgoResourceFocus | null; nonce: number; tab?: "history" } | null>(null);
   const onOpenedRef = useRef(onOpened);
@@ -349,27 +371,36 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave, open, on
     const open = isOpen(id, !quietOk || level !== "ok");
     return (
       <section key={id} className={`argo-card argo-card-${level}${level === "ok" && !open ? " argo-card-quiet" : ""}`} aria-label={g.name}>
-        <button className="argo-band" aria-expanded={open} onClick={() => setOpen(id, !open)}>
-          <span className="argo-band-tw">{open ? "▾" : "▸"}</span>
-          <b className="argo-band-name">{g.name}</b>
-          {g.apps.length > 0 && <TallyBar t={t} />}
-          <TallyChips t={t} />
-          {g.set && g.set.generators.length > 0 && <span className="dim">{argoGenerators(g.set.generators.join(", "))}</span>}
-          <ArgoBadge status={g.set?.status} />
-          {g.set?.message && <span className="err argo-band-msg">{g.set.message}</span>}
-          <span className="dim">{argoAppCount(g.apps.length)}</span>
-        </button>
-        {g.set && (
-          <button
-            className="btn small tone-secondary argo-band-open"
-            onClick={() => {
-              setSelected(null);
-              setSelectedSet({ namespace: g.set!.namespace, name: g.set!.name });
-            }}
-          >
-            {APPSET_OPEN}
+        <div className="argo-card-head">
+          <button className="argo-band" aria-expanded={open} onClick={() => setOpen(id, !open)}>
+            <span className="argo-band-tw">{open ? "▾" : "▸"}</span>
+            <b className="argo-band-name">{g.name}</b>
+            {g.apps.length > 0 && <TallyBar t={t} />}
+            <TallyChips t={t} />
+            {g.set && g.set.generators.length > 0 && <span className="dim">{argoGenerators(g.set.generators.join(", "))}</span>}
+            <ArgoBadge status={g.set?.status} />
+            <span className="dim">{argoAppCount(g.apps.length)}</span>
           </button>
-        )}
+          {g.set && (open || g.set.message) && (
+            <span className="argo-set-acts">
+              <button
+                className="btn small tone-secondary"
+                onClick={() => {
+                  setSelected(null);
+                  setSelectedSet({ namespace: g.set!.namespace, name: g.set!.name });
+                }}
+              >
+                {APPSET_OPEN}
+              </button>
+              {g.set.status === "Error" && (
+                <button className="btn small tone-warn" title={ARGO_SET_RETRY_HINT} onClick={() => setRefreshSet(g.set!)}>
+                  {ARGO_SET_RETRY}
+                </button>
+              )}
+            </span>
+          )}
+        </div>
+        {g.set?.message && <SetError message={g.set.message} set={g.set} at={at} />}
         {open && g.apps.length > 0 && (
           <table className="k8s-table argo-table argo-card-rows" aria-label={g.name}>
             <Columns withEnv={showEnv} />
@@ -460,6 +491,18 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave, open, on
           {allOpen ? ARGO_FOLD_OK : ARGO_EXPAND_ALL}
         </button>
         <CreateApp url={url} rows={appRows} onDone={setNote} />
+        {refreshSet && (
+          <ChangeSheet
+            url={url}
+            target={{ namespace: refreshSet.namespace, name: refreshSet.name, project: refreshSet.project ?? "default", env: envOf({ name: refreshSet.name, namespace: refreshSet.namespace, resourceVersion: "", labels: {}, values: {} }).env }}
+            change={{ kind: "appSetRefresh" }}
+            onClose={() => setRefreshSet(null)}
+            onDone={(message) => {
+              setRefreshSet(null);
+              setNote(message);
+            }}
+          />
+        )}
         {note && (
           <span className="ok" role="status">
             {note}

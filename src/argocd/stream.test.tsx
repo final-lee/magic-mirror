@@ -50,7 +50,7 @@ test("restarting the ApplicationSet watch removes deleted sets", async () => {
   vi.clearAllMocks();
   const qc = newQueryClient();
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
-  const set = { name: "deleted", namespace: "n", status: null, message: null, generators: [] };
+  const set = { name: "deleted", namespace: "n", status: null, message: null, errorSince: null, generators: [], requeueSeconds: null, project: null };
   api.appsets.mockResolvedValueOnce([set]).mockResolvedValue([]);
   api.watchAppsets.mockResolvedValue(11);
   api.watchStop.mockResolvedValue();

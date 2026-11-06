@@ -114,7 +114,13 @@ export interface ArgoAppSetRow {
   status: string | null;
   /** status가 Error일 때의 메시지 */
   message: string | null;
+  /** 오류 상태가 시작된 시각 */
+  errorSince: string | null;
   generators: string[];
+  /** generator가 다시 도는 간격 중 가장 짧은 것(초) */
+  requeueSeconds: number | null;
+  /** template의 프로젝트 */
+  project: string | null;
 }
 
 export interface ArgoNetworkingInfo {

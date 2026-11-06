@@ -1518,7 +1518,14 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 /* 이름 칸 너비를 맞춰 상태 막대가 묶음마다 같은 자리에 온다 */
 .argo-band-name { min-width: 230px; font-size: 14px; }
 .argo-band-chips { display: inline-flex; gap: 4px; }
-.argo-band-msg { flex-basis: 100%; padding-left: 22px; white-space: pre-wrap; word-break: break-word; }
+.argo-card-head { display: flex; align-items: center; background: var(--tone-2e2e33); }
+.argo-card-head .argo-band { flex: 1; min-width: 0; }
+.argo-card-quiet .argo-card-head { background: var(--tone-252528); }
+.argo-set-acts { display: inline-flex; gap: 6px; padding: 0 12px; flex-shrink: 0; }
+.argo-set-err { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 0 12px 8px 34px; background: var(--tone-2e2e33); font-size: 12px; }
+.argo-set-err details { flex-basis: 100%; }
+.argo-set-err summary { cursor: pointer; }
+.argo-set-err pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; }
 .argo-tally { display: inline-flex; width: 120px; height: 8px; border-radius: 4px; overflow: hidden; background: var(--neutral-alpha-10); }
 .argo-tally-ok { background: var(--green); }
 .argo-tally-err { background: var(--red); }
@@ -2519,7 +2526,6 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .ts-diff-gap { color: var(--dim); }
 
 /* ArgoCD 앱 관리·ApplicationSet */
-.argo-band-open { position: absolute; top: 4px; right: 8px; }
 .mg { display: flex; flex-direction: column; gap: 8px; }
 .mg-views { display: flex; gap: 2px; border-bottom: 1px solid var(--line); }
 .mg-views [role="tab"] { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--dim); padding: 4px 10px; cursor: pointer; font: inherit; font-size: 12px; }
