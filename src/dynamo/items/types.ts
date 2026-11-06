@@ -28,4 +28,6 @@ export interface QueryPrefill {
   index?: string;
   pk?: string;
   skPrefix?: string;
+  /** 정렬 키가 이 값과 같은 아이템 하나를 읽는다. skPrefix와 함께 오지 않는다 */
+  skEquals?: string;
 }

@@ -46,15 +46,15 @@ export function ItemEditor({ table, item, creating, duplicate, save, close }: {
     <div className="ddb-items-dialog">
       <header><h3>{creating ? "새 아이템" : "아이템 편집"}</h3></header>
       {duplicate && <p>기존 아이템과 다른 키를 입력해 주세요.</p>}
-      <div className="ddb-items-actions">
-        <button className="btn small tone-secondary" disabled={!canSwitch} onClick={toggle}>{plain ? "DynamoDB JSON" : "일반 JSON"}</button>
-        <span>{plain ? "일반 JSON" : "DynamoDB JSON"}</span>
+      <div className="ddb-items-actions" role="group" aria-label="편집 형식">
+        <button className="btn small tone-secondary" aria-pressed={!plain} onClick={plain ? toggle : undefined}>DynamoDB JSON</button>
+        <button className="btn small tone-secondary" aria-pressed={plain} disabled={!canSwitch} onClick={plain ? undefined : toggle}>일반 JSON</button>
       </div>
       <CodeEditor key={plain ? "plain" : "dynamo"} value={text} onChange={setText} label="아이템 JSON" language="json" minHeight="320px" />
       {error && <p className="err" role="alert">{error}</p>}
-      <div className="ddb-items-actions">
-        <button className="btn tone-ghost-danger" onClick={close}>편집 버리기</button>
-        <button className="btn tone-primary" onClick={submit}>저장</button>
+      <div className="foot">
+        <button className="btn plain tone-ghost-danger" onClick={close}>편집 버리기</button>
+        <button className="btn plain tone-primary" onClick={submit}>저장</button>
       </div>
     </div>
   </div>;

@@ -1,6 +1,7 @@
 import type { DynamoTable, KeyAttr } from "../types";
 import type { Item } from "../items/types";
 import { itemSize } from "../items/value";
+import * as t from "./text";
 
 export interface DesignEntity {
   name: string;
@@ -18,15 +19,24 @@ export interface AccessPattern {
   sparse: boolean;
   overloaded: boolean;
   entities: string[];
+  /** 이 줄이 가리키는 엔티티와 그 엔티티의 아이템 수 */
+  entity?: string;
+  entityCount: number;
   pk?: string;
   skPrefix?: string;
-  description: string;
+  /** 정렬 키가 늘 같은 값이면 그 값. 키가 하나뿐인 읽기(GetItem)와 같다 */
+  skEquals?: string;
+  /** 키 모양으로 쓴 조건: `PK = USER#<id>, SK begins_with ORDER#` */
+  shape: string;
+  /** 기본 테이블에서 키 전체가 정해지는 읽기. 아이템 하나를 읽는다 */
+  single: boolean;
 }
 
 export interface Diagnostic {
   id: "ttlMillis" | "ttlMissing" | "ttlNotNumber" | "ttlExpiredPresent" | "largeItem" | "hotKey" | "mixedType" | "versionAttr";
   level: "info" | "warn" | "fail";
-  detail: string;
+  summary: string;
+  detail: string | null;
   count: number;
 }
 
@@ -39,11 +49,14 @@ export interface DesignReport {
 
 interface EntityGroup {
   items: Item[];
-  pkShape: string;
-  skShape: string;
+  pks: string[];
+  sks: string[];
 }
 
 type EntityGroups = Map<string, EntityGroup>;
+
+const SEPARATOR = /([#|:/])/;
+const IS_SEPARATOR = /^[#|:/]$/;
 
 function keyValue(item: Item, name?: string): string {
   if (!name) return "";
@@ -57,17 +70,38 @@ function prefix(value: string): string {
   return /^([A-Z_]+)[#|:/]/.exec(value)?.[1] ?? "";
 }
 
-function keyShape(value: string): string {
+/**
+ * 키 값 하나의 모양. `#`·`|`·`:`·`/`으로 나눈 조각마다 날짜·숫자·UUID·ULID는 이름표(`<date>` 등)로,
+ * 대문자 상수(`USER`, `PROFILE`, `META`)는 그대로 두고, 나머지는 `<id>`로 바꾼다.
+ */
+export function keyShape(value: string): string {
   if (!value) return "";
-  return value.split(/([#|:/])/).map((part, index) => {
+  return value.split(SEPARATOR).map((part, index) => {
     if (index === 0 && prefix(value)) return part;
-    if (/^[#|:/]$/.test(part)) return part;
+    if (IS_SEPARATOR.test(part)) return part;
     if (/^\d{4}-\d\d-\d\d/.test(part)) return "<date>";
     if (/^\d+$/.test(part)) return "<number>";
     if (/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(part)) return "<uuid>";
     if (/^[0-9A-HJKMNP-TV-Z]{26}$/.test(part)) return "<ulid>";
+    if (/^[A-Z][A-Z_]+$/.test(part)) return part;
     return "<id>";
   }).join("");
+}
+
+/**
+ * 같은 엔티티의 키 값들이 하나의 모양으로 모이는지 본다. 모든 값에서 같은 조각은 그대로 두고 값마다 다른 조각만 `<id>`로 바꾼다.
+ * 조각 수가 서로 다르면 가장 많은 모양을 따른다.
+ */
+export function sharedKeyShape(values: string[]): string {
+  const shapes = values.map(keyShape).filter(Boolean);
+  if (shapes.length === 0) return "";
+  const counts = new Map<string, number>();
+  for (const shape of shapes) counts.set(shape, (counts.get(shape) ?? 0) + 1);
+  const common = [...counts].sort((a, b) => b[1] - a[1])[0][0];
+  const parts = common.split(SEPARATOR);
+  const sameLength = shapes.filter(shape => shape.split(SEPARATOR).length === parts.length);
+  return parts.map((part, index) =>
+    sameLength.every(shape => shape.split(SEPARATOR)[index] === part) ? part : "<id>").join("");
 }
 
 function inferEntities(table: DynamoTable, items: Item[]): EntityGroups {
@@ -79,16 +113,16 @@ function inferEntities(table: DynamoTable, items: Item[]): EntityGroups {
       .map(name => keyValue(item, name)).find(Boolean);
     const pair = [prefix(pk), prefix(sk)].filter(Boolean).join(" / ");
     const name = label || pair || "엔티티 1종(접두사 없음)";
-    const group = groups.get(name) ?? {
-      items: [], pkShape: keyShape(pk), skShape: keyShape(sk),
-    };
+    const group = groups.get(name) ?? { items: [], pks: [], sks: [] };
     group.items.push(item);
+    group.pks.push(pk);
+    group.sks.push(sk);
     groups.set(name, group);
   }
   return groups;
 }
 
-function entityAttributes(items: Item[]): DesignEntity["attributes"] {
+function entityAttributes(items: Item[], keyNames: string[]): DesignEntity["attributes"] {
   const attributes = new Map<string, { count: number; types: Set<string> }>();
   for (const item of items) {
     for (const [name, value] of Object.entries(item)) {
@@ -98,28 +132,53 @@ function entityAttributes(items: Item[]): DesignEntity["attributes"] {
       attributes.set(name, attribute);
     }
   }
-  return [...attributes].map(([name, attribute]) => ({
-    name, count: attribute.count, types: [...attribute.types],
-  }));
+  const rank = (name: string) => keyNames.includes(name) ? keyNames.indexOf(name) : keyNames.length;
+  return [...attributes]
+    .map(([name, attribute]) => ({ name, count: attribute.count, types: [...attribute.types] }))
+    .sort((a, b) => rank(a.name) - rank(b.name) || b.count - a.count || a.name.localeCompare(b.name));
 }
 
-function summarizeEntities(groups: EntityGroups): DesignEntity[] {
+function summarizeEntities(table: DynamoTable, groups: EntityGroups): DesignEntity[] {
+  const keyNames = [table.keys.pk.name, table.keys.sk?.name].filter((name): name is string => !!name);
   return [...groups].map(([name, group]) => ({
     name,
     count: group.items.length,
-    pkShape: group.pkShape,
-    skShape: group.skShape,
-    attributes: entityAttributes(group.items),
+    pkShape: sharedKeyShape(group.pks),
+    skShape: sharedKeyShape(group.sks),
+    attributes: entityAttributes(group.items, keyNames),
     examples: group.items.slice(0, 3),
   }));
 }
 
+/** 정렬 키 모양에서 앞의 상수 접두사(`ORDER#`). 없으면 빈 문자열 */
+function skPrefixOf(skShape: string): string {
+  return /^[A-Z_]+[#|:/]/.exec(skShape)?.[0] ?? "";
+}
+
+type IndexKeys = { name: string; pk: KeyAttr; sk?: KeyAttr | null; index?: string };
+
+function patternFor(index: IndexKeys, present: Item[]): Pick<AccessPattern, "pk" | "skPrefix" | "skEquals" | "shape" | "single"> {
+  const pks = present.map(item => keyValue(item, index.pk.name));
+  const sks = present.map(item => keyValue(item, index.sk?.name));
+  const pkShape = sharedKeyShape(pks);
+  const skShape = sharedKeyShape(sks);
+  const base = { pk: pks[0], shape: "", single: false };
+  const pkCondition = `${index.pk.name} = ${pkShape}`;
+  if (!index.sk) return { ...base, shape: pkCondition, single: !index.index };
+  if (skShape !== "" && !skShape.includes("<")) {
+    return { ...base, skEquals: sks[0], shape: `${pkCondition}, ${index.sk.name} = ${skShape}`, single: !index.index };
+  }
+  const skPrefix = skPrefixOf(skShape);
+  if (skPrefix) return { ...base, skPrefix, shape: `${pkCondition}, ${index.sk.name} begins_with ${skPrefix}` };
+  return { ...base, shape: `${pkCondition}, ${t.SK_RANGE(index.sk.name)}` };
+}
+
 function accessPatterns(table: DynamoTable, items: Item[], groups: EntityGroups): AccessPattern[] {
-  const indexes: { name: string; pk: KeyAttr; sk?: KeyAttr | null; index?: string }[] = [
+  const indexes: IndexKeys[] = [
     { name: table.name, ...table.keys },
     ...table.indexes.map(index => ({ ...index, index: index.name })),
   ];
-  return indexes.flatMap(index => {
+  return indexes.flatMap((index): AccessPattern[] => {
     const present = new Set(items.filter(item => item[index.pk.name] && (!index.sk || item[index.sk.name])));
     const matching = [...groups].filter(([, group]) => group.items.some(item => present.has(item)));
     const names = matching.map(([name]) => name);
@@ -128,49 +187,49 @@ function accessPatterns(table: DynamoTable, items: Item[], groups: EntityGroups)
       sparse: present.size < items.length, overloaded: names.length > 1, entities: names,
     };
     if (!matching.length) {
-      return [{ ...common, description: `${index.name}: ${index.pk.name}${index.sk ? `로 ${index.sk.name} 범위 조회` : " 조회"}` }];
+      const sk = index.sk ? `, ${t.SK_RANGE(index.sk.name)}` : "";
+      return [{ ...common, entityCount: 0, shape: `${index.pk.name} = ${t.ANY_VALUE}${sk}`, single: false }];
     }
     return matching.map(([entity, group]) => {
-      const example = group.items.find(item => present.has(item))!;
-      const pk = keyValue(example, index.pk.name);
-      const sk = keyValue(example, index.sk?.name);
-      const skPart = prefix(sk);
-      const skPrefix = skPart ? skPart + sk[skPart.length] : undefined;
-      return {
-        ...common, pk, skPrefix,
-        description: `${index.name}: ${index.pk.name}=${pk}${skPrefix ? `, ${index.sk?.name} begins_with ${skPrefix}` : index.sk ? `, ${index.sk.name} 범위` : ""} (${entity})`,
-      };
+      const own = group.items.filter(item => present.has(item));
+      return { ...common, entity, entityCount: own.length, ...patternFor(index, own) };
     });
   });
 }
 
 function diagnose(table: DynamoTable, items: Item[], entities: DesignEntity[], now: number): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
-  const add = (id: Diagnostic["id"], level: Diagnostic["level"], count: number, detail: string) => {
-    if (count) diagnostics.push({ id, level, count, detail });
+  const total = items.length;
+  const add = (id: Diagnostic["id"], level: Diagnostic["level"], count: number, message: { summary: string; detail: string | null }) => {
+    if (count) diagnostics.push({ id, level, count, ...message });
   };
   const ttl = table.ttl?.status === "ENABLED" ? table.ttl.attribute : null;
   if (ttl) {
     const numeric = items.filter(item => item[ttl]?.N !== undefined);
-    add("ttlMillis", "warn", numeric.filter(item => Number(item[ttl].N) > 1e11).length, "TTL은 초 단위 Unix 시간이어야 지워져요.");
-    add("ttlMissing", "info", items.filter(item => !item[ttl]).length, "TTL 속성이 없는 아이템이에요.");
-    add("ttlNotNumber", "warn", items.filter(item => item[ttl] && !("N" in item[ttl])).length, "숫자가 아닌 TTL은 지워지지 않아요.");
-    add("ttlExpiredPresent", "info", numeric.filter(item => Number(item[ttl].N) < now / 1000).length, "만료됐지만 아직 남아 있어요. 삭제에는 보통 며칠 걸려요.");
+    const millis = numeric.filter(item => Number(item[ttl].N) > 1e11).length;
+    const missing = items.filter(item => !item[ttl]).length;
+    const notNumber = items.filter(item => item[ttl] && !("N" in item[ttl])).length;
+    const expired = numeric.filter(item => Number(item[ttl].N) < now / 1000).length;
+    add("ttlMillis", "warn", millis, t.TTL_MILLIS(total, millis));
+    add("ttlMissing", "info", missing, t.TTL_MISSING(total, missing));
+    add("ttlNotNumber", "warn", notNumber, t.TTL_NOT_NUMBER(total, notNumber));
+    add("ttlExpiredPresent", "info", expired, t.TTL_EXPIRED(total, expired));
   }
   const sizes = items.map(itemSize);
   const large = sizes.filter(size => size >= 100 * 1024).length;
   const critical = sizes.some(size => size >= 350 * 1024);
-  add("largeItem", critical ? "fail" : "warn", large, "추정 크기가 100 KB 이상이에요 (한도 400 KB).");
+  add("largeItem", critical ? "fail" : "warn", large, t.LARGE_ITEM(total, large));
   const counts = new Map<string, number>();
   for (const item of items) {
     const key = JSON.stringify(item[table.keys.pk.name]);
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-  add("hotKey", "info", [...counts.values()].filter(count => count / items.length >= 0.2).length, "샘플의 20% 이상이 같은 파티션 키예요. Scan 샘플은 분포를 대략 따릅니다.");
+  const hot = [...counts.values()].filter(count => count / items.length >= 0.2).length;
+  add("hotKey", "info", hot, t.HOT_KEY(total, hot));
   for (const entity of entities) {
     for (const attribute of entity.attributes) {
-      if (attribute.types.length > 1) add("mixedType", "warn", attribute.count, `${entity.name}: ${attribute.name}의 타입이 ${attribute.types.join(", ")}로 섞여 있어요.`);
-      if (["version", "revision", "_version", "ver"].includes(attribute.name) && attribute.types.includes("N")) add("versionAttr", "info", attribute.count, `${entity.name}: ${attribute.name}은 버전 속성으로 보입니다.`);
+      if (attribute.types.length > 1) add("mixedType", "warn", attribute.count, t.MIXED_TYPE(entity.name, attribute.name, attribute.types, entity.count, attribute.count));
+      if (["version", "revision", "_version", "ver"].includes(attribute.name) && attribute.types.includes("N")) add("versionAttr", "info", attribute.count, t.VERSION_ATTR(entity.name, attribute.name, entity.count, attribute.count));
     }
   }
   return diagnostics;
@@ -178,7 +237,7 @@ function diagnose(table: DynamoTable, items: Item[], entities: DesignEntity[], n
 
 export function analyze(table: DynamoTable, items: Item[], now = Date.now()): DesignReport {
   const groups = inferEntities(table, items);
-  const entities = summarizeEntities(groups);
+  const entities = summarizeEntities(table, groups);
   return {
     sampleCount: items.length,
     entities,

@@ -65,3 +65,22 @@ export function summary(value: Attribute): string {
   if (tag === "L") return `[${(content as unknown[]).length}]`;
   return typeof content === "string" ? content : JSON.stringify(content);
 }
+
+/** 속성 값 하나를 한 줄 글로. 맵·리스트는 일반 JSON으로 펼친다(`summary`의 `{3}` 같은 요약은 표 칸에서만 쓴다) */
+export function plainText(value: Attribute): string {
+  const [tag] = Object.keys(value);
+  if (tag === "M" || tag === "L") return JSON.stringify(plainValue(value));
+  return summary(value);
+}
+
+/** 키 속성을 `PK=SMOKE#1 · SK=META`처럼 값만 보이게 */
+export function keyText(keys: Item): string {
+  return Object.entries(keys).map(([name, value]) => `${name}=${summary(value)}`).join(" · ");
+}
+
+/** 속성을 이름 순으로: 키 속성을 먼저(주어진 순서), 나머지는 이름 순 */
+export function orderedNames(item: Item, keyNames: string[]): string[] {
+  const keys = keyNames.filter(name => name in item);
+  const rest = Object.keys(item).filter(name => !keyNames.includes(name)).sort((a, b) => a.localeCompare(b));
+  return [...keys, ...rest];
+}

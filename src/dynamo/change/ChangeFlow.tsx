@@ -5,6 +5,7 @@ import { ConfirmField, ReversibleNote, useSheetFocus } from "../../iam/previewPa
 import { applyItemResults } from "../items/writes";
 import { changeApi } from "./api";
 import { canApply } from "./gate";
+import { CallView, DiffView } from "./PreviewParts";
 import * as t from "./text";
 import type { DynamoChange, DynamoPreview, ItemResult, Target } from "./types";
 
@@ -86,13 +87,7 @@ export function useDynamoChange(target: Target): DynamoChangeFlow {
     loading={loading}
     apply={apply}
     cancel={() => setPending(null)}
-  />}{results.length > 0 && <div className="modal"><div className="sheet wide cp" role="dialog" aria-label="아이템 변경 결과">
-    <h3>변경하지 못한 아이템</h3>
-    {results.map((result, index) => <div key={index}><p className="err">{result.error}</p>
-      <h4>읽은 아이템</h4><pre>{JSON.stringify(result.item, null, 2)}</pre>
-      <h4>현재 아이템</h4><pre>{JSON.stringify(result.latest, null, 2)}</pre></div>)}
-    <button className="btn tone-secondary" onClick={() => setResults([])}>닫기</button>
-  </div></div>}</>;
+  />}{results.length > 0 && <ResultsDialog results={results} close={() => setResults([])} />}</>;
   return { begin, undo, loading, error, dialog };
 }
 
@@ -121,18 +116,32 @@ function Dialog({ pending, loading, apply, cancel }: {
       <div className="cp-body">
         <h3>{preview.title}</h3>
         <h4>{t.CALLS}</h4>
-        {preview.calls.map((call, index) => <div key={index}><code>{call.api}</code><pre>{JSON.stringify(call.params, null, 2)}</pre></div>)}
-        {preview.diff != null && <><h4>{t.DIFF}</h4><pre>{JSON.stringify(preview.diff, null, 2)}</pre></>}
+        {preview.calls.map((call, index) => <CallView key={index} call={call} />)}
+        {preview.diff != null && <><h4>{t.DIFF}</h4><DiffView diff={preview.diff} /></>}
         {preview.impact.length > 0 && <><h4>{t.IMPACT}</h4>{preview.impact.map((impact, index) => <p key={index}>{impact}</p>)}</>}
         {preview.warnings.length > 0 && <><h4>{t.WARNINGS}</h4>{preview.warnings.map((warning, index) => <p className="err" key={index}>{warning}</p>)}</>}
         <ReversibleNote reversible={!!preview.inverse || pending.change.kind === "createBackup"} />
         {preview.blocked && <p className="err">{preview.blocked}</p>}
         {preview.confirmName && <ConfirmField required={preview.confirmName} typed={typed} onTyped={setTyped} locked={loading} label={t.CONFIRM} />}
       </div>
-      <div className="cp-footer">
-        <button type="button" className="btn tone-ghost" ref={cancelRef} disabled={loading} onClick={cancel}>{t.CANCEL}</button>
-        <button type="button" className={`btn ${actionTone(pending)}`} disabled={!canApply(preview, typed, loading)} onClick={() => apply(typed)}>{t.APPLY}</button>
+      <div className="foot">
+        <button type="button" className="btn plain tone-ghost" ref={cancelRef} disabled={loading} onClick={cancel}>{t.CANCEL}</button>
+        <button type="button" className={`btn plain ${actionTone(pending)}`} disabled={!canApply(preview, typed, loading)} onClick={() => apply(typed)}>{t.APPLY}</button>
       </div>
     </div>
   </div>;
+}
+
+function ResultsDialog({ results, close }: { results: ItemResult[]; close: () => void }) {
+  return <div className="modal"><div className="sheet wide cp" role="dialog" aria-label="아이템 변경 결과">
+    <div className="cp-body">
+      <h3>{t.RESULTS_TITLE}</h3>
+      {results.map((result, index) => <div key={index}><p className="err">{result.error}</p>
+        <h4>{t.READ_ITEM}</h4><pre>{JSON.stringify(result.item, null, 2)}</pre>
+        <h4>{t.LATEST_ITEM}</h4><pre>{JSON.stringify(result.latest, null, 2)}</pre></div>)}
+    </div>
+    <div className="foot">
+      <button type="button" className="btn plain tone-ghost" onClick={close}>{t.CLOSE}</button>
+    </div>
+  </div></div>;
 }

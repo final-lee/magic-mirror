@@ -27,14 +27,14 @@ export async function shootDynamo(page, out) {
   await page.getByLabel(/^PK \(S\)/).fill('USER#u-1001');
   await page.getByLabel(/^SK 조건/).selectOption('begins_with');
   await page.getByLabel('정렬 키 값').fill('ORDER#');
-  await page.getByRole('button', { name: '읽기', exact: true }).click();
+  await page.getByRole('button', { name: '첫 페이지 읽기' }).click();
   await page.getByText(/^Count 7/).waitFor();
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${out}/dynamo-items.png` });
 
-  // 설계: Scan 첫 페이지와 다음 페이지로 표본을 모으면 엔티티, 인덱스별 접근 패턴, 진단이 나온다
+  // 설계: 첫 페이지와 다음 페이지로 표본을 모으면 엔티티, 인덱스별 접근 패턴, 진단이 나온다
   await page.getByLabel('읽기 방식').selectOption('scan');
-  await page.getByRole('button', { name: /^(Scan 첫 페이지|읽기)$/ }).click();
+  await page.getByRole('button', { name: '첫 페이지 읽기' }).click();
   await page.getByText(/^Count 24/).waitFor();
   const next = page.getByRole('button', { name: '다음 페이지' });
   await next.click();

@@ -1,8 +1,17 @@
 import * as t from "./text";
-import type { Finding } from "./types";
+import type { FindingLevel } from "./types";
+
+/** 진단 한 줄. 건강 진단(`Finding`)과 설계 진단이 함께 쓴다 */
+export interface FindingRow {
+  id: string;
+  level: FindingLevel;
+  summary: string;
+  detail?: string | null;
+  index?: string | null;
+}
 
 /** 진단 목록: 항목마다 수준 아이콘과 한 줄 요약, 자세한 설명이 있으면 접어 둔다 */
-export function Findings({ findings }: { findings: Finding[] }) {
+export function Findings({ findings }: { findings: FindingRow[] }) {
   if (findings.length === 0) return <p className="dim ddb-findings-empty">{t.FINDINGS_OK}</p>;
   return (
     <ul className="ddb-findings">

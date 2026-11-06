@@ -1,8 +1,11 @@
+import { formatDateTimeSeconds } from "../../iam/format";
+import type { Item } from "../items/types";
+import { keyText } from "../items/value";
 import { RecordDiff } from "./RecordDiff";
 import * as t from "./text";
 import type { StreamRecord } from "./types";
 
-const timeLabel = (time: number | null) => (time === null ? t.NONE_VALUE : new Date(time * 1000).toLocaleString());
+const timeLabel = (time: number | null) => (time === null ? t.NONE_VALUE : formatDateTimeSeconds(new Date(time * 1000).toISOString()));
 
 function RecordRow({ record }: { record: StreamRecord }) {
   return (
@@ -10,7 +13,7 @@ function RecordRow({ record }: { record: StreamRecord }) {
       <summary>
         <time>{timeLabel(record.time)}</time>
         <b className={`ddb-stream-event ddb-stream-${record.event.toLowerCase()}`}>{t.eventLabel(record.event)}</b>
-        <code>{JSON.stringify(record.keys)}</code>
+        <code>{record.keys ? keyText(record.keys as Item) : t.NONE_VALUE}</code>
         <span>{t.sizeLabel(record.size)}</span>
       </summary>
       <RecordDiff record={record} />

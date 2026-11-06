@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { Item, QueryPrefill, ReadRequest } from "./types";
+import type { Item, ItemPage, QueryPrefill, ReadRequest } from "./types";
 
 interface Snapshot {
   items: Item[];
@@ -8,9 +8,13 @@ interface Snapshot {
   scanKey: Item | null;
   scanStarted: boolean;
   history: ReadRequest[];
+  /** 마지막으로 읽은 페이지와 그 요청, 이 표를 읽느라 쓴 RCU 누적. 상세 탭을 옮겨도 남는다 */
+  lastPage: ItemPage | null;
+  lastRequest: ReadRequest | null;
+  consumed: number;
 }
 
-const empty: Snapshot = { items: [], prefill: null, serial: 0, scanKey: null, scanStarted: false, history: [] };
+const empty: Snapshot = { items: [], prefill: null, serial: 0, scanKey: null, scanStarted: false, history: [], lastPage: null, lastRequest: null, consumed: 0 };
 const stores = new Map<string, Snapshot>();
 const listeners = new Set<() => void>();
 

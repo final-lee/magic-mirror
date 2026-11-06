@@ -28,9 +28,8 @@
 .ddb-stream-record { border-top: 1px solid var(--line); }
 .ddb-stream-record summary { display: flex; gap: 12px; align-items: baseline; padding: 8px 0; cursor: pointer; }
 .ddb-stream-record summary code { flex: 1; overflow-wrap: anywhere; }
+.ddb-stream-record summary time { flex: none; color: var(--dim); font-variant-numeric: tabular-nums; }
 .ddb-stream-event { min-width: 3em; }
 .ddb-stream-insert { color: var(--green-text); }
 .ddb-stream-modify { color: var(--accent); }
 .ddb-stream-remove { color: var(--red); }
-.ddb-stream-diff { table-layout: fixed; width: 100%; overflow-wrap: anywhere; }
-.ddb-stream-changed { background: var(--accent-soft); }

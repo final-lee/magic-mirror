@@ -1,35 +1,78 @@
 import { useMemo, useState } from "react";
 import { errorMessage } from "../../api/errors";
+import { Findings } from "../Findings";
 import type { DetailContext } from "../TableDetail";
 import type { DynamoTable } from "../types";
 import { itemsApi } from "../items/api";
 import { ItemDetail } from "../items/ItemDetail";
 import { openQuery, tableStoreKey, updateItems, useItems } from "../items/store";
 import type { Item } from "../items/types";
-import { analyze, type DesignReport } from "./design";
+import { summary } from "../items/value";
+import { analyze, type AccessPattern, type DesignEntity, type DesignReport } from "./design";
 import * as t from "./text";
 
+/** 예시 키: `PK · SK`의 값만 이어 붙인다 */
+function exampleLabel(item: Item, table: DynamoTable): string {
+  return [table.keys.pk.name, table.keys.sk?.name]
+    .filter((name): name is string => !!name && !!item[name])
+    .map(name => summary(item[name]))
+    .join(" · ");
+}
+
+function AttributeTable({ entity }: { entity: DesignEntity }) {
+  return <table className="ddb-table ddb-entity-attributes">
+    <thead><tr><th>{t.COL_ATTRIBUTE}</th><th className="ddb-num">{t.COL_RATE}</th><th>{t.COL_TYPE}</th></tr></thead>
+    <tbody>{entity.attributes.map(attribute => <tr key={attribute.name}>
+      <td>{attribute.name}</td>
+      <td className="ddb-num">{t.attributeRate(attribute.count, entity.count)}</td>
+      <td>{attribute.types.map(type => <span key={type} className="iam-chip">{type}</span>)}</td>
+    </tr>)}</tbody>
+  </table>;
+}
+
 function Entities({ report, table, select }: { report: DesignReport; table: DynamoTable; select: (item: Item) => void }) {
-  return <><h3>{t.ENTITIES}</h3>{report.entities.map(entity => <section key={entity.name}>
-    <h4>{entity.name} · {entity.count}개 ({(entity.count / report.sampleCount * 100).toFixed(1)}%)</h4>
-    <p>PK {entity.pkShape || "—"} {entity.skShape && `· SK ${entity.skShape}`}</p>
-    <p>{entity.attributes.map(attribute => `${attribute.name} ${Math.round(attribute.count / entity.count * 100)}% (${attribute.types.join("/")})`).join(" · ")}</p>
-    <div>{entity.examples.map((item, index) => <button key={index} className="btn small tone-secondary" onClick={() => select(item)}>예시 키 {index + 1}: {JSON.stringify(item[table.keys.pk.name])}</button>)}</div>
+  return <><h3>{t.ENTITIES}</h3>{report.entities.map(entity => <section key={entity.name} className="ddb-entity">
+    <h4>{t.entityHeading(entity.name, entity.count, report.sampleCount)}</h4>
+    <p className="ddb-shapes">
+      <code>{table.keys.pk.name} {entity.pkShape || "—"}</code>
+      {entity.skShape && table.keys.sk && <code>{table.keys.sk.name} {entity.skShape}</code>}
+    </p>
+    <AttributeTable entity={entity} />
+    <div className="ddb-items-actions"><span className="dim">{t.EXAMPLES}</span>
+      {entity.examples.map((item, index) => <button key={index} className="btn small tone-secondary" onClick={() => select(item)}>{exampleLabel(item, table)}</button>)}
+    </div>
   </section>)}</>;
 }
 
-function Patterns({ report, storeKey, openItems }: { report: DesignReport; storeKey: string; openItems: () => void }) {
-  return <><h3>{t.PATTERNS}</h3>{report.patterns.map((pattern, index) => <div key={`${pattern.name}-${index}`}>
-    <button className="btn small tone-nav" onClick={() => {
-      openQuery(storeKey, { index: pattern.index, pk: pattern.pk, skPrefix: pattern.skPrefix });
-      openItems();
-    }}>{pattern.description}</button> {pattern.count}/{report.sampleCount} {pattern.sparse && "· 희소"} {pattern.overloaded && "· 여러 엔티티"} {pattern.entities.join(", ")}
-  </div>)}</>;
+/** 눌렀을 때 아이템 탭에 채워 줄 예시 값을 마우스를 올리면 보여 준다 */
+function sampleTitle(pattern: AccessPattern): string {
+  const sort = pattern.skEquals ?? pattern.skPrefix;
+  return `${t.PATTERN_TITLE} · ${[pattern.pk, sort].filter(Boolean).join(" · ")}`;
 }
 
-function Diagnostics({ report }: { report: DesignReport }) {
-  return <><h3>{t.DIAGNOSTICS}</h3>{report.diagnostics.length === 0 ? <p className="dim">진단할 항목이 없어요.</p> :
-    <ul>{report.diagnostics.map((diagnostic, index) => <li key={index}><strong>{diagnostic.level} · {diagnostic.id}</strong> {diagnostic.detail} ({diagnostic.count})</li>)}</ul>}
+function PatternRow({ pattern, total, open }: { pattern: AccessPattern; total: number; open: () => void }) {
+  return <tr>
+    <td>{pattern.name}</td>
+    <td><button className="btn small tone-nav ddb-pattern" title={sampleTitle(pattern)} onClick={open}>{pattern.shape}</button></td>
+    <td>{pattern.entity}</td>
+    <td className="ddb-num">{t.patternCount(pattern.entityCount, total)}</td>
+    <td>
+      {pattern.pk !== undefined && <span className="iam-chip">{pattern.single ? t.SINGLE_GET : t.MULTI_QUERY}</span>}
+      {pattern.sparse && <span className="iam-chip">{t.SPARSE}</span>}
+      {pattern.overloaded && <span className="iam-chip">{t.OVERLOADED}</span>}
+    </td>
+  </tr>;
+}
+
+function Patterns({ report, storeKey, openItems }: { report: DesignReport; storeKey: string; openItems: () => void }) {
+  return <><h3>{t.PATTERNS}</h3>
+    <table className="ddb-table">
+      <thead><tr><th>{t.COL_TARGET}</th><th>{t.COL_PATTERN}</th><th>{t.COL_ENTITY}</th><th className="ddb-num">{t.COL_ITEMS}</th><th>{t.COL_NOTE}</th></tr></thead>
+      <tbody>{report.patterns.map((pattern, index) => <PatternRow key={`${pattern.name}-${index}`} pattern={pattern} total={report.sampleCount} open={() => {
+        openQuery(storeKey, { index: pattern.index, pk: pattern.pk, skPrefix: pattern.skPrefix, skEquals: pattern.skEquals });
+        openItems();
+      }} />)}</tbody>
+    </table>
   </>;
 }
 
@@ -59,12 +102,15 @@ export function Design({ profile, region, table, openItems }: DetailContext) {
   }
   const finished = store.scanStarted && !store.scanKey;
   return <div className="ddb-design">
-    <p>{report.sampleCount.toLocaleString()}개 아이템 · {t.DISCLAIMER}</p>
-    <button className="btn small tone-refresh" disabled={busy || finished} title={finished ? "마지막 페이지까지 읽었어요" : undefined} onClick={() => void sample()}>{t.SAMPLE}</button>
+    <div className="ddb-items-actions">
+      <span>{t.sampleCount(report.sampleCount)} · {t.DISCLAIMER}</span>
+      <button className="btn small tone-refresh" disabled={busy || finished} title={finished ? t.SAMPLE_DONE : undefined} onClick={() => void sample()}>{t.SAMPLE}</button>
+    </div>
     {error && <p className="err">{error}</p>}
     <Entities report={report} table={table} select={setSelected} />
     <Patterns report={report} storeKey={key} openItems={openItems} />
-    <Diagnostics report={report} />
+    <h3>{t.DIAGNOSTICS}</h3>
+    <Findings findings={report.diagnostics} />
     {selected && <ItemDetail item={selected} table={table} onClose={() => setSelected(null)} />}
   </div>;
 }

@@ -105,8 +105,7 @@ function QueryBuilder({ table, form }: { table: DynamoTable; form: QueryFormStat
       </select></label>{form.skOp && <input aria-label="정렬 키 값" value={form.skValue} onChange={event => form.setSkValue(event.target.value)} placeholder="값 (between은 쉼표로 구분)" />}</>}
       <label><input type="checkbox" checked={form.forward} onChange={event => form.setForward(event.target.checked)} /> 오름차순</label>
     </div>}
-    {kind !== "partiql" && <>
-      <details><summary>필터와 프로젝션</summary>
+    {kind !== "partiql" && <details className="ddb-filters"><summary>필터와 프로젝션</summary>
         {form.filters.map((row, index) => <div className="ddb-items-actions" key={index}>
           <input aria-label="필터 속성" placeholder="속성" value={row.attribute} onChange={event => updateFilter(index, { attribute: event.target.value })} />
           <select aria-label="필터 연산" value={row.op} onChange={event => updateFilter(index, { op: event.target.value })}>{ops.map(op => <option key={op}>{op}</option>)}</select>
@@ -116,16 +115,15 @@ function QueryBuilder({ table, form }: { table: DynamoTable; form: QueryFormStat
         </div>)}
         <button className="btn small tone-secondary" onClick={() => form.setFilters(rows => [...rows, { attribute: "", op: "=", type: "S", value: "" }])}>조건 추가</button>
         <label>프로젝션 (쉼표 구분) <input value={form.projection} onChange={event => form.setProjection(event.target.value)} /></label>
-      </details>
-      <label>페이지 개수 <input type="number" min="1" value={form.limit} onChange={event => form.setLimit(event.target.value)} /></label>
-    </>}
+    </details>}
   </>;
 }
 
 function PagingBar({ form, page, busy, run, next }: { form: QueryFormState; page: ItemPage | null; busy: boolean; run: () => void; next: () => void }) {
   return <div className="ddb-items-actions">
+    {form.kind !== "partiql" && <label>{t.PAGE_LIMIT} <input type="number" min="1" className="ddb-limit" placeholder={t.PAGE_LIMIT_PLACEHOLDER} value={form.limit} onChange={event => form.setLimit(event.target.value)} /></label>}
     <label><input type="checkbox" checked={form.consistent} disabled={form.selectedIndex?.kind === "gsi"} onChange={event => form.setConsistent(event.target.checked)} /> 강한 일관성</label>
-    <button className="btn small tone-refresh" disabled={busy} onClick={run}>{form.kind === "scan" && !page ? t.FIRST_SCAN : t.SEND}</button>
+    <button className="btn small tone-refresh" disabled={busy} onClick={run}>{t.READ_FIRST}</button>
     <button className="btn small tone-secondary" disabled={busy || !page || !(page.lastKey || page.nextToken)} onClick={next}>{t.NEXT_PAGE}</button>
   </div>;
 }
@@ -143,11 +141,12 @@ function ExportControls({ table, items, onError }: { table: string; items: Item[
   </select><button className="btn small tone-secondary" disabled={!items.length} onClick={() => void save()}>{t.EXPORT}</button></>;
 }
 
-function ResultsTable({ table, items, columns, onError, onEdit, onDuplicate, onDelete }: {
+function ResultsTable({ table, items, columns, onError, onCreate, onEdit, onDuplicate, onDelete }: {
   table: DynamoTable;
   items: Item[];
   columns: string[];
   onError: (error: string) => void;
+  onCreate: () => void;
   onEdit: (item: Item) => void;
   onDuplicate: (item: Item) => void;
   onDelete: (items: Item[]) => void;
@@ -163,8 +162,9 @@ function ResultsTable({ table, items, columns, onError, onEdit, onDuplicate, onD
   const visible = columns.filter(column => !hidden.includes(column));
   return <>
     <div className="ddb-items-actions"><input value={filter} onChange={event => setFilter(event.target.value)} placeholder="아이템 찾기" />
-      <details><summary>열 고르기</summary>{columns.map(column => <label key={column}><input type="checkbox" checked={!hidden.includes(column)} onChange={() => setHidden(current => current.includes(column) ? current.filter(name => name !== column) : [...current, column])} />{column} </label>)}</details>
+      <details className="ddb-columns"><summary>열 고르기</summary><div>{columns.map(column => <label key={column}><input type="checkbox" checked={!hidden.includes(column)} onChange={() => setHidden(current => current.includes(column) ? current.filter(name => name !== column) : [...current, column])} />{column}</label>)}</div></details>
       <ExportControls table={table.name} items={items} onError={onError} />
+      <button className="btn small tone-create" onClick={onCreate}>{t.NEW_ITEM}</button>
       <button className="btn small tone-danger" disabled={!checked.length || checked.length > 1000} onClick={() => { onDelete(checked); setChecked([]); }}>삭제 {checked.length}개</button>
       {checked.length > 1000 && <span className="err">최대 1,000개까지 삭제할 수 있어요.</span>}
     </div>
@@ -185,18 +185,17 @@ function ResultsTable({ table, items, columns, onError, onEdit, onDuplicate, onD
 export function Items({ profile, region, table }: DetailContext) {
   const key = tableStoreKey(profile, region, table.name);
   const store = useItems(key);
+  const { lastPage: page, lastRequest: lastReq, consumed } = store;
   const form = useQueryForm(table);
-  const [page, setPage] = useState<ItemPage | null>(null);
-  const [lastReq, setLastReq] = useState<ReadRequest | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const flow = useDynamoChange({ profile, region, table: table.name });
   const [editor, setEditor] = useState<{ item: Item; creating: boolean; duplicate: boolean } | null>(null);
-  const [consumed, setConsumed] = useState(0);
   useEffect(() => {
     if (store.prefill) {
       form.setKind("query"); form.setIndex(store.prefill.index ?? ""); form.setPk(store.prefill.pk ?? "");
-      form.setSkOp(store.prefill.skPrefix ? "begins_with" : ""); form.setSkValue(store.prefill.skPrefix ?? "");
+      form.setSkOp(store.prefill.skEquals !== undefined ? "=" : store.prefill.skPrefix ? "begins_with" : "");
+      form.setSkValue(store.prefill.skEquals ?? store.prefill.skPrefix ?? "");
     }
   }, [store.serial]);
   const columns = useMemo(() => {
@@ -209,9 +208,9 @@ export function Items({ profile, region, table }: DetailContext) {
     setBusy(true); setError("");
     try {
       const result = await itemsApi.read(profile, region, table.name, request);
-      setPage(result); setLastReq(request); setConsumed(total => append ? total + result.consumed : result.consumed);
       updateItems(key, { items: append ? [...store.items, ...result.items] : result.items,
         history: append ? store.history : [request, ...store.history].slice(0, 20),
+        lastPage: result, lastRequest: request, consumed: append ? consumed + result.consumed : result.consumed,
         ...(!append ? { scanKey: null, scanStarted: false } : {}) });
     } catch (failure) { setError(errorMessage(failure)); } finally { setBusy(false); }
   }
@@ -231,14 +230,13 @@ export function Items({ profile, region, table }: DetailContext) {
   }
   return <div className="ddb-items">
     <QueryBuilder table={table} form={form} />
-    <button className="btn tone-create" onClick={create}>새 아이템</button>
-    {flow.error && <p className="err" role="alert">{flow.error}</p>}
     <PagingBar form={form} page={page} busy={busy} run={() => void run(form.build())} next={next} />
+    {flow.error && <p className="err" role="alert">{flow.error}</p>}
     {error && <p className="err" role="alert">{error}</p>}
     {store.history.length > 0 && <details><summary>최근 질의 ({store.history.length})</summary>{store.history.map((request, index) => <button key={index} className="btn small tone-secondary" onClick={() => void run(request)}>{request.kind} {index + 1}</button>)}</details>}
-    {page && <><p>Count {page.count} · ScannedCount {page.scannedCount} · 소비 {page.consumed.toFixed(2)} RCU · 누적 {consumed.toFixed(2)} RCU</p>
-      <details><summary>{t.REQUEST}</summary><pre>{JSON.stringify(page.request.params, null, 2)}</pre><pre>{page.request.cli}</pre><button className="btn small tone-secondary" onClick={() => void desktop.copy(page.request.cli)}>CLI 복사</button></details></>}
-    <ResultsTable table={table} items={store.items} columns={columns} onError={setError}
+    {page && <div className="ddb-items-summary"><p>{t.pageSummary(page.count, page.scannedCount, page.consumed.toFixed(2), consumed.toFixed(2))}</p>
+      <details><summary>{t.REQUEST}</summary><pre>{JSON.stringify(page.request.params, null, 2)}</pre><pre>{page.request.cli}</pre><button className="btn small tone-secondary" onClick={() => void desktop.copy(page.request.cli)}>CLI 복사</button></details></div>}
+    <ResultsTable table={table} items={store.items} columns={columns} onError={setError} onCreate={create}
       onEdit={item => setEditor({ item, creating: false, duplicate: false })}
       onDuplicate={item => setEditor({ item, creating: true, duplicate: true })}
       onDelete={items => begin({ kind: "deleteItems", items })} />

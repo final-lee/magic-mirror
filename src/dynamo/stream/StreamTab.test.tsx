@@ -146,7 +146,7 @@ describe("실시간 레코드", () => {
 
     await flush(POLL_INTERVAL_MS);
     await flush(POLL_INTERVAL_MS);
-    expect(rows()).toEqual(['{"pk":{"S":"order#2"}}', '{"pk":{"S":"order#1"}}']);
+    expect(rows()).toEqual(["pk=order#2", "pk=order#1"]);
   });
 
   it("지금부터를 기본으로 읽고, 24시간 전부터를 고르면 많이 읽을 수 있다고 안내한다", async () => {
@@ -195,7 +195,7 @@ describe("실시간 레코드", () => {
     expect(screen.getByRole("button", { name: "삭제" })).toHaveAttribute("aria-pressed", "false");
 
     fireEvent.change(screen.getByLabelText("레코드 필터"), { target: { value: "shipped" } });
-    expect(rows()).toEqual(['{"pk":{"S":"order#3"}}']);
+    expect(rows()).toEqual(["pk=order#3"]);
   });
 
   it("레코드를 펼치면 바뀐 속성을 이전·새 이미지로 맞대 보이고, 이미지가 없으면 그렇게 말한다", async () => {
@@ -212,10 +212,10 @@ describe("실시간 레코드", () => {
     expect(within(keysOnly).getByText("이미지 없음")).toBeInTheDocument();
     const changed = within(withImages).getByText("status").closest("tr")!;
     const unchanged = within(withImages).getByText("id").closest("tr")!;
-    expect(changed).toHaveClass("ddb-stream-changed");
-    expect(unchanged).not.toHaveClass("ddb-stream-changed");
-    expect(within(changed).getByText('{"S":"NEW"}')).toBeInTheDocument();
-    expect(within(changed).getByText('{"S":"PAID"}')).toBeInTheDocument();
+    expect(changed).toHaveClass("ddb-changed");
+    expect(unchanged).not.toHaveClass("ddb-changed");
+    expect(within(changed).getByText("NEW")).toBeInTheDocument();
+    expect(within(changed).getByText("PAID")).toBeInTheDocument();
   });
 
   it("새 레코드가 와도 펼쳐 둔 레코드는 그대로 펼쳐져 있다", async () => {

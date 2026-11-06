@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fromPlain, itemSize, plainItem, plainValue, valueSize } from "./value";
+import { fromPlain, itemSize, keyText, orderedNames, plainItem, plainText, plainValue, valueSize } from "./value";
 
 describe("DynamoDB values", () => {
   it("keeps unsafe numbers and binary or set representations without losing data", () => {
@@ -28,5 +28,22 @@ describe("DynamoDB values", () => {
     expect(valueSize({ L: [{ S: "x" }] })).toBe(5);
     expect(valueSize({ M: { a: { BOOL: true } } })).toBe(6);
     expect(valueSize({ N: "1e20" })).toBe(valueSize({ N: "1" }));
+  });
+});
+
+describe("item display helpers", () => {
+  it("shows keys as plain name=value pairs", () => {
+    expect(keyText({ PK: { S: "SMOKE#1" }, SK: { S: "META" } })).toBe("PK=SMOKE#1 · SK=META");
+  });
+
+  it("writes maps and lists as plain JSON but scalars as their value", () => {
+    expect(plainText({ S: "x" })).toBe("x");
+    expect(plainText({ N: "2" })).toBe("2");
+    expect(plainText({ M: { a: { N: "1" } } })).toBe('{"a":1}');
+  });
+
+  it("orders key attributes first and the rest alphabetically", () => {
+    const item = { type: { S: "a" }, SK: { S: "b" }, email: { S: "c" }, PK: { S: "d" } };
+    expect(orderedNames(item, ["PK", "SK"])).toEqual(["PK", "SK", "email", "type"]);
   });
 });

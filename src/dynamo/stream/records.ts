@@ -1,4 +1,5 @@
 import { fuzzyKeep } from "../../lib/fuzzy";
+import { diffImages, type AttributeChange } from "../items/diff";
 import type { StreamEvent, StreamImage, StreamRecord } from "./types";
 
 /** 메모리에 두는 레코드 수. 넘으면 오래된 것부터 버린다 */
@@ -25,23 +26,7 @@ export function toggleKind(kinds: readonly string[], kind: string): string[] {
   return kinds.includes(kind) ? kinds.filter((k) => k !== kind) : [...kinds, kind];
 }
 
-export interface AttributeChange {
-  name: string;
-  /** 이전 이미지의 값. 이미지에 속성이 없으면 undefined */
-  before: unknown;
-  after: unknown;
-  changed: boolean;
-}
-
-/** 이전·새 이미지를 속성 이름 순으로 맞대 보인다. 한쪽에만 있거나 값이 다르면 바뀐 것이다. 두 이미지가 모두 없으면(KEYS_ONLY) 빈 목록 */
+/** 이전·새 이미지를 속성 이름 순으로 맞댄다. 두 이미지가 모두 없으면(KEYS_ONLY) 빈 목록 */
 export function attributeChanges(record: StreamRecord): AttributeChange[] {
-  const before = record.oldImage ?? {};
-  const after = record.newImage ?? {};
-  const names = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort();
-  return names.map((name) => ({
-    name,
-    before: before[name],
-    after: after[name],
-    changed: JSON.stringify(before[name]) !== JSON.stringify(after[name]),
-  }));
+  return diffImages(record.oldImage, record.newImage);
 }

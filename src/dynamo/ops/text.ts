@@ -1,3 +1,5 @@
+import { OFF, ON, statusLabel, UNREAD } from "../text";
+
 export const SETTINGS = "테이블 설정";
 export const TTL = "TTL";
 export const PITR = "특정 시점 복구(PITR)";
@@ -32,3 +34,17 @@ export const WCU = "쓰기 용량(WCU)";
 export const ON_DEMAND = "온디맨드";
 export const PROVISIONED = "프로비저닝";
 export const READ_AGAIN = "다시 읽기";
+export const STATUS_WORD: Record<string, string> = {
+  ENABLED: ON,
+  DISABLED: OFF,
+  ENABLING: "켜는 중",
+  DISABLING: "끄는 중",
+  FAILED: "실패",
+  AVAILABLE: "사용할 수 있음",
+  DELETED: "삭제됨",
+  IN_PROGRESS: "진행 중",
+  COMPLETED: "완료",
+};
+/** AWS가 주는 상태 낱말을 한국어로. 읽지 못했으면(null) "읽지 못했어요" */
+export const statusText = (status: string | null | undefined) =>
+  status == null ? UNREAD : (STATUS_WORD[status] ?? statusLabel(status));

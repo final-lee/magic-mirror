@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { gsi, table } from "../fixtures";
 import type { Item } from "../items/types";
-import { analyze, type DesignReport } from "./design";
+import { analyze, keyShape, sharedKeyShape, type DesignReport } from "./design";
 
 const diagnostic = (report: DesignReport, id: string) => report.diagnostics.find(item => item.id === id);
 
@@ -69,5 +69,56 @@ describe("design analysis", () => {
     const items = ["a", "a", "b", "c", "d", "e", "f", "g", "h", "i"].map(id => ({ id: { S: id } }));
     expect(diagnostic(analyze(db, items), "hotKey")?.count).toBe(1);
     expect(diagnostic(analyze(db, [...items, { id: { S: "j" } }]), "hotKey")).toBeUndefined();
+  });
+});
+
+describe("key shapes", () => {
+  it("keeps constant segments literal and masks variable ones", () => {
+    expect(keyShape("PROFILE")).toBe("PROFILE");
+    expect(keyShape("META")).toBe("META");
+    expect(keyShape("USER#u003")).toBe("USER#<id>");
+    expect(keyShape("ORDER#2026-10-20#881ed1")).toBe("ORDER#<date>#<id>");
+    expect(keyShape("acme")).toBe("<id>");
+    expect(keyShape("01ARZ3NDEKTSV4RRFFQ69G5FAV")).toBe("<ulid>");
+  });
+
+  it("masks only the segments that differ between values", () => {
+    expect(sharedKeyShape(["PROFILE", "PROFILE"])).toBe("PROFILE");
+    expect(sharedKeyShape(["STATUS#SHIPPED", "STATUS#PAID"])).toBe("STATUS#<id>");
+    expect(sharedKeyShape([])).toBe("");
+  });
+});
+
+describe("design access patterns", () => {
+  const db = table("sample", { keys: { pk: { name: "PK", type: "S" }, sk: { name: "SK", type: "S" } } });
+  const items: Item[] = [
+    { PK: { S: "USER#u1" }, SK: { S: "PROFILE" }, type: { S: "User" } },
+    { PK: { S: "USER#u2" }, SK: { S: "PROFILE" }, type: { S: "User" } },
+    { PK: { S: "USER#u1" }, SK: { S: "ORDER#2026-10-20#a" }, type: { S: "Order" } },
+  ];
+
+  it("describes a constant sort key as a single-item get with its literal value", () => {
+    const user = analyze(db, items).entities.find(entity => entity.name === "User")!;
+    expect(user.skShape).toBe("PROFILE");
+    const pattern = analyze(db, items).patterns.find(item => item.entity === "User")!;
+    expect(pattern).toMatchObject({ shape: "PK = USER#<id>, SK = PROFILE", single: true, pk: "USER#u1", skEquals: "PROFILE" });
+  });
+
+  it("describes a prefixed sort key as a query by shape and keeps a sample value for prefill", () => {
+    const pattern = analyze(db, items).patterns.find(item => item.entity === "Order")!;
+    expect(pattern).toMatchObject({ shape: "PK = USER#<id>, SK begins_with ORDER#", single: false, pk: "USER#u1", skPrefix: "ORDER#" });
+  });
+});
+
+describe("design diagnostics", () => {
+  it("words diagnostics with the count and ratio of the sample", () => {
+    const db = table("sample", { ttl: { status: "ENABLED", attribute: "ttl" } });
+    const items: Item[] = [
+      { id: { S: "a" }, ttl: { N: "1" } },
+      { id: { S: "b" } },
+      { id: { S: "c" } },
+      { id: { S: "d" } },
+    ];
+    expect(diagnostic(analyze(db, items, 0), "ttlMissing")?.summary).toBe("샘플 4개 중 3개(75%)에 TTL 속성이 없어요");
   });
 });

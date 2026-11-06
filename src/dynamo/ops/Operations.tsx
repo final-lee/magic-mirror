@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { errorMessage } from "../../api/errors";
+import { formatDateTime } from "../../iam/format";
 import type { DetailContext } from "../TableDetail";
 import { dynamoApi } from "../api";
 import { changeApi } from "../change/api";
 import { useDynamoChange, type DynamoChangeFlow } from "../change/ChangeFlow";
 import { analyze } from "../design/design";
+import { classLabel, OFF, ON, pitrOn, streamOn, ttlOn } from "../text";
 import { tableStoreKey, useItems } from "../items/store";
 import { opsApi } from "./api";
 import * as t from "./text";
@@ -45,28 +47,28 @@ function Settings({ profile, region, table, flow }: SectionProps) {
   function changeTtl() {
     const warnings = analyze({ ...table, ttl: { status: "ENABLED", attribute } }, items)
       .diagnostics.filter(item => item.id === "ttlMillis" || item.id === "ttlNotNumber")
-      .map(item => `${item.count}개: ${item.detail}`);
+      .map(item => item.summary);
     void flow.begin({ kind: "ttl", enabled: table.ttl?.status !== "ENABLED", attribute }, warnings);
   }
 
   return <>
     <div className="ddb-ops-row">
-      <strong>{t.TTL}</strong><span>{table.ttl?.status ?? "?"}</span>
+      <strong>{t.TTL}</strong><span className="ddb-ops-state">{table.ttl?.status === "ENABLED" ? ttlOn(table.ttl.attribute) : t.statusText(table.ttl?.status)}</span>
       <label>{t.ATTR}<input value={attribute} onChange={event => setAttribute(event.target.value)} /></label>
       <button className="btn small tone-warn" disabled={busy || !table.ttl || !attribute} onClick={changeTtl}>{table.ttl?.status === "ENABLED" ? t.DISABLE : t.ENABLE}</button>
     </div>
     <div className="ddb-ops-row">
-      <strong>{t.PITR}</strong><span>{table.pitr?.status ?? "?"}</span>
+      <strong>{t.PITR}</strong><span className="ddb-ops-state">{table.pitr?.status === "ENABLED" ? pitrOn(table.pitr.days) : t.statusText(table.pitr?.status)}</span>
       <label>{t.DAYS}<input type="number" min={1} max={35} value={days} onChange={event => setDays(Number(event.target.value))} /></label>
       <button className="btn small tone-warn" disabled={busy || !table.pitr} onClick={() => void flow.begin({ kind: "pitr", enabled: table.pitr?.status !== "ENABLED", days })}>{table.pitr?.status === "ENABLED" ? t.DISABLE : t.ENABLE}</button>
       <button className="btn small tone-warn" disabled={busy || table.pitr?.status !== "ENABLED"} onClick={() => void flow.begin({ kind: "pitr", enabled: true, days })}>{t.CHANGE}</button>
     </div>
     <div className="ddb-ops-row">
-      <strong>{t.PROTECTION}</strong><span>{table.deletionProtection ? "켜짐" : "꺼짐"}</span>
+      <strong>{t.PROTECTION}</strong><span className="ddb-ops-state">{table.deletionProtection ? ON : OFF}</span>
       <button className="btn small tone-warn" disabled={busy} onClick={() => void flow.begin({ kind: "deletionProtection", enabled: !table.deletionProtection })}>{table.deletionProtection ? t.DISABLE : t.ENABLE}</button>
     </div>
     <div className="ddb-ops-row">
-      <strong>{t.STREAM}</strong><span>{table.stream?.viewType ?? "꺼짐"}</span>
+      <strong>{t.STREAM}</strong><span className="ddb-ops-state">{table.stream ? streamOn(table.stream.viewType) : OFF}</span>
       <select aria-label={t.STREAM} value={viewType} onChange={event => setViewType(event.target.value)}>
         {["KEYS_ONLY", "NEW_IMAGE", "OLD_IMAGE", "NEW_AND_OLD_IMAGES"].map(view => <option key={view}>{view}</option>)}
       </select>
@@ -74,7 +76,7 @@ function Settings({ profile, region, table, flow }: SectionProps) {
     </div>
     <div className="ddb-ops-row">
       <strong>{t.CLASS}</strong>
-      <select aria-label={t.CLASS} value={tableClass} onChange={event => setTableClass(event.target.value)}><option>STANDARD</option><option>STANDARD_INFREQUENT_ACCESS</option></select>
+      <select aria-label={t.CLASS} value={tableClass} onChange={event => setTableClass(event.target.value)}><option value="STANDARD">{classLabel("STANDARD")}</option><option value="STANDARD_INFREQUENT_ACCESS">{classLabel("STANDARD_INFREQUENT_ACCESS")}</option></select>
       <button className="btn small tone-warn" disabled={busy || table.class === tableClass} onClick={() => void flow.begin({ kind: "tableClass", class: tableClass })}>{t.CHANGE}</button>
     </div>
     <div className="ddb-ops-row">
@@ -91,7 +93,7 @@ function Settings({ profile, region, table, flow }: SectionProps) {
       <button className="btn small tone-warn" disabled={busy} onClick={() => void flow.begin({ kind: "billing", mode, read: mode === "provisioned" ? read : null, write: mode === "provisioned" ? write : null, indexes: mode === "provisioned" ? indexes : [] })}>{t.CHANGE}</button>
     </div>
     <div className="ddb-ops-row">
-      <strong>{t.INSIGHTS}</strong><span>{table.contributorInsights ?? "?"}</span>
+      <strong>{t.INSIGHTS}</strong><span className="ddb-ops-state">{t.statusText(table.contributorInsights)}</span>
       <button className="btn small tone-warn" disabled={busy || !table.contributorInsights} onClick={() => void flow.begin({ kind: "contributorInsights", enabled: table.contributorInsights !== "ENABLED" })}>{table.contributorInsights === "ENABLED" ? t.DISABLE : t.ENABLE}</button>
     </div>
   </>;
@@ -117,7 +119,7 @@ function Backups({ profile, region, table, active, flow, restoreTarget, setResto
     {backups.isError && <p className="err">{errorMessage(backups.error)}</p>}
     {backups.data?.length === 0 && <p className="dim">{t.NO_BACKUPS}</p>}
     {backups.data?.map(backup => <div className="ddb-ops-row" key={backup.arn}>
-      <strong>{backup.name}</strong><span>{backup.status} {backup.createdAt}</span>
+      <strong>{backup.name}</strong><span>{t.statusText(backup.status)} {formatDateTime(backup.createdAt)}</span>
       <label>{t.TARGET}<input value={restoreTarget} onChange={event => setRestoreTarget(event.target.value)} /></label>
       <button className="btn small tone-primary" disabled={flow.loading || !restoreTarget || backup.status !== "AVAILABLE"} onClick={() => void flow.begin({ kind: "restoreBackup", arn: backup.arn, target: restoreTarget })}>{t.RESTORE}</button>
       <button className="btn small tone-danger" disabled={flow.loading} onClick={() => void flow.begin({ kind: "deleteBackup", arn: backup.arn })}>{t.DELETE}</button>
@@ -166,7 +168,7 @@ function Exports({ profile, region, table, active, flow }: SectionProps) {
     {exports.isError && <p className="err">{errorMessage(exports.error)}</p>}
     {exports.data?.length === 0 && <p className="dim">{t.EMPTY_EXPORTS}</p>}
     {exports.data?.map(item => <div className="ddb-ops-row" key={item.arn}>
-      <span>{item.status} {item.createdAt} {item.size != null && `${item.size} B`}</span>
+      <span>{t.statusText(item.status)} {formatDateTime(item.createdAt)} {item.size != null && `${item.size} B`}</span>
       <code>s3://{item.bucket}/{item.prefix}</code>{item.error && <span className="err">{item.error}</span>}
     </div>)}
   </>;
@@ -180,5 +182,5 @@ function RestoreStatus({ profile, region, name, active }: { profile: string; reg
     retry: false,
     refetchInterval: query => active && query.state.data && query.state.data.status !== "ACTIVE" ? 10000 : false,
   });
-  return <div className="ddb-ops-row"><strong>{name}</strong><span>{query.data?.status ?? (query.isError ? errorMessage(query.error) : t.RESTORE_LOADING)}</span></div>;
+  return <div className="ddb-ops-row"><strong>{name}</strong><span>{query.data ? t.statusText(query.data.status) : (query.isError ? errorMessage(query.error) : t.RESTORE_LOADING)}</span></div>;
 }
