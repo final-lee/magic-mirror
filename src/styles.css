@@ -2625,3 +2625,105 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .argo-bar-actions { display: flex; flex-direction: column; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--border-input); }
 .argo-bar-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .argo-bar-label { font-size: 11px; min-width: 48px; margin-right: 2px; }
+
+/* SNS 주제 탭. 메뉴·이동 줄은 IAM 작업 공간의 것(.iam-nav, .iam-bar), 칩은 .kv-chip을 그대로 쓴다. */
+.sns-tab { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.sns-tab .link:hover { text-decoration: underline; }
+.sns-top { display: flex; align-items: center; gap: 14px; padding: 6px 14px; min-height: 40px; background: var(--tone-232325); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.sns-ident-name { font-size: 14px; font-weight: 600; }
+.sns-top-end { margin-left: auto; display: flex; align-items: center; gap: 10px; flex: none; }
+.sns-partial { padding: 4px 14px; font-size: 11px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.sns-main { flex: 1; display: flex; min-width: 0; min-height: 0; }
+.sns-pane { flex: 1; min-height: 0; overflow: auto; padding: 12px 16px; user-select: text; }
+.sns-pane-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.sns-pane-tools { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
+.sns-ident { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.sns-section { margin-bottom: 4px; }
+.sns-heading { margin: 16px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }
+.sns-sentences { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.sns-note { margin: 4px 0 8px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.sns-error { color: var(--red); }
+
+/* 구독 표 */
+.sns-screen { min-height: 0; }
+.sns-screen.tailscale-diagnosis { max-width: none; overflow: auto; }
+.sns-diagnosis-card { margin: 12px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; }
+.sns-diagnosis-card h3 { margin: 0 0 8px; overflow-wrap: anywhere; }
+.sns-screen details summary { cursor: pointer; color: var(--dim); }
+.sns-bar { display: flex; align-items: center; gap: 16px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 12px; flex-wrap: wrap; }
+.sns-scroll { flex: 1; min-height: 0; overflow: auto; user-select: text; }
+.sns-table td { white-space: normal; max-width: none; vertical-align: top; overflow-wrap: anywhere; }
+.sns-table td.sns-nowrap, .sns-table th { white-space: nowrap; }
+.sns-table th.nosort { cursor: default; }
+.sns-table th:first-child, .sns-table td:first-child { padding-left: 16px; }
+.sns-pane .sns-table th { top: -12px; }
+.sns-row { cursor: pointer; }
+.sns-row:hover td { background: var(--hover); }
+.sns-endpoint { text-align: left; font: inherit; overflow-wrap: anywhere; }
+.sns-where { margin-left: 8px; font-size: 11px; }
+.sns-state { display: inline-block; padding: 0 7px; line-height: 17px; border-radius: 4px; font-size: 11px; background: var(--neutral-alpha-12); color: var(--tone-c8c8cd); white-space: nowrap; }
+.sns-state.confirmed { background: var(--green-soft); color: var(--green-text); }
+.sns-state.pending { background: var(--yellow-soft); color: var(--yellow); }
+.sns-warn { display: inline-block; margin-left: 6px; width: 15px; line-height: 15px; text-align: center; border-radius: 50%; font-size: 10px; font-weight: 700; background: var(--yellow-soft); color: var(--yellow); cursor: help; }
+
+/* 필터·배달 정책 JSON */
+.sns-json { margin: 0 0 8px; max-height: none; }
+.sns-json-key { color: var(--syntax-property); }
+.sns-json-str { color: var(--syntax-string); }
+.sns-json-num { color: var(--syntax-number); }
+.sns-json-lit { color: var(--syntax-keyword); }
+
+/* SQS 큐·Lambda 함수 상세의 `이 리소스를 구독한 주제` */
+.sns-subscribed-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.sns-subscribed-list li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.sns-subscribed-list .mono { overflow-wrap: anywhere; }
+
+/* SNS 정책·점검, 계정 개요 */
+.sns-level { display: inline-block; padding: 0 7px; line-height: 17px; border-radius: 4px; font-size: 11px; font-weight: 600; white-space: nowrap; background: var(--neutral-alpha-12); color: var(--tone-c8c8cd); }
+.sns-level.high, .sns-level.error, .sns-level.securityWarning { background: var(--red-soft); color: var(--red); }
+.sns-level.medium, .sns-level.warning { background: var(--yellow-soft); color: var(--yellow); }
+.sns-level.low, .sns-level.suggestion { background: var(--accent-soft); color: var(--accent); }
+.sns-reach { display: inline-block; padding: 0 7px; line-height: 17px; border-radius: 4px; font-size: 11px; white-space: nowrap; background: var(--neutral-alpha-12); color: var(--tone-c8c8cd); }
+.sns-reach.public, .sns-reach.deny { background: var(--red-soft); color: var(--red); }
+.sns-reach.crossAccount { background: var(--yellow-soft); color: var(--yellow); }
+.sns-reach.sameAccount { background: var(--green-soft); color: var(--green-text); }
+.sns-findings, .sns-statements, .sns-checks { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.sns-finding-head, .sns-statement { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; min-width: 0; overflow-wrap: anywhere; line-height: 1.5; }
+.sns-finding-items { margin: 4px 0 0; padding: 0 0 0 18px; font-size: 12px; display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.sns-check { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sns-check label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.sns-subheading { margin: 12px 0 6px; font-size: 12px; font-weight: 600; }
+.sns-level-count { font-weight: 600; }
+.sns-level-count.high { color: var(--red); }
+.sns-level-count.medium { color: var(--yellow); }
+.typ.sns-open { color: var(--text); font-weight: 600; }
+.typ.sns-open:hover { color: var(--foreground-strong); }
+
+/* SNS 변경 대화창(S5): 틀은 .cp(변경 미리보기)를 그대로 쓰고 여기는 SNS에만 있는 조각만 둔다 */
+.sns-plan-topic { margin: 0 0 8px; font-size: 11px; overflow-wrap: anywhere; }
+.sns-plan-failed { margin: 8px 0 0; color: var(--red); }
+.sns-body { margin: 0; }
+.sns-fields, .sns-impact, .sns-done-calls { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+.sns-fields > li { border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+.sns-before-after { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; margin-top: 4px; align-items: baseline; }
+.sns-before-after pre { margin: 0; }
+.sns-diff { margin: 6px 0 0; padding: 6px 0; max-height: 40vh; overflow: auto; background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; font-size: 11px; user-select: text; }
+.sns-diff > div { padding: 0 10px; white-space: pre-wrap; word-break: break-all; }
+.sns-diff-add { background: var(--green-soft); color: var(--green-text); }
+.sns-diff-del { background: var(--red-soft); color: var(--tone-ff6b62); }
+.sns-diff-head, .sns-diff-hunk { color: var(--dim); }
+.sns-impact > li { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; overflow-wrap: anywhere; }
+.sns-impact-sub { font-size: 11px; color: var(--dim); }
+.sns-impact-before { color: var(--tone-ff6b62); }
+.sns-impact-after { color: var(--green-text); }
+.sns-done-calls > li { overflow-wrap: anywhere; }
+
+/* 진단의 고치기 단추 줄, DLQ 고르기, 변경 기록 */
+.sns-fix-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.sns-dlq-sub { margin: 0 0 8px; overflow-wrap: anywhere; }
+.sns-dlq-list { max-height: 40vh; }
+.sns-dlq-opt { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.sns-dlq-type { margin-left: auto; font-size: 11px; }
+.sns-log-head { display: flex; justify-content: flex-end; padding: 6px 0; }
+.sns-log-calls { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 11px; overflow-wrap: anywhere; }
+.sns-log-why { margin-top: 4px; font-size: 11px; white-space: normal; }

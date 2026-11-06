@@ -57,6 +57,19 @@ fn dimensions_come_from_the_part_of_the_row_cloudwatch_names_and_the_region_wher
 }
 
 #[test]
+fn sns_filter_and_dlq_metrics_are_counts() {
+    let sns = plan("sns", "topics", &row("arn:aws:sns:r:1:alerts", "alerts", &[]));
+    for name in [
+        "NumberOfNotificationsFilteredOut", "NumberOfNotificationsFilteredOut-InvalidAttributes",
+        "NumberOfNotificationsFilteredOut-InvalidMessageBody", "NumberOfNotificationsFilteredOut-NoMessageAttributes",
+        "NumberOfNotificationsRedrivenToDlq", "NumberOfNotificationsFailedToRedriveToDlq",
+    ] {
+        let metric = sns.metrics.iter().find(|m| m.name == name).unwrap();
+        assert_eq!((metric.stat, metric.unit), ("Sum", super::catalog::MetricUnit::Count));
+    }
+}
+
+#[test]
 fn a_query_per_metric_and_line_with_the_metric_s_own_dimensions_added() {
     let s3 = plan("s3", "buckets", &row("assets", "assets", &[("region", "us-west-2")]));
     let q = queries(&s3, 86_400);

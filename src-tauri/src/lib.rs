@@ -38,6 +38,8 @@ mod pg;
 mod pg_commands;
 mod resource_index;
 mod settings;
+mod sns;
+mod sns_commands;
 mod tailscale;
 mod tailscale_commands;
 mod topology;
@@ -85,6 +87,20 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            sns_commands::sns_topic,
+            sns_commands::sns_subscriptions_all,
+            sns_commands::sns_subscribed_topics,
+            sns_commands::sns_diagnose,
+            sns_commands::sns_publishers,
+            sns_commands::sns_topic_policy,
+            sns_commands::sns_check_public_access,
+            sns_commands::sns_account_overview,
+            sns_commands::sns_messaging,
+            sns_commands::sns_filter_test,
+            sns_commands::sns_plan,
+            sns_commands::sns_apply,
+            sns_commands::sns_changes,
+            sns_commands::sns_undo_plan,
             tailscale_commands::tailscale_node,
             tailscale_commands::tailscale_diagnose,
             tailscale_commands::tailscale_diagnostic_tool,

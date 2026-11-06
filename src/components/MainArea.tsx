@@ -3,6 +3,8 @@ import type { S3Location } from "../lib/s3";
 import type { K8sTarget } from "../k8s/types";
 import type { KvTarget } from "../kv/types";
 import type { PgTarget } from "../pg/types";
+import type { SnsRoute } from "../sns/route";
+import type { SnsTopicRef } from "../sns/targets";
 import { ResourceArea, type ResourceFocus } from "./ResourceArea";
 
 interface Props {
@@ -17,12 +19,13 @@ interface Props {
   onOpenPg?: (target: PgTarget) => void;
   onOpenK8s?: (target: K8sTarget) => void;
   onOpenKv?: (target: KvTarget) => void;
+  onOpenSns?: (target: SnsTopicRef, route?: SnsRoute) => void;
   onRefresh: () => void;
   active: boolean;
   focus?: ResourceFocus | null;
 }
 
-export function MainArea({ services, selection, profile, region, account, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onOpenKv, onRefresh, active, focus = null }: Props) {
+export function MainArea({ services, selection, profile, region, account, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onOpenKv, onOpenSns, onRefresh, active, focus = null }: Props) {
   const service = services.find((s) => s.id === selection?.service);
   const type = service?.types.find((t) => t.id === selection?.type);
   if (!profile || !service || !type) {
@@ -45,6 +48,7 @@ export function MainArea({ services, selection, profile, region, account, onOpen
       onOpenPg={onOpenPg}
       onOpenK8s={onOpenK8s}
       onOpenKv={onOpenKv}
+      onOpenSns={onOpenSns}
       onRefresh={onRefresh}
       active={active}
       focus={focus}

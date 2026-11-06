@@ -150,6 +150,8 @@ export interface Settings {
   k8sLaneWidths?: K8sLaneWidths;
   /** EKS 보안 점검: 끈 점검 항목과 시스템 네임스페이스 포함 여부. 비어 있으면 모두 켜고 시스템 네임스페이스는 뺀다 */
   k8sSecurityChecks?: K8sSecurityChecks;
+  /** SNS 점검: 끈 점검 항목. 비어 있으면 모두 켠다 */
+  snsChecks?: SnsChecks;
   k8sPlugins?: K8sPlugin[];
   /** ArgoCD API 서버 목록(이름과 주소). 토큰은 넣지 않는다(키체인에 있다). */
   argocdServers?: ArgocdServer[];
@@ -171,6 +173,11 @@ export interface Settings {
 export interface K8sSecurityChecks {
   disabled: string[];
   includeSystem: boolean;
+}
+
+/** SNS 점검 설정. disabled는 끈 점검 항목의 id(`publicPolicy`, `httpEndpoint` …). 모든 주제에 같이 쓴다 */
+export interface SnsChecks {
+  disabled: string[];
 }
 
 /** 메뉴(1열)·종류(2열)는 px, 상세(4열)는 목록(3열) 너비에 대한 % */

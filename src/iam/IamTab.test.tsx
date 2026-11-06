@@ -411,6 +411,12 @@ describe("opening a target (focus)", () => {
     expect(await screen.findByRole("heading", { name: "dev-team" })).toBeInTheDocument();
   });
 
+  test("a preset route opens that screen with the search filled in and runs it", async () => {
+    setup({ preset: { view: "whoCan", search: { action: "sns:Publish", resource: "arn:aws:sns:ap-northeast-2:123456789012:orders" } }, nonce: 1 });
+    expect(await screen.findByRole("combobox", { name: "작업" })).toHaveValue("sns:Publish");
+    await waitFor(() => expect(m.whoCan).toHaveBeenCalledWith("prod", "sns:Publish", "arn:aws:sns:ap-northeast-2:123456789012:orders"));
+  });
+
   test("focusing again with the same nonce does not navigate again", async () => {
     const { update } = setup({ focus: bob.arn, nonce: 1 });
     await screen.findByRole("heading", { name: "bob" });

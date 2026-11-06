@@ -45,6 +45,13 @@ import { closeKv, refreshKv } from "./kv/queries";
 import { kvTabId } from "./kv/targets";
 import { tabTitle as kvTabTitle } from "./kv/text";
 import type { KvTarget } from "./kv/types";
+import { SnsTab } from "./sns/SnsTab";
+import { forgetSns, forgetSnsAccount, refreshSns, refreshSnsAccount, snsKeys } from "./sns/queries";
+import type { SnsRoute } from "./sns/route";
+import { AccountTab } from "./sns/AccountTab";
+import { ACCOUNT_TITLE } from "./sns/accessText";
+import { SNS_ACCOUNT_TAB, snsTabId, snsTabTitle, type SnsOpen, type SnsTopicRef } from "./sns/targets";
+import type { IamRoute } from "./iam/route";
 import { getVersion } from "@tauri-apps/api/app";
 import { VpcMapTab } from "./vpcmap/VpcMapTab";
 import type { VpcHighlight } from "./vpcmap/types";
@@ -91,8 +98,13 @@ export default function App() {
   const k8sOpenNonce = useRef(0);
   // 대상(프로필·리전·종류·식별자)마다 탭 하나(ElastiCache의 Valkey·Redis OSS). 탭을 닫거나 프로필을 바꾸면 그 대상의 연결도 닫는다.
   const [kvTabs, setKvTabs] = useState<{ id: string; target: KvTarget }[]>([]);
+  // 주제마다 탭 하나(id는 프로필·리전·주제 ARN). open은 다른 화면(구독 행 더블클릭)이 탭 안의 화면을 부탁할 때만 있다. 읽기만 해서 닫을 연결은 없고, 닫거나 프로필을 바꾸면 읽어 둔 스냅샷만 버린다.
+  const [snsTabs, setSnsTabs] = useState<{ id: string; target: SnsTopicRef; open?: SnsOpen }[]>([]);
+  const snsOpenNonce = useRef(0);
+  // SNS 계정 개요 탭도 하나뿐이다(id "sns-account"). 열 때 고른 리전을 기억한다. 프로필을 바꾸면 닫는다.
+  const [snsAccountTab, setSnsAccountTab] = useState<{ region: string } | null>(null);
   // IAM 탭은 하나뿐이다(id "iam"). focus는 리소스 목록에서 넘어온 대상 ARN, nonce는 열 때마다 올라가 같은 대상도 다시 이동시킨다.
-  const [iamTab, setIamTab] = useState<{ focus: string | null; nonce: number } | null>(null);
+  const [iamTab, setIamTab] = useState<{ focus: string | null; preset: IamRoute | null; nonce: number } | null>(null);
   const iamOverview = useIamOverview(iamTab ? profile : null);
   // 비용 탭도 프로필마다 하나다(id "cost"). 리전과 상관없다.
   const [costTab, setCostTab] = useState(false);
@@ -149,7 +161,13 @@ export default function App() {
     // 보고 있는 Valkey·Redis 탭은 연결부터 다시 읽는다(보이지 않는 탭은 그대로 둔다)
     const kv = kvTabs.find((t) => t.id === activeTab);
     if (kv) void refreshKv(qc, kv.target);
-  }, [qc, profile, pgTabs, k8sTabs, kvTabs, activeTab]);
+    // 보고 있는 SNS 주제 탭은 스냅샷을 다시 읽는다. SQS 큐·Lambda 함수 상세의 `이 리소스를 구독한 주제`도 계정의 구독 목록이라 함께 다시 읽는다
+    const sns = snsTabs.find((t) => t.id === activeTab);
+    if (sns) void refreshSns(qc, sns.target);
+    void qc.invalidateQueries({ queryKey: snsKeys.subscribedAll(profile) });
+    // 보고 있는 SNS 계정 개요 탭은 지표 읽기(GetMetricData)에 돈이 들어서 이 탭을 보고 있을 때만 다시 읽는다
+    if (activeTab === SNS_ACCOUNT_TAB && snsAccountTab) void refreshSnsAccount(qc, profile, snsAccountTab.region);
+  }, [qc, profile, pgTabs, k8sTabs, kvTabs, snsTabs, snsAccountTab, activeTab]);
 
   // 하드 리셋: 모든 프로필·리전의 리소스 목록 캐시(메모리·디스크)를 버리고 보이는 목록을 처음부터 다시 읽는다
   const hardReset = useCallback(() => hardResetResourceCache(qc), [qc]);
@@ -222,8 +240,21 @@ export default function App() {
     setKvTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs : [...tabs, { id, target }]));
     setActiveTab(id);
   };
-  const openIam = (focus: string | null = null) => {
-    setIamTab((t) => ({ focus, nonce: (t?.nonce ?? 0) + 1 }));
+  // route가 있으면 그 탭 안에서 그 화면을 연다(이미 열린 탭이면 화면만 옮긴다)
+  const openSns = (target: SnsTopicRef, route?: SnsRoute) => {
+    const id = snsTabId(target);
+    const open = route ? { route, nonce: ++snsOpenNonce.current } : undefined;
+    setSnsTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs.map((t) => (t.id === id && open ? { ...t, open } : t)) : [...tabs, { id, target, open }]));
+    setActiveTab(id);
+  };
+  // 계정 개요 탭은 하나뿐이다. 지금 고른 리전의 것을 연다(다른 리전에서 다시 열면 그 리전으로 바뀐다).
+  const openSnsAccount = () => {
+    setSnsAccountTab({ region });
+    setActiveTab(SNS_ACCOUNT_TAB);
+  };
+  // preset은 IAM 탭 안에서 바로 갈 화면(SNS 정책 화면의 '누가 할 수 있나' 검색 등). focus보다 먼저다.
+  const openIam = (focus: string | null = null, preset: IamRoute | null = null) => {
+    setIamTab((t) => ({ focus, preset, nonce: (t?.nonce ?? 0) + 1 }));
     setActiveTab("iam");
   };
   const openCost = () => {
@@ -248,6 +279,10 @@ export default function App() {
     if (id === "argocd") setArgocdTab(false);
     if (id === "argowf") setArgowfTab(false);
     if (id === "cost") setCostTab(false);
+    if (id === SNS_ACCOUNT_TAB) {
+      if (snsAccountTab && profile) forgetSnsAccount(qc, profile, snsAccountTab.region);
+      setSnsAccountTab(null);
+    }
     const pg = pgTabs.find((t) => t.id === id);
     if (pg) void closePg(qc, pg.target);
     setPgTabs((tabs) => tabs.filter((t) => t.id !== id));
@@ -257,6 +292,9 @@ export default function App() {
     const kv = kvTabs.find((t) => t.id === id);
     if (kv) void closeKv(qc, kv.target);
     setKvTabs((tabs) => tabs.filter((t) => t.id !== id));
+    const sns = snsTabs.find((t) => t.id === id);
+    if (sns) forgetSns(qc, sns.target);
+    setSnsTabs((tabs) => tabs.filter((t) => t.id !== id));
     setVpcTabs((tabs) => tabs.filter((t) => t.id !== id));
     setExplorerTabs((tabs) => tabs.filter((t) => t.id !== id));
     setDiffTabs((tabs) => tabs.filter((t) => t.id !== id));
@@ -280,6 +318,8 @@ export default function App() {
     ...pgTabs.map((t) => ({ id: t.id, title: t.title, closable: true })),
     ...k8sTabs.map((t) => ({ id: t.id, title: tabTitle(t.target.cluster), closable: true })),
     ...kvTabs.map((t) => ({ id: t.id, title: kvTabTitle(t.target.id), closable: true })),
+    ...snsTabs.map((t) => ({ id: t.id, title: snsTabTitle(t.target.topicName), closable: true })),
+    ...(snsAccountTab ? [{ id: SNS_ACCOUNT_TAB, title: ACCOUNT_TITLE, closable: true }] : []),
     ...diffTabs.map((t) => ({ id: t.id, title: diffTitle(t.left, t.right), closable: true })),
   ];
   const diffTool: DiffTool = settings.diffTool ?? "filemerge";
@@ -303,9 +343,13 @@ export default function App() {
     setK8sTabs([]);
     kvTabs.forEach((t) => void closeKv(qc, t.target));
     setKvTabs([]);
+    snsTabs.forEach((t) => forgetSns(qc, t.target));
+    setSnsTabs([]);
     setIamTab(null);
     setCostTab(false);
-    if (activeTab.startsWith("s3:") || activeTab.startsWith("vpc:") || activeTab.startsWith("diff:") || activeTab.startsWith("pg:") || activeTab.startsWith("k8s:") || activeTab.startsWith("kv:") || activeTab === "iam" || activeTab === "cost") setActiveTab("resources");
+    if (snsAccountTab && profile) forgetSnsAccount(qc, profile, snsAccountTab.region);
+    setSnsAccountTab(null);
+    if (activeTab.startsWith("s3:") || activeTab.startsWith("vpc:") || activeTab.startsWith("diff:") || activeTab.startsWith("pg:") || activeTab.startsWith("k8s:") || activeTab.startsWith("kv:") || activeTab.startsWith("sns:") || activeTab === SNS_ACCOUNT_TAB || activeTab === "iam" || activeTab === "cost") setActiveTab("resources");
     update({ lastProfile: name, lastRegion: nextRegion });
   };
 
@@ -377,6 +421,7 @@ export default function App() {
             onTypeOrderChange={(service, keys) => update({ sidebarTypeOrder: { ...settings.sidebarTypeOrder, [service]: keys } })}
             onFavoritesChange={(favorites) => update({ favorites })}
             onOpenIam={() => openIam()}
+            onOpenSnsAccount={openSnsAccount}
             onOpenCost={openCost}
             onOpenTailscale={openTailscale}
             tailscaleActive={tailscaleShown}
@@ -397,6 +442,7 @@ export default function App() {
               onOpenPg={(target) => openPg(target, `🐘 ${target.id}`)}
               onOpenK8s={openK8s}
               onOpenKv={openKv}
+              onOpenSns={openSns}
               onRefresh={refresh}
               active={activeTab === "resources" && !tailscaleShown}
               focus={focus}
@@ -410,7 +456,7 @@ export default function App() {
         </div>
         {profile && iamTab && (
           <div className="tabpane" hidden={activeTab !== "iam"}>
-            <IamTab profile={profile} active={activeTab === "iam"} focus={iamTab.focus} nonce={iamTab.nonce} />
+            <IamTab profile={profile} active={activeTab === "iam"} focus={iamTab.focus} preset={iamTab.preset} nonce={iamTab.nonce} />
           </div>
         )}
         {profile && costTab && (
@@ -467,6 +513,16 @@ export default function App() {
             <KvTab target={t.target} active={activeTab === t.id} />
           </div>
         ))}
+        {snsTabs.map((t) => (
+          <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
+            <SnsTab target={t.target} active={activeTab === t.id} open={t.open} onOpenResource={pickResource} onOpenIam={openIam} />
+          </div>
+        ))}
+        {profile && snsAccountTab && (
+          <div className="tabpane" hidden={activeTab !== SNS_ACCOUNT_TAB}>
+            <AccountTab key={`${profile}:${snsAccountTab.region}`} profile={profile} region={snsAccountTab.region} onOpenTopic={openSns} />
+          </div>
+        )}
         {diffTabs.map((t) => (
           <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
             <DiffTab
