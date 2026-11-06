@@ -231,18 +231,24 @@ describe("queue detail", () => {
   }
 
   test("opens from a card with the counts of every state and the facts", async () => {
-    const tiles = within(await openQueue());
-    expect(m.bullQueue).toHaveBeenCalledWith(kvTarget, "bull", "emails");
-    expect(tiles.getByRole("button", { name: /대기\s*12/ })).toBeInTheDocument();
-    expect(tiles.getByRole("button", { name: /처리 중\s*3/ })).toBeInTheDocument();
-    expect(tiles.getByRole("button", { name: /실패\s*7/ })).toBeInTheDocument();
-    expect(tiles.getByRole("button", { name: /완료\s*18,420/ })).toBeInTheDocument();
-    const fact = (label: string) => screen.getByText(label, { selector: "dt" }).nextElementSibling;
-    expect(fact("반복 작업")).toHaveTextContent("2");
-    expect(fact("워커")).toHaveTextContent("3");
-    expect(fact("가장 오래 기다린 작업")).toHaveTextContent(/전$/);
-    expect(fact("다음 지연 작업")).toHaveTextContent(/뒤$/);
-    expect(within(screen.getByRole("navigation", { name: "현재 위치" })).getByText("emails")).toBeInTheDocument();
+    // "…전"·"…뒤"는 지금 시각과 비교한다: 시계를 fixture의 지금(BULL_NOW)에 맞춘다
+    vi.useFakeTimers({ toFake: ["Date"], now: BULL_NOW });
+    try {
+      const tiles = within(await openQueue());
+      expect(m.bullQueue).toHaveBeenCalledWith(kvTarget, "bull", "emails");
+      expect(tiles.getByRole("button", { name: /대기\s*12/ })).toBeInTheDocument();
+      expect(tiles.getByRole("button", { name: /처리 중\s*3/ })).toBeInTheDocument();
+      expect(tiles.getByRole("button", { name: /실패\s*7/ })).toBeInTheDocument();
+      expect(tiles.getByRole("button", { name: /완료\s*18,420/ })).toBeInTheDocument();
+      const fact = (label: string) => screen.getByText(label, { selector: "dt" }).nextElementSibling;
+      expect(fact("반복 작업")).toHaveTextContent("2");
+      expect(fact("워커")).toHaveTextContent("3");
+      expect(fact("가장 오래 기다린 작업")).toHaveTextContent(/전$/);
+      expect(fact("다음 지연 작업")).toHaveTextContent(/뒤$/);
+      expect(within(screen.getByRole("navigation", { name: "현재 위치" })).getByText("emails")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("shows the throughput, the timing percentiles with their distribution, the failure reasons and the workers", async () => {
