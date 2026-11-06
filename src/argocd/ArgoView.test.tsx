@@ -936,3 +936,18 @@ describe("remembered filters and grouping", () => {
     });
   });
 });
+
+test("matrix respects list filters and returns to the filtered list after selecting a cell", async () => {
+  await ready([
+    appRow("api-dev", { destination: "cluster-a", sync: "OutOfSync" }),
+    appRow("api-prd", { destination: "cluster-b", sync: "OutOfSync" }),
+    appRow("web-dev", { destination: "cluster-a" }),
+  ]);
+  fireEvent.click(chip(ARGO_SYNC_GROUP, "OutOfSync"));
+  fireEvent.click(screen.getByRole("button", { name: "플릿 매트릭스" }));
+  const devRow = screen.getByRole("row", { name: /^dev / });
+  fireEvent.click(within(devRow).getByRole("button"));
+  expect(screen.getByRole("button", { name: "목록", pressed: true })).toBeInTheDocument();
+  expect(names()).toEqual(["api-dev"]);
+  expect(chipN(ARGO_ENV_GROUP, "dev")).toHaveAttribute("aria-pressed", "true");
+});

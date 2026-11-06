@@ -95,13 +95,3 @@ export function timeline(events: ArgoEvent[], histories: Map<string, (ArgoHistor
   return items.sort((a, b) => a.start - b.start);
 }
 
-export function timelineLanes(items: TimelineItem[]): Map<string, TimelineItem[]> {
-  const lanes = new Map<string, TimelineItem[]>();
-  for (const item of items) {
-    const key = rowKey(item.namespace, item.app);
-    const lane = lanes.get(key) ?? [];
-    lane.push(item);
-    lanes.set(key, lane);
-  }
-  return lanes;
-}

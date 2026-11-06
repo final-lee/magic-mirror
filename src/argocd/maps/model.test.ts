@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ArgoAppRow, ArgoEvent } from "../types";
-import { appForest, matrix, normalizeAppName, timeline, timelineLanes, versions } from "./model";
+import { appForest, matrix, normalizeAppName, timeline, versions } from "./model";
 
 const app = (name: string, values: Record<string, string> = {}): ArgoAppRow => ({ name, namespace: "argocd", resourceVersion: "1", labels: {}, values: { sync: "Synced", health: "Healthy", ...values } });
 
@@ -40,6 +40,5 @@ describe("fleet maps", () => {
     const history = new Map([["argocd/api", [{ id: 1, revisions: ["xyz"], deployedAt: "2026-11-05T11:00:00Z", deployStartedAt: "2026-11-05T10:59:00Z", initiatedBy: "kim" }]]]);
     const result = timeline(events, history, now, 1);
     expect(result).toHaveLength(2); expect(result[0].failed).toBe(true); expect(result[1].revision).toBe("xyz");
-    expect(timelineLanes(result).get("argocd/api")).toHaveLength(2);
   });
 });

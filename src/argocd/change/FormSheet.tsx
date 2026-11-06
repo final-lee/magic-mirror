@@ -7,7 +7,8 @@ interface Props {
   /** 넓은 시트(diff·목록이 있는 폼) */
   wide?: boolean;
   onCancel: () => void;
-  submit: { label: string; disabled?: boolean; title?: string; onClick: () => void };
+  /** 없으면 진행 버튼 없이 취소만(안에 자기 버튼이 있는 폼) */
+  submit?: { label: string; disabled?: boolean; title?: string; onClick: () => void };
   children: ReactNode;
 }
 
@@ -31,9 +32,11 @@ export function FormSheet({ label, wide, onCancel, submit, children }: Props) {
           <button className="btn plain tone-ghost" onClick={onCancel}>
             {CHANGE_CANCEL}
           </button>
-          <button className="btn plain tone-primary" disabled={submit.disabled} title={submit.title} onClick={submit.onClick}>
-            {submit.label}
-          </button>
+          {submit && (
+            <button className="btn plain tone-primary" disabled={submit.disabled} title={submit.title} onClick={submit.onClick}>
+              {submit.label}
+            </button>
+          )}
         </div>
       </div>
     </div>

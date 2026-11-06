@@ -187,3 +187,60 @@ fn parent_instance_label_warns() {
     let app = json!({"metadata":{"resourceVersion":"1","labels":{"argocd.argoproj.io/instance":"parent"}}});
     assert!(!plan(&target(), &ArgoChange::Terminate, Some(&app), None).unwrap().warnings.is_empty());
 }
+
+fn res_ref(kind: &str, name: &str) -> Value {
+    json!({"group":"apps","version":"v1","kind":kind,"namespace":"demo","name":name,"uid":null})
+}
+
+#[test]
+fn batch_action_makes_one_call_per_resource_and_summarises_by_kind() {
+    let app = json!({"metadata":{"resourceVersion":"1"}});
+    let change = parse(json!({"kind":"resourceActionBatch","action":"restart","params":[{"name":"x","value":"1"}],"resources":[res_ref("Deployment","a"),res_ref("Deployment","b"),res_ref("StatefulSet","c")]}));
+    let p = plan(&target(), &change, Some(&app), None).unwrap();
+    assert_eq!(p.calls.len(), 3);
+    assert!(p.calls.iter().all(|c| c.verb == "POST" && c.path == "/api/v1/applications/web/resource/actions/v2"));
+    let body = p.calls[1].body.as_ref().unwrap();
+    assert_eq!((body["resourceName"].as_str(), body["action"].as_str(), body["kind"].as_str()), (Some("b"), Some("restart"), Some("Deployment")));
+    assert_eq!(body["resourceActionParameters"], json!([{"name":"x","value":"1"}]));
+    assert_eq!(p.impact, ["Deployment 2개를 재시작해요", "StatefulSet 1개를 재시작해요"]);
+    assert_eq!(p.title, "리소스 작업");
+}
+
+#[test]
+fn batch_action_uses_the_usual_confirmation_rule_and_refuses_an_empty_list() {
+    let app = json!({"metadata":{"resourceVersion":"1"}});
+    let change = parse(json!({"kind":"resourceActionBatch","action":"custom","params":[],"resources":[res_ref("Deployment","a")]}));
+    let mut prd = target();
+    prd.env = Some("prd".into());
+    let p = plan(&prd, &change, Some(&app), None).unwrap();
+    assert_eq!(p.confirm_name.as_deref(), Some("web"));
+    assert_eq!(p.impact, ["Deployment 1개에 custom 액션을 실행해요"]);
+    assert!(plan(&target(), &change, Some(&app), None).unwrap().confirm_name.is_none());
+    let empty = parse(json!({"kind":"resourceActionBatch","action":"restart","params":[],"resources":[]}));
+    assert!(plan(&target(), &empty, Some(&app), None).is_err());
+}
+
+#[tokio::test]
+async fn batch_keeps_going_after_a_failure_and_names_the_failed_resources() {
+    let app = json!({"metadata":{"resourceVersion":"1"}});
+    let change = parse(json!({"kind":"resourceActionBatch","action":"restart","params":[],"resources":[res_ref("Deployment","a"),res_ref("Deployment","bad"),res_ref("Deployment","c"),res_ref("Deployment","bad2")]}));
+    let calls = plan(&target(), &change, Some(&app), None).unwrap().calls;
+    let sent = std::sync::Mutex::new(Vec::new());
+    let send = |c: ApiCall| {
+        let name = c.body.as_ref().unwrap()["resourceName"].as_str().unwrap().to_owned();
+        sent.lock().unwrap().push(name.clone());
+        async move { if name.starts_with("bad") { Err(AppError::other("no")) } else { Ok(()) } }
+    };
+    let error = run_calls(&calls, true, send).await.unwrap_err().to_string();
+    assert_eq!(sent.lock().unwrap().len(), 4);
+    assert!(error.contains("4개 중 2개") && error.contains("bad, bad2"), "{error}");
+    // 일괄이 아닌 변경은 첫 실패에서 멈춘다
+    sent.lock().unwrap().clear();
+    let send = |c: ApiCall| {
+        let name = c.body.as_ref().unwrap()["resourceName"].as_str().unwrap().to_owned();
+        sent.lock().unwrap().push(name.clone());
+        async move { if name == "bad" { Err(AppError::other("no")) } else { Ok(()) } }
+    };
+    assert!(run_calls(&calls, false, send).await.is_err());
+    assert_eq!(sent.lock().unwrap().len(), 2);
+}

@@ -2,7 +2,7 @@
 use reqwest::Method;
 use tauri::State;
 
-use crate::argocd::ops::{self, KubeContext, ResourceAction};
+use crate::argocd::ops::{self, AppActionGroup, KubeContext, ResourceAction};
 use crate::argocd::resource::{self, AppTarget, ResRef};
 use crate::argocd::ArgocdState;
 use crate::argowf::{auth, client::State as WfState};
@@ -22,4 +22,27 @@ pub async fn argocd_resource_actions(state: State<'_, ArgocdState>, url: String,
 /// kubeconfig의 context 전체(서버 주소·AWS 프로필·EKS 클러스터). 대상 클러스터와 이어 터미널을 EKS 탭에서 열 때 쓴다.
 pub fn argocd_kube_contexts(state: State<'_, WfState>) -> Result<Vec<KubeContext>, AppError> {
     Ok(ops::kube_contexts(&auth::load(&state.settings_path)?.config))
+}
+
+#[tauri::command]
+/// 앱을 고르면 바로 보일 워크로드 액션: 앱이 관리하는 리소스에서 할 수 있는 액션을 종류·이름별로 묶는다(리소스 최대 200개, 동시 8개, 읽다가 실패한 리소스는 뺀다).
+pub async fn argocd_app_actions(state: State<'_, ArgocdState>, url: String, target: AppTarget) -> Result<Vec<AppActionGroup>, AppError> {
+    let app = state
+        .api(
+            &url,
+            Method::GET,
+            &["api", "v1", "applications", &target.name],
+            &[("appNamespace", &target.namespace)],
+            None,
+        )
+        .await?;
+    let (state, url, target) = (&*state, &url, &target);
+    Ok(ops::app_actions(ops::managed_resources(&app), |res| async move {
+        let query = resource::resource_query(target, &res, "resourceName");
+        let body = state
+            .api(url, Method::GET, &["api", "v1", "applications", &target.name, "resource", "actions"], &query, None)
+            .await?;
+        Ok(ops::action_rows(&body))
+    })
+    .await)
 }

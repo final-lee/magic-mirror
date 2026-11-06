@@ -77,3 +77,38 @@ export const serverKubeContextLabel = (name: string) => `${name}의 in-cluster c
 // 작업 중단
 export const TERMINATE = "작업 중단";
 export const TERMINATE_NOTE = "진행 중인 동기화 작업을 멈춰요. 이미 적용한 리소스는 되돌리지 않아요";
+
+// 앱 상세의 액션 바
+export const BAR_LABEL = "앱 작업";
+export const BAR_SYNC = "동기화";
+export const BAR_DEPLOY = "배포";
+export const BAR_WORKLOADS = "워크로드";
+export const BAR_DANGER = "위험";
+export const ROLLBACK_PREVIOUS = "이전 버전으로 롤백…";
+export const ROLLBACK_NO_PREVIOUS = "롤백할 이전 배포 이력이 없어요";
+export const AUTO_SYNC_ON = "자동 동기화 켜기";
+export const AUTO_SYNC_OFF = "자동 동기화 끄기";
+export const APP_DELETE = "앱 삭제…";
+export const BATCH_TARGETS = "대상 리소스";
+export const BATCH_DISABLED = "지금은 이 리소스에서 실행할 수 없어요";
+export const BATCH_PREVIEW = "미리 보기";
+export const batchTitle = (label: string, kind: string) => `${label} · ${kind}`;
+export const batchPick = (name: string) => `${name} 선택`;
+export const batchButton = (label: string, kind: string, count: number) => `${label} · ${kind} ${count}`;
+
+/** 널리 쓰는 액션 이름의 한국어 표시. 모르면 서버가 준 표시 이름, 그것도 없으면 이름 그대로 */
+const ACTION_NAMES: Record<string, string> = {
+  restart: "재시작",
+  pause: "일시정지",
+  resume: "재개",
+  "promote-full": "전체 승격",
+  abort: "중단",
+  retry: "재시도",
+  "create-job": "지금 실행",
+  suspend: "일시정지",
+  refresh: "새로고침",
+};
+export const actionLabel = (action: string, displayName: string | null) => {
+  const known: unknown = ACTION_NAMES[action];
+  return typeof known === "string" ? known : (displayName ?? action);
+};

@@ -74,3 +74,107 @@ current-context: kind
     assert_eq!(rows[1].profile, None);
     assert_eq!(rows[1].eks, None);
 }
+
+fn res(group: &str, kind: &str, name: &str) -> ResRef {
+    ResRef {
+        group: group.into(),
+        version: "v1".into(),
+        kind: kind.into(),
+        namespace: Some("web".into()),
+        name: name.into(),
+        uid: None,
+    }
+}
+
+fn action(name: &str, disabled: bool) -> ResourceAction {
+    ResourceAction {
+        name: name.into(),
+        display_name: None,
+        disabled,
+        icon_class: None,
+        params: vec![],
+    }
+}
+
+#[test]
+fn managed_resources_skip_hooks_and_incomplete_rows_and_stop_at_the_limit() {
+    let app = json!({"status": {"resources": [
+        {"group": "apps", "version": "v1", "kind": "Deployment", "namespace": "web", "name": "web"},
+        {"group": "batch", "version": "v1", "kind": "Job", "namespace": "web", "name": "migrate", "hook": true},
+        {"version": "v1", "kind": "Service", "name": "svc"},
+        {"kind": "Broken", "name": "x"},
+    ]}});
+    let rows = managed_resources(&app);
+    assert_eq!(rows.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["web", "svc"]);
+    assert_eq!(rows[1].group, "");
+    let many = json!({"status": {"resources": (0..APP_ACTION_LIMIT + 50).map(|i| json!({"version": "v1", "kind": "ConfigMap", "name": format!("c{i}")})).collect::<Vec<_>>()}});
+    assert_eq!(managed_resources(&many).len(), APP_ACTION_LIMIT);
+}
+
+#[test]
+fn actions_group_by_kind_and_name_with_disabled_counted() {
+    let groups = group_actions(vec![
+        (res("apps", "Deployment", "a"), vec![action("restart", false)]),
+        (res("apps", "Deployment", "b"), vec![action("restart", true)]),
+        (res("argoproj.io", "Rollout", "r"), vec![action("restart", false), action("pause", false)]),
+        (res("apps", "StatefulSet", "s"), vec![action("restart", false)]),
+    ]);
+    let key: Vec<_> = groups.iter().map(|g| (g.kind.as_str(), g.action.as_str(), g.resources.len(), g.disabled_count)).collect();
+    assert_eq!(
+        key,
+        [
+            ("Deployment", "restart", 2, 1),
+            ("Rollout", "restart", 1, 0),
+            ("Rollout", "pause", 1, 0),
+            ("StatefulSet", "restart", 1, 0)
+        ]
+    );
+    assert!(groups[0].resources[1].disabled);
+}
+
+#[tokio::test]
+async fn only_kinds_with_actions_are_read_in_full_and_failures_are_skipped() {
+    use std::sync::Mutex;
+    let calls = Mutex::new(Vec::new());
+    let resources = vec![
+        res("apps", "Deployment", "a"),
+        res("", "Service", "svc"),
+        res("apps", "Deployment", "b"),
+        res("apps", "Deployment", "broken"),
+        res("", "Service", "svc2"),
+    ];
+    let groups = app_actions(resources, |r| {
+        calls.lock().unwrap().push(r.name.clone());
+        async move {
+            match (r.kind.as_str(), r.name.as_str()) {
+                ("Deployment", "broken") => Err(AppError::other("boom")),
+                ("Deployment", _) => Ok(vec![action("restart", r.name == "b")]),
+                _ => Ok(vec![]),
+            }
+        }
+    })
+    .await;
+    // Service는 첫 리소스만 탐색하고 끝낸다
+    let mut seen = calls.into_inner().unwrap();
+    seen.sort();
+    assert_eq!(seen, ["a", "b", "broken", "svc"]);
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].resources.iter().map(|r| r.res.name.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+    assert_eq!(groups[0].disabled_count, 1);
+}
+
+#[tokio::test]
+async fn a_failed_probe_drops_that_kind_but_not_the_others() {
+    let resources = vec![res("apps", "Deployment", "a"), res("apps", "StatefulSet", "s"), res("apps", "StatefulSet", "t")];
+    let groups = app_actions(resources, |r| async move {
+        if r.kind == "Deployment" {
+            Err(AppError::other("no"))
+        } else {
+            Ok(vec![action("restart", false)])
+        }
+    })
+    .await;
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].kind, "StatefulSet");
+    assert_eq!(groups[0].resources.len(), 2);
+}

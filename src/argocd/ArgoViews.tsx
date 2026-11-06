@@ -1,10 +1,9 @@
-import { ARGO_VIEWS_LABEL, ARGO_VIEW_APPS, ARGO_VIEW_RESOURCES, ARGO_VIEW_MAPS, ARGO_VIEW_METRICS } from "./text";
+import { ARGO_VIEWS_LABEL, ARGO_VIEW_APPS, ARGO_VIEW_RESOURCES, ARGO_VIEW_METRICS } from "./text";
 
 /** 서버 화면 위쪽의 화면 전환 목록. 화면을 늘릴 때는 여기에 한 줄을 더하고 ArgocdTab에서 그리는 곳을 정한다. id는 설정에 남는다. */
 export const ARGO_VIEWS = [
   { id: "apps", label: ARGO_VIEW_APPS },
   { id: "resources", label: ARGO_VIEW_RESOURCES },
-  { id: "maps", label: ARGO_VIEW_MAPS },
   { id: "metrics", label: ARGO_VIEW_METRICS },
 ] as const;
 

@@ -242,9 +242,9 @@ Open **EKS → 🐙 ArgoCD** in the sidebar for a single tab that talks to ArgoC
 - **Grouping**: two levels, by ApplicationSet, environment, target cluster, project, namespace, or a label. ApplicationSet groups are cards marked by their worst app, with a tally bar and chips (오류, OutOfSync, 주의, 정상), their generators, and their own errors.
 - **Problems first**: groups go red, then yellow, then healthy; inside a group the worst apps come first. Healthy cards fold to a thin line, and healthy apps in a mixed group fold to one green line naming them. **모두 펼치기** and **정상 접기** switch everything at once.
 - **Application detail**: overview, resource tree, app-wide Diff, operation progress and waves, deployment history with revision metadata and comparison, management, and YAML/JSON. Select a resource for live and desired YAML, diff, events, logs, links, and actions. Pod terminals hand off to the matching EKS context.
-- **Operations**: refresh, sync selected resources or the whole application with a revision, sync options and retry settings, terminate a running operation, or roll back to a historical revision. Resource actions, patch and delete are available from the resource panel. Sync windows and deep links appear in the detail bar.
+- **Operations**: an action bar under the application header is on every tab. **동기화** has Sync… (selected resources or the whole application, revision, all sync options, retry settings, and an inline diff), Refresh, Hard refresh, and 작업 중단 while an operation runs. **배포** rolls back to the previous deployment (preview of the revision and manifest changes; turning auto-sync off first when it is on) and turns auto-sync on or off. **워크로드** shows what the server allows on the application's own resources, grouped by kind — for example 재시작 · Deployment 3, 일시정지 · Rollout 1, 지금 실행 · CronJob 2 — and runs one action on all selected resources in one reviewed change. **위험** deletes the application. Rolling back to any earlier revision is in the history tab; resource actions, patch, delete, and a pod terminal in the EKS tab are on each resource. Controls follow your ArgoCD RBAC.
 - **Manage**: create, edit, or delete applications; inspect an ApplicationSet and its generated applications, edit its YAML, preview generated changes, save or delete it. Manage application notification subscriptions with catalog suggestions when available.
-- **Resource search and maps**: search managed resources across applications and jump from results or ⌘K into a resource. Maps show the fleet, dependencies, network, timeline, and other relationships; select a map item to navigate back to its detail.
+- **Resource search and maps**: search managed resources across applications and jump from results or ⌘K into a resource. Switch the filtered app list to a fleet matrix; selecting a cell returns to the list with its environment and cluster or project selected. Each application has maps for its network, resource relationships, app-of-apps hierarchy, ApplicationSet siblings, environment versions, and deployment timeline. Select an app or resource to open its detail.
 - **Safeguards**: every write opens a preview of calls, diff, impact, and warnings. Production targets and delete, rollback, and resource-delete operations can require the target name; a stale resource version stops applying. ArgoCD RBAC controls which operations are available.
 
 **Metrics and notifications**
@@ -254,7 +254,7 @@ Open **EKS → 🐙 ArgoCD** in the sidebar for a single tab that talks to ArgoC
 
 ![ArgoCD resource diff](docs/screenshots/argocd-resource.png)
 
-![ArgoCD fleet map](docs/screenshots/argocd-maps.png)
+![ArgoCD application map](docs/screenshots/argocd-maps.png)
 
 ![ArgoCD application resource tree](docs/screenshots/argocd-detail.png)
 

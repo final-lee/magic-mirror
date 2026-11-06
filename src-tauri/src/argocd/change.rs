@@ -49,6 +49,12 @@ pub enum ArgoChange {
         action: String,
         params: Vec<Value>,
     },
+    /// 같은 액션을 여러 리소스에 한 번에(앱 상세의 워크로드 액션). 리소스마다 요청 하나.
+    ResourceActionBatch {
+        action: String,
+        resources: Vec<ResRef>,
+        params: Vec<Value>,
+    },
     ResourceDelete {
         res: ResRef,
         force: bool,
@@ -225,6 +231,70 @@ fn patch_call(t: &ArgoTarget, patch: &Value) -> Result<ApiCall, AppError> {
         ),
     ))
 }
+/// 리소스 액션 실행 요청 하나(`resource/actions/v2`).
+fn action_call(t: &ArgoTarget, res: &ResRef, action: &str, params: &[Value]) -> ApiCall {
+    call(
+        "POST",
+        &["api", "v1", "applications", &t.name, "resource", "actions", "v2"],
+        vec![],
+        Some(json!({"name":t.name,"appNamespace":t.namespace,"project":t.project,"namespace":res.namespace,"resourceName":res.name,"group":res.group,"version":res.version,"kind":res.kind,"action":action,"resourceActionParameters":params})),
+    )
+}
+
+/// 널리 쓰는 액션 이름의 "…해요" 꼴. 모르는 이름은 None.
+fn action_verb(action: &str) -> Option<&'static str> {
+    Some(match action {
+        "restart" => "재시작해요",
+        "pause" | "suspend" => "일시정지해요",
+        "resume" => "재개해요",
+        "promote-full" => "전체 승격해요",
+        "abort" => "중단해요",
+        "retry" => "재시도해요",
+        "create-job" => "지금 실행해요",
+        "refresh" => "새로고침해요",
+        _ => return None,
+    })
+}
+
+/// 종류(group·kind)별로 몇 개에 무슨 액션을 하는지 한 줄씩. 처음 나온 종류 순서.
+fn batch_impact(action: &str, resources: &[ResRef]) -> Vec<String> {
+    let mut kinds: Vec<(&ResRef, usize)> = Vec::new();
+    for r in resources {
+        match kinds.iter_mut().find(|(k, _)| k.group == r.group && k.kind == r.kind) {
+            Some((_, n)) => *n += 1,
+            None => kinds.push((r, 1)),
+        }
+    }
+    kinds
+        .into_iter()
+        .map(|(r, n)| match action_verb(action) {
+            Some(verb) => format!("{} {n}개를 {verb}", r.kind),
+            None => format!("{} {n}개에 {action} 액션을 실행해요", r.kind),
+        })
+        .collect()
+}
+
+/// 변경의 요청을 차례로 보낸다. `keep_going`이면 하나가 실패해도 나머지를 보내고, 끝에 실패한 리소스 이름을 모아 오류로 돌려준다.
+/// 아니면 첫 실패에서 멈춘다.
+async fn run_calls<F, Fut>(calls: &[ApiCall], keep_going: bool, send: F) -> Result<(), AppError>
+where
+    F: Fn(ApiCall) -> Fut,
+    Fut: std::future::Future<Output = Result<(), AppError>>,
+{
+    let mut failed = Vec::new();
+    for c in calls {
+        match send(c.clone()).await {
+            Ok(()) => {}
+            Err(e) if !keep_going => return Err(e),
+            Err(_) => failed.push(c.body.as_ref().and_then(|b| b.get("resourceName")).and_then(Value::as_str).unwrap_or("?").to_owned()),
+        }
+    }
+    if failed.is_empty() {
+        return Ok(());
+    }
+    Err(AppError::other(format!("{}개 중 {}개를 처리하지 못했어요: {}", calls.len(), failed.len(), failed.join(", "))))
+}
+
 fn change_kind(c: &ArgoChange) -> &'static str {
     match c {
         ArgoChange::Refresh { .. } => "refresh",
@@ -232,6 +302,7 @@ fn change_kind(c: &ArgoChange) -> &'static str {
         ArgoChange::Terminate => "terminate",
         ArgoChange::Rollback { .. } => "rollback",
         ArgoChange::ResourceAction { .. } => "resourceAction",
+        ArgoChange::ResourceActionBatch { .. } => "resourceActionBatch",
         ArgoChange::ResourceDelete { .. } => "resourceDelete",
         ArgoChange::ResourcePatch { .. } => "resourcePatch",
         ArgoChange::AppSpec { .. } => "appSpec",
@@ -248,7 +319,7 @@ fn title(c: &ArgoChange) -> &'static str {
         ArgoChange::Sync { .. } => "동기화",
         ArgoChange::Terminate => "작업 중단",
         ArgoChange::Rollback { .. } => "롤백",
-        ArgoChange::ResourceAction { .. } => "리소스 작업",
+        ArgoChange::ResourceAction { .. } | ArgoChange::ResourceActionBatch { .. } => "리소스 작업",
         ArgoChange::ResourceDelete { .. } => "리소스 삭제",
         ArgoChange::ResourcePatch { .. } => "리소스 수정",
         ArgoChange::AppSpec { .. } | ArgoChange::AppPatch { .. } => "앱 수정",
@@ -331,6 +402,15 @@ fn plan(t: &ArgoTarget, c: &ArgoChange, current: Option<&Value>, windows: Option
             if *dry_run {
                 impact.push("롤백은 시험 실행이라 리소스를 변경하지 않아요".into());
             }
+        }
+        ArgoChange::ResourceActionBatch { action, resources, params } => {
+            if resources.is_empty() {
+                return Err(AppError::other("작업할 리소스를 하나 이상 골라 주세요"));
+            }
+            for res in resources {
+                calls.push(action_call(t, res, action, params));
+            }
+            impact.extend(batch_impact(action, resources));
         }
         ArgoChange::ResourceAction { res, action, params } => calls.push(call("POST", &["api", "v1", "applications", &t.name, "resource", "actions", "v2"], vec![], Some(json!({"name":t.name,"appNamespace":t.namespace,"project":t.project,"namespace":res.namespace,"resourceName":res.name,"group":res.group,"version":res.version,"kind":res.kind,"action":action,"resourceActionParameters":params})))),
         ArgoChange::ResourceDelete { res, force, orphan } => {
@@ -510,12 +590,13 @@ pub async fn apply(state: &ArgocdState, url: &str, t: &ArgoTarget, c: &ArgoChang
         if let Some(reason) = p.blocked {
             return Err(AppError::other(reason));
         }
-        for c in &calls {
-            let method = Method::from_bytes(c.verb.as_bytes()).map_err(|e| AppError::other(e.to_string()))?;
-            let segments: Vec<&str> = c.segments.iter().map(String::as_str).collect();
-            let query: Vec<(&str, &str)> = c.query.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-            state.api(url, method, &segments, &query, c.body.as_ref()).await?;
-        }
+        run_calls(&calls, matches!(c, ArgoChange::ResourceActionBatch { .. }), |call| async move {
+            let method = Method::from_bytes(call.verb.as_bytes()).map_err(|e| AppError::other(e.to_string()))?;
+            let segments: Vec<&str> = call.segments.iter().map(String::as_str).collect();
+            let query: Vec<(&str, &str)> = call.query.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+            state.api(url, method, &segments, &query, call.body.as_ref()).await.map(|_| ())
+        })
+        .await?;
         Ok(ArgoApplyResult {
             message: format!("{} 요청을 보냈어요", title(c)),
         })

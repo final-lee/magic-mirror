@@ -12,7 +12,13 @@ interface Props {
 
 const initial = (p: ActionParam) => p.value ?? p.default ?? "";
 
-function ParamInput({ param, value, onChange }: { param: ActionParam; value: string; onChange: (value: string) => void }) {
+/** 인자의 처음 값(서버가 준 value, 없으면 default) */
+export const initialParams = (params: ActionParam[]): Record<string, string> => Object.fromEntries(params.map((p) => [p.name, initial(p)]));
+
+/** 값을 넣은 인자만(비워 둔 칸은 보내지 않는다) */
+export const filledParams = (params: ActionParam[], values: Record<string, string>) => params.flatMap((p) => (values[p.name] ? [{ name: p.name, value: values[p.name] }] : []));
+
+export function ParamInput({ param, value, onChange }: { param: ActionParam; value: string; onChange: (value: string) => void }) {
   if (param.kind === "boolean") {
     return (
       <label className="k8s-check argo-opt">
@@ -31,12 +37,12 @@ function ParamInput({ param, value, onChange }: { param: ActionParam; value: str
 
 /** 인자가 있는 리소스 액션의 값 입력. 서버가 준 처음 값(value·default)으로 채운다. */
 export function ActionForm({ action, onCancel, onPreview }: Props) {
-  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(action.params.map((p) => [p.name, initial(p)])));
+  const [values, setValues] = useState<Record<string, string>>(() => initialParams(action.params));
   return (
     <FormSheet
       label={actParamsTitle(action.displayName ?? action.name)}
       onCancel={onCancel}
-      submit={{ label: ACT_PREVIEW, onClick: () => onPreview(action.params.flatMap((p) => (values[p.name] ? [{ name: p.name, value: values[p.name] }] : []))) }}
+      submit={{ label: ACT_PREVIEW, onClick: () => onPreview(filledParams(action.params, values)) }}
     >
       <p>{ACT_PARAMS_HINT}</p>
       {action.params.map((p) => (

@@ -32,3 +32,7 @@
 .argo-map-track { height: 22px; position: relative; flex: 1; background: var(--hover); }
 .argo-map-bar { position: absolute; top: 4px; height: 14px; min-width: 5px; padding: 0; border: 0; border-radius: 2px; background: var(--green); cursor: pointer; }
 .argo-map-bar.err { background: var(--red); }
+.argo-map-node.selected rect { stroke: var(--accent); stroke-width: 3; }
+.argo-map-link[aria-current="true"] { font-weight: 700; text-decoration: underline; }
+.argo-map-tabs { flex-wrap: wrap; }
+.argo-map-lane > span { width: 180px; flex: none; }

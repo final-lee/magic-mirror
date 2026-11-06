@@ -18,7 +18,9 @@ export async function shootArgocd(page, out) {
   await page.getByRole('complementary', { name: 'Application 상세' }).getByRole('tab', { name: 'Diff', exact: true }).first().click();
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${out}/argocd-diff.png` });
-  await page.getByRole('tab', { name: '지도', exact: true }).click();
+  await page.getByRole('complementary', { name: 'Application 상세' }).getByRole('tab', { name: '지도', exact: true }).click();
+  await page.getByRole('tab', { name: '리소스 관계', exact: true }).click();
+  await page.locator('svg[aria-label="리소스 관계"]').waitFor();
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${out}/argocd-maps.png` });
 }

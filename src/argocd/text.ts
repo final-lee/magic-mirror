@@ -186,6 +186,8 @@ export const ARGO_VIEW_METRICS = "지표";
 export const MAP_TEXT = {
   tabs: "지도 종류", matrix: "플릿 매트릭스", versions: "환경 간 버전", sets: "ApplicationSet 펼침",
   hierarchy: "app-of-apps 계층", timeline: "배포 타임라인", network: "네트워크",
+  relations: "리소스 관계", listDisplay: "목록 표시", list: "목록", matrixDimension: "매트릭스 열",
+  noSet: "이 앱은 ApplicationSet에서 만들지 않았어요", selected: "선택한 앱",
   cluster: "클러스터", project: "프로젝트", all: "전체", empty: "표시할 데이터가 없어요",
   driftOnly: "차이 있는 앱만", drift: "상위 환경과 달라요", cycle: "순환 참조",
   env: "환경", app: "Application", external: "외부", ingress: "Ingress", service: "Service", pod: "Pod",

@@ -8,6 +8,7 @@ export type ArgoChange =
   | { kind: "terminate" }
   | { kind: "rollback"; id: number; prune: boolean; dryRun: boolean; disableAutoSync: boolean }
   | { kind: "resourceAction"; res: ResRef; action: string; params: { name: string; value: string }[] }
+  | { kind: "resourceActionBatch"; action: string; resources: ResRef[]; params: { name: string; value: string }[] }
   | { kind: "resourceDelete"; res: ResRef; force: boolean; orphan: boolean }
   | { kind: "resourcePatch"; res: ResRef; patch: string; patchType: string }
   | { kind: "appSpec"; yaml: string }

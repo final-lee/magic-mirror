@@ -16,6 +16,8 @@ import { CreateApp } from "./manage/CreateApp";
 import { APPSET_OPEN } from "./manage/text";
 import { ArgoLabelFilter } from "./ArgoLabelFilter";
 import { ArgoMultiSelect } from "./ArgoMultiSelect";
+import { Matrix } from "./maps/Matrix";
+import { MAP_TEXT } from "./text";
 import { isTokenError, useApps, useAppsets } from "./queries";
 import {
   ARGO_APPS_LABEL, ARGO_AUTO_OFF, ARGO_AUTO_ON, ARGO_CLUSTER_FILTER, ARGO_ENV_GROUP, ARGO_ENV_SOURCE, ARGO_ENV_TEXT, ARGO_GROUP_BY, ARGO_GROUP_THEN, ARGO_HEALTH_GROUP,
@@ -134,6 +136,7 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave, open, on
   const find = useListFind(listRef);
   const search = find.query;
   const [primary, setPrimary] = useState<GroupDim>(() => parseDim(saved?.groupBy) ?? "set");
+  const [display, setDisplay] = useState<"list" | "matrix">("list");
   const [secondaryPick, setSecondaryPick] = useState<GroupDim>(() => parseDim(saved?.thenBy) ?? "none");
   // 문제가 있는 묶음은 펴고, 정상인 묶음·정상 행은 접어 문제를 먼저 보인다. 사용자가 직접 펴거나 접은 것은 탭이 열린 동안 그대로 둔다.
   const [manual, setManual] = useState<Map<string, boolean>>(new Map());
@@ -392,6 +395,10 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave, open, on
       {apps.isError && <ErrorState error={apps.error} profile="" compact onRetry={() => void apps.refetch()} />}
       {sets.isError && <ErrorState error={sets.error} profile="" compact onRetry={() => void sets.refetch()} />}
       <div className="argo-bar">
+        <div role="group" aria-label={MAP_TEXT.listDisplay}>
+          <button className="btn small tone-secondary" aria-pressed={display === "list"} onClick={() => setDisplay("list")}>{MAP_TEXT.list}</button>
+          <button className="btn small tone-secondary" aria-pressed={display === "matrix"} onClick={() => setDisplay("matrix")}>{MAP_TEXT.matrix}</button>
+        </div>
         <ArgoChips label={ARGO_SYNC_GROUP} statuses={ARGO_SYNC_STATUSES} counts={view.syncCounts} picked={syncPick} onToggle={(s) => setSyncPick((p) => toggled(p, s))} dot={(s) => `argo-lvl-${s}`} />
         <ArgoChips label={ARGO_HEALTH_GROUP} statuses={ARGO_HEALTH_STATUSES} counts={view.healthCounts} picked={healthPick} onToggle={(s) => setHealthPick((p) => toggled(p, s))} dot={(s) => `argo-lvl-${s}`} />
         <ArgoChips
@@ -471,7 +478,12 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave, open, on
         }}
       >
         <ListFind find={find} placeholder={ARGO_SEARCH} count={visible.length} />
-        {apps.isPending ? (
+        {display === "matrix" ? <Matrix rows={visible} onSelect={(env, dim, value) => {
+          setEnvPick(new Set([env]));
+          if (dim === "cluster") setClusterPick(new Set([value]));
+          else setProjectPick(new Set([value]));
+          setDisplay("list");
+        }} /> : <>{apps.isPending ? (
           <div className="empty">{LOADING}</div>
         ) : appRows.length === 0 ? (
           !apps.isError && <div className="empty">{ARGO_NO_APPS}</div>
@@ -505,6 +517,7 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave, open, on
             {groups.map(({ g, subs }) => card(`${primary}|${g.id}`, g, subs))}
           </div>
         )}
+        </>}
       </div>
       {selectedSet && (
         <AppSetPanel
@@ -535,6 +548,7 @@ export function ArgoView({ url, live, onTokenError, now, saved, onSave, open, on
           live={live}
           onClose={() => setSelected(null)}
           focus={focus?.resource ?? null}
+          onOpenApp={(app) => { setFocus(null); setSelected({ namespace: app.namespace, name: app.name }); }}
           initialTab={focus?.tab}
           onTokenError={onTokenError}
           now={now}

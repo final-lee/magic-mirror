@@ -16,6 +16,7 @@ import { TAB_ARGO_MANAGE } from "./manage/text";
 import { MANAGE_TARGET_REVISION } from "./manage/text";
 
 vi.mock("./api", () => ({ argocdApi: { app: vi.fn(), tree: vi.fn(), events: vi.fn() } }));
+vi.mock("./ops/api", () => ({ opsApi: { appActions: vi.fn().mockResolvedValue([]), resourceActions: vi.fn().mockResolvedValue([]), kubeContexts: vi.fn().mockResolvedValue([]) } }));
 vi.mock("./change/api", () => ({ changeApi: { can: vi.fn(), preview: vi.fn(), apply: vi.fn() } }));
 vi.mock("./detail/api", () => ({ readApi: { appLinks: vi.fn(), syncWindows: vi.fn(), history: vi.fn(), manifestsDiff: vi.fn() } }));
 const m = vi.mocked(argocdApi);
@@ -277,11 +278,22 @@ test("작업 중에는 동기화를 막아요", async () => {
 });
 
 describe("reading the app", () => {
+  test("the action bar sits under the header on every tab and each action exists exactly once", async () => {
+    setup();
+    await loaded();
+    for (const name of [TAB_ARGO_RESOURCES, TAB_ARGO_HISTORY, TAB_ARGO_RAW]) {
+      tab(name);
+      expect(screen.getByRole("toolbar", { name: "앱 작업" })).toBeInTheDocument();
+      for (const label of [ARGO_SYNC, ARGO_REFRESH, ARGO_HARD_REFRESH]) expect(screen.getAllByRole("button", { name: label })).toHaveLength(1);
+    }
+    expect(within(screen.getByRole("toolbar", { name: "앱 작업" })).getAllByRole("button", { name: ARGO_SYNC })).toHaveLength(1);
+  });
+
   test("a failed read shows the error, keeps Sync off, and closing still works", async () => {
     m.app.mockRejectedValue({ kind: "other", message: "application not found" });
     const h = setup();
     expect(await screen.findByText("application not found")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: ARGO_SYNC })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: ARGO_SYNC })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: CLOSE }));
     expect(h.onClose).toHaveBeenCalled();
     expect(h.onTokenError).not.toHaveBeenCalled();

@@ -1,3 +1,5 @@
+import type { ResRef } from "../types";
+
 /** 리소스 액션이 받는 인자. 서버가 주는 `type`은 kind, 처음 값은 default */
 export interface ActionParam {
   name: string;
@@ -23,4 +25,16 @@ export interface KubeContext {
   /** exec 플러그인의 AWS 프로필 */
   profile: string | null;
   eks: { region: string; name: string } | null;
+}
+
+/** 앱 액션 한 줄: 같은 종류(group·kind)의 리소스들에 같은 이름의 액션이 있으면 묶인다 */
+export interface AppActionGroup {
+  group: string;
+  kind: string;
+  action: string;
+  displayName: string | null;
+  params: ActionParam[];
+  resources: { res: ResRef; disabled: boolean }[];
+  /** 지금 실행할 수 없는 리소스 수 */
+  disabledCount: number;
 }

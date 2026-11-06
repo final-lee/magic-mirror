@@ -429,6 +429,39 @@ async fn write_podinfo_and_cleanup() {
         },
     )
     .await;
+    // 앱 상세의 액션 바와 같은 길: 앱 리소스의 액션을 묶고, 재시작을 한 번에 보낸다.
+    let live_app = get(&state, &url, &name, app_ns, &[]).await;
+    let (st, u, tg) = (&*state, &url, &target);
+    let groups = ops::app_actions(ops::managed_resources(&live_app), |res| async move {
+        let body = st
+            .api(
+                u,
+                Method::GET,
+                &["api", "v1", "applications", &tg.name, "resource", "actions"],
+                &resource::resource_query(tg, &res, "resourceName"),
+                None,
+            )
+            .await?;
+        Ok(ops::action_rows(&body))
+    })
+    .await;
+    let restart = groups
+        .iter()
+        .find(|g| g.kind == "Deployment" && g.action == "restart")
+        .expect("Deployment 재시작 묶음 없음");
+    let targets: Vec<ResRef> = restart.resources.iter().filter(|r| !r.disabled).map(|r| r.res.clone()).collect();
+    assert!(!targets.is_empty());
+    apply(
+        &state,
+        &url,
+        &t,
+        &ArgoChange::ResourceActionBatch {
+            action: "restart".into(),
+            resources: targets,
+            params: vec![],
+        },
+    )
+    .await;
     apply(
         &state,
         &url,

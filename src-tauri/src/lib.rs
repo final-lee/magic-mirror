@@ -305,6 +305,7 @@ pub fn run() {
             argocd_read_commands::argocd_logs,
             argocd_read_commands::argocd_logs_stop,
             argocd_ops_commands::argocd_resource_actions,
+            argocd_ops_commands::argocd_app_actions,
             argocd_ops_commands::argocd_kube_contexts,
             argocd_metrics_commands::argocd_deploy_history,
             argocd_metrics_commands::argocd_controller_metrics,

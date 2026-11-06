@@ -116,6 +116,15 @@ export function argocdMock(cmd: string, a: Record<string, any>): unknown {
       expectedVersion: "91000",
     };
     case "argocd_apply": return { message: "Demo change accepted" };
+    case "argocd_app_actions": {
+      const r = (group: string, kind: string, name: string) => ({ group, version: "v1", kind, namespace: a.target.name, name, uid: null });
+      const one = (res: ReturnType<typeof r>, disabled = false) => ({ res, disabled });
+      return [
+        { group: "apps", kind: "Deployment", action: "restart", displayName: "Restart", params: [], resources: [one(r("apps", "Deployment", `${a.target.name}-api`)), one(r("apps", "Deployment", `${a.target.name}-worker`)), one(r("apps", "Deployment", `${a.target.name}-web`))], disabledCount: 0 },
+        { group: "argoproj.io", kind: "Rollout", action: "pause", displayName: "Pause", params: [], resources: [one(r("argoproj.io", "Rollout", `${a.target.name}-canary`))], disabledCount: 0 },
+        { group: "batch", kind: "CronJob", action: "create-job", displayName: "Create Job", params: [{ name: "jobName", value: null, kind: "string", default: null }], resources: [one(r("batch", "CronJob", "nightly-report")), one(r("batch", "CronJob", "cleanup"), true)], disabledCount: 1 },
+      ];
+    }
     case "argocd_resource_actions": return [{ name: "restart", displayName: "Restart", disabled: false, iconClass: null, params: [] }];
     case "argocd_kube_contexts": return [{ name: "eks-prd-apne2", cluster: "eks-prd-apne2", server: "https://eks-prd-apne2.demo.ts.net", profile: "prod", eks: { region: "ap-northeast-2", name: "eks-prd-apne2" } }];
     case "argocd_appset": return {

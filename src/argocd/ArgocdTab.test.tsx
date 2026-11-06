@@ -6,7 +6,7 @@ import { renderWithClient } from "../test/utils";
 import { argocdApi } from "./api";
 import { ArgocdTab } from "./ArgocdTab";
 import {
-  ARGO_GROUP_BY, ARGO_NO_APPS, ARGO_VIEW_APPS, ARGO_VIEW_RESOURCES, ARGO_VIEW_MAPS, LOADING, SERVER_ADD, SERVER_EDIT, SERVER_HELP, SERVER_LABEL, SERVER_NAME, SERVER_NEXT, SERVER_URL, STEPS_LABEL, STEP_SERVER, STEP_TOKEN,
+  ARGO_GROUP_BY, ARGO_NO_APPS, ARGO_VIEW_APPS, ARGO_VIEW_RESOURCES, LOADING, SERVER_ADD, SERVER_EDIT, SERVER_HELP, SERVER_LABEL, SERVER_NAME, SERVER_NEXT, SERVER_URL, STEPS_LABEL, STEP_SERVER, STEP_TOKEN,
   TOKEN_CANCEL, TOKEN_CHANGE, TOKEN_FORGET, TOKEN_HTTP_WARNING, TOKEN_INVALID, TOKEN_LABEL, TOKEN_MISSING, TOKEN_SUBMIT, serverRemoveLabel, tokenFor,
 } from "./text";
 import type { ArgoAppRow, ArgocdServer, ArgocdSession, ArgoViewState } from "./types";
@@ -319,17 +319,13 @@ describe("switching servers", () => {
     expect(groupSel()).toHaveValue("env");
   });
 
-  test("switching to maps stops the hidden list watch before starting its own", async () => {
+  test("a previously saved maps view falls back to the app list", async () => {
     keychain = new Set([STG.url]);
-    a.watchApps.mockResolvedValue(1);
-    a.watchAppsets.mockResolvedValueOnce(2).mockResolvedValueOnce(3);
-    a.watchStop.mockResolvedValue();
+    const view: ArgoViewState = { sync: [], health: [], envs: [], clusters: [], projects: [], labels: [], groupBy: null, thenBy: null, view: "maps" };
+    vi.mocked(api.getSettings).mockResolvedValue({ ...SETTINGS, argocdViews: { [STG.url]: view } });
     renderWithClient(<ArgocdTab active />);
     await screen.findByText("stg-app");
-    await waitFor(() => expect(a.watchAppsets).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole("tab", { name: ARGO_VIEW_MAPS }));
-    await waitFor(() => expect(a.watchStop).toHaveBeenCalledWith(2));
-    await waitFor(() => expect(a.watchAppsets).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("tab", { name: ARGO_VIEW_APPS })).toHaveAttribute("aria-selected", "true");
   });
 
   test("each server remembers which screen it was on, and the switcher saves the choice", async () => {

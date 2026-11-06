@@ -1,9 +1,13 @@
 //! 리소스 액션 목록 읽기와, kubeconfig context를 EKS 클러스터에 이어 주는 정보.
+use std::future::Future;
+
+use futures::{stream, StreamExt};
 use kube::config::Kubeconfig;
 use serde::Serialize;
 use serde_json::Value;
 
-use super::{list, text};
+use super::{list, resource::ResRef, text};
+use crate::error::AppError;
 use crate::k8s::kubeconfig::exec_profile;
 
 /// 액션이 받는 인자 하나. 서버가 주는 `type`·`default`는 있으면 그대로 싣는다.
@@ -58,6 +62,125 @@ pub fn action_rows(body: &Value) -> Vec<ResourceAction> {
             })
         })
         .collect()
+}
+
+/// 앱 하나에서 액션을 찾아볼 리소스 수의 한계
+pub const APP_ACTION_LIMIT: usize = 200;
+const APP_ACTION_PARALLEL: usize = 8;
+
+/// 앱 액션 한 줄: 같은 종류(group·kind)의 리소스 여러 개에 같은 이름의 액션이 있으면 하나로 묶는다.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppActionGroup {
+    pub group: String,
+    pub kind: String,
+    pub action: String,
+    pub display_name: Option<String>,
+    pub params: Vec<ActionParam>,
+    pub resources: Vec<AppActionResource>,
+    /// 지금 실행할 수 없는 리소스 수(서버가 disabled로 준 것)
+    pub disabled_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppActionResource {
+    pub res: ResRef,
+    pub disabled: bool,
+}
+
+/// 앱이 관리하는 리소스(`status.resources`)를 순서대로. hook은 액션 대상이 아니라 뺀다. 한계(`APP_ACTION_LIMIT`)까지만.
+pub fn managed_resources(app: &Value) -> Vec<ResRef> {
+    list(app, "/status/resources")
+        .iter()
+        .filter(|r| r.get("hook").and_then(Value::as_bool) != Some(true))
+        .filter_map(|r| {
+            Some(ResRef {
+                group: opt(r, "/group").unwrap_or_default(),
+                version: opt(r, "/version")?,
+                kind: opt(r, "/kind")?,
+                namespace: opt(r, "/namespace"),
+                name: opt(r, "/name")?,
+                uid: None,
+            })
+        })
+        .take(APP_ACTION_LIMIT)
+        .collect()
+}
+
+/// 같은 (group, kind, action)끼리 묶는다. 순서는 처음 나온 리소스·액션 순서. 표시 이름과 인자는 처음 본 것을 쓴다.
+pub fn group_actions(items: Vec<(ResRef, Vec<ResourceAction>)>) -> Vec<AppActionGroup> {
+    let mut groups: Vec<AppActionGroup> = Vec::new();
+    for (res, actions) in items {
+        for action in actions {
+            let at = match groups.iter().position(|g| g.group == res.group && g.kind == res.kind && g.action == action.name) {
+                Some(at) => at,
+                None => {
+                    groups.push(AppActionGroup {
+                        group: res.group.clone(),
+                        kind: res.kind.clone(),
+                        action: action.name.clone(),
+                        display_name: action.display_name.clone(),
+                        params: action.params.clone(),
+                        resources: Vec::new(),
+                        disabled_count: 0,
+                    });
+                    groups.len() - 1
+                }
+            };
+            groups[at].disabled_count += usize::from(action.disabled);
+            groups[at].resources.push(AppActionResource {
+                res: res.clone(),
+                disabled: action.disabled,
+            });
+        }
+    }
+    groups
+}
+
+/// 앱의 모든 리소스에서 할 수 있는 액션. 종류(group·kind)마다 첫 리소스 하나로 액션이 있는 종류를 알아내고(탐색),
+/// 있는 종류의 나머지 리소스는 모두 읽는다. 동시에 `APP_ACTION_PARALLEL`개까지, 읽다가 실패한 리소스는 빼고 계속한다.
+pub async fn app_actions<F, Fut>(resources: Vec<ResRef>, fetch: F) -> Vec<AppActionGroup>
+where
+    F: Fn(ResRef) -> Fut,
+    Fut: Future<Output = Result<Vec<ResourceAction>, AppError>>,
+{
+    let mut probes: Vec<usize> = Vec::new();
+    for (i, r) in resources.iter().enumerate() {
+        if !probes.iter().any(|&p| resources[p].group == r.group && resources[p].kind == r.kind) {
+            probes.push(i);
+        }
+    }
+    let read = |indexes: Vec<usize>| {
+        let fetch = &fetch;
+        let resources = &resources;
+        async move {
+            stream::iter(indexes)
+                .map(|i| async move { (i, fetch(resources[i].clone()).await) })
+                .buffered(APP_ACTION_PARALLEL)
+                .collect::<Vec<_>>()
+                .await
+        }
+    };
+    let probed = read(probes.clone()).await;
+    let mut found: Vec<(usize, Vec<ResourceAction>)> = Vec::new();
+    let mut rest: Vec<usize> = Vec::new();
+    for (i, result) in probed {
+        let Ok(actions) = result else { continue };
+        if actions.is_empty() {
+            continue;
+        }
+        let kind = (&resources[i].group, &resources[i].kind);
+        rest.extend((0..resources.len()).filter(|j| !probes.contains(j) && (&resources[*j].group, &resources[*j].kind) == kind));
+        found.push((i, actions));
+    }
+    for (i, result) in read(rest).await {
+        if let Ok(actions) = result {
+            found.push((i, actions));
+        }
+    }
+    found.sort_by_key(|(i, _)| *i);
+    group_actions(found.into_iter().map(|(i, actions)| (resources[i].clone(), actions)).collect())
 }
 
 /// kubeconfig context 하나. EKS 클러스터를 가리키면 `eks`에 리전과 클러스터 이름이 있다.

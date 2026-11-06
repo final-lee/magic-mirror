@@ -10,6 +10,18 @@ import { opsApi } from "./api";
 export const useResourceActions = (url: string, target: AppTarget, res: ResRef, version: string | null) =>
   useQuery({ queryKey: argoKeys.read(url, target.namespace, target.name, "actions", resKey(res), version), queryFn: () => opsApi.resourceActions(url, target, res), retry: false });
 
+/**
+ * 앱의 워크로드 액션(앱 상세의 액션 바). 앱이 바뀌면(version) 다시 읽는다: 서버가 상태에 따라 켜고 끄는 액션이 있다.
+ * 읽는 동안 이전 값을 그대로 보여 줘서 버튼이 깜빡이지 않는다.
+ */
+export const useAppActions = (url: string, target: AppTarget, version: string | null) =>
+  useQuery({
+    queryKey: argoKeys.read(url, target.namespace, target.name, "appActions", version),
+    queryFn: () => opsApi.appActions(url, target),
+    retry: false,
+    placeholderData: (previous) => previous,
+  });
+
 /** kubeconfig context 전체. 파일이 바뀌어도 앱을 다시 열기 전까지는 같은 목록을 쓴다. */
 export const useKubeContexts = (enabled = true) => useQuery({ queryKey: ["argocd", "kubeContexts"], queryFn: opsApi.kubeContexts, enabled, retry: false, staleTime: 60_000 });
 

@@ -14,7 +14,6 @@ import { argoKeys, isTokenError, useAppsWatch, useSession } from "./queries";
 import { LOADING, SERVER_EDIT, SERVER_HELP, SERVER_LABEL, SERVER_NEXT, TOKEN_CHANGE, TOKEN_FORGET, sessionLine } from "./text";
 import { ResourceSearch } from "./search/ResourceSearch";
 import { useKubeContexts, withKubeContext } from "./ops/queries";
-import { MapsView } from "./maps/MapsView";
 import { MetricsView } from "./metrics/MetricsView";
 import { useArgoNotifier } from "./notify/useArgoNotifier";
 import type { ArgoJump, ArgoOpenRequest, ArgocdServer, ArgoResourceFocus, ArgoViewState } from "./types";
@@ -69,7 +68,6 @@ export function ArgocdTab({ active, jump, onJumpDone }: { active: boolean; jump?
 
   // 앱 목록 화면에 보내는 "이 앱(과 리소스)을 열어 주세요" 요청. 검색 화면과 ⌘K(jump)가 만든다. 앱 목록 화면이 받으면 비운다.
   const [request, setRequest] = useState<(ArgoOpenRequest & { url: string }) | null>(null);
-  const [mapFilter, setMapFilter] = useState<{ url: string; state: ArgoViewState; nonce: number } | null>(null);
   const nonce = useRef(0);
   const openApp = useCallback((target: string, app: { namespace: string; name: string }, resource: ArgoResourceFocus | null, history = false) => {
     setChosen((c) => ({ ...c, [target]: "apps" }));
@@ -150,25 +148,17 @@ export function ArgocdTab({ active, jump, onJumpDone }: { active: boolean; jump?
       <>
         <div className="argo" hidden={view !== "apps"}>
           <ArgoView
-            key={`${url}:${mapFilter?.url === url ? mapFilter.nonce : 0}`}
+            key={url}
             url={url}
             live={active && view === "apps"}
             onTokenError={onTokenError}
-            saved={mapFilter?.url === url ? mapFilter.state : settings.argocdViews?.[url] ?? null}
-            onSave={(state) => {
-              setMapFilter(current => current?.url === url ? { ...current, state } : current);
-              update({ argocdViews: { ...settings.argocdViews, [url]: { ...state, view: settings.argocdViews?.[url]?.view } } });
-            }}
+            saved={settings.argocdViews?.[url] ?? null}
+            onSave={(state) => update({ argocdViews: { ...settings.argocdViews, [url]: { ...state, view: settings.argocdViews?.[url]?.view } } })}
             open={request?.url === url ? request : null}
             onOpened={() => setRequest(null)}
           />
         </div>
         {view === "resources" && <ResourceSearch key={url} url={url} live={active} onOpen={(app, resource) => openApp(url, app, resource)} />}
-        {view === "maps" && <MapsView key={url} url={url} live={active} onOpen={(app, history) => openApp(url, app, null, history)} onFilter={(state) => {
-          setMapFilter({ url, state, nonce: ++nonce.current });
-          setChosen(c => ({ ...c, [url]: "apps" }));
-          update({ argocdViews: { ...settings.argocdViews, [url]: { ...state, view: "apps" } } });
-        }} />}
         {view === "metrics" && <MetricsView key={url} url={url} live={active} onOpen={(row) => openApp(url, row, null)} />}
       </>
     );

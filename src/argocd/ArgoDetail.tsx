@@ -9,13 +9,12 @@ import { isTokenError, useArgoApp, useArgoTree } from "./queries";
 import { envOf } from "./argoEnv";
 import { useArgoCan } from "./can";
 import { ChangeSheet } from "./change/ChangeSheet";
-import { SyncForm } from "./change/SyncForm";
 import { useArgoChange } from "./change/useArgoChange";
 import { CHANGE_DENIED } from "./change/text";
 import type { ArgoChange } from "./change/types";
 import {
-  ARGO_APPLICATION, ARGO_AUTOMATED_USER, ARGO_DETAIL_LABEL, ARGO_HARD_REFRESH, ARGO_IN_CLUSTER, ARGO_NO,
-  ARGO_NO_HISTORY, ARGO_NO_OPERATION, ARGO_REFRESH, ARGO_SYNC, ARGO_SYNC_RUNNING, ARGO_YES, CLOSE, COL_NAME, H_ARGO_DEPLOYED, H_ARGO_HOOK_PHASE, H_ARGO_ID,
+  ARGO_APPLICATION, ARGO_AUTOMATED_USER, ARGO_DETAIL_LABEL, ARGO_IN_CLUSTER, ARGO_NO,
+  ARGO_NO_HISTORY, ARGO_NO_OPERATION, ARGO_YES, CLOSE, COL_NAME, H_ARGO_DEPLOYED, H_ARGO_HOOK_PHASE, H_ARGO_ID,
   H_MESSAGE, H_STATE, LOADING, L_ARGO_APPSET, L_ARGO_AUTOMATED, L_ARGO_CHART, L_ARGO_CLUSTER, L_ARGO_FINISHED, L_ARGO_HEALTH, L_ARGO_INITIATED,
   L_ARGO_MESSAGE, L_ARGO_NAMESPACE, L_ARGO_OPTIONS, L_ARGO_PATH, L_ARGO_PHASE, L_ARGO_PROJECT, L_ARGO_PRUNE, L_ARGO_RECONCILED, L_ARGO_REF, L_ARGO_REPO,
   L_ARGO_REVISIONS, L_ARGO_SELF_HEAL, L_ARGO_STARTED, L_ARGO_SYNC, L_ARGO_TARGET, L_ARGO_VALUES, SEC_ARGO_CONDITIONS, SEC_ARGO_DEST, SEC_ARGO_FAILED,
@@ -33,9 +32,10 @@ import { ResourcePanel } from "./detail/ResourcePanel";
 import { TAB_ARGO_DIFF, TAB_ARGO_OPERATION } from "./detail/text";
 import { ManageTab } from "./manage/ManageTab";
 import { TAB_ARGO_MANAGE } from "./manage/text";
-import { NetworkMap } from "./maps/NetworkMap";
-import { MAP_TEXT } from "./text";
-import { ROLLBACK_RUNNING, TERMINATE } from "./ops/text";
+import { AppMaps } from "./maps/AppMaps";
+import { ARGO_VIEW_MAPS } from "./text";
+import { ActionBar } from "./ops/ActionBar";
+import { ROLLBACK_RUNNING } from "./ops/text";
 
 interface Props {
   /** ArgoCD 서버 주소 */
@@ -55,10 +55,11 @@ interface Props {
   widthPct?: number;
   /** 처음부터 골라 둘 리소스(전체 리소스 검색·⌘K에서 열 때). 없으면 아무것도 고르지 않는다 */
   focus?: ArgoResourceFocus | null;
+  onOpenApp?: (app: { namespace: string; name: string }) => void;
   initialTab?: "history";
 }
 
-type Tab = "overview" | "resources" | "network" | "diff" | "operation" | "history" | "manage" | "raw";
+type Tab = "overview" | "resources" | "maps" | "diff" | "operation" | "history" | "manage" | "raw";
 
 /** 같은 리소스인가(group·kind·namespace·name) */
 const sameResource = (a: { group: string; kind: string; namespace?: string | null; name: string }, b: { group: string; kind: string; namespace?: string | null; name: string }) =>
@@ -202,10 +203,10 @@ function Overview({ app, at }: { app: ArgoApp; at: number }) {
 }
 
 /** Application 하나의 상세(개요·리소스 트리·이력·YAML/JSON)와 Refresh·Sync 실행 */
-export function ArgoDetail({ url, namespace, name, resourceVersion, live, onClose, onTokenError, now, widthPct = DETAIL_PCT, focus, initialTab }: Props) {
+export function ArgoDetail({ url, namespace, name, resourceVersion, live, onClose, onTokenError, now, widthPct = DETAIL_PCT, focus, initialTab, onOpenApp }: Props) {
   const [tab, setTab] = useState<Tab>(focus ? "resources" : initialTab ?? "overview");
   const q = useArgoApp(url, namespace, name, resourceVersion);
-  const tree = useArgoTree(url, namespace, name, resourceVersion, tab === "resources" || tab === "network", live);
+  const tree = useArgoTree(url, namespace, name, resourceVersion, tab === "resources" || tab === "maps", live);
   const lastApp = useRef<{ key: string; app: ArgoApp } | null>(null);
   const appKey = JSON.stringify([url, namespace, name]);
   if (q.data) lastApp.current = { key: appKey, app: q.data };
@@ -230,7 +231,6 @@ export function ArgoDetail({ url, namespace, name, resourceVersion, live, onClos
     if (found) setPicked({ group: found.group, version: found.version, kind: found.kind, namespace: found.namespace, name: found.name, uid: node?.uid ?? null });
   }, [focus, tree.data, app]);
 
-  const [sheet, setSheet] = useState(false);
   const [change, setChange] = useState<ArgoChange | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const flow = useArgoChange(url);
@@ -262,7 +262,7 @@ export function ArgoDetail({ url, namespace, name, resourceVersion, live, onClos
   const tabs: [Tab, string][] = [
     ["overview", TAB_ARGO_OVERVIEW],
     ["resources", TAB_ARGO_RESOURCES],
-    ["network", MAP_TEXT.network],
+    ["maps", ARGO_VIEW_MAPS],
     ["diff", TAB_ARGO_DIFF],
     ["operation", TAB_ARGO_OPERATION],
     ["history", TAB_ARGO_HISTORY],
@@ -302,8 +302,8 @@ export function ArgoDetail({ url, namespace, name, resourceVersion, live, onClos
     ) : (
       <div className="empty">{LOADING}</div>
     );
-  } else if (tab === "network") {
-    body = tree.isError ? <ErrorState error={tree.error} profile="" compact onRetry={() => void tree.refetch()} /> : tree.data ? <NetworkMap nodes={tree.data} onOpen={openResource} /> : <div className="empty">{LOADING}</div>;
+  } else if (tab === "maps") {
+    body = <>{tree.isError && <ErrorState error={tree.error} profile="" compact onRetry={() => void tree.refetch()} />}<AppMaps url={url} app={app} version={resourceVersion} live={live} nodes={tree.data ?? []} onResource={openResource} onApp={(next) => onOpenApp?.(next)} /></>;
   } else if (tab === "diff") {
     body = <AppDiffTab url={url} namespace={namespace} name={name} version={resourceVersion} enabled onOpen={openResource} onTokenError={onTokenError} />;
   } else if (tab === "operation") {
@@ -343,26 +343,12 @@ export function ArgoDetail({ url, namespace, name, resourceVersion, live, onClos
         <span className="mono k8s-wrap">
           {namespace}/{name}
         </span>
-        <span className="argo-acts k8s-push">
-          <button className="btn small tone-secondary" disabled={flow.pending || can.data?.[0] !== true} title={can.data?.[0] === false ? CHANGE_DENIED : undefined} onClick={() => refresh(false)}>
-            {ARGO_REFRESH}
-          </button>
-          <button className="btn small tone-warn" disabled={flow.pending || can.data?.[0] !== true} title={can.data?.[0] === false ? CHANGE_DENIED : undefined} onClick={() => refresh(true)}>
-            {ARGO_HARD_REFRESH}
-          </button>
-          {syncBlocked && (
-            <button className="btn small tone-danger" disabled={flow.pending || can.data?.[1] !== true} title={syncDenied ?? undefined} onClick={() => setChange({ kind: "terminate" })}>
-              {TERMINATE}
-            </button>
-          )}
-          <button className="btn small tone-primary" disabled={flow.pending || !app || syncBlocked || can.data?.[1] !== true} title={syncBlocked ? ARGO_SYNC_RUNNING : can.data?.[1] === false ? CHANGE_DENIED : undefined} onClick={() => setSheet(true)}>
-            {ARGO_SYNC}
-          </button>
-        </span>
+        <span className="k8s-push" />
         <button className="icon" aria-label={CLOSE} title={CLOSE} onClick={onClose}>
           ✕
         </button>
       </div>
+      {target && app && <ActionBar url={url} app={app} target={target} version={resourceVersion} pending={flow.pending} now={now} onRefresh={refresh} onChange={setChange} />}
       {readTarget && <DetailBar url={url} namespace={namespace} name={name} version={resourceVersion} live={live} onTokenError={onTokenError} />}
       {note && (
         <p className="ok argo-note" role="status">
@@ -378,19 +364,11 @@ export function ArgoDetail({ url, namespace, name, resourceVersion, live, onClos
         ))}
       </div>
       <div className="k8s-detail-body">{body}</div>
-      {sheet && app && (
-        <SyncForm
-          url={url}
-          app={app}
-          version={resourceVersion}
-          onCancel={() => setSheet(false)}
-          onPreview={(value) => {
-            setSheet(false);
-            setChange(value);
-          }}
-        />
-      )}
-      {change && target && <ChangeSheet url={url} target={target} change={change} onClose={() => setChange(null)} onDone={(message) => { setChange(null); setNote(message); }} />}
+      {change && target && <ChangeSheet url={url} target={target} change={change} onClose={() => setChange(null)} onDone={(message) => {
+        if (change.kind === "appDelete") onClose();
+        setChange(null);
+        setNote(message);
+      }} />}
     </aside>
   );
 }
