@@ -16,7 +16,6 @@ pub struct DynamoState {
     /// 변경 기록 파일(`dynamo-changes.jsonl`). 키와 바뀐 속성 이름만 쓰고 아이템 값은 쓰지 않는다
     pub(crate) log_path: PathBuf,
     pub(crate) change_lock: tokio::sync::Mutex<()>,
-    #[allow(dead_code)]
     pub(crate) undo_images: std::sync::Mutex<std::collections::HashMap<String, serde_json::Value>>,
     pub(crate) stream_sessions: crate::dynamo::stream::Sessions,
 }

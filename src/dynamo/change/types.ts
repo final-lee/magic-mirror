@@ -1,4 +1,11 @@
+import type { Item } from "../items/types";
+
 export type DynamoChange =
+  | { kind: "putItem"; item: Item; condition: null }
+  | { kind: "updateItem"; key: Item; original: Item; updated: Item; guardAll?: boolean }
+  | { kind: "moveItem"; original: Item; updated: Item }
+  | { kind: "deleteItems"; items: Item[] }
+  | { kind: "restoreItems"; items: Item[] }
   | { kind: "ttl"; enabled: boolean; attribute: string }
   | { kind: "pitr"; enabled: boolean; days: number | null }
   | { kind: "deletionProtection"; enabled: boolean }
@@ -24,6 +31,18 @@ export interface Target {
   table: string;
 }
 
+export interface ItemResult {
+  item: Item;
+  ok: boolean;
+  error: string | null;
+  latest: Item | null;
+}
+
+export interface ApplyResult {
+  message: string;
+  results?: ItemResult[];
+}
+
 export interface DynamoPreview {
   title: string;
   calls: { api: string; params: unknown }[];
@@ -47,4 +66,5 @@ export interface ChangeLogEntry {
   undone: boolean;
   undoOf: string | null;
   restoredTable: string | null;
+  undoAvailable?: boolean;
 }

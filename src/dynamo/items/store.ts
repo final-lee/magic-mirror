@@ -23,6 +23,10 @@ export function updateItems(key: string, update: Partial<Snapshot>): void {
   listeners.forEach(listener => listener());
 }
 
+export function currentItems(key: string): Item[] {
+  return (stores.get(key) ?? empty).items;
+}
+
 export function openQuery(key: string, prefill: QueryPrefill): void {
   const current = stores.get(key) ?? empty;
   updateItems(key, { prefill, serial: current.serial + 1 });

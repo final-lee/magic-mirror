@@ -3,9 +3,12 @@ import { desktop } from "../../api/desktop";
 import { errorMessage } from "../../api/errors";
 import { fuzzyKeep } from "../../lib/fuzzy";
 import type { DetailContext } from "../TableDetail";
+import { useDynamoChange } from "../change/ChangeFlow";
+import type { DynamoChange } from "../change/types";
 import type { DynamoTable } from "../types";
 import { itemsApi } from "./api";
 import { ItemDetail } from "./ItemDetail";
+import { ItemEditor } from "./ItemEditor";
 import { tableStoreKey, updateItems, useItems } from "./store";
 import * as t from "./text";
 import type { Attribute, Condition, Item, ItemPage, ReadRequest } from "./types";
@@ -140,24 +143,42 @@ function ExportControls({ table, items, onError }: { table: string; items: Item[
   </select><button className="btn small tone-secondary" disabled={!items.length} onClick={() => void save()}>{t.EXPORT}</button></>;
 }
 
-function ResultsTable({ table, items, columns, onError }: { table: DynamoTable; items: Item[]; columns: string[]; onError: (error: string) => void }) {
+function ResultsTable({ table, items, columns, onError, onEdit, onDuplicate, onDelete }: {
+  table: DynamoTable;
+  items: Item[];
+  columns: string[];
+  onError: (error: string) => void;
+  onEdit: (item: Item) => void;
+  onDuplicate: (item: Item) => void;
+  onDelete: (items: Item[]) => void;
+}) {
   const [filter, setFilter] = useState("");
   const [hidden, setHidden] = useState<string[]>([]);
   const [selected, setSelected] = useState<Item | null>(null);
+  const [checked, setChecked] = useState<Item[]>([]);
+  useEffect(() => {
+    setChecked(current => current.filter(item => items.includes(item)));
+  }, [items]);
   const shown = items.filter(item => !filter || fuzzyKeep([item], filter, row => [JSON.stringify(row)]).length > 0);
   const visible = columns.filter(column => !hidden.includes(column));
   return <>
     <div className="ddb-items-actions"><input value={filter} onChange={event => setFilter(event.target.value)} placeholder="아이템 찾기" />
       <details><summary>열 고르기</summary>{columns.map(column => <label key={column}><input type="checkbox" checked={!hidden.includes(column)} onChange={() => setHidden(current => current.includes(column) ? current.filter(name => name !== column) : [...current, column])} />{column} </label>)}</details>
       <ExportControls table={table.name} items={items} onError={onError} />
+      <button className="btn small tone-danger" disabled={!checked.length || checked.length > 1000} onClick={() => { onDelete(checked); setChecked([]); }}>삭제 {checked.length}개</button>
+      {checked.length > 1000 && <span className="err">최대 1,000개까지 삭제할 수 있어요.</span>}
     </div>
     {shown.length === 0 ? <p className="dim">{t.NO_ITEMS}</p> : <div className="ddb-items-table-wrap"><table className="ddb-table">
-      <thead><tr>{visible.map(column => <th key={column}>{column}</th>)}</tr></thead>
+      <thead><tr><th>선택</th>{visible.map(column => <th key={column}>{column}</th>)}</tr></thead>
       <tbody>{shown.map((item, index) => <tr key={index} tabIndex={0} onClick={() => setSelected(item)} onKeyDown={event => { if (event.key === "Enter") setSelected(item); }}>
+        <td onClick={event => event.stopPropagation()}><input type="checkbox" aria-label={`아이템 ${index + 1} 선택`} checked={checked.includes(item)} onChange={event => setChecked(current => event.target.checked ? [...current, item] : current.filter(row => row !== item))} /></td>
         {visible.map(column => <td key={column}>{item[column] && <><span className="iam-chip">{Object.keys(item[column])[0]}</span> {summary(item[column])}</>}</td>)}
       </tr>)}</tbody>
     </table></div>}
-    {selected && <ItemDetail item={selected} table={table} onClose={() => setSelected(null)} />}
+    {selected && <ItemDetail item={selected} table={table} onClose={() => setSelected(null)}
+      onEdit={() => { onEdit(selected); setSelected(null); }}
+      onDuplicate={() => { onDuplicate(selected); setSelected(null); }}
+      onDelete={() => { onDelete([selected]); setSelected(null); }} />}
   </>;
 }
 
@@ -169,6 +190,8 @@ export function Items({ profile, region, table }: DetailContext) {
   const [lastReq, setLastReq] = useState<ReadRequest | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const flow = useDynamoChange({ profile, region, table: table.name });
+  const [editor, setEditor] = useState<{ item: Item; creating: boolean; duplicate: boolean } | null>(null);
   const [consumed, setConsumed] = useState(0);
   useEffect(() => {
     if (store.prefill) {
@@ -197,13 +220,29 @@ export function Items({ profile, region, table }: DetailContext) {
     const request = lastReq.kind === "partiql" ? { ...lastReq, nextToken: page.nextToken } : { ...lastReq, startKey: page.lastKey };
     void run(request, true);
   }
+  function create() {
+    const attrs = [table.keys.pk, table.keys.sk].filter((attr): attr is NonNullable<typeof attr> => !!attr);
+    const item = Object.fromEntries(attrs.map(attr => [attr.name, { [attr.type]: attr.type === "N" ? "0" : "" }]));
+    setEditor({ item, creating: true, duplicate: false });
+  }
+  function begin(change: DynamoChange) {
+    setEditor(null);
+    void flow.begin(change);
+  }
   return <div className="ddb-items">
     <QueryBuilder table={table} form={form} />
+    <button className="btn tone-create" onClick={create}>새 아이템</button>
+    {flow.error && <p className="err" role="alert">{flow.error}</p>}
     <PagingBar form={form} page={page} busy={busy} run={() => void run(form.build())} next={next} />
     {error && <p className="err" role="alert">{error}</p>}
     {store.history.length > 0 && <details><summary>최근 질의 ({store.history.length})</summary>{store.history.map((request, index) => <button key={index} className="btn small tone-secondary" onClick={() => void run(request)}>{request.kind} {index + 1}</button>)}</details>}
     {page && <><p>Count {page.count} · ScannedCount {page.scannedCount} · 소비 {page.consumed.toFixed(2)} RCU · 누적 {consumed.toFixed(2)} RCU</p>
       <details><summary>{t.REQUEST}</summary><pre>{JSON.stringify(page.request.params, null, 2)}</pre><pre>{page.request.cli}</pre><button className="btn small tone-secondary" onClick={() => void desktop.copy(page.request.cli)}>CLI 복사</button></details></>}
-    <ResultsTable table={table} items={store.items} columns={columns} onError={setError} />
+    <ResultsTable table={table} items={store.items} columns={columns} onError={setError}
+      onEdit={item => setEditor({ item, creating: false, duplicate: false })}
+      onDuplicate={item => setEditor({ item, creating: true, duplicate: true })}
+      onDelete={items => begin({ kind: "deleteItems", items })} />
+    {editor && <ItemEditor table={table} {...editor} save={begin} close={() => setEditor(null)} />}
+    {flow.dialog}
   </div>;
 }

@@ -27,6 +27,9 @@ pub async fn apply(
 ) -> Result<Option<DynamoChange>, AppError> {
     let client = Client::new(cfg);
     match change {
+        DynamoChange::PutItem { .. } | DynamoChange::UpdateItem { .. }
+        | DynamoChange::MoveItem { .. } | DynamoChange::DeleteItems { .. }
+        | DynamoChange::RestoreItems { .. } => unreachable!("아이템 쓰기는 별도로 처리해요"),
         DynamoChange::Ttl { enabled, attribute } => {
             let specification = TimeToLiveSpecification::builder()
                 .enabled(*enabled)

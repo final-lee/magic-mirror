@@ -8,6 +8,11 @@ mod inverse;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum DynamoChange {
+    PutItem { item: Value, condition: Option<Value> },
+    UpdateItem { key: Value, original: Value, updated: Value, #[serde(default)] guard_all: bool },
+    MoveItem { original: Value, updated: Value },
+    DeleteItems { items: Vec<Value> },
+    RestoreItems { items: Vec<Value> },
     Ttl { enabled: bool, attribute: String },
     Pitr { enabled: bool, days: Option<i64> },
     DeletionProtection { enabled: bool },
@@ -89,7 +94,13 @@ impl PreviewBuilder {
 }
 
 pub fn preview(table: &DynamoTable, change: &DynamoChange, stream_consumers: bool) -> DynamoPreview {
+    if let Some(result) = super::item_change::preview(table, change) {
+        return result;
+    }
     let builder = match change {
+        DynamoChange::PutItem { .. } | DynamoChange::UpdateItem { .. }
+        | DynamoChange::MoveItem { .. } | DynamoChange::DeleteItems { .. }
+        | DynamoChange::RestoreItems { .. } => unreachable!(),
         DynamoChange::Ttl { enabled, attribute } => preview_ttl(table, *enabled, attribute),
         DynamoChange::Pitr { enabled, days } => preview_pitr(table, *enabled, *days),
         DynamoChange::DeletionProtection { enabled } => PreviewBuilder::new(
@@ -124,6 +135,7 @@ fn confirmation_name(table: &DynamoTable, change: &DynamoChange, stream_consumer
     let name = table.name.to_ascii_lowercase();
     let needs_name = name.contains("prod") || name.contains("prd")
         || matches!(change, DynamoChange::DeleteBackup { .. })
+        || matches!(change, DynamoChange::DeleteItems { items } if items.len() >= 2)
         || (matches!(change, DynamoChange::Stream { enabled: false, .. }) && stream_consumers);
     needs_name.then(|| table.name.clone())
 }

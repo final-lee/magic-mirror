@@ -23,9 +23,11 @@ export function ChangeLog({ profile, region, table }: DetailContext) {
       <span>{row.ok ? row.undone ? t.DONE : "성공" : "실패"}</span>
       <p className="dim">{row.calls.join(", ")}{row.undoOf ? ` · ${row.undoOf}` : ""}</p>
       {row.error && <p className="err">{row.error}</p>}
-      {row.ok && row.reversible && !row.undone
-        ? <button className="btn small tone-caution" disabled={flow.loading} onClick={() => void flow.undo(row.id)}>{t.UNDO}</button>
-        : !row.reversible && <span className="dim">{t.UNAVAILABLE}</span>}
+      {row.ok && row.reversible && !row.undone && row.undoAvailable === false
+        ? <span className="dim">되돌릴 수 없음(이전 값이 남아 있지 않음)</span>
+        : row.ok && row.reversible && !row.undone
+          ? <button className="btn small tone-caution" disabled={flow.loading} onClick={() => void flow.undo(row.id)}>{t.UNDO}</button>
+          : !row.reversible && <span className="dim">{t.UNAVAILABLE}</span>}
     </article>)}
     {flow.dialog}
   </section>;

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use crate::commands::AppState;
-use crate::dynamo::{change::{self, DynamoChange, DynamoPreview}, ops, read};
+use crate::dynamo::{change::{self, DynamoChange, DynamoPreview}, item_apply, item_change, ops, read};
 use crate::dynamo_commands::DynamoState;
 use crate::error::{from_sdk, AppError};
 use crate::iam::clock::{iso, now_secs};
@@ -30,6 +30,8 @@ pub struct ChangeLogEntry {
     inverse: Option<DynamoChange>,
     #[serde(default)]
     restored_table: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    undo_available: Option<bool>,
 }
 fn new_id() -> String {
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -108,6 +110,8 @@ pub async fn dynamo_preview(
 #[derive(Serialize)]
 pub struct ApplyResult {
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    results: Option<Vec<item_apply::ItemResult>>,
 }
 fn check_confirmation(
     preview: &DynamoPreview,
@@ -135,6 +139,37 @@ fn append_change(
         }
     }
     Ok(())
+}
+
+fn item_call_summary(call: change::Call) -> String {
+    fn collect(value: &serde_json::Value, names: &mut std::collections::BTreeSet<String>) {
+        if let Some(object) = value.as_object() {
+            for (key, value) in object {
+                if matches!(key.as_str(), "item" | "key") {
+                    if let Some(attributes) = value.as_object() {
+                        names.extend(attributes.keys().cloned());
+                    }
+                } else if key == "expressionAttributeNames" {
+                    if let Some(attributes) = value.as_object() {
+                        names.extend(attributes.values().filter_map(|value| value.as_str().map(str::to_owned)));
+                    }
+                } else if key != "expressionAttributeValues" {
+                    collect(value, names);
+                }
+            }
+        } else if let Some(items) = value.as_array() {
+            for item in items {
+                collect(item, names);
+            }
+        }
+    }
+    let mut names = std::collections::BTreeSet::new();
+    collect(&call.params, &mut names);
+    if names.is_empty() {
+        call.api
+    } else {
+        format!("{} ({})", call.api, names.into_iter().collect::<Vec<_>>().join(", "))
+    }
 }
 
 fn log_entry(
@@ -165,18 +200,22 @@ fn log_entry(
         table,
         kind,
         summary: preview.title,
-        calls: preview.calls.into_iter().map(|call| call.api).collect(),
+        calls: preview.calls.into_iter().map(|call| {
+            if item_change::is_item(change) { item_call_summary(call) } else { call.api }
+        }).collect(),
         ok: result.is_ok(),
         error: result.as_ref().err().map(ToString::to_string),
         reversible: inverse.is_some(),
         undone: false,
         undo_of,
+        undo_available: None,
         inverse,
         restored_table,
     }
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn dynamo_apply(
     state: State<'_, AppState>,
     dynamo: State<'_, DynamoState>,
@@ -188,23 +227,76 @@ pub async fn dynamo_apply(
     undo_of: Option<String>,
 ) -> Result<ApplyResult, AppError> {
     let cfg = state.ctx.config(&profile, &region).await?;
+    apply_change(&cfg, &dynamo, profile, region, table, change, confirm_name, undo_of).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn apply_change(
+    cfg: &aws_config::SdkConfig,
+    dynamo: &DynamoState,
+    profile: String,
+    region: String,
+    table: String,
+    change: DynamoChange,
+    confirm_name: Option<String>,
+    undo_of: Option<String>,
+) -> Result<ApplyResult, AppError> {
     let _guard = dynamo.change_lock.lock().await;
-    let (preview, arn) = build_preview(&cfg, &table, &change).await?;
+    let (preview, arn) = build_preview(cfg, &table, &change).await?;
     check_confirmation(&preview, confirm_name.as_deref())?;
     if let Some(id) = &undo_of {
         let found = jsonl::read_all::<ChangeLogEntry>(&dynamo.log_path)
             .into_iter()
             .find(|entry| &entry.id == id && entry.profile == profile
                 && entry.region == region && entry.table == table && entry.ok && !entry.undone);
-        if !found.is_some_and(|entry| entry.inverse.as_ref() == Some(&change)) {
+        if !found.is_some_and(|entry| {
+            let inverse = if item_change::is_item(&change) {
+                dynamo.undo_images.lock().ok().and_then(|images| images.get(&entry.id).cloned())
+                    .and_then(|value| serde_json::from_value(value).ok())
+            } else {
+                entry.inverse
+            };
+            inverse.as_ref() == Some(&change)
+        }) {
             return Err(AppError::other("되돌릴 수 없는 기록이거나 변경이 일치하지 않아요."));
         }
     }
-    let result = ops::apply(&cfg, &table, &arn, &change).await;
+    if item_change::is_item(&change) {
+        let info = read::read_table(cfg, &table).await?;
+        let results = item_apply::apply(cfg, &info, &change).await;
+        let inverse = item_apply::inverse(&change, &results, preview.inverse.clone());
+        let status = if results.iter().any(|result| result.ok) { Ok(inverse.clone()) }
+            else { Err(AppError::other("아이템 변경에 실패했어요.")) };
+        let partial = results.iter().any(|result| !result.ok);
+        if partial {
+            if let Some(id) = &undo_of {
+                let failed: Vec<_> = results.iter().filter(|result| !result.ok).map(|result| result.item.clone()).collect();
+                let remaining = match &change {
+                    DynamoChange::DeleteItems { .. } => Some(DynamoChange::DeleteItems { items: failed }),
+                    DynamoChange::RestoreItems { .. } => Some(DynamoChange::RestoreItems { items: failed }),
+                    _ => None,
+                };
+                if let Some(remaining) = remaining {
+                    let value = serde_json::to_value(remaining).map_err(|error| AppError::other(error.to_string()))?;
+                    dynamo.undo_images.lock().map_err(|_| AppError::other("되돌리기 메모리를 사용할 수 없어요."))?.insert(id.clone(), value);
+                }
+            }
+        }
+        let mut entry = log_entry(profile, region, table, &change, preview, &status, if partial { None } else { undo_of });
+        entry.inverse = None;
+        entry.reversible = inverse.is_some();
+        append_change(&dynamo.log_path, &entry)?;
+        if let Some(inverse) = inverse {
+            let image = serde_json::to_value(inverse).map_err(|error| AppError::other(error.to_string()))?;
+            dynamo.undo_images.lock().map_err(|_| AppError::other("되돌리기 메모리를 사용할 수 없어요."))?.insert(entry.id, image);
+        }
+        return Ok(ApplyResult { message: "아이템 변경을 처리했어요.".into(), results: Some(results) });
+    }
+    let result = ops::apply(cfg, &table, &arn, &change).await;
     let entry = log_entry(profile, region, table, &change, preview, &result, undo_of);
     append_change(&dynamo.log_path, &entry)?;
     result?;
-    Ok(ApplyResult { message: "변경을 요청했어요.".into() })
+    Ok(ApplyResult { message: "변경을 요청했어요.".into(), results: None })
 }
 #[tauri::command]
 pub fn dynamo_changes(
@@ -217,6 +309,13 @@ pub fn dynamo_changes(
         .into_iter()
         .filter(|entry| entry.profile == profile && entry.region == region && entry.table == table)
         .collect();
+    if let Ok(images) = dynamo.undo_images.lock() {
+        for row in &mut rows {
+            if matches!(row.kind.as_str(), "putItem" | "updateItem" | "moveItem" | "deleteItems" | "restoreItems") {
+                row.undo_available = Some(images.contains_key(&row.id));
+            }
+        }
+    }
     rows.reverse();
     rows
 }
@@ -234,7 +333,12 @@ pub async fn dynamo_undo_preview(
         .find(|entry| entry.id == id && entry.profile == profile && entry.region == region
             && entry.table == table && entry.ok && !entry.undone)
         .ok_or_else(|| AppError::other("되돌릴 수 있는 기록이 없어요."))?;
-    let change = entry.inverse.ok_or_else(|| AppError::other("되돌릴 값이 남아 있지 않아요."))?;
+    let change = if entry.inverse.is_some() {
+        entry.inverse
+    } else {
+        dynamo.undo_images.lock().ok().and_then(|images| images.get(&entry.id).cloned())
+            .and_then(|value| serde_json::from_value(value).ok())
+    }.ok_or_else(|| AppError::other("되돌릴 수 없음(이전 값이 남아 있지 않음)"))?;
     let cfg = state.ctx.config(&profile, &region).await?;
     let preview = build_preview(&cfg, &table, &change).await?.0;
     Ok((change, preview))

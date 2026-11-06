@@ -26,7 +26,7 @@ export function fromPlain(value: unknown): Attribute {
   if (value === null) return { NULL: true };
   if (typeof value === "boolean") return { BOOL: value };
   if (typeof value === "string") return { S: value };
-  if (typeof value === "number" && Number.isFinite(value)) return { N: String(value) };
+  if (typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER) return { N: String(value) };
   if (Array.isArray(value)) return { L: value.map(fromPlain) };
   if (typeof value === "object") return { M: Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([name, child]) => [name, fromPlain(child)])) };
   throw new Error("JSON으로 표현할 수 없는 값이에요");

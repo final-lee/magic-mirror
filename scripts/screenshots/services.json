@@ -596,6 +596,36 @@
             "kind": "state"
           },
           {
+            "key": "pk",
+            "label": "PK",
+            "kind": "mono"
+          },
+          {
+            "key": "sk",
+            "label": "SK",
+            "kind": "mono"
+          },
+          {
+            "key": "gsis",
+            "label": "GSIs",
+            "kind": "text"
+          },
+          {
+            "key": "billing",
+            "label": "Billing mode",
+            "kind": "text"
+          },
+          {
+            "key": "class",
+            "label": "Class",
+            "kind": "text"
+          },
+          {
+            "key": "stream",
+            "label": "Stream",
+            "kind": "text"
+          },
+          {
             "key": "items",
             "label": "Items",
             "kind": "text"
@@ -604,11 +634,6 @@
             "key": "size",
             "label": "Size",
             "kind": "bytes"
-          },
-          {
-            "key": "billing",
-            "label": "Billing mode",
-            "kind": "text"
           }
         ]
       }

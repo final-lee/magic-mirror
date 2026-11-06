@@ -19,7 +19,14 @@ function Tree({ name, value }: { name: string; value: Attribute }) {
   </div>;
 }
 
-export function ItemDetail({ item, table, onClose }: { item: Item; table: DynamoTable; onClose: () => void }) {
+export function ItemDetail({ item, table, onClose, onEdit, onDuplicate, onDelete }: {
+  item: Item;
+  table: DynamoTable;
+  onClose: () => void;
+  onEdit?: () => void;
+  onDuplicate?: () => void;
+  onDelete?: () => void;
+}) {
   const [mode, setMode] = useState<"tree" | "ddb" | "plain">("tree");
   const size = itemSize(item);
   const ttl = table.ttl?.attribute;
@@ -32,6 +39,9 @@ export function ItemDetail({ item, table, onClose }: { item: Item; table: Dynamo
       <p>추정 크기 {size.toLocaleString()} B / 400 KB ({(size / 409600 * 100).toFixed(1)}%)</p>
       {seconds !== null && Number.isFinite(seconds) && <p>TTL: {new Date(seconds * 1000).toLocaleString()} {seconds * 1000 < Date.now() ? "(만료됐지만 아직 지워지지 않았어요)" : `(약 ${Math.ceil((seconds * 1000 - Date.now()) / 3600000)}시간 남음)`}</p>}
       <div className="ddb-items-actions">
+        {onEdit && <button className="btn small tone-secondary" onClick={onEdit}>편집</button>}
+        {onDuplicate && <button className="btn small tone-create" onClick={onDuplicate}>복제</button>}
+        {onDelete && <button className="btn small tone-danger" onClick={onDelete}>삭제</button>}
         <button className="btn small tone-secondary" onClick={() => setMode("tree")}>트리</button>
         <button className="btn small tone-secondary" onClick={() => setMode("ddb")}>DynamoDB JSON</button>
         <button className="btn small tone-secondary" onClick={() => setMode("plain")}>일반 JSON</button>

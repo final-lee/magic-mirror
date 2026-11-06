@@ -2,10 +2,11 @@ import { useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { errorMessage } from "../../api/errors";
 import { ConfirmField, ReversibleNote, useSheetFocus } from "../../iam/previewParts";
+import { applyItemResults } from "../items/writes";
 import { changeApi } from "./api";
 import { canApply } from "./gate";
 import * as t from "./text";
-import type { DynamoChange, DynamoPreview, Target } from "./types";
+import type { DynamoChange, DynamoPreview, ItemResult, Target } from "./types";
 
 export type DynamoChangeFlow = {
   begin: (change: DynamoChange, extraWarnings?: string[]) => Promise<void>;
@@ -26,9 +27,11 @@ export function useDynamoChange(target: Target): DynamoChangeFlow {
   const [pending, setPending] = useState<Pending | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [results, setResults] = useState<ItemResult[]>([]);
 
   const begin = async (change: DynamoChange, extraWarnings: string[] = []) => {
     setError("");
+    setResults([]);
     setLoading(true);
     try {
       const preview = await changeApi.preview(target, change);
@@ -62,7 +65,11 @@ export function useDynamoChange(target: Target): DynamoChangeFlow {
     setError("");
     setLoading(true);
     try {
-      await changeApi.apply(target, pending.change, typed || null, pending.undoOf);
+      const outcome = await changeApi.apply(target, pending.change, typed || null, pending.undoOf);
+      if (outcome.results) {
+        applyItemResults(target, pending.change, outcome.results);
+        setResults(outcome.results.filter(result => !result.ok));
+      }
       setPending(null);
       await queryClient.invalidateQueries({ queryKey: ["dynamo"] });
     } catch (error) {
@@ -73,19 +80,27 @@ export function useDynamoChange(target: Target): DynamoChangeFlow {
     }
   };
 
-  const dialog = pending && <Dialog
+  const dialog = <>{pending && <Dialog
     key={`${pending.undoOf ?? "new"}-${pending.preview.title}`}
     pending={pending}
     loading={loading}
     apply={apply}
     cancel={() => setPending(null)}
-  />;
+  />}{results.length > 0 && <div className="modal"><div className="sheet wide cp" role="dialog" aria-label="아이템 변경 결과">
+    <h3>변경하지 못한 아이템</h3>
+    {results.map((result, index) => <div key={index}><p className="err">{result.error}</p>
+      <h4>읽은 아이템</h4><pre>{JSON.stringify(result.item, null, 2)}</pre>
+      <h4>현재 아이템</h4><pre>{JSON.stringify(result.latest, null, 2)}</pre></div>)}
+    <button className="btn tone-secondary" onClick={() => setResults([])}>닫기</button>
+  </div></div>}</>;
   return { begin, undo, loading, error, dialog };
 }
 
 function actionTone(pending: Pending) {
   if (pending.undoOf) return "tone-caution";
   if (pending.change.kind === "deleteBackup") return "tone-danger";
+  if (pending.change.kind === "deleteItems") return "tone-danger";
+  if (pending.change.kind === "putItem" || pending.change.kind === "updateItem" || pending.change.kind === "moveItem") return "tone-primary";
   if (pending.change.kind === "createBackup") return "tone-create";
   if (["restoreBackup", "restorePitr", "exportS3"].includes(pending.change.kind)) return "tone-primary";
   return "tone-warn";
