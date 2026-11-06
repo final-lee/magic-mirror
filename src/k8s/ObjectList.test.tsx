@@ -3,7 +3,7 @@ import { useRef } from "react";
 import { DEPLOYMENTS, PODS, SECRETS } from "./kinds";
 import { ObjectList } from "./ObjectList";
 import { findFor, findInputs, pressFind } from "./testFind";
-import { BAD_SELECTOR, COL_CPU, COL_CPU_OF_LIMIT, COL_CPU_OF_REQUEST, COL_NAMESPACE, LIST_EMPTY, LIST_NO_MATCH, LOADING, METRICS_UNAVAILABLE, ONLY_PROBLEMS, PROBLEM_LABELS } from "./text";
+import { BAD_SELECTOR, COL_CPU, COL_CPU_OF_LIMIT, COL_CPU_OF_REQUEST, COL_NAMESPACE, COLUMN_LABELS, FILTER_AGE, FILTER_RESET, FILTER_RESTARTED, FILTER_STATE, LIST_EMPTY, LIST_NO_MATCH, LOADING, METRICS_UNAVAILABLE, ONLY_PROBLEMS, PROBLEM_LABELS, STATE_NOT_READY, STATE_PARTIAL, STATE_READY } from "./text";
 import type { K8sMetrics, K8sProblem, K8sRow } from "./types";
 import { buildUsageIndex } from "./usage";
 
@@ -36,7 +36,7 @@ const filter = findFor;
 test("lists rows with the kind's columns and problem badges", () => {
   setup();
   expect(names()).toEqual(["api", "worker"]);
-  expect(screen.getAllByText("Running")).toHaveLength(2);
+  expect(document.querySelectorAll("tbody .k8s-status.tone-ok")).toHaveLength(2);
   expect(screen.getByText(PROBLEM_LABELS.crashLoopBackOff)).toBeInTheDocument();
   expect(screen.queryByRole("columnheader", { name: new RegExp(COL_NAMESPACE) })).toBeNull();
 });
@@ -73,6 +73,66 @@ test("filters by name, by label selector, and by problems", () => {
   filter("");
   fireEvent.click(screen.getByRole("checkbox", { name: ONLY_PROBLEMS }));
   expect(names()).toEqual(["worker"]);
+});
+
+const pod = (name: string, values: Record<string, string>, createdAt: string | null = null): K8sRow => ({
+  uid: `u-${name}`, name, namespace: "web", resourceVersion: "1", createdAt, labels: {}, values, problems: [],
+});
+const NOW = Date.parse("2026-11-06T12:00:00Z");
+const pods = [
+  pod("a", { status: "Running", restarts: "0", node: "n1" }, "2026-11-06T11:30:00Z"),
+  pod("b", { status: "CrashLoopBackOff", restarts: "7", node: "n2" }, "2026-10-01T00:00:00Z"),
+  pod("c", { status: "Running", restarts: "2", node: "n2" }, "2026-11-01T00:00:00Z"),
+];
+const chip = (state: string) => within(screen.getByRole("group", { name: FILTER_STATE })).getByRole("button", { name: new RegExp(`^${state}`) });
+
+test("state chips count each state (worst first) and toggle to filter, several at once", () => {
+  setup({ rows: pods, now: NOW });
+  const chips = within(screen.getByRole("group", { name: FILTER_STATE })).getAllByRole("button");
+  expect(chips.map((c) => c.textContent)).toEqual(["CrashLoopBackOff1", "Running2"]);
+  fireEvent.click(chip("Running"));
+  expect(chip("Running")).toHaveAttribute("aria-pressed", "true");
+  expect(names()).toEqual(["a", "c"]);
+  fireEvent.click(chip("CrashLoopBackOff"));
+  expect(names()).toEqual(["a", "b", "c"]);
+  fireEvent.click(chip("Running"));
+  expect(names()).toEqual(["b"]);
+});
+
+test("node, age and restarts filters combine; state counts follow the other filters; reset clears all", () => {
+  setup({ rows: pods, now: NOW });
+  fireEvent.change(screen.getByRole("combobox", { name: COLUMN_LABELS.node }), { target: { value: "n2" } });
+  expect(names()).toEqual(["b", "c"]);
+  fireEvent.change(screen.getByRole("combobox", { name: FILTER_AGE }), { target: { value: "7d" } });
+  expect(names()).toEqual(["c"]);
+  expect(chip("Running")).toHaveTextContent("Running1");
+  fireEvent.change(screen.getByRole("combobox", { name: FILTER_AGE }), { target: { value: "over30d" } });
+  expect(names()).toEqual(["b"]);
+  fireEvent.change(screen.getByRole("combobox", { name: FILTER_AGE }), { target: { value: "all" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: FILTER_RESTARTED }));
+  expect(names()).toEqual(["b", "c"]);
+  fireEvent.click(screen.getByRole("button", { name: FILTER_RESET }));
+  expect(names()).toEqual(["a", "b", "c"]);
+  expect(screen.queryByRole("button", { name: FILTER_RESET })).toBeNull();
+});
+
+test("kinds without a status value get ready-based state chips; restarts and node filters only on pods", () => {
+  const deploys = [pod("full", { ready: "2/2" }), pod("half", { ready: "1/2" }), pod("down", { ready: "0/3" })];
+  setup({ kind: DEPLOYMENTS, rows: deploys });
+  expect(within(screen.getByRole("group", { name: FILTER_STATE })).getAllByRole("button").map((c) => c.textContent)).toEqual([`${STATE_NOT_READY}1`, `${STATE_PARTIAL}1`, `${STATE_READY}1`]);
+  fireEvent.click(chip(STATE_PARTIAL));
+  expect(names()).toEqual(["half"]);
+  expect(screen.queryByRole("checkbox", { name: FILTER_RESTARTED })).toBeNull();
+  expect(screen.queryByRole("combobox", { name: COLUMN_LABELS.node })).toBeNull();
+});
+
+test("switching kind drops kind-specific filters but keeps age and problems", () => {
+  const { rerender } = render(<Host kind={PODS} rows={pods} status="ready" showNamespace={false} selectedUid={null} onSelect={() => {}} onClear={() => {}} now={NOW} />);
+  fireEvent.click(chip("Running"));
+  fireEvent.change(screen.getByRole("combobox", { name: FILTER_AGE }), { target: { value: "over7d" } });
+  rerender(<Host kind={DEPLOYMENTS} rows={[pod("old", { ready: "1/1" }, "2026-01-01T00:00:00Z"), pod("new", { ready: "1/1" }, "2026-11-06T11:00:00Z")]} status="ready" showNamespace={false} selectedUid={null} onSelect={() => {}} onClear={() => {}} now={NOW} />);
+  expect(names()).toEqual(["old"]);
+  expect(chip(STATE_READY)).toHaveAttribute("aria-pressed", "false");
 });
 
 test("a bad selector is reported and does not hide rows", () => {

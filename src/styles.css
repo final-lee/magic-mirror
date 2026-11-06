@@ -1157,6 +1157,39 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .k8s-list-bar { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 .k8s-filter { flex: 1; min-width: 0; }
 .k8s-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
+/* 필터 줄: 상태 칩, 값·나이 고르기, 체크 상자. 좁으면 줄을 바꾼다 */
+.k8s-filters { flex-wrap: wrap; gap: 6px 12px; }
+.k8s-filters select { max-width: 220px; }
+.k8s-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.k8s-chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: none; color: var(--text); border-radius: 10px; padding: 1px 8px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.k8s-chip:hover { background: var(--hover); }
+.k8s-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+.k8s-chip-n { color: var(--dim); font-variant-numeric: tabular-nums; }
+.k8s-chip.on { border-color: var(--accent); background: var(--accent-soft); }
+.k8s-chip.on .k8s-chip-n { color: inherit; }
+.k8s-chip.tone-ok::before { background: var(--green); }
+.k8s-chip.tone-done::before { background: var(--accent); }
+.k8s-chip.tone-warn::before { background: var(--yellow); }
+.k8s-chip.tone-bad::before { background: var(--red); }
+.k8s-filter-reset { font-size: 12px; margin-left: auto; }
+/* 상태 값: 색으로 정상·끝남·기다림·오류를 가른다 */
+.k8s-status { display: inline-flex; align-items: center; gap: 5px; border-radius: 9px; padding: 0 7px; font-size: 11px; white-space: nowrap; background: var(--hover-strong); }
+.k8s-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
+.k8s-status.tone-ok { background: var(--green-soft); color: var(--green-text); }
+.k8s-status.tone-ok::before { background: var(--green); }
+.k8s-status.tone-done { background: var(--accent-soft); color: var(--accent); }
+.k8s-status.tone-done::before { background: var(--accent); }
+.k8s-status.tone-warn { background: var(--yellow-soft); color: var(--yellow); }
+.k8s-status.tone-warn::before { background: var(--yellow); }
+.k8s-status.tone-bad { background: var(--red-soft); color: var(--red); font-weight: 600; }
+.k8s-status.tone-bad::before { background: var(--red); }
+.k8s-ready { font-variant-numeric: tabular-nums; }
+.k8s-ready.tone-ok { color: var(--green-text); }
+.k8s-ready.tone-warn { color: var(--yellow); font-weight: 600; }
+.k8s-ready.tone-bad { color: var(--red); font-weight: 600; }
+.k8s-restarts { color: var(--yellow); font-weight: 600; font-variant-numeric: tabular-nums; }
+.k8s-age { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.k8s-age.fresh { color: var(--accent); font-weight: 600; }
 .k8s-hint { margin: 4px 10px; font-size: 12px; }
 
 .k8s-sect { margin: 12px 0; }
