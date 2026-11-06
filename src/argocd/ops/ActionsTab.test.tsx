@@ -15,7 +15,7 @@ const app = { destination: { server: null, name: null, namespace: null, inCluste
 const PREVIEW = { title: "t", calls: [], diff: null, impact: [], warnings: [], blocked: null, confirmName: null, expectedVersion: "1" };
 
 function open(allowed: boolean[]) {
-  // can: [update, delete] 먼저, 그다음 액션별
+  // can: update, delete만 묻는다(액션은 can-i로 물을 수 없다). 액션 확인이 오면 allowed[1]로 답한다
   change.can.mockImplementation(async (_u, checks) => checks.map((c) => (c.action === "update" || c.action === "delete" ? allowed[0] : allowed[1])));
   renderWithClient(<ActionsTab url="https://argocd.example" app={app} target={target} version="1" res={res} containers={[]} onTokenError={vi.fn()} />);
 }
@@ -58,11 +58,11 @@ test("delete sends the chosen force and orphan options; patch sends the patch ty
   await waitFor(() => expect(change.preview).toHaveBeenCalledWith("https://argocd.example", target, { kind: "resourceDelete", res, force: true, orphan: true }));
 });
 
-test("without permission every write is disabled, and a server-disabled action stays disabled", async () => {
+test("without update/delete permission patch and delete are disabled; actions follow only the server's disabled flag", async () => {
   open([false, false]);
-  expect(await screen.findByRole("button", { name: "Restart 실행" })).toBeDisabled();
-  await waitFor(() => expect(change.can).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.getByRole("button", { name: "리소스 삭제…" })).toBeDisabled());
   expect(screen.getByRole("button", { name: "패치 편집…" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "리소스 삭제…" })).toBeDisabled();
+  expect(await screen.findByRole("button", { name: "Restart 실행" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "Pause 실행" })).toBeDisabled();
+  expect(change.can.mock.calls.flatMap(([, checks]) => checks.map((c) => c.action)).some((a) => a.startsWith("action"))).toBe(false);
 });

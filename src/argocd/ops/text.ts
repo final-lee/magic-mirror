@@ -8,7 +8,6 @@ export const ACT_TITLE = "리소스 액션";
 export const ACT_NONE = "실행할 수 있는 액션이 없어요";
 export const ACT_RUN = "실행";
 export const ACT_DISABLED = "지금은 실행할 수 없는 액션이에요";
-export const ACT_CHECKING = "권한을 확인하는 중이에요";
 export const ACT_PREVIEW = "미리 보기";
 export const ACT_PARAMS_HINT = "비워 둔 칸은 보내지 않아요";
 export const actRunLabel = (name: string) => `${name} 실행`;

@@ -52,13 +52,14 @@ test("workload actions show one button per kind with Korean names and counts", a
   expect(screen.getByRole("button", { name: "Frobnicate · Widget 1" })).toBeInTheDocument();
 });
 
-test("a group with nothing runnable is disabled with a reason, and a missing action permission disables it", async () => {
-  open({}, (a) => a !== "action/apps/Rollout/pause");
+test("a group with nothing runnable is disabled with a reason; workload actions never wait on can-i, which answers no to action checks even for admin", async () => {
+  open({}, (a) => !a.startsWith("action"));
   const widget = await button("Frobnicate · Widget 1");
   await waitFor(() => expect(screen.getByRole("button", { name: "재시작 · Deployment 3" })).toBeEnabled());
   expect(widget).toBeDisabled();
   expect(widget.getAttribute("title")).toMatch(/실행할 수 있는 리소스가 없어요/);
-  expect(screen.getByRole("button", { name: "일시정지 · Rollout 1" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "일시정지 · Rollout 1" })).toBeEnabled();
+  expect(change.can.mock.calls.flatMap(([, checks]) => checks.map((c) => c.action)).some((a) => a.startsWith("action"))).toBe(false);
 });
 
 test("the batch form preselects runnable resources, greys the disabled one and sends the chosen ones with params", async () => {

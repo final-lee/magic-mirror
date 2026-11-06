@@ -53,9 +53,9 @@ export function ActionBar({ url, app, target, version, pending, now, onRefresh, 
   const actions = useAppActions(url, read, version);
   const groups = actions.data ?? [];
   const history = useAppHistory(url, app.namespace, app.name, version, true);
-  // 기본 권한은 키가 늘 같아 깜빡이지 않고, 액션 권한은 액션 목록이 오면 따로 묻는다
+  // 리소스 액션 권한(`action/<group>/<kind>/<action>`)은 can-i 경로에 담을 수 없어 admin에게도 "no"가 나온다.
+  // ArgoCD 웹 UI처럼 미리 묻지 않고, 서버가 액션 목록에서 준 실행 가능 여부와 적용 때의 서버 검사에 맡긴다.
   const can = useArgoCan(url, target, ["get", "sync", "update", "delete"]);
-  const actionCan = useArgoCan(url, groups.length > 0 ? target : null, groups.map((g) => `action/${g.group}/${g.kind}/${g.action}`));
   const [form, setForm] = useState<Form | null>(null);
 
   const allowed = (i: number) => can.data?.[i] === true;
@@ -111,8 +111,8 @@ export function ActionBar({ url, app, target, version, pending, now, onRefresh, 
               <button
                 key={`${g.group}/${g.kind}/${g.action}`}
                 className="btn small tone-secondary"
-                disabled={eligible === 0 || actionCan.data?.[i] !== true}
-                title={(actionCan.data?.[i] === false ? CHANGE_DENIED : undefined) ?? (eligible === 0 ? `${g.kind}: 지금은 실행할 수 있는 리소스가 없어요` : undefined)}
+                disabled={eligible === 0}
+                title={eligible === 0 ? `${g.kind}: 지금은 실행할 수 있는 리소스가 없어요` : undefined}
                 onClick={() => setForm({ kind: "batch", group: g })}
               >
                 {batchButton(label, g.kind, g.resources.length)}

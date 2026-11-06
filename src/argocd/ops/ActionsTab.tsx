@@ -12,7 +12,7 @@ import { DeleteForm } from "./DeleteForm";
 import { PatchForm } from "./PatchForm";
 import { useResourceActions } from "./queries";
 import { ShellSection } from "./ShellSection";
-import { ACT_CHECKING, ACT_DISABLED, ACT_NONE, ACT_RUN, ACT_TITLE, DEL_OPEN, EDIT_TITLE, PATCH_OPEN, actRunLabel } from "./text";
+import { ACT_DISABLED, ACT_NONE, ACT_RUN, ACT_TITLE, DEL_OPEN, EDIT_TITLE, PATCH_OPEN, actRunLabel } from "./text";
 import type { ResourceAction } from "./types";
 
 interface Props {
@@ -38,9 +38,7 @@ export function ActionsTab({ url, app, target, version, res, containers, onToken
   const read: AppTarget = { namespace: target.namespace, name: target.name, project: target.project };
   const actions = useResourceActions(url, read, res, version);
   const base = useArgoCan(url, target, ["update", "delete"]);
-  const actionKeys = (actions.data ?? []).map((a) => `action/${res.group}/${res.kind}/${a.name}`);
-  const actionCan = useArgoCan(url, actions.data ? target : null, actionKeys);
-  useTokenGuard([actions.error, base.error, actionCan.error], onTokenError);
+  useTokenGuard([actions.error, base.error], onTokenError);
   const [form, setForm] = useState<Form | null>(null);
   const [change, setChange] = useState<ArgoChange | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -68,23 +66,20 @@ export function ActionsTab({ url, app, target, version, res, containers, onToken
           <p className="dim">{ACT_NONE}</p>
         ) : (
           <ul className="argo-actions">
-            {actions.data.map((a, i) => {
-              const allowed = gate(actionCan.data?.[i]);
-              return (
-                <li key={a.name}>
-                  <span>{a.displayName ?? a.name}</span>
-                  <button
-                    className="btn small tone-secondary"
-                    aria-label={actRunLabel(a.displayName ?? a.name)}
-                    disabled={a.disabled || allowed.disabled}
-                    title={a.disabled ? ACT_DISABLED : (allowed.title ?? (actionCan.data ? undefined : ACT_CHECKING))}
-                    onClick={() => (a.params.length > 0 ? setForm({ kind: "action", action: a }) : preview({ kind: "resourceAction", res, action: a.name, params: [] }))}
-                  >
-                    {ACT_RUN}
-                  </button>
-                </li>
-              );
-            })}
+            {actions.data.map((a) => (
+              <li key={a.name}>
+                <span>{a.displayName ?? a.name}</span>
+                <button
+                  className="btn small tone-secondary"
+                  aria-label={actRunLabel(a.displayName ?? a.name)}
+                  disabled={a.disabled}
+                  title={a.disabled ? ACT_DISABLED : undefined}
+                  onClick={() => (a.params.length > 0 ? setForm({ kind: "action", action: a }) : preview({ kind: "resourceAction", res, action: a.name, params: [] }))}
+                >
+                  {ACT_RUN}
+                </button>
+              </li>
+            ))}
           </ul>
         )}
       </section>
