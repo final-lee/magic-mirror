@@ -1,15 +1,31 @@
 .ddb-stream { display: grid; gap: 14px; min-width: 0; }
+
+/* 연결 그림 */
 .ddb-stream-graph { display: flex; align-items: center; gap: 24px; overflow-x: auto; padding: 12px 0; }
-.ddb-stream-node { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; padding: 10px 12px; min-width: 145px; max-width: 360px; border: 1px solid var(--border); border-radius: 6px; overflow-wrap: anywhere; }
-.ddb-stream-node small { color: var(--text-muted); }
+.ddb-stream-node {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 10px 12px;
+  min-width: 145px;
+  max-width: 360px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+.ddb-stream-node small { color: var(--dim); }
 .ddb-stream-node pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .ddb-stream-branch { display: flex; align-items: center; gap: 24px; position: relative; }
 .ddb-stream-branch::before { content: "→"; position: absolute; left: -19px; color: var(--accent); }
 .ddb-stream-children { display: grid; gap: 8px; }
+.ddb-stream-gap { color: var(--orange); overflow-wrap: anywhere; }
+
+/* 실시간 레코드 */
 .ddb-stream-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
 .ddb-stream-controls [aria-pressed="true"] { border-color: var(--accent); }
 .ddb-stream-records { max-height: 520px; overflow: auto; }
-.ddb-stream-record { border-top: 1px solid var(--border); }
+.ddb-stream-record { border-top: 1px solid var(--line); }
 .ddb-stream-record summary { display: flex; gap: 12px; align-items: baseline; padding: 8px 0; cursor: pointer; }
 .ddb-stream-record summary code { flex: 1; overflow-wrap: anywhere; }
 .ddb-stream-event { min-width: 3em; }
@@ -17,5 +33,4 @@
 .ddb-stream-modify { color: var(--accent); }
 .ddb-stream-remove { color: var(--red); }
 .ddb-stream-diff { table-layout: fixed; width: 100%; overflow-wrap: anywhere; }
-.ddb-stream-changed { background: color-mix(in srgb, var(--accent) 8%, transparent); }
-.ddb-stream-gap { color: var(--orange); overflow-wrap: anywhere; }
+.ddb-stream-changed { background: var(--accent-soft); }

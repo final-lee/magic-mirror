@@ -19,48 +19,102 @@ pub struct HealthInput<'a> {
     pub connections: Option<&'a ConnectionHealth>,
 }
 
+/// 받는 리전의 `ReplicationLatency` 평균(밀리초)이 이 값을 넘으면 주의
+pub const REPLICATION_LAG_WARN_MS: f64 = 60_000.0;
+/// 소비 Lambda의 `IteratorAge`(밀리초)가 이 값 이상이면 주의: 5분
+pub const ITERATOR_AGE_WARN_MS: f64 = 300_000.0;
+/// 이 값 이상이면 실패: 12시간. 스트림 보관이 24시간이라 그 전에 처리하지 못하면 레코드를 잃는다
+pub const ITERATOR_AGE_FAIL_MS: f64 = 43_200_000.0;
+/// 실패 대상이 없을 때 재시도가 무제한임을 뜻하는 `MaximumRetryAttempts`
+const UNLIMITED_RETRIES: i32 = -1;
+
+/// 스트림·연결 규칙(D5)의 입력
 #[derive(Default)]
 pub struct ConnectionHealth {
     pub stream_enabled: bool,
-    /// None means at least one consumer source could not be read.
+    /// ESM·Pipe·Kinesis 대상의 수. 소비자 출처를 하나라도 읽지 못했으면 None이고, 그때는 소비자가 없다고 단정하지 않는다
     pub consumer_count: Option<usize>,
     pub esms: Vec<EsmHealth>,
+    /// (받는 리전, 최근 1시간 `ReplicationLatency` 평균 밀리초). 지표가 없는 리전은 들어 있지 않다
     pub replication_latency_ms: Vec<(String, f64)>,
 }
 
+/// Lambda 이벤트 소스 매핑 하나의 진단 입력
 pub struct EsmHealth {
     pub function: String,
     pub state: String,
+    /// 함수의 최근 15분 `IteratorAge` 최댓값(밀리초). 지표가 없으면 None
     pub iterator_age_ms: Option<f64>,
     pub max_retries: Option<i32>,
     pub has_failure_destination: bool,
 }
 
+fn iterator_age_level(age_ms: f64) -> Option<FindingLevel> {
+    if age_ms >= ITERATOR_AGE_FAIL_MS {
+        Some(FindingLevel::Fail)
+    } else if age_ms >= ITERATOR_AGE_WARN_MS {
+        Some(FindingLevel::Warn)
+    } else {
+        None
+    }
+}
+
+/// 스트림·연결 규칙(`replicationLag` · `streamNoConsumer` · `esmDisabled` · `iteratorAge` · `esmNoOnFailure`). 결과는 실패 → 주의 → 정보, 같은 수준은 규칙 표 순서다
 pub fn connection_findings(input: &ConnectionHealth) -> Vec<Finding> {
     let mut out = Vec::new();
-    for (region, latency) in &input.replication_latency_ms {
-        if *latency > 60_000.0 {
+
+    // replicationLag
+    for (region, latency_ms) in &input.replication_latency_ms {
+        if *latency_ms > REPLICATION_LAG_WARN_MS {
             out.push(finding(FindingId::ReplicationLag, FindingLevel::Warn, None, format!("{region} 복제 지연이 60초를 넘었어요"), None));
         }
     }
+
+    // streamNoConsumer
     if input.stream_enabled && input.consumer_count == Some(0) {
-        out.push(finding(FindingId::StreamNoConsumer, FindingLevel::Info, None, "스트림을 읽는 소비자가 없어요".into(), None));
+        out.push(finding(FindingId::StreamNoConsumer, FindingLevel::Info, None, "스트림을 읽는 소비자가 없어요".to_string(), None));
     }
+
+    // esmDisabled
+    for esm in input.esms.iter().filter(|esm| esm.state.eq_ignore_ascii_case("disabled")) {
+        out.push(finding(FindingId::EsmDisabled, FindingLevel::Warn, None, format!("{} 스트림 매핑이 꺼져 있어요", esm.function), None));
+    }
+
+    // iteratorAge
     for esm in &input.esms {
-        if esm.state.eq_ignore_ascii_case("disabled") {
-            out.push(finding(FindingId::EsmDisabled, FindingLevel::Warn, None, format!("{} 스트림 매핑이 꺼져 있어요", esm.function), None));
-        }
-        if let Some(age) = esm.iterator_age_ms {
-            let level = if age >= 43_200_000.0 { Some(FindingLevel::Fail) } else if age >= 300_000.0 { Some(FindingLevel::Warn) } else { None };
-            if let Some(level) = level {
-                out.push(finding(FindingId::IteratorAge, level, None, format!("{}의 스트림 처리 지연이 {:.0}초예요", esm.function, age / 1000.0), Some("스트림 레코드는 24시간 보관돼요. 그 전에 처리하지 못하면 레코드를 잃어요".into())));
-            }
-        }
-        if !esm.has_failure_destination && esm.max_retries == Some(-1) {
-            out.push(finding(FindingId::EsmNoOnFailure, FindingLevel::Warn, None, format!("{}에 실패 대상이 없고 재시도 횟수가 무제한이에요", esm.function), Some("처리할 수 없는 레코드가 샤드를 최대 24시간 막을 수 있어요".into())));
-        }
+        let Some(age_ms) = esm.iterator_age_ms else { continue };
+        let Some(level) = iterator_age_level(age_ms) else { continue };
+        out.push(finding(
+            FindingId::IteratorAge,
+            level,
+            None,
+            format!("{}의 스트림 처리 지연이 {:.0}초예요", esm.function, age_ms / 1000.0),
+            Some("스트림 레코드는 24시간 보관돼요. 그 전에 처리하지 못하면 레코드를 잃어요".into()),
+        ));
     }
+
+    // esmNoOnFailure
+    for esm in input.esms.iter().filter(|esm| !esm.has_failure_destination && esm.max_retries == Some(UNLIMITED_RETRIES)) {
+        out.push(finding(
+            FindingId::EsmNoOnFailure,
+            FindingLevel::Warn,
+            None,
+            format!("{}에 실패 대상이 없고 재시도 횟수가 무제한이에요", esm.function),
+            Some("처리할 수 없는 레코드가 샤드를 최대 24시간 막을 수 있어요".into()),
+        ));
+    }
+
+    sort_by_severity(&mut out);
     out
+}
+
+/// 실패 → 주의 → 정보. 같은 수준은 들어온 순서를 지킨다
+fn sort_by_severity(findings: &mut [Finding]) {
+    findings.sort_by_key(|f| match f.level {
+        FindingLevel::Fail => 0,
+        FindingLevel::Warn => 1,
+        FindingLevel::Info => 2,
+    });
 }
 
 fn finding(id: FindingId, level: FindingLevel, index: Option<&str>, summary: String, detail: Option<String>) -> Finding {
@@ -318,12 +372,8 @@ pub fn health(input: &HealthInput<'_>) -> Vec<Finding> {
         out.extend(connection_findings(connections));
     }
 
-    // 실패 → 주의 → 정보. 같은 수준은 위에서 만든 규칙 순서를 지킨다
-    out.sort_by_key(|f| match f.level {
-        FindingLevel::Fail => 0,
-        FindingLevel::Warn => 1,
-        FindingLevel::Info => 2,
-    });
+    // 위에서 만든 규칙 순서를 지킨 채 실패 → 주의 → 정보로 모은다
+    sort_by_severity(&mut out);
     out
 }
 

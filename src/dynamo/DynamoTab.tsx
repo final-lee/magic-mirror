@@ -15,10 +15,12 @@ interface Props {
   active: boolean;
   /** 리소스 목록에서 연 테이블. nonce가 바뀔 때마다 그 테이블을 고른다(같은 테이블을 다시 열어도) */
   focus: { table: string; nonce: number } | null;
+  /** 스트림 탭의 Lambda 노드에서 그 함수의 리소스 상세로 간다(ARN을 받는다) */
+  onOpenLambda?: (functionArn: string) => void;
 }
 
 /** 리전 단위 DynamoDB 탭: 왼쪽 테이블 목록, 오른쪽 테이블 상세 */
-export function DynamoTab({ profile, region, active, focus }: Props) {
+export function DynamoTab({ profile, region, active, focus, onOpenLambda }: Props) {
   const qc = useQueryClient();
   const overview = useDynamoOverview(profile, region, active);
   const [selectedName, setSelectedName] = useState<string | null>(focus?.table ?? null);
@@ -77,7 +79,7 @@ export function DynamoTab({ profile, region, active, focus }: Props) {
       <div className="ddb-body">
         <TableList tables={tables} selected={selectedName} onSelect={setSelectedName} active={active} problemOnly={problemOnly} onProblemOnly={setProblemOnly} />
         {selected ? (
-          <TableDetail key={selected.name} profile={profile} region={region} active={active} table={selected} />
+          <TableDetail key={selected.name} profile={profile} region={region} active={active} table={selected} onOpenLambda={onOpenLambda} />
         ) : (
           <div className="empty ddb-detail-empty">{selectedName ? t.TABLE_GONE : t.DETAIL_PICK}</div>
         )}

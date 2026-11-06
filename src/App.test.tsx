@@ -25,6 +25,9 @@ import { sampleBreakdown, sampleOverview as sampleCostOverview } from "./cost/fi
 import { BREAKDOWN_LABEL, COST_TITLE } from "./cost/text";
 import { ARGOWF_TITLE } from "./argowf/text";
 import { tailscaleApi } from "./tailscale/api";
+import { dynamoApi } from "./dynamo/api";
+import { table as dynamoTable } from "./dynamo/fixtures";
+import { streamApi } from "./dynamo/stream/api";
 
 vi.mock("./api/client", () => ({
   api: {
@@ -39,6 +42,7 @@ vi.mock("./api/client", () => ({
     ssoLoginCancel: vi.fn(),
     getSettings: vi.fn(),
     saveSettings: vi.fn(),
+    resourceMetrics: vi.fn(),
   },
 }));
 vi.mock("./explorer/api", () => ({
@@ -83,6 +87,8 @@ vi.mock("./argocd/api", () => ({
 }));
 vi.mock("./cost/api", () => ({ costApi: { overview: vi.fn(), breakdown: vi.fn(), tagKeys: vi.fn(), usage: vi.fn() } }));
 vi.mock("./tailscale/api", () => ({ tailscaleApi: { node: vi.fn(), diagnose: vi.fn(), acceptRoutes: vi.fn() } }));
+vi.mock("./dynamo/api", () => ({ dynamoApi: { overview: vi.fn(), table: vi.fn(), topKeys: vi.fn() } }));
+vi.mock("./dynamo/stream/api", () => ({ streamApi: { connections: vi.fn(), start: vi.fn(), poll: vi.fn(), stop: vi.fn() } }));
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: vi.fn(async () => () => {}) }),
 }));
@@ -1405,5 +1411,50 @@ describe("⌘K 리소스 찾기와 캐시 비우기", () => {
     expect(ttl).toHaveValue("15");
     fireEvent.change(ttl, { target: { value: "0" } });
     await waitFor(() => expect(m.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ resourceCacheTtlMinutes: 0 })));
+  });
+});
+
+describe("🗄 DynamoDB 스트림 탭에서 Lambda 함수로", () => {
+  const FUNCTION_ARN = "arn:aws:lambda:ap-northeast-2:123456789012:function:order-worker:live";
+  const stream = { arn: "arn:aws:dynamodb:ap-northeast-2:123456789012:table/orders/stream/1", viewType: "NEW_AND_OLD_IMAGES" };
+  const dynamoService = { id: "dynamodb", name: "DynamoDB", global: false, types: [{ id: "tables", name: "Tables", columns: [{ key: "name", label: "Name", kind: "text" as const }] }] };
+  const lambdaService = { id: "lambda", name: "Lambda", global: false, types: [{ id: "functions", name: "Functions", columns: [{ key: "name", label: "Function name", kind: "text" as const }] }] };
+  const orders = dynamoTable("orders", { stream });
+
+  beforeEach(() => {
+    m.listServices.mockResolvedValue([...sampleServices, dynamoService, lambdaService]);
+    m.getSettings.mockResolvedValue({ enabledServices: ["ec2", "dynamodb", "lambda"], favorites: [], lastProfile: "prod", lastRegion: null });
+    m.listResources.mockImplementation(async (_p, _r, service) => ({
+      items: service === "lambda" ? [makeResource("billing-api", { name: "billing-api" }), makeResource("order-worker", { name: "order-worker" })] : [makeResource("orders", { name: "orders" })],
+      truncated: false,
+    }));
+    m.resourceMetrics.mockReturnValue(new Promise(() => {}));
+    vi.mocked(dynamoApi.overview).mockResolvedValue({ tables: [orders], truncated: false, gaps: [] });
+    vi.mocked(streamApi.connections).mockResolvedValue({
+      stream,
+      esms: [{ id: "m1", function: FUNCTION_ARN, state: "Enabled", batchSize: 100, startingPosition: null, parallelization: null, bisect: null, retries: 3, maxAge: null, failureDestination: null, filters: [], iteratorAgeMs: null }],
+      pipes: [],
+      kinesis: [],
+      replicas: [],
+      gaps: [],
+      findings: [],
+    });
+  });
+
+  test("the ESM node's jump button goes to the resources tab and selects that function in this region's Lambda list", async () => {
+    renderWithClient(<App />);
+    fireEvent.click(await screen.findByText("DynamoDB"));
+    fireEvent.click(screen.getByText("Tables"));
+    fireEvent.doubleClick(await screen.findByText("orders"));
+    fireEvent.click(await screen.findByRole("option", { name: /orders/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "스트림" }));
+    expect(screen.getByRole("tab", { name: /DynamoDB · ap-northeast-2/ })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Lambda 상세 열기" }));
+
+    expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(within(screen.getByTestId("resource-table")).getByText("order-worker").closest("tr")).toHaveAttribute("aria-selected", "true"));
+    expect(within(screen.getByTestId("resource-table")).getByText("billing-api").closest("tr")).not.toHaveAttribute("aria-selected", "true");
+    expect(m.listResources).toHaveBeenCalledWith("prod", "ap-northeast-2", "lambda", "functions");
   });
 });

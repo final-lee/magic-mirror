@@ -45,10 +45,12 @@ interface Props {
   active: boolean;
   /** 목록에서 읽은 테이블 */
   table: DynamoTable;
+  /** 스트림 탭의 Lambda 노드에서 그 함수의 리소스 상세로 간다 */
+  onOpenLambda?: (functionArn: string) => void;
 }
 
 /** 오른쪽 테이블 상세: 제목줄과 상세 탭. 테이블이 바뀌는 중이면 10초마다 다시 읽는다 */
-export function TableDetail({ profile, region, active, table }: Props) {
+export function TableDetail({ profile, region, active, table, onOpenLambda }: Props) {
   const [tab, setTab] = useState<DetailTab>("overview");
   const poll = useDynamoTablePoll(profile, region, table, active);
   const [copied, setCopied] = useState(false);
@@ -86,7 +88,7 @@ export function TableDetail({ profile, region, active, table }: Props) {
       </div>
       {poll.isError && <ErrorState compact error={poll.error} profile={profile} onRetry={() => void poll.refetch()} />}
       <div className="ddb-detail-body">
-        {table.error ? <div className="empty ddb-read-error">{t.tableReadFailed(table.error)}</div> : current.render({ profile, region, table, active, openItems: () => setTab("items") })}
+        {table.error ? <div className="empty ddb-read-error">{t.tableReadFailed(table.error)}</div> : current.render({ profile, region, table, active, openItems: () => setTab("items"), onOpenLambda })}
       </div>
     </section>
   );

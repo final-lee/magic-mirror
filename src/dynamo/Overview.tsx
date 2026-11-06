@@ -6,7 +6,7 @@ import { formatCount } from "../kv/format";
 import { formatBytes } from "../lib/format";
 import { Findings } from "./Findings";
 import { TopKeysCard } from "./TopKeysCard";
-import { useConnections } from "./stream/StreamTab";
+import { useConnections } from "./stream/queries";
 import * as t from "./text";
 import type { DynamoIndex, DynamoTable, KeyAttr } from "./types";
 

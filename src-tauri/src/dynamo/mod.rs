@@ -14,8 +14,6 @@ pub mod ops;
 pub mod read;
 pub mod connections;
 pub mod stream;
-#[cfg(test)]
-mod connection_tests;
 
 use std::collections::BTreeMap;
 
@@ -220,7 +218,8 @@ pub struct DynamoTable {
     pub error: Option<String>,
 }
 
-/// 읽지 못한 부분(권한 없음 등). `section`은 `ttl` · `pitr` · `contributorInsights` · `resourcePolicy` · `autoscaling` · `metrics`
+/// 읽지 못한 부분(권한 없음 등). `section`은 `ttl` · `pitr` · `contributorInsights` · `resourcePolicy` · `autoscaling` · `metrics`,
+/// 연결(`connections`)은 `lambda` · `pipes` · `kinesis` · `iteratorAge` · `replicationLatency`
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Gap {

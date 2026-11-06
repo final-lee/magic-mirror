@@ -47,6 +47,7 @@ import { tabTitle as kvTabTitle } from "./kv/text";
 import type { KvTarget } from "./kv/types";
 import { DynamoTab } from "./dynamo/DynamoTab";
 import { refreshDynamo } from "./dynamo/queries";
+import { lambdaFunctionName } from "./dynamo/stream/connections";
 import { tabTitle as dynamoTabTitle } from "./dynamo/text";
 import { getVersion } from "@tauri-apps/api/app";
 import { VpcMapTab } from "./vpcmap/VpcMapTab";
@@ -352,6 +353,11 @@ export default function App() {
     setFocus({ id: p.id, nonce: focusNonce.current });
   };
 
+  // DynamoDB 스트림 탭의 Lambda 노드에서 그 함수로 간다: ⌘K 선택과 같게, 이 리전의 Lambda 함수 목록에서 그 함수 행을 고른다. 리소스 id는 함수 이름이다
+  const openLambda = (lambdaRegion: string, functionArn: string) => {
+    pickResource({ region: lambdaRegion, service: "lambda", type: "functions", id: lambdaFunctionName(functionArn) });
+  };
+
   // ⌘K에서 고른 ArgoCD 앱·리소스로 간다: ArgoCD 탭(닫혀 있으면 열고), 그 서버, 그 앱과 리소스
   const pickArgo = (jump: ArgoJump) => {
     setPaletteOpen(false);
@@ -490,7 +496,7 @@ export default function App() {
         ))}
         {dynamoTabs.map((t) => (
           <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
-            <DynamoTab profile={t.profile} region={t.region} active={activeTab === t.id} focus={t.focus} />
+            <DynamoTab profile={t.profile} region={t.region} active={activeTab === t.id} focus={t.focus} onOpenLambda={(functionArn) => openLambda(t.region, functionArn)} />
           </div>
         ))}
         {diffTabs.map((t) => (

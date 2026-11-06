@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { errorMessage } from "../../api/errors";
 import { ConfirmField, ReversibleNote, useSheetFocus } from "../../iam/previewParts";
@@ -7,48 +7,117 @@ import { canApply } from "./gate";
 import * as t from "./text";
 import type { DynamoChange, DynamoPreview, Target } from "./types";
 
-type Pending = { change: DynamoChange; undoOf: string | null; preview: DynamoPreview };
-export function useDynamoChange(target: Target) {
-  const qc = useQueryClient();
+export type DynamoChangeFlow = {
+  begin: (change: DynamoChange, extraWarnings?: string[]) => Promise<void>;
+  undo: (id: string) => Promise<void>;
+  loading: boolean;
+  error: string;
+  dialog: ReactNode;
+};
+
+type Pending = {
+  change: DynamoChange;
+  undoOf: string | null;
+  preview: DynamoPreview;
+};
+
+export function useDynamoChange(target: Target): DynamoChangeFlow {
+  const queryClient = useQueryClient();
   const [pending, setPending] = useState<Pending | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
   const begin = async (change: DynamoChange, extraWarnings: string[] = []) => {
-    setError(""); setLoading(true);
-    try { const preview = await changeApi.preview(target, change); setPending({ change, undoOf: null, preview: { ...preview, warnings:[...preview.warnings, ...extraWarnings] } }); }
-    catch (e) { setError(errorMessage(e)); } finally { setLoading(false); }
+    setError("");
+    setLoading(true);
+    try {
+      const preview = await changeApi.preview(target, change);
+      setPending({
+        change,
+        undoOf: null,
+        preview: { ...preview, warnings: [...preview.warnings, ...extraWarnings] },
+      });
+    } catch (error) {
+      setError(errorMessage(error));
+    } finally {
+      setLoading(false);
+    }
   };
+
   const undo = async (id: string) => {
-    setError(""); setLoading(true);
-    try { const [change, preview] = await changeApi.undoPreview(target, id); setPending({ change, undoOf: id, preview }); }
-    catch (e) { setError(errorMessage(e)); } finally { setLoading(false); }
+    setError("");
+    setLoading(true);
+    try {
+      const [change, preview] = await changeApi.undoPreview(target, id);
+      setPending({ change, undoOf: id, preview });
+    } catch (error) {
+      setError(errorMessage(error));
+    } finally {
+      setLoading(false);
+    }
   };
+
   const apply = async (typed: string) => {
     if (!pending) return;
-    setError(""); setLoading(true);
+    setError("");
+    setLoading(true);
     try {
       await changeApi.apply(target, pending.change, typed || null, pending.undoOf);
       setPending(null);
-      await qc.invalidateQueries({ queryKey: ["dynamo"] });
-    } catch (e) { setError(errorMessage(e)); setPending(null); }
-    finally { setLoading(false); }
+      await queryClient.invalidateQueries({ queryKey: ["dynamo"] });
+    } catch (error) {
+      setError(errorMessage(error));
+      setPending(null);
+    } finally {
+      setLoading(false);
+    }
   };
-  const dialog = pending && <Dialog key={`${pending.undoOf ?? "new"}-${pending.preview.title}`} pending={pending} loading={loading} apply={apply} cancel={() => setPending(null)} />;
+
+  const dialog = pending && <Dialog
+    key={`${pending.undoOf ?? "new"}-${pending.preview.title}`}
+    pending={pending}
+    loading={loading}
+    apply={apply}
+    cancel={() => setPending(null)}
+  />;
   return { begin, undo, loading, error, dialog };
 }
-function Dialog({ pending, loading, apply, cancel }: { pending: Pending; loading: boolean; apply: (typed: string) => void; cancel: () => void }) {
+
+function actionTone(pending: Pending) {
+  if (pending.undoOf) return "tone-caution";
+  if (pending.change.kind === "deleteBackup") return "tone-danger";
+  if (pending.change.kind === "createBackup") return "tone-create";
+  if (["restoreBackup", "restorePitr", "exportS3"].includes(pending.change.kind)) return "tone-primary";
+  return "tone-warn";
+}
+
+function Dialog({ pending, loading, apply, cancel }: {
+  pending: Pending;
+  loading: boolean;
+  apply: (typed: string) => void;
+  cancel: () => void;
+}) {
   const [typed, setTyped] = useState("");
-  const p = pending.preview;
+  const preview = pending.preview;
   const { sheetRef, trapTab, cancelRef } = useSheetFocus(loading ? "applying" : "ready", cancel);
-  const tone = pending.undoOf ? "tone-caution" : pending.change.kind === "deleteBackup" ? "tone-danger" : pending.change.kind === "createBackup" ? "tone-create" : ["restoreBackup", "restorePitr", "exportS3"].includes(pending.change.kind) ? "tone-primary" : "tone-warn";
-  return <div className="modal"><div className="sheet wide cp" role="dialog" aria-modal="true" aria-label={t.PREVIEW} ref={sheetRef} onKeyDown={trapTab}>
-    <div className="cp-body"><h3>{p.title}</h3><h4>{t.CALLS}</h4>{p.calls.map((c, i) => <div key={i}><code>{c.api}</code><pre>{JSON.stringify(c.params, null, 2)}</pre></div>)}
-      {p.diff != null && <><h4>{t.DIFF}</h4><pre>{JSON.stringify(p.diff, null, 2)}</pre></>}
-      {p.impact.length > 0 && <><h4>{t.IMPACT}</h4>{p.impact.map((s, i) => <p key={i}>{s}</p>)}</>}
-      {p.warnings.length > 0 && <><h4>{t.WARNINGS}</h4>{p.warnings.map((s, i) => <p className="err" key={i}>{s}</p>)}</>}
-      <ReversibleNote reversible={!!p.inverse || pending.change.kind === "createBackup"} />
-      {p.blocked && <p className="err">{p.blocked}</p>}
-      {p.confirmName && <ConfirmField required={p.confirmName} typed={typed} onTyped={setTyped} locked={loading} label={t.CONFIRM} />}
-    </div><div className="cp-footer"><button type="button" className="btn tone-ghost" ref={cancelRef} disabled={loading} onClick={cancel}>{t.CANCEL}</button><button type="button" className={`btn ${tone}`} disabled={!canApply(p, typed, loading)} onClick={() => apply(typed)}>{t.APPLY}</button></div>
-  </div></div>;
+
+  return <div className="modal">
+    <div className="sheet wide cp" role="dialog" aria-modal="true" aria-label={t.PREVIEW} ref={sheetRef} onKeyDown={trapTab}>
+      <div className="cp-body">
+        <h3>{preview.title}</h3>
+        <h4>{t.CALLS}</h4>
+        {preview.calls.map((call, index) => <div key={index}><code>{call.api}</code><pre>{JSON.stringify(call.params, null, 2)}</pre></div>)}
+        {preview.diff != null && <><h4>{t.DIFF}</h4><pre>{JSON.stringify(preview.diff, null, 2)}</pre></>}
+        {preview.impact.length > 0 && <><h4>{t.IMPACT}</h4>{preview.impact.map((impact, index) => <p key={index}>{impact}</p>)}</>}
+        {preview.warnings.length > 0 && <><h4>{t.WARNINGS}</h4>{preview.warnings.map((warning, index) => <p className="err" key={index}>{warning}</p>)}</>}
+        <ReversibleNote reversible={!!preview.inverse || pending.change.kind === "createBackup"} />
+        {preview.blocked && <p className="err">{preview.blocked}</p>}
+        {preview.confirmName && <ConfirmField required={preview.confirmName} typed={typed} onTyped={setTyped} locked={loading} label={t.CONFIRM} />}
+      </div>
+      <div className="cp-footer">
+        <button type="button" className="btn tone-ghost" ref={cancelRef} disabled={loading} onClick={cancel}>{t.CANCEL}</button>
+        <button type="button" className={`btn ${actionTone(pending)}`} disabled={!canApply(preview, typed, loading)} onClick={() => apply(typed)}>{t.APPLY}</button>
+      </div>
+    </div>
+  </div>;
 }
