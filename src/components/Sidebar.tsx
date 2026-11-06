@@ -5,6 +5,7 @@ import { ARGOCD_TITLE } from "../argocd/text";
 import { ARGOWF_TITLE } from "../argowf/text";
 import { COST_NAV, COST_TITLE } from "../cost/text";
 import { ordered, savedAfterMove, useReorder, type Reorder } from "../lib/useReorder";
+import tailscaleMark from "../assets/tailscale.svg";
 import { ServiceBadge } from "./ServiceBadge";
 
 interface Props {
@@ -27,6 +28,10 @@ interface Props {
   onOpenIam?: () => void;
   /** 💰 비용 탭을 연다. 주면 서비스 묶음 위에 "💰 비용" 줄이 보인다. */
   onOpenCost?: () => void;
+  /** Tailscale을 리소스 탭의 오른쪽 칸에 연다. 주면 💰 비용 아래에 "Tailscale" 줄이 보인다. */
+  onOpenTailscale?: () => void;
+  /** 오른쪽 칸이 지금 Tailscale이면 그 줄을 고른 줄로 보인다 */
+  tailscaleActive?: boolean;
   /** 🐙 ArgoCD 탭을 연다. 주면 EKS 서비스 아래 리소스 종류 뒤에 "🐙 ArgoCD"가 보인다. */
   onOpenArgocd?: () => void;
   onOpenArgoWorkflows?: () => void;
@@ -47,7 +52,7 @@ const favKey = (f: Favorite) => `${f.service}/${f.type}`;
 export function Sidebar({
   services, profile, region, selection, favorites, onSelect, onToggleFavorite,
   serviceOrder, typeOrder, onServiceOrderChange, onTypeOrderChange, onFavoritesChange,
-  onOpenIam, onOpenCost, onOpenArgocd, onOpenArgoWorkflows,
+  onOpenIam, onOpenCost, onOpenTailscale, tailscaleActive = false, onOpenArgocd, onOpenArgoWorkflows,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(selection ? [selection.service] : []));
 
@@ -136,6 +141,17 @@ export function Sidebar({
             <ServiceBadge service={{ id: "cost", name: COST_NAV }} />
             {COST_NAV}
           </span>
+        </div>
+      )}
+      {onOpenTailscale && (
+        <div
+          className={`typ cost-open${tailscaleActive ? " on" : ""}`}
+          role="button"
+          aria-label="Tailscale"
+          aria-current={tailscaleActive || undefined}
+          onClick={onOpenTailscale}
+        >
+          <span className="cost-open-label"><img className="badge badge-icon" src={tailscaleMark} alt="" />Tailscale</span>
         </div>
       )}
       <div className="grp">서비스</div>

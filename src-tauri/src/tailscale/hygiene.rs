@@ -18,5 +18,13 @@ fn process_and_write_are_confined_to_cli() {
         for forbidden in [concat!("Command", "::new("), concat!("\"", "set", "\"")] {
             assert!(!text.contains(forbidden), "{} contains {}", file.display(), forbidden);
         }
+        // CLI argument vectors must be constructed in cli.rs. Avoid forbidding
+        // ordinary data values such as the device finding named "update".
+        for verb in ["up", "down", "switch", "login", "logout", "serve", "funnel", "file", "cert", "update", "lock"] {
+            for prefix in ["&[\"", "vec![\""] {
+                let forbidden = format!("{prefix}{verb}\"");
+                assert!(!text.contains(&forbidden), "{} contains {}", file.display(), forbidden);
+            }
+        }
     }
 }

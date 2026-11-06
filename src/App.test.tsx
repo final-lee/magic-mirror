@@ -24,6 +24,7 @@ import { costApi } from "./cost/api";
 import { sampleBreakdown, sampleOverview as sampleCostOverview } from "./cost/fixtures";
 import { BREAKDOWN_LABEL, COST_TITLE } from "./cost/text";
 import { ARGOWF_TITLE } from "./argowf/text";
+import { tailscaleApi } from "./tailscale/api";
 
 vi.mock("./api/client", () => ({
   api: {
@@ -81,6 +82,7 @@ vi.mock("./argocd/api", () => ({
   argocdApi: { session: vi.fn(), setToken: vi.fn(), forgetToken: vi.fn(), apps: vi.fn(), appsets: vi.fn(), app: vi.fn(), tree: vi.fn(), refresh: vi.fn(), sync: vi.fn() },
 }));
 vi.mock("./cost/api", () => ({ costApi: { overview: vi.fn(), breakdown: vi.fn(), tagKeys: vi.fn(), usage: vi.fn() } }));
+vi.mock("./tailscale/api", () => ({ tailscaleApi: { node: vi.fn(), diagnose: vi.fn(), acceptRoutes: vi.fn() } }));
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: vi.fn(async () => () => {}) }),
 }));
@@ -99,6 +101,30 @@ beforeEach(() => {
   m.getSettings.mockResolvedValue({ enabledServices: ["ec2", "iam"], favorites: [], lastProfile: "prod", lastRegion: null });
   m.saveSettings.mockResolvedValue(undefined);
   m.listResources.mockResolvedValue({ items: [makeResource("i-1", { name: "web-1", id: "i-1" })], truncated: false });
+});
+
+test("Tailscale은 새 탭 없이 리소스 탭의 오른쪽 칸에 열리고, 리소스를 골랐다 돌아와도·프로필을 바꿔도 그대로예요", async () => {
+  vi.mocked(tailscaleApi.node).mockResolvedValue({ cli: null, version: null, backendState: null, health: [], tailnet: null, magicDnsSuffix: null, user: null, self: null, prefs: null, peers: [] });
+  renderWithClient(<App />);
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "프로필" })).toHaveValue("prod"));
+  fireEvent.click(screen.getByRole("button", { name: "Tailscale" }));
+  expect(await screen.findByText(/Tailscale 앱을 설치/)).toBeInTheDocument();
+  expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["리소스"]);
+  expect(screen.getByRole("button", { name: "Tailscale" })).toHaveAttribute("aria-current", "true");
+  fireEvent.click(screen.getByRole("button", { name: "기기" }));
+
+  // 리소스 종류를 고르면 오른쪽 칸이 목록으로 바뀐다
+  fireEvent.click(screen.getByText("EC2"));
+  fireEvent.click(await screen.findByText("Instances"));
+  expect(await screen.findByText("web-1")).toBeVisible();
+  expect(screen.getByRole("button", { name: "기기", hidden: true })).not.toBeVisible();
+  expect(screen.getByRole("button", { name: "Tailscale" })).not.toHaveAttribute("aria-current");
+
+  // 다시 열면 고른 화면(기기)이 남아 있고, 프로필을 바꿔도 닫히지 않는다
+  fireEvent.click(screen.getByRole("button", { name: "Tailscale" }));
+  expect(screen.getByRole("button", { name: "기기" })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.change(screen.getByRole("combobox", { name: "프로필" }), { target: { value: "dev" } });
+  expect(screen.getByRole("button", { name: "기기" })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("Argo Workflows는 단일 탭으로 열리고 프로필을 바꿔도 남는다", async () => {

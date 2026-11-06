@@ -128,6 +128,8 @@ export interface Settings {
   kvLogins?: Record<string, KvLoginSaved>;
   /** ElastiCache 대상 ARN → 그 대상에서 Bull 큐를 찾는 prefix. 비어 있으면 "bull" */
   kvBullPrefixes?: Record<string, string>;
+  /** Tailscale API를 쓸 테일넷 이름. 자격 증명은 키체인(계정 = 이 이름)에 있다. */
+  tailscaleTailnet?: string | null;
   /** 리소스 목록 캐시가 오래됐다고 보는 시간(분). 비어 있으면 기본값(15분), 0이면 무제한 */
   resourceCacheTtlMinutes?: number | null;
 }
