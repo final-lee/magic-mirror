@@ -64,7 +64,13 @@ pub fn registry() -> Vec<AdapterRef> {
 }
 
 pub fn service_info(a: &dyn ResourceAdapter) -> ServiceInfo {
-    ServiceInfo { id: a.service_id(), name: a.display_name(), global: a.is_global(), types: a.resource_types() }
+    ServiceInfo {
+        id: a.service_id(),
+        name: a.display_name(),
+        global: a.is_global(),
+        types: a.resource_types(),
+        metric_types: crate::metrics::catalog::supported_types(a.service_id()),
+    }
 }
 
 pub fn find_adapter(adapters: &[AdapterRef], id: &str) -> Result<AdapterRef, AppError> {

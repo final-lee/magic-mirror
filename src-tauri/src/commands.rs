@@ -11,6 +11,8 @@ use crate::aws::context::{self, AwsContext, ProfileInfo};
 use crate::aws::sso::{self, SsoLogins};
 use crate::error::AppError;
 use crate::model::{ListResult, ServiceInfo};
+use crate::metrics::catalog::{plan_for, MetricRange, MetricRow, Planned};
+use crate::metrics::{self, ResourceMetrics};
 use crate::resource_index::{IndexedList, ResourceIndexState};
 use crate::settings::{self, Settings};
 
@@ -58,6 +60,28 @@ pub async fn list_resources(
     let region_key = if adapter.is_global() { "global" } else { region.as_str() };
     index.record(&profile, region_key, &service, &type_id, &result);
     Ok(result)
+}
+
+/// 리소스 상세의 CloudWatch 지표. `row`는 목록 행(ID·이름·값)이고, 지표를 붙이지 않는 종류면 오류다
+#[tauri::command]
+pub async fn resource_metrics(
+    state: State<'_, AppState>,
+    profile: String,
+    region: String,
+    service: String,
+    type_id: String,
+    row: MetricRow,
+    range: MetricRange,
+) -> Result<ResourceMetrics, AppError> {
+    let adapter = find_adapter(&state.adapters, &service)?;
+    let plan = match plan_for(&service, &type_id, &row) {
+        Some(Planned::Metrics(plan)) => plan,
+        Some(Planned::Note(note)) => return Ok(ResourceMetrics::note(note)),
+        None => return Err(AppError::other(format!("이 리소스 종류에는 지표가 없어요: {service}/{type_id}"))),
+    };
+    let region = plan.region.clone().unwrap_or_else(|| effective_region(adapter.as_ref(), &region).to_string());
+    let cfg = state.ctx.config(&profile, &region).await?;
+    metrics::fetch(&cfg, &region, &plan, range).await
 }
 
 /// ⌘K 검색용: 이 프로필로 받아 둔 모든 목록(7일 안). 디스크에 남은 것도 포함한다.

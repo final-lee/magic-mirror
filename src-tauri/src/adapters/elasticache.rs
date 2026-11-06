@@ -176,6 +176,8 @@ fn replication_group(g: &ReplicationGroup, region: &str) -> Resource {
         .value("nodeType", s(g.cache_node_type()))
         .value("shards", g.node_groups().len())
         .value("nodes", g.member_clusters().len())
+        // 지표는 멤버 노드마다 쌓인다(상세의 CloudWatch 차트가 노드마다 선을 그린다)
+        .value("members", g.member_clusters().join(","))
         .value("endpoint", &endpoint)
         .field("Description", s(g.description()))
         .field("Cluster mode", cluster_mode)

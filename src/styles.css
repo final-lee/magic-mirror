@@ -1248,6 +1248,25 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .k8s-usage-x-axis { grid-column: 2; display: flex; justify-content: space-between; font-size: 11px; }
 .k8s-usage-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; }
 .k8s-usage-swatch { display: inline-block; width: 10px; height: 10px; margin-right: 4px; }
+/* 리소스 상세의 CloudWatch 지표(ResourceMetrics, MetricChart) */
+.metrics { margin: 4px 0 14px; }
+.metrics-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-bottom: 8px; }
+.metrics-bar .sect { margin: 0; }
+.metrics-where { font-size: 11px; }
+.metrics-tools { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+.metrics-note, .metrics-loading { margin: 4px 0 10px; font-size: 12px; }
+.metrics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px 18px; }
+.metric-chart { min-width: 0; }
+.metric-chart h5 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 4px; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.metric-latest { margin-left: auto; font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.metric-plot { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 6px; }
+.metric-y { height: 90px; display: flex; flex-direction: column; justify-content: space-between; text-align: right; font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.metric-plot svg { width: 100%; height: 90px; overflow: visible; }
+.metric-grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.metric-x { grid-column: 2; display: flex; justify-content: space-between; font-size: 10px; }
+.metric-legend { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 4px; font-size: 11px; }
+.metric-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.metric-empty { height: 90px; display: grid; place-items: center; font-size: 11px; border: 1px dashed var(--line); border-radius: 6px; }
 .k8s-kv { display: contents; }
 .k8s-links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
 .k8s-yaml { margin: 0; white-space: pre; font-size: 12px; user-select: text; }

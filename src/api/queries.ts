@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
-import type { AppError, IndexedList, ListResult, ServiceInfo, Settings } from "./types";
+import type { AppError, IndexedList, ListResult, MetricRange, Resource, ResourceMetrics, ServiceInfo, Settings } from "./types";
 
 export const GLOBAL = "global";
 
@@ -55,6 +55,19 @@ export function useResources(profile: string | null, region: string, service: Se
     enabled: fetch && !!profile,
     staleTime,
     gcTime: Infinity,
+    retry: false,
+  });
+}
+
+/**
+ * 리소스 상세의 CloudWatch 지표. CloudWatch 요청은 돈이 들어(지표 1,000개에 $0.01) 저절로 다시 읽지 않는다.
+ * 같은 행·기간은 1분 동안 다시 묻지 않고, [다시 읽기]가 새로 읽는다.
+ */
+export function useResourceMetrics(profile: string, region: string, service: ServiceInfo, typeId: string, row: Resource, range: MetricRange) {
+  return useQuery<ResourceMetrics, AppError>({
+    queryKey: ["metrics", profile, service.global ? GLOBAL : region, service.id, typeId, row.id, range],
+    queryFn: () => api.resourceMetrics(profile, region, service.id, typeId, row, range),
+    staleTime: 60_000,
     retry: false,
   });
 }
