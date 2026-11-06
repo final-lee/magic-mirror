@@ -12,6 +12,12 @@ export const XRAY_MISSING = "없음";
 export const XRAY_MISSING_TITLE = "가리키는데 클러스터에는 없어요";
 export const XRAY_TRUNCATED = "이어진 객체가 많아 일부만 보여요(전체 300개, 한 갈래 50개까지)";
 export const xrayPartial = (kinds: string[]) => `${kinds.join(", ")} 목록이 길어 앞부분만 읽었어요. 이어진 객체가 빠졌을 수 있어요`;
+export const XRAY_VIEW = "보기 방식";
+export const XRAY_VIEW_MAP = "지도";
+export const XRAY_VIEW_LIST = "목록";
+export const MAP_LABEL = "관계 지도";
+export const MAP_INWARD = "← 이 객체를 가리키는 것";
+export const MAP_OUTWARD = "이 객체가 가리키는 것 →";
 export const xrayGap = (kind: string, reason: string) => `${kind}을(를) 읽지 못했어요: ${reason}. 이 종류와의 관계는 보이지 않아요`;
 export const xrayOpen = (kind: string, name: string) => `${kind} ${name} 열기`;
 

@@ -2059,6 +2059,12 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .xray-badge.edge-reference { background: var(--accent-soft); color: var(--accent); }
 .xray-badge.edge-selector { background: var(--green-soft); color: var(--green-text); }
 .xray-badge.edge-target { background: var(--yellow-soft); color: var(--yellow); }
+/* 관계 지도: 범례의 선 견본(지도의 선과 같은 색·모양), 지금 보는 객체의 글씨 */
+.xray-legend-line::before { content: ""; display: inline-block; width: 18px; margin-right: 5px; vertical-align: middle; border-top: 2px solid var(--dim); }
+.xray-legend-line.reference::before { border-top: 2px dashed var(--accent); }
+.xray-legend-line.selector::before { border-top: 2px dotted var(--green); }
+.xray-legend-line.target::before { border-top-color: var(--yellow); }
+.xray-node.focus text:not(.sub) { font-weight: 700; }
 /* EKS 플러그인 설정 */
 .sheet .k8s-plugin-settings .btn { width: auto; flex: 0 0 auto; }
 .k8s-plugin-settings .tools { align-items: center; justify-content: flex-end; }

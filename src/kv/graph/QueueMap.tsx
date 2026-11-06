@@ -6,8 +6,8 @@ import { KvError } from "../KvError";
 import { useKvBullTopology } from "../queries";
 import * as t from "../text";
 import type { KvTarget } from "../types";
-import { GraphCanvas, GraphEdgeLine } from "./GraphCanvas";
-import { layoutDag } from "./layout";
+import { GraphCanvas, GraphEdgeLine } from "../../components/graph/GraphCanvas";
+import { layoutDag } from "../../components/graph/layout";
 import { buildQueueMap, type MapEdge } from "./queueModel";
 import { edgeWidth } from "./transitions";
 

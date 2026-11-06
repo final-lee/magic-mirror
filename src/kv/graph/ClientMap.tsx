@@ -4,8 +4,8 @@ import * as t from "../text";
 import type { KvClient } from "../types";
 import { buildClientMap, type ClientMapNode } from "./clientModel";
 import { shortAddress } from "./ClusterTopology";
-import { GraphCanvas, GraphEdgeLine } from "./GraphCanvas";
-import { layoutDag } from "./layout";
+import { GraphCanvas, GraphEdgeLine } from "../../components/graph/GraphCanvas";
+import { layoutDag } from "../../components/graph/layout";
 import { edgeWidth } from "./transitions";
 
 /** 호스트는 많아서 한 줄(주소와 연결 수), 이름·노드는 두 줄 */

@@ -5,8 +5,8 @@ import { KvError } from "../KvError";
 import { useKvBullTransitions } from "../queries";
 import * as t from "../text";
 import type { KvBullCounts, KvTarget } from "../types";
-import { GraphCanvas, GraphEdgeLine } from "./GraphCanvas";
-import { layoutDag } from "./layout";
+import { GraphCanvas, GraphEdgeLine } from "../../components/graph/GraphCanvas";
+import { layoutDag } from "../../components/graph/layout";
 import { buildTransitions, edgeWidth, TRANSITION_NODES, windowNotes } from "./transitions";
 
 /** 고를 수 있는 구간(분) */

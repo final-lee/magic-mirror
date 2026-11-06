@@ -1,7 +1,7 @@
 import { STATE_LABEL } from "../bull";
 import type { KvBullFlow, KvBullFlowEdge, KvBullFlowNode, KvBullFlowState } from "../types";
-import { layoutDag, type Direction, type Layout } from "./layout";
-import type { Tone } from "./GraphCanvas";
+import { layoutDag, type Direction, type Layout } from "../../components/graph/layout";
+import type { Tone } from "../../components/graph/GraphCanvas";
 
 export const FLOW_NODE_W = 208;
 export const FLOW_NODE_H = 58;

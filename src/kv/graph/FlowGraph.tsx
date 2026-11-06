@@ -1,6 +1,6 @@
 import { formatCount } from "../format";
 import { flowEdgeStyle, flowNodeId, flowNodeTone, flowStateLabel, FLOW_NODE_H, FLOW_NODE_W, layoutFlow } from "./flowModel";
-import { GraphCanvas, GraphEdgeLine } from "./GraphCanvas";
+import { GraphCanvas, GraphEdgeLine } from "../../components/graph/GraphCanvas";
 import type { KvBullFlow } from "../types";
 import { useMemo } from "react";
 

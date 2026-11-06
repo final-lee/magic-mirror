@@ -48,9 +48,28 @@ function setup(props: Partial<Parameters<typeof XrayView>[0]> = {}) {
 
 beforeEach(() => vi.clearAllMocks());
 
-test("groups the tree by edge type with badges, and opens a node in its own namespace", async () => {
+test("the map is the default: the current object in the middle, nodes open their object, edges carry roles", async () => {
   get.mockResolvedValue(world);
   const { onOpen } = setup();
+  const map = await screen.findByRole("img", { name: "관계 지도" });
+  expect(screen.getByRole("button", { name: "지도" })).toHaveAttribute("aria-pressed", "true");
+  // 지금 보는 객체는 누르지 못한다
+  expect(within(map).getByRole("group", { name: "Deployment web" })).toHaveAttribute("aria-current", "true");
+  expect(within(map).queryByRole("button", { name: /Deployment web 열기/ })).not.toBeInTheDocument();
+  // 없는 객체도 그리되 누르지 못한다
+  expect(within(map).getByRole("group", { name: "Secret gone" })).toHaveTextContent("없음");
+  // 관계의 구체적인 모습은 선의 글로
+  expect(within(map).getByText("볼륨, 환경 변수")).toBeInTheDocument();
+  fireEvent.click(within(map).getByRole("button", { name: "Pod web-5d-a 열기" }));
+  expect(onOpen).toHaveBeenLastCalledWith({ kind: expect.objectContaining({ kind: "Pod", plural: "pods" }), namespace: "prod", name: "web-5d-a" });
+  fireEvent.click(within(map).getByRole("button", { name: "Node node-1 열기" }));
+  expect(onOpen).toHaveBeenLastCalledWith({ kind: expect.objectContaining(NODES), namespace: null, name: "node-1" });
+});
+
+test("목록 groups the tree by edge type with badges, and opens a node in its own namespace", async () => {
+  get.mockResolvedValue(world);
+  const { onOpen } = setup();
+  fireEvent.click(await screen.findByRole("button", { name: "목록" }));
   const owner = await screen.findByRole("region", { name: "소유" });
   expect(screen.getByRole("region", { name: "참조" })).toBeInTheDocument();
   expect(screen.getByRole("region", { name: "선택" })).toBeInTheDocument();
@@ -99,10 +118,10 @@ test("unreadable kinds, partial reads and truncation are told, and an empty tree
 test("reads again when the object's resourceVersion changes, and on demand", async () => {
   get.mockResolvedValue(world);
   const { rerender } = setup({ resourceVersion: "1" });
-  await screen.findByRole("region", { name: "소유" });
+  await screen.findByRole("img", { name: "관계 지도" });
   expect(get).toHaveBeenCalledTimes(1);
   rerender({ resourceVersion: "2" });
-  await screen.findByRole("region", { name: "소유" });
+  await screen.findByRole("img", { name: "관계 지도" });
   expect(get).toHaveBeenCalledTimes(2);
   fireEvent.click(await screen.findByRole("button", { name: "다시 읽기" }));
   await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(3));
@@ -118,5 +137,5 @@ test("shows the failure with a retry when the object cannot be read", async () =
   setup();
   expect(await screen.findByText(/연결이 끊겼어요/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "다시 시도" }));
-  expect(await screen.findByRole("region", { name: "소유" })).toBeInTheDocument();
+  expect(await screen.findByRole("img", { name: "관계 지도" })).toBeInTheDocument();
 });
