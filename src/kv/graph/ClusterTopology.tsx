@@ -4,7 +4,7 @@ import { formatCount } from "../format";
 import * as t from "../text";
 import type { KvClient } from "../types";
 import { buildClusterTopology, type ClusterTopology as Topology, type TopoNode } from "./clusterModel";
-import { GraphCanvas, GraphEdgeLine } from "./GraphCanvas";
+import { GraphCanvas, GraphEdgeLine } from "../../components/graph/GraphCanvas";
 import type { KvOverview } from "../types";
 
 const HOST_W = 176;

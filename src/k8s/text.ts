@@ -76,6 +76,17 @@ export const KIND_TREE_LABEL = "리소스 종류";
 
 export const FILTER_PLACEHOLDER = "이름 또는 레이블 셀렉터(app=web,tier!=db)";
 export const ONLY_PROBLEMS = "문제 있는 것만";
+export const FILTER_STATE = "상태";
+export const FILTER_AGE = "나이";
+export const FILTER_ANY = "전체";
+export const FILTER_RESTARTED = "재시작 있음";
+export const FILTER_RESET = "필터 지우기";
+export const AGE_FILTER_LABELS = { all: "전체", "1h": "1시간 안", "1d": "하루 안", "7d": "7일 안", over7d: "7일 넘음", over30d: "30일 넘음" } as const;
+/** 상태 값이 없는 종류(Deployment 등)는 준비 정도로 상태 필터를 만든다 */
+export const STATE_READY = "준비됨";
+export const STATE_PARTIAL = "일부 준비";
+export const STATE_NOT_READY = "준비 안 됨";
+export const STATE_NONE_WANTED = "0개";
 export const LIST_EMPTY = "항목이 없어요";
 export const LIST_NO_MATCH = "조건에 맞는 항목이 없어요";
 export const BAD_SELECTOR = "레이블 셀렉터를 해석하지 못했어요";
@@ -218,6 +229,9 @@ export const DESCRIBE_REFRESH = "다시 읽기";
 export const DESCRIBE_SECRET = "Secret은 값을 가려서 앱이 만든 설명을 보여요.";
 export const DESCRIBE_FALLBACK = "앱의 요약으로 대신 보여요.";
 export const DESCRIBE_LOADING = "읽는 중…";
+export const DESCRIBE_MODE = "보기 방식";
+export const DESCRIBE_PRETTY = "정리";
+export const DESCRIBE_RAW = "원문";
 export const L_VERSION = "버전";
 export const L_PLATFORM = "플랫폼 버전";
 export const L_STATUS = "상태";

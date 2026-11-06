@@ -1157,6 +1157,39 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .k8s-list-bar { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 .k8s-filter { flex: 1; min-width: 0; }
 .k8s-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
+/* 필터 줄: 상태 칩, 값·나이 고르기, 체크 상자. 좁으면 줄을 바꾼다 */
+.k8s-filters { flex-wrap: wrap; gap: 6px 12px; }
+.k8s-filters select { max-width: 220px; }
+.k8s-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.k8s-chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: none; color: var(--text); border-radius: 10px; padding: 1px 8px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.k8s-chip:hover { background: var(--hover); }
+.k8s-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+.k8s-chip-n { color: var(--dim); font-variant-numeric: tabular-nums; }
+.k8s-chip.on { border-color: var(--accent); background: var(--accent-soft); }
+.k8s-chip.on .k8s-chip-n { color: inherit; }
+.k8s-chip.tone-ok::before { background: var(--green); }
+.k8s-chip.tone-done::before { background: var(--accent); }
+.k8s-chip.tone-warn::before { background: var(--yellow); }
+.k8s-chip.tone-bad::before { background: var(--red); }
+.k8s-filter-reset { font-size: 12px; margin-left: auto; }
+/* 상태 값: 색으로 정상·끝남·기다림·오류를 가른다 */
+.k8s-status { display: inline-flex; align-items: center; gap: 5px; border-radius: 9px; padding: 0 7px; font-size: 11px; white-space: nowrap; background: var(--hover-strong); }
+.k8s-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
+.k8s-status.tone-ok { background: var(--green-soft); color: var(--green-text); }
+.k8s-status.tone-ok::before { background: var(--green); }
+.k8s-status.tone-done { background: var(--accent-soft); color: var(--accent); }
+.k8s-status.tone-done::before { background: var(--accent); }
+.k8s-status.tone-warn { background: var(--yellow-soft); color: var(--yellow); }
+.k8s-status.tone-warn::before { background: var(--yellow); }
+.k8s-status.tone-bad { background: var(--red-soft); color: var(--red); font-weight: 600; }
+.k8s-status.tone-bad::before { background: var(--red); }
+.k8s-ready { font-variant-numeric: tabular-nums; }
+.k8s-ready.tone-ok { color: var(--green-text); }
+.k8s-ready.tone-warn { color: var(--yellow); font-weight: 600; }
+.k8s-ready.tone-bad { color: var(--red); font-weight: 600; }
+.k8s-restarts { color: var(--yellow); font-weight: 600; font-variant-numeric: tabular-nums; }
+.k8s-age { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.k8s-age.fresh { color: var(--accent); font-weight: 600; }
 .k8s-hint { margin: 4px 10px; font-size: 12px; }
 
 .k8s-sect { margin: 12px 0; }
@@ -1288,6 +1321,28 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .k8s-log.nowrap .lj-row { white-space: nowrap; overflow-wrap: normal; }
 .k8s-log.nowrap .lj-detail { white-space: pre-wrap; }
 .k8s-wrap { word-break: break-all; }
+/* 상세 설명(kubectl describe 정리): 키·값 격자, 구역 제목, 컨테이너·볼륨 카드, 표 */
+.desc { font-size: 12px; padding-bottom: 12px; }
+.desc-kv { display: grid; grid-template-columns: minmax(130px, max-content) minmax(0, 1fr); gap: 5px 16px; margin: 0; }
+.desc-kv dt { color: var(--dim); max-width: 280px; overflow-wrap: anywhere; }
+.desc-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.desc-sect { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
+.desc-sect h4 { display: flex; align-items: baseline; gap: 10px; margin: 0 0 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--dim); }
+.desc-sub { font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text); }
+.desc-card { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 10px 12px; margin: 8px 0; }
+.desc-card-title { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; font-family: ui-monospace, Menlo, monospace; font-size: 13px; font-weight: 700; }
+.desc-nested { border-left: 2px solid var(--line); padding-left: 10px; margin: 8px 0; }
+.desc-nested-title { display: flex; align-items: baseline; gap: 10px; margin-bottom: 5px; color: var(--dim); font-weight: 600; }
+.desc-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.desc-chip { background: var(--hover-strong); border-radius: 4px; padding: 1px 6px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; overflow-wrap: anywhere; }
+.desc-lines { display: flex; flex-direction: column; gap: 3px; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
+.desc-text { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; margin: 2px 0; overflow-wrap: anywhere; }
+.desc-table-wrap { overflow-x: auto; margin: 4px 0; }
+.desc-table { font-size: 12px; }
+.desc-table td { white-space: nowrap; }
+.desc-table td:last-child { white-space: normal; min-width: 200px; }
+.desc-warning td { color: var(--red); }
+.desc-warning td:first-child { font-weight: 600; }
 .k8s-warn td { color: var(--orange); }
 /* 사용량이 요청·제한·할당 가능량의 90%를 넘은 비율 */
 .k8s-hot { color: var(--red); font-weight: 600; }
@@ -2004,6 +2059,12 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .xray-badge.edge-reference { background: var(--accent-soft); color: var(--accent); }
 .xray-badge.edge-selector { background: var(--green-soft); color: var(--green-text); }
 .xray-badge.edge-target { background: var(--yellow-soft); color: var(--yellow); }
+/* 관계 지도: 범례의 선 견본(지도의 선과 같은 색·모양), 지금 보는 객체의 글씨 */
+.xray-legend-line::before { content: ""; display: inline-block; width: 18px; margin-right: 5px; vertical-align: middle; border-top: 2px solid var(--dim); }
+.xray-legend-line.reference::before { border-top: 2px dashed var(--accent); }
+.xray-legend-line.selector::before { border-top: 2px dotted var(--green); }
+.xray-legend-line.target::before { border-top-color: var(--yellow); }
+.xray-node.focus text:not(.sub) { font-weight: 700; }
 /* EKS 플러그인 설정 */
 .sheet .k8s-plugin-settings .btn { width: auto; flex: 0 0 auto; }
 .k8s-plugin-settings .tools { align-items: center; justify-content: flex-end; }

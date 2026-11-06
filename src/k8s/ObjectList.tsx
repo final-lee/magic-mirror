@@ -2,8 +2,11 @@ import { useCallback, useMemo, useState, useSyncExternalStore, type RefObject } 
 import { ListFind, useListFind } from "../components/ListFind";
 import { ListTable } from "../iam/ListTable";
 import { columnsFor, type TrendOf } from "./columns";
+import { ListFilterBar } from "./ListFilterBar";
+import { matchesListFilter, NO_FILTER, stateCounts, type ListFilter } from "./listFilter";
 import { matchesFilter, parseFilter } from "./selector";
-import { BAD_SELECTOR, FILTER_PLACEHOLDER, LIST_EMPTY, LIST_NO_MATCH, LOADING, METRICS_UNAVAILABLE, ONLY_PROBLEMS } from "./text";
+import { kindKey } from "./targets";
+import { BAD_SELECTOR, FILTER_PLACEHOLDER, LIST_EMPTY, LIST_NO_MATCH, LOADING, METRICS_UNAVAILABLE } from "./text";
 import type { K8sKindRef, K8sRow } from "./types";
 import { unavailableFor, usageKindOf, type UsageIndex } from "./usage";
 import { nodeTrend, podTrend, subscribeUsage, usageVersion } from "./usageHistory";
@@ -33,13 +36,19 @@ interface Props {
   active?: boolean;
 }
 
-/** 감시로 받은 행을 이름·레이블 셀렉터(⌘F로 여는 찾기 줄)·이상 여부로 걸러 보여 준다 */
+/** 감시로 받은 행을 이름·레이블 셀렉터(⌘F로 여는 찾기 줄)와 필터 줄(상태·값·나이·재시작·이상)로 걸러 보여 준다 */
 export function ObjectList({ kind, rows, status, showNamespace, selectedUid, onSelect, onClear, onOpen, now, usage, historyKey, host, active = true }: Props) {
   const find = useListFind(host, { enabled: active });
-  const [onlyProblems, setOnlyProblems] = useState(false);
+  const key = kindKey(kind);
+  const [saved, setSaved] = useState<{ key: string; filter: ListFilter }>({ key, filter: NO_FILTER });
+  // 종류가 바뀌면 그 종류에만 뜻이 있는 필터(상태·값·재시작)는 풀고 나이·이상만 이어 간다
+  const listFilter = saved.key === key ? saved.filter : { ...NO_FILTER, age: saved.filter.age, onlyProblems: saved.filter.onlyProblems };
   const filter = parseFilter(find.query);
-  const shown = rows.filter((r) => matchesFilter(r, filter) && (!onlyProblems || r.problems.length > 0));
   const at = now ?? Date.now();
+  const found = rows.filter((r) => matchesFilter(r, filter));
+  const shown = found.filter((r) => matchesListFilter(r, listFilter, at));
+  // 상태 칩의 수는 상태 말고 나머지 필터를 거친 행에서 센다
+  const counts = stateCounts(found.filter((r) => matchesListFilter(r, { ...listFilter, states: [] }, at)));
   // 새 기록이 들어올 때마다 다시 그려 추이 그래프를 늘린다
   const subscribe = useCallback((listener: () => void) => (historyKey ? subscribeUsage(historyKey, listener) : () => {}), [historyKey]);
   const version = useSyncExternalStore(subscribe, () => (historyKey ? usageVersion(historyKey) : 0));
@@ -61,12 +70,7 @@ export function ObjectList({ kind, rows, status, showNamespace, selectedUid, onS
   return (
     <div className="k8s-list">
       <ListFind find={find} placeholder={FILTER_PLACEHOLDER} count={shown.length} />
-      <div className="k8s-list-bar">
-        <label className="k8s-check">
-          <input type="checkbox" checked={onlyProblems} onChange={(e) => setOnlyProblems(e.target.checked)} />
-          {ONLY_PROBLEMS}
-        </label>
-      </div>
+      <ListFilterBar kind={kind} rows={found} stateCounts={counts} filter={listFilter} onChange={(next) => setSaved({ key, filter: next })} />
       {unavailable && <p className="dim k8s-hint">{METRICS_UNAVAILABLE[unavailable]}</p>}
       {filter.kind === "invalid" && <p className="err k8s-hint">{BAD_SELECTOR}</p>}
       {status === "loading" ? (

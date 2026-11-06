@@ -1,5 +1,6 @@
-import { errorMessage } from "../../api/errors";
+import { useState } from "react";
 import { createPortal } from "react-dom";
+import { errorMessage } from "../../api/errors";
 import { ErrorState } from "../../components/ErrorState";
 import { Problems } from "../columns";
 import { resolveLink } from "../kinds";
@@ -7,9 +8,10 @@ import type { K8sKind, K8sTarget, ObjectRef } from "../types";
 import { useK8sXray } from "./queries";
 import {
   EDGE_HINTS, EDGE_LABELS, ROLE_LABELS, XRAY_CURRENT, XRAY_EMPTY, XRAY_LABEL, XRAY_LOADING, XRAY_MISSING, XRAY_MISSING_TITLE, XRAY_REFRESH, XRAY_TRUNCATED,
-  xrayGap, xrayOpen, xrayPartial,
+  XRAY_VIEW, XRAY_VIEW_LIST, XRAY_VIEW_MAP, xrayGap, xrayOpen, xrayPartial,
 } from "./text";
 import type { XrayEdge, XrayNode } from "./types";
+import { XrayMap } from "./XrayMap";
 
 interface Props {
   target: K8sTarget;
@@ -76,20 +78,30 @@ function Tree({ nodes, parent, kinds, onOpen }: { nodes: XrayNode[]; parent: Xra
   );
 }
 
-/** 관계 탭: 소유·참조·선택·대상으로 묶은 들여쓰기 트리. 노드를 누르면 그 객체의 상세로 간다 */
+/** 관계 탭: 지도(기본) 또는 소유·참조·선택·대상으로 묶은 들여쓰기 목록. 노드를 누르면 그 객체의 상세로 간다 */
 export function XrayView({ target, context, ssoProfile, live, objectRef, resourceVersion, kinds, onOpen, toolbar }: Props) {
   const q = useK8sXray(target, context, objectRef, resourceVersion, ssoProfile, live);
-  const refresh = toolbar && createPortal(<button className="btn tone-secondary" onClick={() => void q.refetch()} disabled={q.isFetching}>{XRAY_REFRESH}</button>, toolbar);
+  const [view, setView] = useState<"map" | "list">("map");
+  const tools = toolbar && createPortal(
+    <>
+      <div className="k8s-seg" role="group" aria-label={XRAY_VIEW}>
+        <button aria-pressed={view === "map"} onClick={() => setView("map")}>{XRAY_VIEW_MAP}</button>
+        <button aria-pressed={view === "list"} onClick={() => setView("list")}>{XRAY_VIEW_LIST}</button>
+      </div>
+      <button className="btn tone-secondary" onClick={() => void q.refetch()} disabled={q.isFetching}>{XRAY_REFRESH}</button>
+    </>,
+    toolbar,
+  );
   if (q.isError) {
-    return <>{refresh}<ErrorState error={q.error} profile={ssoProfile} compact onRetry={() => void q.refetch()} onLoggedIn={() => void q.refetch()} /></>;
+    return <>{tools}<ErrorState error={q.error} profile={ssoProfile} compact onRetry={() => void q.refetch()} onLoggedIn={() => void q.refetch()} /></>;
   }
   if (!q.data) {
-    return <>{refresh}<div className="empty">{XRAY_LOADING}</div></>;
+    return <>{tools}<div className="empty">{XRAY_LOADING}</div></>;
   }
   const x = q.data;
   return (
     <div className="xray" aria-label={XRAY_LABEL}>
-      {refresh}
+      {tools}
       {x.gaps.map((g) => (
         <p key={g.kind} role="status" className="dim">
           {xrayGap(g.kind, errorMessage(g.error))}
@@ -105,15 +117,20 @@ export function XrayView({ target, context, ssoProfile, live, objectRef, resourc
           {XRAY_TRUNCATED}
         </p>
       )}
-      {x.sections.length === 0 && <div className="empty">{XRAY_EMPTY}</div>}
-      {x.sections.map((s) => (
-        <section key={s.edge} className="k8s-sect" aria-label={EDGE_LABELS[s.edge]}>
-          <h4 title={EDGE_HINTS[s.edge]}>
-            {EDGE_LABELS[s.edge]} <span className="xray-hint">{EDGE_HINTS[s.edge]}</span>
-          </h4>
-          <Tree nodes={s.nodes} parent={s.edge} kinds={kinds} onOpen={onOpen} />
-        </section>
-      ))}
+      {x.sections.length === 0 ? (
+        <div className="empty">{XRAY_EMPTY}</div>
+      ) : view === "map" ? (
+        <XrayMap xray={x} objectRef={objectRef} kinds={kinds} onOpen={onOpen} />
+      ) : (
+        x.sections.map((s) => (
+          <section key={s.edge} className="k8s-sect" aria-label={EDGE_LABELS[s.edge]}>
+            <h4 title={EDGE_HINTS[s.edge]}>
+              {EDGE_LABELS[s.edge]} <span className="xray-hint">{EDGE_HINTS[s.edge]}</span>
+            </h4>
+            <Tree nodes={s.nodes} parent={s.edge} kinds={kinds} onOpen={onOpen} />
+          </section>
+        ))
+      )}
     </div>
   );
 }

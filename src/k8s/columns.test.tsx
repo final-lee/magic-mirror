@@ -19,9 +19,9 @@ test("value keys per kind", () => {
   expect(valueKeys(widget)).toEqual(["ready"]);
 });
 
-test("columns: name, namespace when all namespaces, values, problems, age", () => {
+test("columns: name, namespace when all namespaces, age, values, problems", () => {
   const labels = (cols: ReturnType<typeof columnsFor>) => cols.map((c) => c.label);
-  expect(labels(columnsFor(DEPLOYMENTS, true, 0))).toEqual([COL_NAME, COL_NAMESPACE, COLUMN_LABELS.ready, COLUMN_LABELS.upToDate, COLUMN_LABELS.available, COL_PROBLEMS, COL_AGE]);
+  expect(labels(columnsFor(DEPLOYMENTS, true, 0))).toEqual([COL_NAME, COL_NAMESPACE, COL_AGE, COLUMN_LABELS.ready, COLUMN_LABELS.upToDate, COLUMN_LABELS.available, COL_PROBLEMS]);
   expect(labels(columnsFor(DEPLOYMENTS, false, 0))).not.toContain(COL_NAMESPACE);
   expect(labels(columnsFor(NODES, true, 0))).not.toContain(COL_NAMESPACE);
 });
@@ -32,13 +32,30 @@ test("problems render as labelled badges", () => {
   expect(screen.getByText(PROBLEM_LABELS.notReady)).toBeInTheDocument();
 });
 
-test("age column sorts by creation time and renders relative age", () => {
+test("age column sorts by creation time, renders relative age and marks the last ten minutes", () => {
   const now = Date.parse("2026-10-30T12:00:00Z");
   const ageCol = columnsFor(PODS, false, now).find((c) => c.key === "age")!;
   const r: K8sRow = { uid: "u", name: "p", namespace: "web", resourceVersion: "1", createdAt: "2026-10-30T11:15:00Z", labels: {}, values: {}, problems: [] };
   expect(ageCol.sort!(r)).toBe(Date.parse("2026-10-30T11:15:00Z"));
-  render(<>{ageCol.render(r)}</>);
-  expect(screen.getByText("45m")).toBeInTheDocument();
+  expect(render(<>{ageCol.render(r)}</>).container.querySelector(".k8s-age")).toHaveTextContent("45m");
+  expect(render(<>{ageCol.render(r)}</>).container.querySelector(".fresh")).toBeNull();
+  const fresh = render(<>{ageCol.render({ ...r, createdAt: "2026-10-30T11:51:00Z" })}</>).container.querySelector(".fresh");
+  expect(fresh).toHaveTextContent("9m");
+  expect(render(<>{ageCol.render({ ...r, createdAt: "2026-10-30T11:50:00Z" })}</>).container.querySelector(".fresh")).toBeNull();
+});
+
+test("status, ready and restarts cells carry their tone", () => {
+  const cols = columnsFor(PODS, false, 0);
+  const cell = (label: string, values: Record<string, string>) => render(<>{col(cols, label).render(podRow("p", values))}</>).container.firstElementChild;
+  expect(cell(COLUMN_LABELS.status, { status: "CrashLoopBackOff" })).toHaveClass("k8s-status", "tone-bad");
+  expect(cell(COLUMN_LABELS.status, { status: "Running" })).toHaveClass("tone-ok");
+  expect(cell(COLUMN_LABELS.ready, { ready: "1/2" })).toHaveClass("tone-warn");
+  expect(cell(COLUMN_LABELS.ready, { ready: "0/1", status: "Completed" })).toBeNull();
+  expect(cell(COLUMN_LABELS.restarts, { restarts: "3" })).toHaveClass("k8s-restarts");
+  expect(cell(COLUMN_LABELS.restarts, { restarts: "0" })).toBeNull();
+  // DaemonSet은 준비 수를 원하는 수와 견준다
+  const ds = col(columnsFor({ ...DEPLOYMENTS, plural: "daemonsets", kind: "DaemonSet" }, false, 0), COLUMN_LABELS.ready);
+  expect(render(<>{ds.render(podRow("d", { desired: "3", ready: "0" }))}</>).container.firstElementChild).toHaveClass("tone-bad");
 });
 
 const podRow = (name: string, values: Record<string, string> = {}): K8sRow => ({ uid: name, name, namespace: "web", resourceVersion: "1", createdAt: null, labels: {}, values, problems: [] });
@@ -50,7 +67,7 @@ const text = (c: { render: (r: K8sRow) => ReactNode }, r: K8sRow) => render(<>{c
 test("pod usage columns: usage, then percent of request and of limit, blank when not set", () => {
   const usage = usageOf({ pods: [{ namespace: "web", name: "api", cpuMilli: 450, memoryBytes: 90 * 1024 * 1024, containers: [], owners: [] }] });
   const cols = columnsFor(PODS, false, 0, usage);
-  expect(labelsOf(cols)).toEqual([COL_NAME, ...valueKeys(PODS).map((k) => COLUMN_LABELS[k]), COL_CPU, COL_MEMORY, COL_CPU_OF_REQUEST, COL_CPU_OF_LIMIT, COL_MEMORY_OF_REQUEST, COL_MEMORY_OF_LIMIT, COL_PROBLEMS, COL_AGE]);
+  expect(labelsOf(cols)).toEqual([COL_NAME, COL_AGE, ...valueKeys(PODS).map((k) => COLUMN_LABELS[k]), COL_CPU, COL_MEMORY, COL_CPU_OF_REQUEST, COL_CPU_OF_LIMIT, COL_MEMORY_OF_REQUEST, COL_MEMORY_OF_LIMIT, COL_PROBLEMS]);
   const api = podRow("api", { cpuRequest: "500", cpuLimit: "1000", memoryRequest: String(100 * 1024 * 1024) });
   expect(text(col(cols, COL_CPU), api)).toBe("450m");
   expect(text(col(cols, COL_MEMORY), api)).toBe("90 MiB");
@@ -149,7 +166,7 @@ test("workload usage is the sum over its pods, only cpu and memory", () => {
     { namespace: "web", name: "p2", cpuMilli: 250, memoryBytes: 2048, containers: [], owners },
   ] });
   const cols = columnsFor(DEPLOYMENTS, false, 0, usage);
-  expect(labelsOf(cols)).toEqual([COL_NAME, COLUMN_LABELS.ready, COLUMN_LABELS.upToDate, COLUMN_LABELS.available, COL_CPU, COL_MEMORY, COL_PROBLEMS, COL_AGE]);
+  expect(labelsOf(cols)).toEqual([COL_NAME, COL_AGE, COLUMN_LABELS.ready, COLUMN_LABELS.upToDate, COLUMN_LABELS.available, COL_CPU, COL_MEMORY, COL_PROBLEMS]);
   expect(text(col(cols, COL_CPU), podRow("web"))).toBe("350m");
   expect(text(col(cols, COL_MEMORY), podRow("web"))).toBe("3 KiB");
   expect(text(col(cols, COL_CPU), podRow("idle"))).toBe("");

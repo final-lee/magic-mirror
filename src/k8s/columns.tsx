@@ -1,6 +1,8 @@
+import type { ReactNode } from "react";
 import type { ListColumn } from "../iam/ListTable";
 import { age, formatBytes, formatCpu } from "./format";
 import { BUILTIN } from "./kinds";
+import { rowReadyTone, statusTone } from "./status";
 import { kindKey } from "./targets";
 import {
   COL_AGE, COL_CPU, COL_CPU_OF_ALLOCATABLE, COL_CPU_OF_LIMIT, COL_CPU_OF_REQUEST, COL_MEMORY, COL_MEMORY_OF_ALLOCATABLE, COL_MEMORY_OF_LIMIT,
@@ -184,14 +186,44 @@ export function usageColumns(kind: K8sKindRef, usage: UsageIndex | null | undefi
   return cols;
 }
 
+/** 이만큼 안에 생긴 것은 나이를 눈에 띄게 한다(방금 다시 뜬 Pod·새 배포) */
+export const FRESH_MS = 10 * 60_000;
+
+function Age({ createdAt, now }: { createdAt: string | null; now: number }) {
+  const fresh = createdAt !== null && now - Date.parse(createdAt) < FRESH_MS;
+  return <span className={fresh ? "k8s-age fresh" : "k8s-age"}>{age(createdAt, now)}</span>;
+}
+
+export function StatusBadge({ text }: { text: string }) {
+  return <span className={`k8s-status tone-${statusTone(text)}`}>{text}</span>;
+}
+
+/** 준비 수: 다 준비되면 초록, 일부면 노랑, 하나도 안 되면 빨강. 끝난 Pod(Completed)는 0/N이 정상이라 색을 뺀다 */
+function Ready({ row }: { row: K8sRow }) {
+  const ready = row.values.ready ?? "";
+  const finished = row.values.status !== undefined && statusTone(row.values.status) === "done";
+  const tone = finished ? null : rowReadyTone(row);
+  return tone ? <span className={`k8s-ready tone-${tone}`}>{ready}</span> : <>{ready}</>;
+}
+
+function valueCell(key: string, r: K8sRow): ReactNode {
+  const v = r.values[key];
+  if (v === undefined) return "";
+  if (key === "status") return <StatusBadge text={v} />;
+  if (key === "ready") return <Ready row={r} />;
+  if (key === "restarts" && Number(v) > 0) return <span className="k8s-restarts">{v}</span>;
+  return v;
+}
+
+/** 이름(·네임스페이스) 바로 뒤에 나이를 둔다: 언제 생겼는지가 상태를 읽는 첫 단서다 */
 export function columnsFor(kind: K8sKindRef, showNamespace: boolean, now: number, usage?: UsageIndex | null, trendOf?: TrendOf | null): ListColumn<K8sRow>[] {
   const cols: ListColumn<K8sRow>[] = [{ key: "name", label: COL_NAME, render: (r) => <span className="mono">{r.name}</span>, sort: (r) => r.name }];
   if (showNamespace && kind.namespaced) cols.push({ key: "namespace", label: COL_NAMESPACE, render: (r) => r.namespace ?? "", sort: (r) => r.namespace ?? "" });
+  cols.push({ key: "age", label: COL_AGE, render: (r) => <Age createdAt={r.createdAt} now={now} />, sort: (r) => (r.createdAt ? Date.parse(r.createdAt) : null) });
   for (const key of valueKeys(kind)) {
-    cols.push({ key: `v:${key}`, label: COLUMN_LABELS[key] ?? key, render: (r) => r.values[key] ?? "", sort: (r) => r.values[key] ?? null });
+    cols.push({ key: `v:${key}`, label: COLUMN_LABELS[key] ?? key, render: (r) => valueCell(key, r), sort: (r) => r.values[key] ?? null });
   }
   cols.push(...usageColumns(kind, usage, trendOf));
   cols.push({ key: "problems", label: COL_PROBLEMS, render: (r) => <Problems problems={r.problems} />, sort: (r) => r.problems.length });
-  cols.push({ key: "age", label: COL_AGE, render: (r) => age(r.createdAt, now), sort: (r) => (r.createdAt ? Date.parse(r.createdAt) : null) });
   return cols;
 }

@@ -1,12 +1,14 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { errorMessage } from "../api/errors";
 import { invoke } from "../api/invoke";
 import type { AppError } from "../api/types";
+import { DescribePretty } from "./DescribePretty";
+import { parseDescribe } from "./describeParse";
 import { targetKey, kindKey } from "./targets";
 import type { K8sObjectView, K8sTarget, ObjectRef } from "./types";
-import { DESCRIBE_FALLBACK, DESCRIBE_LOADING, DESCRIBE_REFRESH, DESCRIBE_SECRET } from "./text";
+import { DESCRIBE_FALLBACK, DESCRIBE_LOADING, DESCRIBE_MODE, DESCRIBE_PRETTY, DESCRIBE_RAW, DESCRIBE_REFRESH, DESCRIBE_SECRET } from "./text";
 
 export function fallbackDescribe(view: K8sObjectView): string {
   const fields = Object.entries(view.row.values).map(([key, value]) => `${key}: ${value}`);
@@ -54,11 +56,23 @@ export function DescribeView({ target, context, objectRef, resourceVersion, ssoP
     const timer = setTimeout(() => void query.refetch(), delay);
     return () => clearTimeout(timer);
   }, [resourceVersion, live, context, secret, query.dataUpdatedAt, query.refetch]);
+  const [raw, setRaw] = useState(false);
+  const text = secret || query.isError ? fallbackDescribe(view) : query.data;
+  const nodes = useMemo(() => (text === undefined || raw ? null : parseDescribe(text)), [text, raw]);
   return (
     <section>
-      {toolbar && createPortal(<button className="btn tone-secondary" onClick={() => secret ? onRefreshObject() : void query.refetch()} disabled={!secret && query.isFetching}>{DESCRIBE_REFRESH}</button>, toolbar)}
+      {toolbar && createPortal(
+        <>
+          <div className="k8s-seg" role="group" aria-label={DESCRIBE_MODE}>
+            <button aria-pressed={!raw} onClick={() => setRaw(false)}>{DESCRIBE_PRETTY}</button>
+            <button aria-pressed={raw} onClick={() => setRaw(true)}>{DESCRIBE_RAW}</button>
+          </div>
+          <button className="btn tone-secondary" onClick={() => secret ? onRefreshObject() : void query.refetch()} disabled={!secret && query.isFetching}>{DESCRIBE_REFRESH}</button>
+        </>,
+        toolbar,
+      )}
       {secret ? <p>{DESCRIBE_SECRET}</p> : query.isError && <p role="alert">{errorMessage(query.error)} — {DESCRIBE_FALLBACK}</p>}
-      {!secret && query.isPending && !query.isError ? <p>{DESCRIBE_LOADING}</p> : <pre className="k8s-wrap">{secret || query.isError ? fallbackDescribe(view) : query.data}</pre>}
+      {!secret && query.isPending && !query.isError ? <p>{DESCRIBE_LOADING}</p> : nodes ? <DescribePretty nodes={nodes} /> : <pre className="k8s-wrap">{text}</pre>}
     </section>
   );
 }
