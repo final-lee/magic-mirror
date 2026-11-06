@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { errorMessage } from "../api/errors";
 import { desktop } from "../api/desktop";
 import { useSettings } from "../api/queries";
@@ -7,6 +7,7 @@ import type { IamRoute } from "../iam/route";
 import * as t from "./accessText";
 import { useSnsPublicAccessCheck, useSnsTopicPolicy } from "./queries";
 import { FindingsList } from "./SnsFindings";
+import { TopicPolicyEdit } from "./TopicPolicyEdit";
 import type { SnsTopicRef } from "./targets";
 import type { SnsFinding, SnsPublicAccessReport } from "./types";
 
@@ -40,6 +41,12 @@ export function Policy({ target, onOpenIam }: Props) {
   const check = useSnsPublicAccessCheck(target);
   const { settings } = useSettings();
   const policy = q.data;
+  const checkedPolicy = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!policy) return;
+    if (checkedPolicy.current !== undefined && checkedPolicy.current !== policy.policy) check.reset();
+    checkedPolicy.current = policy.policy;
+  }, [policy?.policy, check.reset]);
   if (!policy) {
     return (
       <section className="center sns-pane" aria-label={t.POLICY_LABEL}>
@@ -48,7 +55,8 @@ export function Policy({ target, onOpenIam }: Props) {
     );
   }
   const disabled = settings?.snsChecks?.disabled ?? [];
-  const all = merge(policy.findings, check.data);
+  const report = !check.isPending && check.variables === policy.policy ? check.data : undefined;
+  const all = merge(policy.findings, report);
   const shown = t.enabledOnly(all, disabled);
   const hidden = all.length - shown.length;
   const jump = (action: string) => onOpenIam?.(null, { view: "whoCan", search: { action, resource: target.topicArn } });
@@ -75,6 +83,7 @@ export function Policy({ target, onOpenIam }: Props) {
             </li>
           ))}
         </ul>
+        <TopicPolicyEdit target={target} policy={policy} />
       </Section>
 
       <Section title={t.SECTION_VALIDATION}>
@@ -110,24 +119,24 @@ export function Policy({ target, onOpenIam }: Props) {
           className="btn small tone-refresh"
           title={t.PUBLIC_COST}
           disabled={check.isPending}
-          onClick={() => check.mutate()}
+          onClick={() => check.mutate(policy.policy)}
         >
           {check.isPending ? t.PUBLIC_RUNNING : `${t.PUBLIC_RUN} ($0.002)`}
         </button>
-        {check.data && (
+        {report && (
           <div className="sns-note" role="status">
-            <b className={check.data.result === "fail" ? "sns-error" : undefined}>{t.PUBLIC_RESULT[check.data.result]}</b>
-            {check.data.message && <span className="dim"> · {check.data.message}</span>}
-            {check.data.reasons.length > 0 && (
+            <b className={report.result === "fail" ? "sns-error" : undefined}>{t.PUBLIC_RESULT[report.result]}</b>
+            {report.message && <span className="dim"> · {report.message}</span>}
+            {report.reasons.length > 0 && (
               <ul className="sns-finding-items mono">
-                {check.data.reasons.map((r) => (
+                {report.reasons.map((r) => (
                   <li key={r}>{r}</li>
                 ))}
               </ul>
             )}
           </div>
         )}
-        {check.isError && (
+        {check.isError && check.variables === policy.policy && (
           <p className="sns-note sns-error" role="alert">
             {errorMessage(check.error)}
           </p>

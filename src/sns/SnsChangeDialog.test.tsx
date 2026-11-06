@@ -48,7 +48,7 @@ test("plans on open and shows calls, field changes with a line diff, impact rows
   const calls = within(within(dialog).getByRole("list", { name: "호출할 API" }));
   expect(calls.getByText("sqs:SetQueueAttributes")).toBeInTheDocument();
   expect(calls.getByText(QUEUE_URL)).toBeInTheDocument();
-  expect(calls.getByText(/"Policy": "\{\}"/)).toBeInTheDocument();
+  expect(calls.getByText(/"Policy": \{\}/)).toBeInTheDocument();
   const diff = within(dialog).getByLabelText("줄 차이");
   expect([...diff.querySelectorAll(".sns-diff-add")].map((n) => n.textContent)).toEqual(['+  "Sid": "magic-mirror-sns-orders"']);
   expect([...diff.querySelectorAll(".sns-diff-del")].map((n) => n.textContent)).toEqual(['-  "Old": 1']);
@@ -62,12 +62,39 @@ test("plans on open and shows calls, field changes with a line diff, impact rows
   expect(within(dialog).getByText("큐 정책을 고쳐요")).toBeInTheDocument();
 });
 
+test("policy strings are expanded only for display and invalid JSON stays intact", async () => {
+  const body = { Policy: '{"Statement":[{"Effect":"Allow"}]}', nested: { FilterPolicy: '{"event":["created"]}', RedrivePolicy: "not JSON" }, other: '{"unchanged":true}' };
+  const originalPlan = plan({ calls: [{ ...call, body }] });
+  m.plan.mockResolvedValue(originalPlan);
+  m.apply.mockResolvedValue(ok);
+  setup();
+  await screen.findByText("sqs:SetQueueAttributes");
+  const shown = document.querySelector(".sns-body")!;
+  expect(JSON.parse(shown.textContent!)).toEqual({ Policy: { Statement: [{ Effect: "Allow" }] }, nested: { FilterPolicy: { event: ["created"] }, RedrivePolicy: "not JSON" }, other: '{"unchanged":true}' });
+  fireEvent.click(applyButton());
+  await waitFor(() => expect(m.apply).toHaveBeenCalledWith("personal", "ap-northeast-2", originalPlan));
+  expect(originalPlan.calls[0].body).toEqual(body);
+});
+
 test("the final button is blue, [취소] is ghost, and focus starts on cancel", async () => {
   setup();
   await screen.findByRole("dialog");
   expect(applyButton()).toHaveClass("tone-primary");
   expect(screen.getByRole("button", { name: "취소" })).toHaveClass("tone-ghost");
   expect(screen.getByRole("button", { name: "취소" })).toHaveFocus();
+});
+
+test.each([
+  [{ kind: "subscribe", topicArn: TOPIC_ARN, protocol: "sqs", endpoint: QUEUE_ARN, filterPolicy: null, filterPolicyScope: null, rawMessageDelivery: false, dlqArn: null } as SnsChangeRequest, "tone-create"],
+  [{ kind: "unsubscribe", subscriptionArn: "sub" } as SnsChangeRequest, "tone-danger"],
+  [{ kind: "rawDelivery", subscriptionArn: "sub", enabled: true } as SnsChangeRequest, "tone-warn"],
+  [{ kind: "archivePolicy", topicArn: TOPIC_ARN, retentionDays: null } as SnsChangeRequest, "tone-danger"],
+  [{ kind: "archivePolicy", topicArn: TOPIC_ARN, retentionDays: 30 } as SnsChangeRequest, "tone-warn"],
+])("변경 확인은 작업의 색을 유지해요", async (changeRequest, tone) => {
+  m.plan.mockResolvedValue(plan({ request: changeRequest }));
+  setup({ request: changeRequest });
+  await screen.findByRole("dialog");
+  expect(applyButton()).toHaveClass(tone);
 });
 
 test("a typed confirmation phrase gates the final button until it matches exactly", async () => {
@@ -103,21 +130,31 @@ test("the result lists the calls that ran, invalidates the topic queries and rep
   expect(within(result).getByText("sqs:SetQueueAttributes")).toBeInTheDocument();
   expect(within(result).getByText("변경 기록에 남겼어요")).toBeInTheDocument();
   expect(onApplied).toHaveBeenCalledWith(ok);
-  const keys = spy.mock.calls.map(([filter]) => (filter as { queryKey: unknown }).queryKey);
+  const keys = spy.mock.calls.map(([filter]) => filter?.queryKey);
   expect(keys).toEqual(expect.arrayContaining([snsKeys.topic("personal", "ap-northeast-2", TOPIC_ARN), snsKeys.diagnosis("personal", "ap-northeast-2", TOPIC_ARN)]));
+  expect(keys).toEqual(expect.arrayContaining([
+    ["resources", "personal", "ap-northeast-2", "sns", "subscriptions"],
+    ["sns", "peek", "personal", "ap-northeast-2", TOPIC_ARN],
+  ]));
   fireEvent.click(screen.getByRole("button", { name: "닫기" }));
   expect(onClose).toHaveBeenCalled();
 });
 
 test("a failure after some calls ran shows both the calls and the error", async () => {
   m.apply.mockResolvedValue({ callsRun: [call], error: "권한 없음 (lambda:AddPermission)", recordId: "rec-2" });
-  setup();
+  const { qc } = setup();
+  const spy = vi.spyOn(qc, "invalidateQueries");
   await screen.findByRole("dialog");
   fireEvent.click(applyButton());
   const result = await screen.findByTestId("sns-result");
   expect(within(result).getByText("일부만 적용했어요")).toBeInTheDocument();
   expect(within(result).getByRole("alert")).toHaveTextContent("권한 없음 (lambda:AddPermission)");
   expect(within(result).getByText("sqs:SetQueueAttributes")).toBeInTheDocument();
+  const keys = spy.mock.calls.map(([filter]) => filter?.queryKey);
+  expect(keys).toEqual(expect.arrayContaining([
+    ["resources", "personal", "ap-northeast-2", "sns", "subscriptions"],
+    ["sns", "peek", "personal", "ap-northeast-2", TOPIC_ARN],
+  ]));
 });
 
 test("a failure before any call ran says nothing was applied", async () => {
@@ -194,6 +231,8 @@ test("Esc cancels while the preview is open but not while applying", async () =>
   await screen.findByRole("dialog");
   fireEvent.click(applyButton());
   await screen.findByRole("button", { name: "적용 중…" });
+  expect(screen.getByRole("button", { name: "취소" })).toHaveAttribute("title", "적용 중에는 취소할 수 없어요");
+  expect(screen.getByRole("button", { name: "미리보기 다시 받기" })).toHaveAttribute("title", "작업이 끝난 뒤 다시 받을 수 있어요");
   fireEvent.keyDown(document, { key: "Escape" });
   expect(onClose).not.toHaveBeenCalled();
   await act(async () => release(ok));

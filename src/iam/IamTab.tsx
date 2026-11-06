@@ -80,12 +80,15 @@ export function IamTab({ profile, active, focus, preset = null, nonce }: Props) 
 
   // 대상이 지정돼 열렸으면(nonce가 새로 바뀜) 그 사용자·역할·정책으로 이동한다. 지정이 없으면 보던 자리를 지킨다.
   const appliedNonce = useRef<number | null>(null);
+  const [searchVersion, setSearchVersion] = useState(0);
   useLayoutEffect(() => {
     if (!ov || appliedNonce.current === nonce) return;
     appliedNonce.current = nonce;
+    if (preset?.view === "whoCan") setSearchVersion(nonce);
     const target = preset ?? (focus ? routeForFocus(ov, focus) : null);
-    if (target) navigate(target);
-  }, [ov, focus, preset, nonce, navigate]);
+    if (target?.view === "whoCan" && route.view === "whoCan") replace(() => target);
+    else if (target) navigate(target);
+  }, [ov, focus, preset, nonce, navigate, replace, route.view]);
 
   // ⌘[ / ⌘](tab.back / tab.forward)와 마우스 뒤로/앞으로 버튼: 보이는 탭에서만, 확인 창이 떠 있거나 글자를 입력하는 중이면 건드리지 않는다.
   const root = useRef<HTMLDivElement>(null);
@@ -188,7 +191,7 @@ export function IamTab({ profile, active, focus, preset = null, nonce }: Props) 
   } else if (route.view === "findings") {
     body = <Findings profile={profile} overview={ov} onOpen={navigate} onFix={change.start} initialKind={route.tab} onViewState={remember} />;
   } else if (route.view === "whoCan") {
-    body = <WhoCan profile={profile} overview={ov} onOpen={navigate} initial={route.search} onViewState={remember} />;
+    body = <WhoCan key={searchVersion} profile={profile} overview={ov} onOpen={navigate} initial={route.search} onViewState={remember} />;
   } else {
     body = <ChangeLog profile={profile} accountId={ov.accountId} onStart={change.start} onStartBatch={batch.start} />;
   }

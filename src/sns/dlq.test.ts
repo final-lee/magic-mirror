@@ -1,5 +1,5 @@
 import { makeResource } from "../test/utils";
-import { ACCOUNT, DLQ_ARN, FUNCTION_ARN, QUEUE_ARN, REGION, lambdaSubscription, partnerSubscription, sampleTopic, sqsSubscription } from "./fixtures";
+import { ACCOUNT, DLQ_ARN, QUEUE_ARN, REGION, lambdaSubscription, sampleTopic, sqsSubscription } from "./fixtures";
 import { dlqCandidates, dlqMustBeFifo } from "./dlq";
 import type { SnsSubscription } from "./types";
 
@@ -9,18 +9,9 @@ const names = (r: ReturnType<typeof dlqCandidates>) => r.queues.map((x) => x.nam
 const standardQueueSub: SnsSubscription = { ...sqsSubscription, endpoint: `arn:aws:sqs:${REGION}:${ACCOUNT}:std-queue`, target: { kind: "sqs", arn: `arn:aws:sqs:${REGION}:${ACCOUNT}:std-queue`, url: "u", fifo: false, kmsKey: null, policy: null, redrivePolicy: null, error: null } };
 
 describe("dlqMustBeFifo", () => {
-  test("a FIFO endpoint queue needs a FIFO DLQ and a standard endpoint queue a standard one, whatever the topic is", () => {
-    expect(dlqMustBeFifo(sqsSubscription, sampleTopic())).toBe(true);
-    expect(dlqMustBeFifo(standardQueueSub, sampleTopic())).toBe(false);
-  });
-  test("an unresolved SQS endpoint is judged by its queue name", () => {
-    expect(dlqMustBeFifo({ ...partnerSubscription, endpoint: "arn:aws:sqs:us-east-1:9:p.fifo" }, sampleTopic({ fifo: false }))).toBe(true);
-    expect(dlqMustBeFifo(partnerSubscription, sampleTopic())).toBe(false);
-  });
-  test("non-SQS endpoints follow the topic kind", () => {
-    expect(dlqMustBeFifo(lambdaSubscription, sampleTopic({ fifo: true }))).toBe(true);
-    expect(dlqMustBeFifo(lambdaSubscription, sampleTopic({ fifo: false }))).toBe(false);
-    expect(lambdaSubscription.endpoint).toBe(FUNCTION_ARN);
+  test("the topic determines DLQ type independently of the endpoint", () => {
+    expect(dlqMustBeFifo(sampleTopic({ fifo: true }))).toBe(true);
+    expect(dlqMustBeFifo(sampleTopic({ fifo: false }))).toBe(false);
   });
 });
 
@@ -31,8 +22,9 @@ describe("dlqCandidates", () => {
     expect(names(r)).toEqual(["dead.fifo"]);
     expect(r.hidden).toBe(queues.length - 1);
   });
-  test("a standard subscription gets only standard queues", () => {
-    expect(names(dlqCandidates(queues, standardQueueSub, sampleTopic()))).toEqual(["dead-std"]);
+  test("a standard endpoint on a FIFO topic still requires FIFO queues", () => {
+    expect(names(dlqCandidates(queues, standardQueueSub, sampleTopic({ fifo: true })))).toEqual(["orders-queue.fifo", "dead.fifo"]);
+    expect(names(dlqCandidates(queues, standardQueueSub, sampleTopic({ fifo: false })))).toEqual(["dead-std"]);
   });
   test("Lambda on a FIFO topic gets FIFO queues, on a standard topic standard queues", () => {
     expect(names(dlqCandidates(queues, lambdaSubscription, sampleTopic({ fifo: true })))).toEqual(["orders-queue.fifo", "dead.fifo"]);

@@ -6,6 +6,12 @@ import { JsonView } from "./JsonView";
 import { resourceJumpOf, type ResourceJump } from "./targets";
 import * as t from "./text";
 import type { SnsSubscription, SnsTopic } from "./types";
+import { ReplayControls } from "./ReplayControls";
+import { DeliveryEdit, FilterEdit, RawToggle, UnsubscribeButton } from "./SubscriptionEdits";
+import { changeTone } from "./change";
+import { DlqPicker } from "./DlqPicker";
+import { useSnsChange } from "./useSnsChange";
+import type { SnsTopicRef } from "./targets";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -26,7 +32,7 @@ function targetSentence(sub: SnsSubscription): string | null {
  * 구독 상세: 속성 전부, 필터 정책 JSON(칠해서), DLQ, 배달 정책, 엔드포인트의 리소스 브라우저 행으로 가는 버튼.
  * 확인 대기 구독은 속성을 읽을 수 없어서 그 이유를 적는다.
  */
-export function SubscriptionDetail({ topic, subscriptionKey, onBack, onOpenResource }: { topic: SnsTopic; subscriptionKey: string; onBack: () => void; onOpenResource?: (jump: ResourceJump) => void }) {
+export function SubscriptionDetail({ topic, subscriptionKey, onBack, onOpenResource, snsTarget }: { topic: SnsTopic; subscriptionKey: string; onBack: () => void; onOpenResource?: (jump: ResourceJump) => void; snsTarget?: SnsTopicRef }) {
   const [showRaw, setShowRaw] = useState(false);
   const sub = topic.subscriptions.find((s) => s.key === subscriptionKey);
   if (!sub) {
@@ -75,6 +81,7 @@ export function SubscriptionDetail({ topic, subscriptionKey, onBack, onOpenResou
               {t.SHOW_RAW}
             </button>
           )}
+          {snsTarget && <UnsubscribeButton sub={sub} target={snsTarget} />}
         </span>
       </div>
 
@@ -93,6 +100,7 @@ export function SubscriptionDetail({ topic, subscriptionKey, onBack, onOpenResou
           {errorMessage(sub.error)}
         </p>
       )}
+      {snsTarget && <ReplayControls topic={topic} sub={sub} target={snsTarget} />}
 
       <Section title={t.SECTION_ENDPOINT}>
         <ul className="sns-sentences">
@@ -116,6 +124,11 @@ export function SubscriptionDetail({ topic, subscriptionKey, onBack, onOpenResou
                 <JsonView value={sub.filter.policy} label={t.SECTION_FILTER} />
               </>
             )}
+            {snsTarget && (
+              <div className="sns-edit-slot">
+                <FilterEdit sub={sub} target={snsTarget} />
+              </div>
+            )}
           </Section>
 
           <Section title={t.SECTION_DLQ}>
@@ -127,11 +140,18 @@ export function SubscriptionDetail({ topic, subscriptionKey, onBack, onOpenResou
                 <li className="dim mono">{sub.dlqArn}</li>
               </ul>
             )}
+            {snsTarget && <DlqReplacement target={snsTarget} topic={topic} sub={sub} />}
           </Section>
 
           <Section title={t.SECTION_DELIVERY}>
             <p className="sns-note">{t.RAW_SENTENCE(sub.raw)}</p>
             {delivery !== null && <JsonView value={delivery} label={t.SECTION_DELIVERY} />}
+            {snsTarget && (
+              <div className="sns-edit-slot">
+                <RawToggle sub={sub} target={snsTarget} />
+                <DeliveryEdit sub={sub} target={snsTarget} />
+              </div>
+            )}
           </Section>
         </>
       )}
@@ -163,4 +183,17 @@ export function SubscriptionDetail({ topic, subscriptionKey, onBack, onOpenResou
       {showRaw && <RawModal title={label.name} text={JSON.stringify(sub.attributes, null, 2)} onClose={() => setShowRaw(false)} />}
     </section>
   );
+}
+
+function DlqReplacement({ target, topic, sub }: { target: SnsTopicRef; topic: SnsTopic; sub: SnsSubscription }) {
+  const [picking, setPicking] = useState(false);
+  const change = useSnsChange(target);
+  return <>
+    <button className={`btn small ${changeTone({ kind: "addDlq" })}`} disabled={!sub.arn} title={!sub.arn ? "확인 대기 중인 구독은 바꿀 수 없어요" : undefined} onClick={() => setPicking(true)}>DLQ 바꾸기…</button>
+    {picking && <DlqPicker target={target} topic={topic} subscription={sub} onClose={() => setPicking(false)} onPick={(dlqArn) => {
+      setPicking(false);
+      if (sub.arn) change.start({ kind: "addDlq", subscriptionArn: sub.arn, dlqArn });
+    }} />}
+    {change.dialog}
+  </>;
 }

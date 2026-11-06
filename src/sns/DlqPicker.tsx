@@ -20,7 +20,7 @@ interface Props {
 
 /**
  * DLQ 고르기: 이 리전의 SQS 큐(리소스 브라우저가 읽는 목록과 같은 쿼리) 가운데 이 구독에 붙일 수 있는 큐만 보여 준다.
- * 종류 규칙: FIFO 구독은 FIFO 큐, 표준 구독은 표준 큐(SQS가 아닌 구독은 주제의 종류를 따른다). 같은 계정·리전이 아니거나 엔드포인트 큐 자신은 뺀다.
+ * 종류 규칙: 주제와 같은 종류의 큐. 같은 계정·리전이 아니거나 엔드포인트 큐 자신은 뺀다.
  * 고르는 것만 하고 아무것도 바꾸지 않는다: [미리 보기…]가 변경 대화창(SnsChangeDialog)으로 이어진다.
  */
 export function DlqPicker({ target, topic, subscription, onPick, onClose }: Props) {

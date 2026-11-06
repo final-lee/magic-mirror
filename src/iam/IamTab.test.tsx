@@ -417,6 +417,16 @@ describe("opening a target (focus)", () => {
     await waitFor(() => expect(m.whoCan).toHaveBeenCalledWith("prod", "sns:Publish", "arn:aws:sns:ap-northeast-2:123456789012:orders"));
   });
 
+  test("새 외부 검색 요청을 이미 열린 검색 화면에 적용해요", async () => {
+    const first = { view: "whoCan" as const, search: { action: "sns:Publish", resource: "arn:aws:sns:r:a:first" } };
+    const second = { view: "whoCan" as const, search: { action: "sns:Subscribe", resource: "arn:aws:sns:r:a:second" } };
+    const { update } = setup({ preset: first, nonce: 1 });
+    expect(await screen.findByRole("combobox", { name: "작업" })).toHaveValue("sns:Publish");
+    update({ preset: second, nonce: 2 });
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "작업" })).toHaveValue("sns:Subscribe"));
+    await waitFor(() => expect(m.whoCan).toHaveBeenCalledWith("prod", "sns:Subscribe", second.search.resource));
+  });
+
   test("focusing again with the same nonce does not navigate again", async () => {
     const { update } = setup({ focus: bob.arn, nonce: 1 });
     await screen.findByRole("heading", { name: "bob" });

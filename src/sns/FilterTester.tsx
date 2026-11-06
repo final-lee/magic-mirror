@@ -4,7 +4,7 @@ import { snsApi } from "./api";
 import { endpointLabel } from "./format";
 import type { FilterResult, FilterSample, SnsTopic } from "./types";
 
-const recent = new Map<string, FilterSample[]>();
+import { recent } from "./samples";
 const initialSample: FilterSample = { attributes: [{ name: "", dataType: "String", value: "" }], body: null };
 
 export function FilterTester({ topic, tabId }: { topic: SnsTopic; tabId: string }) {

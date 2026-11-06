@@ -36,15 +36,30 @@ pub struct SnsPublishers {
     pub errors: Vec<AppError>,
 }
 
-fn configured_one(kind: &str, name: String, arn: Option<String>, principal: Option<&str>) -> Publisher {
-    Publisher { kind: kind.into(), name, arn, principal: principal.map(Into::into), configured: true }
+fn configured_one(
+    kind: &str,
+    name: String,
+    arn: Option<String>,
+    principal: Option<&str>,
+) -> Publisher {
+    Publisher {
+        kind: kind.into(),
+        name,
+        arn,
+        principal: principal.map(Into::into),
+        configured: true,
+    }
 }
 
 /// 리소스 설정에 이 주제가 적힌 발행자: CloudWatch 경보, EventBridge 규칙, RDS 이벤트 구독, ElastiCache 알림.
 /// 읽지 못한 출처는 오류로 돌려주고 나머지는 그대로 낸다.
 pub async fn configured(cfg: &SdkConfig, topic_arn: &str) -> (Vec<Publisher>, Vec<AppError>) {
-    let (alarms, rules, rds, cache) =
-        tokio::join!(alarms(cfg, topic_arn), rules(cfg, topic_arn), rds_subscriptions(cfg, topic_arn), cache_clusters(cfg, topic_arn));
+    let (alarms, rules, rds, cache) = tokio::join!(
+        alarms(cfg, topic_arn),
+        rules(cfg, topic_arn),
+        rds_subscriptions(cfg, topic_arn),
+        cache_clusters(cfg, topic_arn)
+    );
     let mut out = Vec::new();
     let mut errors = Vec::new();
     for r in [alarms, rules, rds, cache] {
@@ -69,15 +84,39 @@ async fn alarms(cfg: &SdkConfig, topic_arn: &str) -> Result<Vec<Publisher>, AppE
     while let Some(page) = pages.next().await {
         let page = page.map_err(|e| from_sdk(e, "cloudwatch:DescribeAlarms"))?;
         for a in page.metric_alarms() {
-            let actions = [a.alarm_actions(), a.ok_actions(), a.insufficient_data_actions()];
-            if actions.iter().any(|list| list.iter().any(|x| x == topic_arn)) {
-                out.push(configured_one("alarm", a.alarm_name().unwrap_or_default().into(), a.alarm_arn().map(Into::into), Some("cloudwatch.amazonaws.com")));
+            let actions = [
+                a.alarm_actions(),
+                a.ok_actions(),
+                a.insufficient_data_actions(),
+            ];
+            if actions
+                .iter()
+                .any(|list| list.iter().any(|x| x == topic_arn))
+            {
+                out.push(configured_one(
+                    "alarm",
+                    a.alarm_name().unwrap_or_default().into(),
+                    a.alarm_arn().map(Into::into),
+                    Some("cloudwatch.amazonaws.com"),
+                ));
             }
         }
         for a in page.composite_alarms() {
-            let actions = [a.alarm_actions(), a.ok_actions(), a.insufficient_data_actions()];
-            if actions.iter().any(|list| list.iter().any(|x| x == topic_arn)) {
-                out.push(configured_one("alarm", a.alarm_name().unwrap_or_default().into(), a.alarm_arn().map(Into::into), Some("cloudwatch.amazonaws.com")));
+            let actions = [
+                a.alarm_actions(),
+                a.ok_actions(),
+                a.insufficient_data_actions(),
+            ];
+            if actions
+                .iter()
+                .any(|list| list.iter().any(|x| x == topic_arn))
+            {
+                out.push(configured_one(
+                    "alarm",
+                    a.alarm_name().unwrap_or_default().into(),
+                    a.alarm_arn().map(Into::into),
+                    Some("cloudwatch.amazonaws.com"),
+                ));
             }
         }
     }
@@ -95,7 +134,11 @@ async fn rules(cfg: &SdkConfig, topic_arn: &str) -> Result<Vec<Publisher>, AppEr
             .send()
             .await
             .map_err(|e| from_sdk(e, "events:ListEventBuses"))?;
-        buses.extend(out.event_buses().iter().filter_map(|b| b.name().map(String::from)));
+        buses.extend(
+            out.event_buses()
+                .iter()
+                .filter_map(|b| b.name().map(String::from)),
+        );
         match out.next_token() {
             Some(t) => token = Some(t.into()),
             None => break,
@@ -121,7 +164,12 @@ async fn rules(cfg: &SdkConfig, topic_arn: &str) -> Result<Vec<Publisher>, AppEr
                     None => break,
                 }
             }
-            Ok::<_, AppError>(names.into_iter().map(|n| rule_publisher(&bus, &n)).collect::<Vec<_>>())
+            Ok::<_, AppError>(
+                names
+                    .into_iter()
+                    .map(|n| rule_publisher(&bus, &n))
+                    .collect::<Vec<_>>(),
+            )
         }
     })
     .await;
@@ -134,13 +182,20 @@ async fn rules(cfg: &SdkConfig, topic_arn: &str) -> Result<Vec<Publisher>, AppEr
 
 /// 기본 버스의 규칙은 이름만, 다른 버스는 `버스/규칙`으로 적는다
 pub(crate) fn rule_publisher(bus: &str, rule: &str) -> Publisher {
-    let name = if bus == "default" { rule.to_string() } else { format!("{bus}/{rule}") };
+    let name = if bus == "default" {
+        rule.to_string()
+    } else {
+        format!("{bus}/{rule}")
+    };
     configured_one("eventbridge", name, None, Some("events.amazonaws.com"))
 }
 
 async fn rds_subscriptions(cfg: &SdkConfig, topic_arn: &str) -> Result<Vec<Publisher>, AppError> {
     let client = aws_sdk_rds::Client::new(cfg);
-    let mut pages = client.describe_event_subscriptions().into_paginator().send();
+    let mut pages = client
+        .describe_event_subscriptions()
+        .into_paginator()
+        .send();
     let mut out = Vec::new();
     while let Some(page) = pages.next().await {
         let page = page.map_err(|e| from_sdk(e, "rds:DescribeEventSubscriptions"))?;
@@ -167,9 +222,21 @@ async fn cache_clusters(cfg: &SdkConfig, topic_arn: &str) -> Result<Vec<Publishe
         for c in page.cache_clusters() {
             if c.notification_configuration().and_then(|n| n.topic_arn()) == Some(topic_arn) {
                 // 복제 그룹의 노드는 그룹 이름 하나로 묶는다(merge가 중복을 지운다)
-                let name = c.replication_group_id().or(c.cache_cluster_id()).unwrap_or_default();
-                let arn = if c.replication_group_id().is_some() { None } else { c.arn().map(Into::into) };
-                out.push(configured_one("elasticache", name.into(), arn, Some("elasticache.amazonaws.com")));
+                let name = c
+                    .replication_group_id()
+                    .or(c.cache_cluster_id())
+                    .unwrap_or_default();
+                let arn = if c.replication_group_id().is_some() {
+                    None
+                } else {
+                    c.arn().map(Into::into)
+                };
+                out.push(configured_one(
+                    "elasticache",
+                    name.into(),
+                    arn,
+                    Some("elasticache.amazonaws.com"),
+                ));
             }
         }
     }
@@ -179,7 +246,10 @@ async fn cache_clusters(cfg: &SdkConfig, topic_arn: &str) -> Result<Vec<Publishe
 /// 더 찾기: 이 리전 S3 버킷의 이벤트 알림과 Lambda 함수의 비동기 호출 대상.
 /// 리소스 수만큼 API를 부르므로 화면의 버튼으로만 돌린다.
 pub async fn deep(cfg: &SdkConfig, topic_arn: &str) -> (Vec<Publisher>, DeepScan, Vec<AppError>) {
-    let (buckets, functions) = tokio::join!(bucket_notifications(cfg, topic_arn), function_destinations(cfg, topic_arn));
+    let (buckets, functions) = tokio::join!(
+        bucket_notifications(cfg, topic_arn),
+        function_destinations(cfg, topic_arn)
+    );
     let mut out = Vec::new();
     let mut errors = Vec::new();
     let mut scan = DeepScan::default();
@@ -207,10 +277,18 @@ type Scanned = (Vec<Publisher>, usize, Vec<AppError>);
 async fn bucket_notifications(cfg: &SdkConfig, topic_arn: &str) -> Result<Scanned, AppError> {
     let client = aws_sdk_s3::Client::new(cfg);
     let mut names = Vec::new();
-    let mut pages = client.list_buckets().bucket_region(region(cfg)).into_paginator().send();
+    let mut pages = client
+        .list_buckets()
+        .bucket_region(region(cfg))
+        .into_paginator()
+        .send();
     while let Some(page) = pages.next().await {
         let page = page.map_err(|e| from_sdk(e, "s3:ListAllMyBuckets"))?;
-        names.extend(page.buckets().iter().filter_map(|b| b.name().map(String::from)));
+        names.extend(
+            page.buckets()
+                .iter()
+                .filter_map(|b| b.name().map(String::from)),
+        );
     }
     let count = names.len();
     let results = map_concurrent(names, |bucket| {
@@ -222,9 +300,17 @@ async fn bucket_notifications(cfg: &SdkConfig, topic_arn: &str) -> Result<Scanne
                 .send()
                 .await
                 .map_err(|e| from_sdk(e, "s3:GetBucketNotification"))?;
-            let hit = out.topic_configurations().iter().any(|t| t.topic_arn() == topic_arn);
+            let hit = out
+                .topic_configurations()
+                .iter()
+                .any(|t| t.topic_arn() == topic_arn);
             Ok::<_, AppError>(hit.then(|| {
-                configured_one("s3", bucket.clone(), Some(format!("arn:aws:s3:::{bucket}")), Some("s3.amazonaws.com"))
+                configured_one(
+                    "s3",
+                    bucket.clone(),
+                    Some(format!("arn:aws:s3:::{bucket}")),
+                    Some("s3.amazonaws.com"),
+                )
             }))
         }
     })
@@ -238,25 +324,42 @@ async fn function_destinations(cfg: &SdkConfig, topic_arn: &str) -> Result<Scann
     let mut pages = client.list_functions().into_paginator().send();
     while let Some(page) = pages.next().await {
         let page = page.map_err(|e| from_sdk(e, "lambda:ListFunctions"))?;
-        functions.extend(page.functions().iter().filter_map(|f| Some((f.function_name()?.to_string(), f.function_arn().map(String::from)))));
+        functions.extend(page.functions().iter().filter_map(|f| {
+            Some((
+                f.function_name()?.to_string(),
+                f.function_arn().map(String::from),
+            ))
+        }));
     }
     let count = functions.len();
     let results = map_concurrent(functions, |(name, arn)| {
         let client = client.clone();
         async move {
-            let mut pages = client.list_function_event_invoke_configs().function_name(&name).into_paginator().send();
+            let mut pages = client
+                .list_function_event_invoke_configs()
+                .function_name(&name)
+                .into_paginator()
+                .send();
             let mut hit = false;
             while let Some(page) = pages.next().await {
-                let page = page.map_err(|e| from_sdk(e, "lambda:ListFunctionEventInvokeConfigs"))?;
+                let page =
+                    page.map_err(|e| from_sdk(e, "lambda:ListFunctionEventInvokeConfigs"))?;
                 hit |= page.function_event_invoke_configs().iter().any(|c| {
                     let dest = c.destination_config();
-                    let on_success = dest.and_then(|d| d.on_success()).and_then(|d| d.destination());
-                    let on_failure = dest.and_then(|d| d.on_failure()).and_then(|d| d.destination());
-                    destination_matches(on_success, topic_arn) || destination_matches(on_failure, topic_arn)
+                    let on_success = dest
+                        .and_then(|d| d.on_success())
+                        .and_then(|d| d.destination());
+                    let on_failure = dest
+                        .and_then(|d| d.on_failure())
+                        .and_then(|d| d.destination());
+                    destination_matches(on_success, topic_arn)
+                        || destination_matches(on_failure, topic_arn)
                 });
             }
             // 대상으로 발행하는 주체는 함수의 실행 역할이라 서비스 주체가 없다
-            Ok::<_, AppError>(hit.then(|| configured_one("lambda", name.clone(), arn.clone(), None)))
+            Ok::<_, AppError>(
+                hit.then(|| configured_one("lambda", name.clone(), arn.clone(), None)),
+            )
         }
     })
     .await;
@@ -291,6 +394,45 @@ pub fn policy_allowed(policy_json: &str, own_account: &str) -> Vec<Publisher> {
     }
 }
 
+/// 주제의 발행자 찾기. 현재 계정·리전의 주제가 아니면 AWS를 읽기 전에 거절한다.
+pub async fn find(
+    cfg: &SdkConfig,
+    account: &str,
+    region: &str,
+    topic_arn: &str,
+    deep_scan: bool,
+) -> Result<SnsPublishers, AppError> {
+    if !crate::sns::findings::is_own_topic(topic_arn, account, region) {
+        return Err(AppError::other("현재 계정과 리전의 주제만 읽을 수 있어요"));
+    }
+    let attrs = aws_sdk_sns::Client::new(cfg)
+        .get_topic_attributes()
+        .topic_arn(topic_arn)
+        .send()
+        .await
+        .map_err(|e| from_sdk(e, "sns:GetTopicAttributes"))?;
+    let policy = attrs
+        .attributes()
+        .and_then(|a| a.get("Policy"))
+        .cloned()
+        .unwrap_or_default();
+    let (mut list, mut errors) = configured(cfg, topic_arn).await;
+    let scanned = if deep_scan {
+        let (found, scan, deep_errors) = deep(cfg, topic_arn).await;
+        list.extend(found);
+        errors.extend(deep_errors);
+        Some(scan)
+    } else {
+        None
+    };
+    list.extend(policy_allowed(&policy, account));
+    Ok(SnsPublishers {
+        publishers: merge(list),
+        scanned,
+        errors,
+    })
+}
+
 pub(crate) fn statement_publishers(v: &StatementView) -> Vec<Publisher> {
     let publishes = !v.not_action && v.actions.iter().any(|a| action_matches(a, "sns:Publish"));
     if v.effect != "Allow" || !publishes {
@@ -301,15 +443,30 @@ pub(crate) fn statement_publishers(v: &StatementView) -> Vec<Publisher> {
         .map(|p| {
             let (name, principal) = match p.kind.as_str() {
                 "service" => (p.value.clone(), Some(p.value.clone())),
-                "anyone" if v.scope == Reach::SameAccount => ("이 계정 안의 주체".to_string(), None),
+                "anyone" if v.scope == Reach::SameAccount => {
+                    ("이 계정 안의 주체".to_string(), None)
+                }
                 "anyone" => ("모든 주체(*)".to_string(), None),
                 "account" => {
                     let id = p.account.clone().unwrap_or_else(|| p.value.clone());
-                    (if v.scope == Reach::SameAccount { "이 계정 안의 주체".to_string() } else { format!("계정 {id}") }, None)
+                    (
+                        if v.scope == Reach::SameAccount {
+                            "이 계정 안의 주체".to_string()
+                        } else {
+                            format!("계정 {id}")
+                        },
+                        None,
+                    )
                 }
                 _ => (p.value.clone(), None),
             };
-            Publisher { kind: "policy".into(), name, arn: None, principal, configured: false }
+            Publisher {
+                kind: "policy".into(),
+                name,
+                arn: None,
+                principal,
+                configured: false,
+            }
         })
         .collect()
 }

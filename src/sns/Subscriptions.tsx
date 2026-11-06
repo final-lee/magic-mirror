@@ -3,11 +3,15 @@ import { errorMessage } from "../api/errors";
 import { Highlight } from "../components/Highlight";
 import { ListFind, useListFind } from "../components/ListFind";
 import { fuzzyKeep, tokenize } from "../lib/fuzzy";
+import { changeTone } from "./change";
 import { diagnosisBadge, diagnosisStatus } from "./Diagnosis";
 import { useSnsDiagnosis } from "./queries";
 import type { SnsTopicRef } from "./targets";
 import { dlqName, endpointLabel, STATE_LABEL } from "./format";
 import * as t from "./text";
+import * as ET from "./editText";
+import { SubscribeForm } from "./SubscribeForm";
+import { useSnsChange } from "./useSnsChange";
 import type { SnsSubscription, SnsSubscriptionState, SnsTopic } from "./types";
 
 const PROTOCOL_ICON: Record<string, string> = { sqs: "📥", lambda: "λ", http: "🌐", https: "🌐", email: "✉️", "email-json": "✉️", sms: "💬", application: "📱", firehose: "🔥" };
@@ -45,6 +49,8 @@ export function Subscriptions({ topic, target, active, onOpen }: { topic: SnsTop
   const find = useListFind(box, { enabled: active });
   const [protocols, setProtocols] = useState<ReadonlySet<string>>(new Set());
   const [states, setStates] = useState<ReadonlySet<SnsSubscriptionState>>(new Set());
+  const [form, setForm] = useState(false);
+  const { start, dialog } = useSnsChange(target);
   const all = topic.subscriptions;
   const rows = useMemo<Row[]>(() => all.map((sub) => ({ sub, label: endpointLabel(sub, topic), filter: sub.summary, dlq: dlqName(sub) })), [all, topic]);
   const listed = useMemo(() => {
@@ -70,6 +76,11 @@ export function Subscriptions({ topic, target, active, onOpen }: { topic: SnsTop
             </button>
           ))}
         </div>
+        <span className="sns-top-end">
+          <button type="button" className={`btn small ${changeTone({ kind: "subscribe" })}`} onClick={() => setForm(true)}>
+            {ET.SUBSCRIBE_OPEN}
+          </button>
+        </span>
       </div>
       <ListFind find={find} count={listed.length} />
       {listed.length === 0 ? (
@@ -85,6 +96,7 @@ export function Subscriptions({ topic, target, active, onOpen }: { topic: SnsTop
                   </th>
                 ))}
                 <th scope="col" className="nosort">진단</th>
+                <th scope="col" className="nosort">조치</th>
               </tr>
             </thead>
             <tbody>
@@ -101,6 +113,7 @@ export function Subscriptions({ topic, target, active, onOpen }: { topic: SnsTop
                   </td>
                   <td className="sns-nowrap">
                     <span className={`sns-state ${sub.state}`}>{STATE_LABEL[sub.state]}</span>
+                    {sub.attributes.ReplayStatus && <span className="iam-chip" role="status">다시 보내기: {sub.attributes.ReplayStatus}{["In progress", "Pending"].includes(sub.attributes.ReplayStatus) && " · 10초마다 확인"}</span>}
                     {sub.error && (
                       <span className="sns-warn" role="img" aria-label={t.ROW_ERROR} title={`${t.ROW_ERROR}: ${errorMessage(sub.error)}`}>
                         !
@@ -108,20 +121,36 @@ export function Subscriptions({ topic, target, active, onOpen }: { topic: SnsTop
                     )}
                   </td>
                   <td className={filter ? "mono" : "dim"}>{filter ? <Highlight text={filter} tokens={tokens} /> : t.FILTER_NONE}</td>
-                  <td className={sub.raw ? undefined : "dim"}>{sub.raw ? t.RAW_ON : t.RAW_OFF}</td>
+                  <td className={`sns-nowrap${sub.raw ? "" : " dim"}`}>{sub.raw ? t.RAW_ON : t.RAW_OFF}</td>
                   <td className={dlq ? "mono" : "dim"}>{dlq ? <Highlight text={dlq} tokens={tokens} /> : t.DLQ_NONE}</td>
-                  <td>{(() => {
+                  <td className="sns-nowrap">{(() => {
                     const item = diagnosis.data?.subscriptions.find((d) => d.subscription === sub.key);
                     if (!item) return <span className="dim" title={diagnosis.isError ? "진단을 읽지 못했어요" : "진단을 읽고 있어요"}>–</span>;
                     const [mark, label] = diagnosisBadge(item.checks);
                     return <span className={`tailscale-check-${diagnosisStatus(item.checks)}`} title={item.verdict}>{mark} {label}</span>;
                   })()}</td>
+                  <td className="sns-nowrap">
+                    <button
+                      type="button"
+                      className={`btn small ${changeTone({ kind: "unsubscribe" })}`}
+                      disabled={sub.arn === null}
+                      title={sub.arn === null ? ET.UNSUBSCRIBE_WHY_PENDING : undefined}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (sub.arn !== null) start({ kind: "unsubscribe", subscriptionArn: sub.arn });
+                      }}
+                    >
+                      {ET.UNSUBSCRIBE_OPEN}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+      {form && <SubscribeForm target={target} topic={topic} onClose={() => setForm(false)} onPreview={(request) => { setForm(false); start(request); }} />}
+      {dialog}
     </section>
   );
 }

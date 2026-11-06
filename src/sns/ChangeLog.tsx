@@ -9,9 +9,12 @@ import type { SnsChangeRecord } from "./types";
 
 /** 되돌릴 수 없는 이유. 되돌릴 수 있으면 null(그 밖의 거절은 되돌리기 미리보기가 알려 준다) */
 export function undoBlockReason(record: SnsChangeRecord): string | null {
+  if (record.undoBlocked) return record.undoBlocked;
   if (record.undone) return t.UNDO_WHY_DONE;
   if (record.undoOf !== null) return t.UNDO_WHY_IS_UNDO;
   if (record.calls.length === 0) return t.UNDO_WHY_NO_CALLS;
+  if (record.request.kind === "replay") return "다시 보낸 메시지는 되돌릴 수 없어요";
+  if (record.request.kind === "publish") return t.UNDO_WHY_PUBLISH;
   return null;
 }
 
@@ -34,7 +37,7 @@ export function ChangeLog({ target }: { target: SnsTopicRef }) {
     <section className="center sns-screen iam-log" aria-label={t.LOG_LABEL}>
       {q.isError && <ErrorState compact error={q.error} profile={target.profile} onRetry={reread} />}
       <div className="sns-log-head">
-        <button className="btn small tone-refresh" disabled={q.isFetching} onClick={reread}>
+        <button className="btn small tone-refresh" disabled={q.isFetching} title={q.isFetching ? "읽고 있어요" : undefined} onClick={reread}>
           {q.isFetching ? "읽는 중…" : "다시 읽기"}
         </button>
       </div>
@@ -58,7 +61,10 @@ export function ChangeLog({ target }: { target: SnsTopicRef }) {
                 return (
                   <tr key={r.id}>
                     <td className="sns-nowrap">{formatDateTime(r.at)}</td>
-                    <td className="cl-sum">{t.requestSummary(r.request)}</td>
+                    <td className="cl-sum">
+                      {t.requestSummary(r.request)}
+                      {t.recordDetail(r) && <div className="dim mono sns-log-why">{t.recordDetail(r)}</div>}
+                    </td>
                     <td>
                       <ul className="sns-log-calls" aria-label={t.LOG_COLS.calls}>
                         {r.calls.map((c, i) => (
@@ -71,6 +77,7 @@ export function ChangeLog({ target }: { target: SnsTopicRef }) {
                     <td className="cl-state">
                       {r.undone && <span className="iam-chip">{t.LOG_UNDONE}</span>}
                       {r.undoOf !== null && <span className="iam-chip">{t.LOG_IS_UNDO}</span>}
+                      {t.needsReconfirm(r) && <span className="iam-chip">{t.LOG_RECONFIRM}</span>}
                     </td>
                     <td className="cl-act">
                       <button className="btn small tone-caution" disabled={why !== null} title={why ?? undefined} aria-description={why ?? undefined} onClick={() => setUndoing({ id: r.id, nonce: ++nonce.current })}>

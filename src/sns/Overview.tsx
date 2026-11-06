@@ -1,6 +1,9 @@
 import type { ReactNode } from "react";
 import type { SnsTopic } from "./types";
 import * as t from "./text";
+import { ArchiveEditor } from "./ReplayControls";
+import type { SnsTopicRef } from "./targets";
+import { LoggingEdit, TopicDeliveryEdit } from "./OverviewEdits";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -20,7 +23,7 @@ const Lines = ({ lines }: { lines: string[] }) => (
 );
 
 /** 개요: 주제 속성을 풀어 쓴 문장. 암호화, FIFO, 아카이브, 서명·추적, 배달 상태 로깅, HTTP 배달 정책, 데이터 보호 정책, 태그 */
-export function Overview({ topic, onShowRaw }: { topic: SnsTopic; onShowRaw: () => void }) {
+export function Overview({ topic, onShowRaw, target }: { topic: SnsTopic; onShowRaw: () => void; target?: SnsTopicRef }) {
   const o = topic.overview;
   const tags = Object.entries(topic.tags);
   return (
@@ -46,6 +49,7 @@ export function Overview({ topic, onShowRaw }: { topic: SnsTopic; onShowRaw: () 
           </Section>
           <Section title={t.SECTION_ARCHIVE}>
             <Lines lines={t.archiveSentences(topic)} />
+            {target && <ArchiveEditor topic={topic} target={target} />}
           </Section>
         </>
       )}
@@ -60,7 +64,7 @@ export function Overview({ topic, onShowRaw }: { topic: SnsTopic; onShowRaw: () 
             const s = t.loggingSentence(l);
             return (
               <li key={l.protocol}>
-                <b>{s.protocol}</b>: <span className={s.on ? undefined : "dim"}>{s.text}</span>
+                <b>{s.protocol}</b>: <span className={s.on ? undefined : "dim"}>{s.text}</span> {target && <LoggingEdit target={target} logging={l} />}
               </li>
             );
           })}
@@ -92,6 +96,7 @@ export function Overview({ topic, onShowRaw }: { topic: SnsTopic; onShowRaw: () 
             </tbody>
           </table>
         )}
+        {target && <TopicDeliveryEdit target={target} topic={topic} />}
       </Section>
 
       <Section title={t.SECTION_DATA_PROTECTION}>

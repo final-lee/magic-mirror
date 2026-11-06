@@ -5,6 +5,7 @@ import { renderWithClient } from "../test/utils";
 import { snsApi } from "./api";
 import { samplePolicy, signatureFinding } from "./accessFixtures";
 import { TOPIC_ARN, REGION, snsTarget } from "./fixtures";
+import { snsKeys } from "./queries";
 import { Policy } from "./Policy";
 
 vi.mock("./api", () => ({ snsApi: { topicPolicy: vi.fn(), checkPublicAccess: vi.fn() } }));
@@ -105,6 +106,21 @@ describe("paid public access check", () => {
     expect(await screen.findByText("통과: 공개 접근이 없어요")).toBeInTheDocument();
     expect(m.checkPublicAccess).toHaveBeenCalledTimes(1);
     expect(m.checkPublicAccess).toHaveBeenCalledWith("personal", REGION, TOPIC_ARN);
+  });
+
+  test("정책이 바뀌면 유료 검사 결과와 그 점검을 버리고 다시 검사하지 않아요", async () => {
+    m.topicPolicy.mockResolvedValue(samplePolicy({ findings: [signatureFinding] }));
+    m.checkPublicAccess.mockResolvedValue({
+      result: "fail", message: null, reasons: [],
+      finding: { check: "publicPolicy", level: "high", topicArn: TOPIC_ARN, topicName: "orders", summary: "유료 검사 발견", detail: null, items: [] },
+    });
+    const { qc } = renderWithClient(<Policy target={snsTarget} />);
+    fireEvent.click(await screen.findByRole("button", { name: /공개 접근 검사 실행/ }));
+    expect(await screen.findByText("유료 검사 발견")).toBeInTheDocument();
+    qc.setQueryData(snsKeys.policy("personal", REGION, TOPIC_ARN), samplePolicy({ policy: '{"changed":true}', findings: [signatureFinding] }));
+    await waitFor(() => expect(screen.queryByText("유료 검사 발견")).toBeNull());
+    expect(screen.queryByText("실패: 공개 접근이 있어요")).toBeNull();
+    expect(m.checkPublicAccess).toHaveBeenCalledTimes(1);
   });
 
   test("a FAIL adds the public-policy finding to a topic that looked fine locally", async () => {

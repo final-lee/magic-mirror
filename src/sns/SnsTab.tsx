@@ -23,6 +23,10 @@ import type { SnsTopic } from "./types";
 import type { IamRoute } from "../iam/route";
 import { Policy } from "./Policy";
 import { ChangeLog } from "./ChangeLog";
+import { Peek } from "./Peek";
+import * as ET from "./editText";
+import { PublishForm } from "./PublishForm";
+import { useSnsChange } from "./useSnsChange";
 
 interface Props {
   target: SnsTopicRef;
@@ -49,6 +53,8 @@ export function SnsTab({ target, active, open, onOpenResource, onOpenIam }: Prop
   const root = useRef<HTMLDivElement>(null);
   useHistoryKeys(root, active, back, forward);
   const [showRaw, setShowRaw] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const { start: startChange, dialog: changeDialog } = useSnsChange(target);
 
   // 탭을 열면서 받은 요청(또는 이미 열려 있는 탭에 새로 온 요청)으로 이동한다
   const seen = useRef<number | null>(null);
@@ -63,11 +69,11 @@ export function SnsTab({ target, active, open, onOpenResource, onOpenIam }: Prop
   const renderView = (topic: SnsTopic): ReactNode => {
     switch (route.view) {
       case "overview":
-        return <Overview topic={topic} onShowRaw={() => setShowRaw(true)} />;
+        return <Overview topic={topic} target={target} onShowRaw={() => setShowRaw(true)} />;
       case "subscriptions":
         return <Subscriptions topic={topic} target={target} active={active} onOpen={(key) => navigate(snsSubscriptionRoute(key))} />;
       case "subscription":
-        return <SubscriptionDetail topic={topic} subscriptionKey={route.subscription ?? ""} onBack={() => navigate({ view: "subscriptions" })} onOpenResource={onOpenResource} />;
+        return <SubscriptionDetail key={route.subscription ?? ""} topic={topic} snsTarget={target} subscriptionKey={route.subscription ?? ""} onBack={() => navigate({ view: "subscriptions" })} onOpenResource={onOpenResource} />;
       case "flow":
         return <Flow topic={topic} target={target} onOpen={(key) => navigate(snsSubscriptionRoute(key))} />;
       case "diagnosis":
@@ -76,6 +82,8 @@ export function SnsTab({ target, active, open, onOpenResource, onOpenIam }: Prop
         return <FilterTester topic={topic} tabId={snsTabId(target)} />;
       case "policy":
         return <Policy target={target} onOpenIam={onOpenIam} />;
+      case "peek":
+        return <Peek target={target} focusQueue={route.queue} />;
       case "changes":
         return <ChangeLog target={target} />;
       case "metrics":
@@ -133,8 +141,11 @@ export function SnsTab({ target, active, open, onOpenResource, onOpenIam }: Prop
         <b className="sns-ident-name">{topic?.name ?? target.topicName}</b>
         {topic && <span className="dim">{topicHeadline(topic)}</span>}
         <span className="sns-top-end">
-          <button className="btn small tone-refresh" onClick={reread} disabled={q.isFetching}>
+          <button className="btn small tone-refresh" onClick={reread} disabled={q.isFetching} title={q.isFetching ? "읽고 있어요" : undefined}>
             {q.isFetching ? t.READING : t.REREAD}
+          </button>
+          <button className="btn small tone-primary" disabled={!topic} title={topic ? undefined : t.LOADING} onClick={() => setPublishing(true)}>
+            {ET.PUBLISH_OPEN}
           </button>
         </span>
       </div>
@@ -146,6 +157,8 @@ export function SnsTab({ target, active, open, onOpenResource, onOpenIam }: Prop
       )}
       <div className="sns-main">{content}</div>
       {showRaw && topic && <RawModal title={topic.name} text={rawText(topic)} onClose={() => setShowRaw(false)} />}
+      {publishing && topic && <PublishForm topic={topic} onClose={() => setPublishing(false)} onPreview={(request) => { setPublishing(false); startChange(request); }} />}
+      {changeDialog}
     </div>
   );
 }

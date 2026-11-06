@@ -205,10 +205,30 @@ export interface SnsDeepScan { buckets: number; functions: number }
 export interface SnsPublishers { publishers: SnsPublisher[]; scanned: SnsDeepScan | null; errors: AppError[] }
 
 // 변경 틀(S5). 백엔드 src-tauri/src/sns/change*.rs가 camelCase로 보내는 모양 그대로다.
+export type SnsFilterScope = "MessageAttributes" | "MessageBody";
+/** 구독 만들기에서 고를 수 있는 프로토콜(SMS·모바일 푸시는 만들지 않는다) */
+export type SnsSubscribeProtocol = "sqs" | "lambda" | "https" | "http" | "email" | "email-json";
+/** 배달 상태 로깅의 프로토콜 이름(주제 속성 접두사). HTTP는 http·https 구독 모두 */
+export type SnsLoggingProtocol = "Lambda" | "SQS" | "HTTP" | "Application" | "Firehose";
+export type SnsPublishAttributeType = "String" | "String.Array" | "Number";
+export interface SnsPublishAttribute { name: string; dataType: SnsPublishAttributeType; value: string }
+/** 배달 상태 로깅에 고를 수 있는 기존 IAM 역할(SNS를 신뢰하는 역할) */
+export interface SnsRole { name: string; arn: string }
 export type SnsChangeRequest =
   | { kind: "queuePolicy"; topicArn: string; queueUrl: string; queueArn: string }
   | { kind: "lambdaPermission"; topicArn: string; functionArn: string }
   | { kind: "addDlq"; subscriptionArn: string; dlqArn: string }
+  | { kind: "replay"; subscriptionArn: string; start: string; end?: string | null }
+  | { kind: "archivePolicy"; topicArn: string; retentionDays: number | null }
+  | { kind: "subscribe"; topicArn: string; protocol: SnsSubscribeProtocol; endpoint: string; filterPolicy: string | null; filterPolicyScope: SnsFilterScope | null; rawMessageDelivery: boolean; dlqArn: string | null }
+  | { kind: "unsubscribe"; subscriptionArn: string }
+  | { kind: "filterPolicy"; subscriptionArn: string; filterPolicy: string | null; scope: SnsFilterScope }
+  | { kind: "rawDelivery"; subscriptionArn: string; enabled: boolean }
+  | { kind: "subscriptionDeliveryPolicy"; subscriptionArn: string; deliveryPolicy: string | null }
+  | { kind: "topicDeliveryPolicy"; topicArn: string; deliveryPolicy: string | null }
+  | { kind: "topicPolicy"; topicArn: string; policy: string }
+  | { kind: "deliveryLogging"; topicArn: string; protocol: SnsLoggingProtocol; successRoleArn: string | null; failureRoleArn: string | null; sampleRate: number }
+  | { kind: "publish"; topicArn: string; message: string; subject: string | null; messageStructureJson: boolean; attributes: SnsPublishAttribute[]; messageGroupId: string | null; deduplicationId: string | null }
   | { kind: "undo"; id: string };
 /** 보낼 AWS 호출 하나: API 이름, 대상(큐 URL·구독 ARN·함수 ARN), 본문 */
 export interface SnsCall { api: string; target: string; body: unknown }
@@ -229,7 +249,8 @@ export interface SnsPlan {
   /** 되돌리기 계획이면 되돌리는 기록의 id */
   undoOf: string | null;
 }
-export interface SnsApplyResult { callsRun: SnsCall[]; error: string | null; recordId: string | null }
+/** `outputs`: 호출마다의 결과값(`callsRun`과 같은 순서). 구독 만들기는 `{ subscriptionArn }`, 시험 발행은 `{ messageId, sequenceNumber }`, 그 밖에는 null */
+export interface SnsApplyResult { callsRun: SnsCall[]; outputs?: unknown[]; error: string | null; recordId: string | null }
 export interface SnsChangeRecord {
   id: string;
   at: string;
@@ -242,4 +263,6 @@ export interface SnsChangeRecord {
   after: unknown;
   undoOf: string | null;
   undone: boolean;
+  /** 개인정보 보호로 되돌릴 값을 저장하지 못한 이유 */
+  undoBlocked: string | null;
 }

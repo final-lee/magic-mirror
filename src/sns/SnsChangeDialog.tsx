@@ -1,10 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { errorMessage, isAppError } from "../api/errors";
 import { ErrorState } from "../components/ErrorState";
 import { ConfirmField, PreviewAlerts, WarningList, useSheetFocus } from "../iam/previewParts";
 import { snsApi } from "./api";
-import { classifyDiff, formatSnsValue, isStalePlan } from "./change";
+import { changeTone, classifyDiff, formatSnsValue, isStalePlan, outputLines } from "./change";
 import * as t from "./changeText";
 import { invalidateAfterChange } from "./queries";
 import type { SnsApplyResult, SnsCall, SnsChangeRequest, SnsPlan } from "./types";
@@ -20,12 +20,13 @@ import type { SnsApplyResult, SnsCall, SnsChangeRequest, SnsPlan } from "./types
  *   다른 요청이 필요하면 `key`를 바꿔서 새로 여세요: 요청은 열릴 때 한 번만 읽고, [미리보기 다시 받기]는 같은 요청으로 다시 받는다.
  * - `onClose`: 창을 닫는다. 취소와 결과 화면의 [닫기]가 부른다(적용이 끝나도 저절로 닫지 않는다: 결과를 보여 줘야 해서).
  * - `onApplied?`: 적용 호출이 끝났을 때(일부만 적용하고 실패한 경우 포함) 결과와 함께 한 번 부른다.
+ * - `renderExtra?`: 계획 아래(바뀌는 값·진단 변화·경고 다음)에 더 그릴 것. 필터 변경의 최근 표본 판정 전후, 정책 저장의 정책 검사 같은 변경별 정보를 이 틀에 섞지 않고 호출한 쪽이 넘긴다. 계획을 다시 받으면 다시 부른다.
  *
  * 동작
  * - 계획의 `confirm`이 있으면 그 글을 정확히 입력하기 전에는 [적용]이 꺼져 있다.
  * - 적용이 `stalePlan`으로 거절되면(미리보기 뒤에 상태가 바뀜) 알림을 띄우고 같은 요청으로 미리보기를 다시 받는다. 확인 문구도 다시 입력해야 한다.
  * - 적용을 마치면 이 주제의 스냅샷·진단·정책·변경 기록 쿼리를 무효화하고, 창은 결과(실행한 호출과 오류)로 바뀐다.
- * - [적용]의 색: 보내는 일이라 파랑(실행, `tone-primary`). 되돌리기(`plan.undoOf`가 있거나 `request.kind === "undo"`)는 주황(`tone-caution`). [취소]는 투명.
+ * - [적용]의 색은 변경 작업의 색을 따른다. [취소]는 투명.
  */
 export interface SnsChangeDialogProps {
   profile: string;
@@ -33,11 +34,12 @@ export interface SnsChangeDialogProps {
   request: SnsChangeRequest;
   onClose: () => void;
   onApplied?: (result: SnsApplyResult) => void;
+  renderExtra?: (plan: SnsPlan) => ReactNode;
 }
 
 type Phase = "loading" | "ready" | "applying" | "done";
 
-export function SnsChangeDialog({ profile, region, request, onClose, onApplied }: SnsChangeDialogProps) {
+export function SnsChangeDialog({ profile, region, request, onClose, onApplied, renderExtra }: SnsChangeDialogProps) {
   const qc = useQueryClient();
   const [phase, setPhase] = useState<Phase>("loading");
   const [plan, setPlan] = useState<SnsPlan | null>(null);
@@ -152,6 +154,7 @@ export function SnsChangeDialog({ profile, region, request, onClose, onApplied }
             </>
           )}
           {plan && <PlanBody plan={plan} />}
+          {plan && phase !== "done" && renderExtra?.(plan)}
           {plan?.confirm && <ConfirmField required={plan.confirm} typed={typed} onTyped={setTyped} locked={phase === "applying"} />}
         </div>
         {applyError !== null &&
@@ -162,16 +165,16 @@ export function SnsChangeDialog({ profile, region, request, onClose, onApplied }
           ))}
         <div className="foot">
           {gateHint && <span className="cp-hint">{gateHint}</span>}
-          <button ref={cancelRef} className="btn plain tone-ghost" disabled={phase === "applying"} onClick={onClose}>
+          <button ref={cancelRef} className="btn plain tone-ghost" disabled={phase === "applying"} title={phase === "applying" ? "적용 중에는 취소할 수 없어요" : undefined} onClick={onClose}>
             {t.CANCEL}
           </button>
           {plan && (
-            <button ref={retryRef} className="btn plain tone-refresh" disabled={phase !== "ready"} onClick={() => void load()}>
+            <button ref={retryRef} className="btn plain tone-refresh" disabled={phase !== "ready"} title={phase !== "ready" ? "작업이 끝난 뒤 다시 받을 수 있어요" : undefined} onClick={() => void load()}>
               {t.REPLAN}
             </button>
           )}
           <button
-            className={`btn plain ${undo ? "tone-caution" : "tone-primary"}`}
+            className={`btn plain ${changeTone(request, plan)}`}
             disabled={!canApply}
             title={canApply ? undefined : (disabledWhy ?? undefined)}
             aria-description={canApply ? undefined : (disabledWhy ?? undefined)}
@@ -234,6 +237,20 @@ function PlanBody({ plan }: { plan: SnsPlan }) {
   );
 }
 
+const JSON_POLICY_FIELDS: Record<string, true> = { Policy: true, FilterPolicy: true, RedrivePolicy: true, DeliveryPolicy: true, ReplayPolicy: true, ArchivePolicy: true };
+
+/** 전송 값은 그대로 두고 정책 JSON만 본문 보기에서 펼친다. */
+function formatCallBody(body: unknown): string {
+  return JSON.stringify(body, (key, value: unknown) => {
+    if (!Object.prototype.hasOwnProperty.call(JSON_POLICY_FIELDS, key) || typeof value !== "string") return value;
+    try {
+      return JSON.parse(value) as unknown;
+    } catch {
+      return value;
+    }
+  }, 2) ?? "null";
+}
+
 /** 호출 목록: API 이름, 대상, 본문(보기 좋은 JSON) */
 function CallBlocks({ calls, label }: { calls: SnsCall[]; label: string }) {
   return (
@@ -247,7 +264,7 @@ function CallBlocks({ calls, label }: { calls: SnsCall[]; label: string }) {
           </div>
           <div className="cp-param">
             <span className="dim">{t.CALL_BODY}</span>
-            <pre className="cp-val mono sns-body">{JSON.stringify(c.body, null, 2) ?? "null"}</pre>
+            <pre className="cp-val mono sns-body">{formatCallBody(c.body)}</pre>
           </div>
         </li>
       ))}
@@ -294,6 +311,15 @@ function ResultView({ result, undo }: { result: SnsApplyResult; undo: boolean })
       )}
       {result.error !== null && ran > 0 && result.recordId !== null && <p className="cp-note">{t.RESULT_PARTIAL_NOTE}</p>}
       {result.recordId !== null && <p className="dim">{t.RESULT_RECORDED}</p>}
+      {outputLines(result).length > 0 && (
+        <ul className="sns-outputs" aria-label={t.RESULT_OUTPUTS}>
+          {outputLines(result).map(([label, value]) => (
+            <li key={label + value}>
+              <span className="dim">{label}</span> <span className="mono">{value}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

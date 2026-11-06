@@ -1,5 +1,5 @@
 import { invoke } from "../api/invoke";
-import type { FilterInput, FilterResult, FilterSample, SnsAccountOverview, SnsApplyResult, SnsChangeRecord, SnsChangeRequest, SnsDiagnosisReport, SnsMessaging, SnsPlan, SnsPublicAccessReport, SnsPublishers, SnsSubscriptionRow, SnsTopic, SnsTopicPolicy } from "./types";
+import type { FilterInput, FilterResult, FilterSample, SnsAccountOverview, SnsApplyResult, SnsChangeRecord, SnsChangeRequest, SnsDiagnosisReport, SnsMessaging, SnsPlan, SnsPolicyFinding, SnsPublicAccessReport, SnsPublishers, SnsRole, SnsSubscriptionRow, SnsTopic, SnsTopicPolicy } from "./types";
 
 // 명령 이름과 인자 이름은 계약과 같아야 한다(Tauri가 camelCase 인자를 snake_case로 바꿔 준다).
 // 모두 최상위 인자 `profile`을 받는다: invoke가 SSO 만료를 알릴 때 이 값을 읽는다(src/api/invoke.ts). 쓰는 명령(plan 다음의 apply)은 미리보기를 받은 계획만 받는다.
@@ -29,4 +29,10 @@ export const snsApi = {
   changes: (profile: string) => invoke<SnsChangeRecord[]>("sns_changes", { profile }),
   /** 기록 하나를 되돌리는 계획 */
   undoPlan: (profile: string, region: string, id: string) => invoke<SnsPlan>("sns_undo_plan", { profile, region, id }),
+  /** 정책 저장 미리보기: 저장하기 전 문서의 무료 ValidatePolicy 지적 */
+  validatePolicy: (profile: string, region: string, document: string) => invoke<SnsPolicyFinding[]>("sns_validate_policy", { profile, region, document }),
+  /** 정책 저장 미리보기의 유료(호출당 $0.002) 공개 접근 검사. 버튼을 눌렀을 때만 부른다 */
+  checkPolicyDocument: (profile: string, region: string, arn: string, document: string) => invoke<SnsPublicAccessReport>("sns_check_policy_document", { profile, region, arn, document }),
+  /** 배달 상태 로깅에 고를 수 있는 기존 IAM 역할(SNS를 신뢰하는 역할) */
+  loggingRoles: (profile: string, region: string) => invoke<SnsRole[]>("sns_logging_roles", { profile, region }),
 };

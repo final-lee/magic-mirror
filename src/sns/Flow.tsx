@@ -5,25 +5,24 @@ import { layoutDag, type LayoutEdge, type LayoutNode } from "../components/graph
 import { endpointLabel } from "./format";
 import { useSnsDiagnosis, useSnsPublishers } from "./queries";
 import type { SnsTopicRef } from "./targets";
-import type { SnsPublisher, SnsTopic, TopicHourMetrics } from "./types";
+import type { SnsPublisher, SnsTopic } from "./types";
 
 type Node = LayoutNode & { label: string; detail: string; subscription?: string };
 type Edge = LayoutEdge & { label?: string; dashed?: boolean };
 
-export function flowGraph(topic: SnsTopic, publishers: SnsPublisher[], metrics?: TopicHourMetrics) {
+export function flowGraph(topic: SnsTopic, publishers: SnsPublisher[]) {
   const nodes: Node[] = [{ id: "topic", label: topic.name, detail: "SNS 주제", layer: 1, w: 190, h: 44 }];
   const edges: Edge[] = [];
   publishers.forEach((publisher, i) => {
     const id = `publisher:${i}`;
     nodes.push({ id, label: publisher.name, detail: publisher.configured ? publisher.kind : "정책상 발행할 수 있음", layer: 0, w: 190, h: 44 });
-    edges.push({ id: `pub:${i}`, from: id, to: "topic", dashed: !publisher.configured, label: metrics?.published != null ? `발행 ${metrics.published}` : undefined });
+    edges.push({ id: `pub:${i}`, from: id, to: "topic", dashed: !publisher.configured });
   });
   topic.subscriptions.forEach((sub, i) => {
     const sid = `subscription:${i}`, eid = `endpoint:${i}`;
     nodes.push({ id: sid, label: `구독 ${i + 1}`, detail: sub.state, layer: 2, w: 190, h: 44 });
     nodes.push({ id: eid, label: endpointLabel(sub, topic).name, detail: sub.protocol, subscription: sub.key, layer: 3, w: 190, h: 44 });
-    const traffic = [metrics?.delivered != null ? `배달 ${metrics.delivered}` : "", metrics?.failed != null ? `실패 ${metrics.failed}` : ""].filter(Boolean).join(" · ");
-    edges.push({ id: `sub:${i}`, from: "topic", to: sid, label: traffic || undefined });
+    edges.push({ id: `sub:${i}`, from: "topic", to: sid });
     edges.push({ id: `endpoint-edge:${i}`, from: sid, to: eid, label: [sub.filter || sub.attributes.FilterPolicy ? "필터" : "", sub.raw ? "raw" : ""].filter(Boolean).join(" · ") || undefined });
     if (sub.dlqArn) {
       const did = `dlq:${i}`;
@@ -40,12 +39,14 @@ export function Flow({ topic, target, onOpen }: { topic: SnsTopic; target: SnsTo
   const scan = useSnsPublishers(target, deep);
   const diagnosis = useSnsDiagnosis(target);
   const data = deep ? scan.data ?? base.data : base.data;
-  const graph = flowGraph(topic, data?.publishers ?? [], diagnosis.data?.metrics);
+  const graph = flowGraph(topic, data?.publishers ?? []);
   const edgeOf = new Map(graph.edges.map(e => [e.id, e]));
   const nodeOf = new Map(graph.nodes.map(n => [n.id, n]));
   return <section className="center sns-screen" aria-label="흐름 지도">
     <h2>흐름 지도</h2>
-    <p>실선: 설정상 발행 · 점선: 정책상 발행할 수 있음. 지표는 지난 1시간 주제 전체 합계예요.</p>
+    <p>실선: 설정상 발행 · 점선: 정책상 발행할 수 있음. 지표는 지난 1시간 주제 전체 합계예요.
+      {diagnosis.data?.metrics && ` 발행 ${diagnosis.data.metrics.published ?? "–"} · 배달 ${diagnosis.data.metrics.delivered ?? "–"} · 실패 ${diagnosis.data.metrics.failed ?? "–"}`}
+    </p>
     <button className="btn tone-refresh" disabled={scan.isFetching} onClick={() => { if (deep) void scan.refetch(); else setDeep(true); }}>더 찾기</button>{" "}
     {deep && scan.isFetching && <span role="status">버킷과 함수를 찾는 중이에요…</span>}
     {data?.scanned && <span>버킷 {data.scanned.buckets}개 · 함수 {data.scanned.functions}개 확인</span>}

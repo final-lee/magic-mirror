@@ -78,6 +78,7 @@ describe("header and overview", () => {
     const logging = section("배달 상태 로깅");
     expect(logging.getByText("켜짐 · 성공 로그 표본 25%(역할 sns-feedback) · 실패 로그 전부(역할 sns-failure)")).toBeInTheDocument();
     expect(logging.getAllByText("꺼짐")).toHaveLength(4);
+    expect(logging.getByRole("button", { name: "SQS 배달 상태 로깅 설정…" })).toHaveClass("tone-primary");
     expect(logging.getByText("모바일 푸시")).toBeInTheDocument();
   });
 
@@ -121,6 +122,13 @@ describe("subscriptions", () => {
     await loaded();
     openMenu("구독");
   };
+
+  test("shows replay status and polling indicator", async () => {
+    const topic = sampleTopic();
+    m.topic.mockResolvedValue({ ...topic, subscriptions: [{ ...sqsSubscription, attributes: { ...sqsSubscription.attributes, ReplayStatus: "In progress" } }] });
+    await showTable();
+    expect(within(rows()[0]).getByRole("status")).toHaveTextContent("다시 보내기: In progress · 10초마다 확인");
+  });
 
   test("a table row per subscription: endpoint names, where they live, state, filter summary, raw, DLQ", async () => {
     await showTable();
@@ -309,6 +317,16 @@ describe("subscription detail", () => {
 });
 
 describe("opening on a route", () => {
+  test("다른 구독으로 직접 이동하면 이전 구독의 열린 편집기를 버려요", async () => {
+    const { rerender, qc } = setup({ open: { route: snsSubscriptionRoute(sqsSubscription.key), nonce: 1 } });
+    await screen.findByRole("region", { name: "구독 상세" });
+    fireEvent.click(screen.getByRole("button", { name: "필터 정책 편집" }));
+    expect(screen.getByRole("button", { name: "미리 보기…" })).toBeInTheDocument();
+    rerender(<QueryClientProvider client={qc}><SnsTab target={snsTarget} active open={{ route: snsSubscriptionRoute(lambdaSubscription.key), nonce: 2 }} /></QueryClientProvider>);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "미리 보기…" })).toBeNull());
+    expect(screen.getByRole("button", { name: "필터 정책 편집" })).toBeInTheDocument();
+  });
+
   test("a requested subscription opens right away, and back returns to the overview", async () => {
     setup({ open: { route: snsSubscriptionRoute(sqsSubscription.key), nonce: 1 } });
     await loaded();

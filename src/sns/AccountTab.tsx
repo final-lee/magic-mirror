@@ -39,7 +39,7 @@ export function AccountTab({ profile, region, onOpenTopic }: Props) {
         <b className="sns-ident-name">{t.ACCOUNT_TITLE}</b>
         <span className="dim">{ov ? t.ACCOUNT_HEAD(ov.account, ov.region) : region}</span>
         <span className="sns-top-end">
-          <button className="btn small tone-refresh" onClick={reread} disabled={q.isFetching}>
+          <button className="btn small tone-refresh" onClick={reread} disabled={q.isFetching} title={q.isFetching ? "읽고 있어요" : undefined}>
             {q.isFetching ? t.READING : t.REREAD}
           </button>
         </span>

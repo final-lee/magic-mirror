@@ -9,13 +9,9 @@ export const SQS_QUEUES = "queues";
 
 const isFifoArn = (arn: string) => arn.endsWith(".fifo");
 
-/**
- * 이 구독의 DLQ는 FIFO여야 하는가. SNS는 DLQ의 종류가 구독과 같아야 한다.
- * SQS 구독은 엔드포인트 큐를 따르고(해석하지 못했으면 큐 이름의 `.fifo`), SQS가 아닌 구독(Lambda, HTTP(S) …)은 주제를 따른다.
- */
-export function dlqMustBeFifo(sub: SnsSubscription, topic: SnsTopic): boolean {
-  if (sub.protocol !== "sqs") return topic.fifo;
-  return sub.target?.kind === "sqs" ? sub.target.fifo : isFifoArn(sub.endpoint);
+/** DLQ의 종류는 구독 엔드포인트가 아닌 주제를 따른다. */
+export function dlqMustBeFifo(topic: SnsTopic): boolean {
+  return topic.fifo;
 }
 
 export interface DlqCandidates {
@@ -28,7 +24,7 @@ export interface DlqCandidates {
 
 /** 고를 수 있는 DLQ: 같은 계정·리전, 구독과 같은 종류, 엔드포인트 큐 자신이 아닌 큐 */
 export function dlqCandidates(queues: Resource[], sub: SnsSubscription, topic: SnsTopic): DlqCandidates {
-  const fifo = dlqMustBeFifo(sub, topic);
+  const fifo = dlqMustBeFifo(topic);
   const keep = queues.filter((q) => {
     if (!q.arn) return false;
     const scope = arnScope(q.arn);

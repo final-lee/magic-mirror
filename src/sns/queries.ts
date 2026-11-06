@@ -2,7 +2,7 @@ import { useMutation, useQuery, type QueryClient } from "@tanstack/react-query";
 import type { AppError } from "../api/types";
 import { snsApi } from "./api";
 import type { SnsTopicRef } from "./targets";
-import type { SnsAccountOverview, SnsChangeRecord, SnsDiagnosisReport, SnsMessaging, SnsPublicAccessReport, SnsPublishers, SnsTopic, SnsTopicPolicy } from "./types";
+import type { SnsAccountOverview, SnsChangeRecord, SnsDiagnosisReport, SnsMessaging, SnsPublicAccessReport, SnsPublishers, SnsRole, SnsTopic, SnsTopicPolicy } from "./types";
 
 /**
  * 쿼리 키. 모두 ["sns", 종류, profile, region, ...] 모양이다.
@@ -22,12 +22,18 @@ export const snsKeys = {
   changes: (profile: string) => ["sns", "changes", profile] as const,
 };
 
+export function replayPollInterval(topic: SnsTopic | undefined): number | false {
+  return topic?.subscriptions.some((s) => s.attributes.ReplayStatus === "In progress" || s.attributes.ReplayStatus === "Pending") ? 10_000 : false;
+}
+
 /** 주제 스냅샷. 다른 워크스페이스처럼 저절로 다시 읽지 않고 [다시 읽기]·⌘R이 새로 읽는다. 항목별 읽기 실패는 데이터의 errors에 있다. */
 export function useSnsTopic(ref: Pick<SnsTopicRef, "profile" | "region" | "topicArn">) {
   return useQuery<SnsTopic, AppError>({
     queryKey: snsKeys.topic(ref.profile, ref.region, ref.topicArn),
     queryFn: () => snsApi.topic(ref.profile, ref.region, ref.topicArn),
     staleTime: Infinity,
+    refetchInterval: (query) => replayPollInterval(query.state.data),
+    refetchIntervalInBackground: true,
     retry: false,
   });
 }
@@ -94,7 +100,7 @@ export function useSnsTopicPolicy(ref: Pick<SnsTopicRef, "profile" | "region" | 
 
 /** 유료 공개 접근 검사(호출당 $0.002). 호출은 `mutate`를 부르는 버튼뿐이다 */
 export function useSnsPublicAccessCheck(ref: Pick<SnsTopicRef, "profile" | "region" | "topicArn">) {
-  return useMutation<SnsPublicAccessReport, AppError>({ mutationFn: () => snsApi.checkPublicAccess(ref.profile, ref.region, ref.topicArn) });
+  return useMutation<SnsPublicAccessReport, AppError, string | null>({ mutationFn: () => snsApi.checkPublicAccess(ref.profile, ref.region, ref.topicArn) });
 }
 
 /** 계정 개요. 지표 읽기에 돈이 들어서(GetMetricData) 저절로 다시 읽지 않고 [다시 읽기]·⌘R이 새로 읽는다 */
@@ -145,5 +151,19 @@ export async function invalidateAfterChange(qc: QueryClient, ref: Pick<SnsTopicR
     qc.invalidateQueries({ queryKey: snsKeys.diagnosis(ref.profile, ref.region, ref.topicArn) }),
     qc.invalidateQueries({ queryKey: snsKeys.policy(ref.profile, ref.region, ref.topicArn) }),
     qc.invalidateQueries({ queryKey: snsKeys.changes(ref.profile) }),
+    // 구독을 만들거나 해지하면 엔드포인트(큐·함수) 쪽의 '이 리소스를 구독한 주제'도 달라진다
+    qc.invalidateQueries({ queryKey: snsKeys.subscribedAll(ref.profile) }),
+    qc.invalidateQueries({ queryKey: ["resources", ref.profile, ref.region, "sns", "subscriptions"] }),
+    qc.invalidateQueries({ queryKey: ["sns", "peek", ref.profile, ref.region, ref.topicArn] }),
   ]);
+}
+
+/** 배달 상태 로깅에 고를 수 있는 기존 IAM 역할(SNS를 신뢰하는 역할). 편집 창을 열 때만 읽는다 */
+export function useSnsLoggingRoles(profile: string, region: string) {
+  return useQuery<SnsRole[], AppError>({
+    queryKey: ["sns", "roles", profile, region],
+    queryFn: () => snsApi.loggingRoles(profile, region),
+    staleTime: 60_000,
+    retry: false,
+  });
 }

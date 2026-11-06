@@ -20,6 +20,7 @@ const record = (over: Partial<SnsChangeRecord>): SnsChangeRecord => ({
   after: null,
   undoOf: null,
   undone: false,
+  undoBlocked: null,
   ...over,
 });
 const undoPlan: SnsPlan = { request: { kind: "undo", id: "rec-1" }, topicArn: TOPIC_ARN, calls: [{ api: "sqs:SetQueueAttributes", target: QUEUE_URL, body: {} }], fields: [], impact: [], warnings: [], confirm: null, fingerprint: "u", undoOf: "rec-1" };
@@ -83,6 +84,16 @@ test("records that cannot be undone say why", async () => {
   }
   expect(within(r[0]).getByText("되돌렸어요")).toBeInTheDocument();
   expect(within(r[1]).getByText("되돌리기 기록")).toBeInTheDocument();
+});
+
+test("개인정보 보호로 되돌릴 수 없는 기록은 이유를 표시해요", async () => {
+  const reason = "개인정보가 들어 있어 되돌릴 값을 저장하지 않았어요";
+  m.changes.mockResolvedValue([record({ undoBlocked: reason })]);
+  renderWithClient(<ChangeLog target={snsTarget} />);
+  const button = await screen.findByRole("button", { name: "되돌리기…" });
+  expect(button).toBeDisabled();
+  expect(button).toHaveAttribute("title", reason);
+  expect(screen.getByText(reason)).toBeInTheDocument();
 });
 
 test("undoBlockReason is null for a plain applied record", () => {

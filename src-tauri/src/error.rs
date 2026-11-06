@@ -21,6 +21,9 @@ pub enum AppError {
     LoginRequired { message: String },
     #[error("변경된 상태가 있어 미리보기를 다시 만들어야 해요")]
     StalePlan,
+    /// 엿보기: 시작 직전에 다시 계산한 판정에 경고가 있는데 큐 이름 확인이 없었다. 화면은 `warning`을 보여 주고 이름을 다시 받는다
+    #[error("{message}")]
+    PeekConfirm { warning: String, message: String },
 }
 
 impl AppError {
