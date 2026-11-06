@@ -52,6 +52,8 @@ aws-sdk-iam = "1"
 aws-sdk-route53 = "1"
 aws-sdk-cloudfront = "1"
 aws-sdk-dynamodb = "1"
+aws-sdk-dynamodbstreams = "1"
+aws-sdk-pipes = "1"
 # DynamoDB 탭: 테이블·GSI의 오토스케일링 대상과 정책(읽기 전용)
 aws-sdk-applicationautoscaling = "1"
 aws-sdk-cloudwatchlogs = "1"

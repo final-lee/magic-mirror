@@ -1,0 +1,14 @@
+export const PREVIEW = "변경 미리 보기";
+export const LOADING = "미리 보기를 불러오는 중이에요…";
+export const CALLS = "보낼 요청";
+export const DIFF = "이전 설정과 변경할 설정";
+export const IMPACT = "영향";
+export const WARNINGS = "주의할 점";
+export const CONFIRM = "확인하려면 테이블 이름을 입력해 주세요";
+export const APPLY = "적용";
+export const CANCEL = "취소";
+export const UNDO = "되돌리기…";
+export const EMPTY = "아직 변경 기록이 없어요.";
+export const RELOAD = "다시 읽기";
+export const DONE = "되돌렸어요";
+export const UNAVAILABLE = "되돌릴 수 없어요";

@@ -5,9 +5,17 @@
 // 아이템을 읽고 쓰는 단계(D2·D4)가 쓴다. 그 전까지는 시험만 부른다
 #[allow(dead_code)]
 pub mod attr;
+pub mod change;
+pub mod expr;
+pub mod items;
 pub mod health;
 pub mod metrics;
+pub mod ops;
 pub mod read;
+pub mod connections;
+pub mod stream;
+#[cfg(test)]
+mod connection_tests;
 
 use std::collections::BTreeMap;
 
@@ -159,6 +167,11 @@ pub enum FindingId {
     PitrOff,
     DeletionProtectionOff,
     ReplicaUnhealthy,
+    ReplicationLag,
+    StreamNoConsumer,
+    EsmDisabled,
+    IteratorAge,
+    EsmNoOnFailure,
 }
 
 /// 건강 진단 한 줄. 문구는 백엔드가 만든다

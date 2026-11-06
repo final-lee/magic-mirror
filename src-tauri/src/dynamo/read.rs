@@ -344,7 +344,7 @@ pub async fn read_scaling(cfg: &SdkConfig) -> Result<HashMap<String, Vec<Scaling
 fn diagnose(tables: &mut [DynamoTable], mut scaling: Option<HashMap<String, Vec<ScalingTarget>>>, metrics: Option<&HashMap<String, TableMetrics>>) {
     for t in tables.iter_mut().filter(|t| t.error.is_none()) {
         t.scaling = scaling.as_mut().map(|s| s.remove(&t.name).unwrap_or_default());
-        t.findings = health(&HealthInput { table: t, scaling: t.scaling.as_deref(), metrics: metrics.and_then(|m| m.get(&t.name)) });
+        t.findings = health(&HealthInput { table: t, scaling: t.scaling.as_deref(), metrics: metrics.and_then(|m| m.get(&t.name)), connections: None });
     }
 }
 

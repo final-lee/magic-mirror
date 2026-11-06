@@ -16,6 +16,51 @@ pub struct HealthInput<'a> {
     /// Application Auto Scaling 대상. None이면 읽지 못한 것이다
     pub scaling: Option<&'a [ScalingTarget]>,
     pub metrics: Option<&'a TableMetrics>,
+    pub connections: Option<&'a ConnectionHealth>,
+}
+
+#[derive(Default)]
+pub struct ConnectionHealth {
+    pub stream_enabled: bool,
+    /// None means at least one consumer source could not be read.
+    pub consumer_count: Option<usize>,
+    pub esms: Vec<EsmHealth>,
+    pub replication_latency_ms: Vec<(String, f64)>,
+}
+
+pub struct EsmHealth {
+    pub function: String,
+    pub state: String,
+    pub iterator_age_ms: Option<f64>,
+    pub max_retries: Option<i32>,
+    pub has_failure_destination: bool,
+}
+
+pub fn connection_findings(input: &ConnectionHealth) -> Vec<Finding> {
+    let mut out = Vec::new();
+    for (region, latency) in &input.replication_latency_ms {
+        if *latency > 60_000.0 {
+            out.push(finding(FindingId::ReplicationLag, FindingLevel::Warn, None, format!("{region} 복제 지연이 60초를 넘었어요"), None));
+        }
+    }
+    if input.stream_enabled && input.consumer_count == Some(0) {
+        out.push(finding(FindingId::StreamNoConsumer, FindingLevel::Info, None, "스트림을 읽는 소비자가 없어요".into(), None));
+    }
+    for esm in &input.esms {
+        if esm.state.eq_ignore_ascii_case("disabled") {
+            out.push(finding(FindingId::EsmDisabled, FindingLevel::Warn, None, format!("{} 스트림 매핑이 꺼져 있어요", esm.function), None));
+        }
+        if let Some(age) = esm.iterator_age_ms {
+            let level = if age >= 43_200_000.0 { Some(FindingLevel::Fail) } else if age >= 300_000.0 { Some(FindingLevel::Warn) } else { None };
+            if let Some(level) = level {
+                out.push(finding(FindingId::IteratorAge, level, None, format!("{}의 스트림 처리 지연이 {:.0}초예요", esm.function, age / 1000.0), Some("스트림 레코드는 24시간 보관돼요. 그 전에 처리하지 못하면 레코드를 잃어요".into())));
+            }
+        }
+        if !esm.has_failure_destination && esm.max_retries == Some(-1) {
+            out.push(finding(FindingId::EsmNoOnFailure, FindingLevel::Warn, None, format!("{}에 실패 대상이 없고 재시도 횟수가 무제한이에요", esm.function), Some("처리할 수 없는 레코드가 샤드를 최대 24시간 막을 수 있어요".into())));
+        }
+    }
+    out
 }
 
 fn finding(id: FindingId, level: FindingLevel, index: Option<&str>, summary: String, detail: Option<String>) -> Finding {
@@ -267,6 +312,10 @@ pub fn health(input: &HealthInput<'_>) -> Vec<Finding> {
             format!("글로벌 테이블 복제본 {}이 {} 상태예요", replica.region, replica.status),
             Some("활성이 아닌 복제본은 쓰기를 받아 가지 못할 수 있어요. 복제본 리전의 콘솔에서 원인을 확인해 주세요".into()),
         ));
+    }
+
+    if let Some(connections) = input.connections {
+        out.extend(connection_findings(connections));
     }
 
     // 실패 → 주의 → 정보. 같은 수준은 위에서 만든 규칙 순서를 지킨다

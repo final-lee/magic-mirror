@@ -2692,3 +2692,26 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .ddb-finding.info .ddb-finding-icon { color: var(--dim); }
 .ddb-finding-detail { margin: 0; padding: 0 10px 8px 32px; color: var(--dim); }
 .ddb-findings-empty { margin: 0; }
+
+.ddb-items, .ddb-design { display: flex; flex-direction: column; gap: 10px; }
+.ddb-items-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ddb-items-actions label { display: inline-flex; align-items: center; gap: 5px; }
+.ddb-items textarea { width: 100%; min-height: 70px; }
+.ddb-items-table-wrap { overflow: auto; max-height: 55vh; }
+.ddb-items-table-wrap td { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ddb-items-table-wrap tbody tr { cursor: pointer; }
+.ddb-items-overlay { position: fixed; inset: 0; background: #0009; z-index: 1000; display: flex; justify-content: flex-end; }
+.ddb-items-dialog { width: min(760px, 95vw); height: 100%; overflow: auto; background: var(--panel); padding: 20px; box-shadow: 0 0 20px #0006; }
+.ddb-items-dialog header { display: flex; justify-content: space-between; align-items: center; }
+.ddb-items-dialog pre, .ddb-items pre { overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ddb-items-tree { margin-left: 20px; border-left: 1px solid var(--line); padding-left: 10px; }
+.ddb-design section { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+
+.ddb-ops { display: flex; flex-direction: column; gap: 10px; }
+.ddb-ops h3 { margin: 16px 0 2px; }
+.ddb-ops-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.ddb-ops-row > strong { min-width: 150px; }
+.ddb-ops-row label { display: inline-flex; align-items: center; gap: 6px; }
+.ddb-ops-row input[type="number"] { width: 76px; }
+.ddb-change-log article { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.ddb-change-log time { margin: 0 10px; }

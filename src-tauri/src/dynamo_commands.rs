@@ -14,13 +14,16 @@ use crate::iam::clock::now_secs;
 /// 아이템 쓰기의 되돌리기용 이전 이미지(메모리만). 변경 기록은 `log_path`의 JSON Lines다.
 pub struct DynamoState {
     /// 변경 기록 파일(`dynamo-changes.jsonl`). 키와 바뀐 속성 이름만 쓰고 아이템 값은 쓰지 않는다
+    pub(crate) log_path: PathBuf,
+    pub(crate) change_lock: tokio::sync::Mutex<()>,
     #[allow(dead_code)]
-    log_path: PathBuf,
+    pub(crate) undo_images: std::sync::Mutex<std::collections::HashMap<String, serde_json::Value>>,
+    pub(crate) stream_sessions: crate::dynamo::stream::Sessions,
 }
 
 impl DynamoState {
     pub fn new(log_path: PathBuf) -> DynamoState {
-        DynamoState { log_path }
+        DynamoState { log_path, stream_sessions: Default::default(), undo_images: Default::default(), change_lock: Default::default() }
     }
 }
 

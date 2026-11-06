@@ -95,7 +95,7 @@ export interface Replica {
 export type FindingLevel = "fail" | "warn" | "info";
 
 /** 진단 규칙 id. 단계마다 늘어난다 */
-export type FindingId = "throttled" | "gsiBackpressure" | "indexNotActive" | "underProvisioned" | "overProvisioned" | "noAutoScaling" | "pitrOff" | "deletionProtectionOff" | "replicaUnhealthy";
+export type FindingId = "throttled" | "gsiBackpressure" | "indexNotActive" | "underProvisioned" | "overProvisioned" | "noAutoScaling" | "pitrOff" | "deletionProtectionOff" | "replicaUnhealthy" | "replicationLag" | "streamNoConsumer" | "esmDisabled" | "iteratorAge" | "esmNoOnFailure";
 
 export interface Finding {
   id: FindingId;

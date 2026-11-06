@@ -21,7 +21,7 @@ fn quiet() -> DynamoTable {
 }
 
 fn run(table: &DynamoTable, scaling: Option<&[ScalingTarget]>, metrics: Option<&TableMetrics>) -> Vec<Finding> {
-    health(&HealthInput { table, scaling, metrics })
+    health(&HealthInput { table, scaling, metrics, connections: None })
 }
 
 fn ids(findings: &[Finding]) -> Vec<(FindingId, FindingLevel)> {

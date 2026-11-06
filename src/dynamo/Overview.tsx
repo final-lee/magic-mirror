@@ -6,6 +6,7 @@ import { formatCount } from "../kv/format";
 import { formatBytes } from "../lib/format";
 import { Findings } from "./Findings";
 import { TopKeysCard } from "./TopKeysCard";
+import { useConnections } from "./stream/StreamTab";
 import * as t from "./text";
 import type { DynamoIndex, DynamoTable, KeyAttr } from "./types";
 
@@ -20,7 +21,7 @@ function projectionLabel(i: DynamoIndex): string {
   return t.PROJECTION_ALL;
 }
 
-function IndexTable({ indexes }: { indexes: DynamoIndex[] }) {
+function IndexTable({ indexes, onIndex }: { indexes: DynamoIndex[]; onIndex?: (index: string) => void }) {
   if (indexes.length === 0) return <p className="dim">{t.NO_INDEXES}</p>;
   return (
     <table className="ddb-table">
@@ -38,7 +39,7 @@ function IndexTable({ indexes }: { indexes: DynamoIndex[] }) {
         {indexes.map((i) => (
           <tr key={`${i.kind}-${i.name}`}>
             <td>
-              <span className="mono">{i.name}</span> <span className="iam-chip">{t.INDEX_KIND[i.kind]}</span>
+              <button className="btn small tone-nav mono" onClick={() => onIndex?.(i.name)}>{i.name}</button> <span className="iam-chip">{t.INDEX_KIND[i.kind]}</span>
             </td>
             <td className="mono">{[i.pk, ...(i.sk ? [i.sk] : [])].map(key).join(" + ")}</td>
             <td>{projectionLabel(i)}</td>
@@ -95,11 +96,14 @@ interface Props {
   profile: string;
   region: string;
   table: DynamoTable;
+  active?: boolean;
+  onIndex?: (index: string) => void;
 }
 
 /** 개요: 키 · 인덱스 · 설정 · 건강 진단 · CloudWatch 지표 · (Contributor Insights가 켜져 있으면) 상위 키 */
-export function Overview({ profile, region, table }: Props) {
+export function Overview({ profile, region, table, onIndex, active = true }: Props) {
   const row = useMemo<Resource>(() => ({ id: table.name, name: table.name, arn: table.arn, values: {}, tags: {}, fields: [], raw: "", consoleUrl: null }), [table.name, table.arn]);
+  const connections = useConnections(profile, region, table.name, active);
   return (
     <div className="ddb-overview">
       <section className="ddb-card" aria-label={t.CARD_KEYS}>
@@ -113,7 +117,7 @@ export function Overview({ profile, region, table }: Props) {
       </section>
       <section className="ddb-card" aria-label={t.CARD_INDEXES}>
         <h4>{t.CARD_INDEXES}</h4>
-        <IndexTable indexes={table.indexes} />
+        <IndexTable indexes={table.indexes} onIndex={onIndex} />
       </section>
       <section className="ddb-card" aria-label={t.CARD_SETTINGS}>
         <h4>{t.CARD_SETTINGS}</h4>
@@ -128,7 +132,7 @@ export function Overview({ profile, region, table }: Props) {
       </section>
       <section className="ddb-card" aria-label={t.CARD_FINDINGS}>
         <h4>{t.CARD_FINDINGS}</h4>
-        <Findings findings={table.findings} />
+        <Findings findings={[...table.findings, ...(connections.data?.findings ?? [])].sort((a, b) => ({ fail: 0, warn: 1, info: 2 }[a.level] - { fail: 0, warn: 1, info: 2 }[b.level]))} />
       </section>
       <ResourceMetrics key={`${profile}|${region}|${table.name}`} profile={profile} region={region} service={DYNAMO_SERVICE} typeId="tables" row={row} />
       {table.contributorInsights === "ENABLED" && <TopKeysCard profile={profile} region={region} table={table} />}

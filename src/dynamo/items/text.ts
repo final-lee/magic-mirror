@@ -1,0 +1,10 @@
+export const SCAN_WARNING = "Scan은 테이블 전체를 1 MB씩 읽어요. 필터는 읽은 뒤에 거르므로 비용을 줄이지 않아요.";
+export const PARTIQL_WARNING = "WHERE에 키 조건이 없으면 Scan과 같아요.";
+export const FIRST_SCAN = "Scan 첫 페이지";
+export const NEXT_PAGE = "다음 페이지";
+export const SEND = "읽기";
+export const REQUEST = "보낸 요청";
+export const EXPORT = "내보내기…";
+export const CLOSE = "닫기";
+export const COPY = "복사";
+export const NO_ITEMS = "읽어 온 아이템이 없어요.";

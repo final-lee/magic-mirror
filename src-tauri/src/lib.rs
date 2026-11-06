@@ -16,6 +16,10 @@ mod cost;
 mod cost_commands;
 mod dynamo;
 mod dynamo_commands;
+mod dynamo_items_commands;
+mod dynamo_stream_commands;
+mod dynamo_change_commands;
+mod dynamo_ops_commands;
 mod error;
 mod explorer;
 mod explorer_commands;
@@ -237,6 +241,20 @@ pub fn run() {
             dynamo_commands::dynamo_overview,
             dynamo_commands::dynamo_table,
             dynamo_commands::dynamo_top_keys,
+            dynamo_items_commands::dynamo_read,
+            dynamo_items_commands::dynamo_export,
+            dynamo_items_commands::dynamo_export_path,
+            dynamo_stream_commands::dynamo_connections,
+            dynamo_stream_commands::dynamo_stream_start,
+            dynamo_stream_commands::dynamo_stream_poll,
+            dynamo_stream_commands::dynamo_stream_stop,
+            dynamo_change_commands::dynamo_preview,
+            dynamo_change_commands::dynamo_apply,
+            dynamo_change_commands::dynamo_changes,
+            dynamo_change_commands::dynamo_undo_preview,
+            dynamo_ops_commands::dynamo_backups,
+            dynamo_ops_commands::dynamo_exports,
+            dynamo_ops_commands::dynamo_buckets,
             k8s_access_commands::k8s_access,
             k8s_access_commands::k8s_access_matrix,
             k8s_access_commands::k8s_access_cell,

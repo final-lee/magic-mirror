@@ -2,6 +2,12 @@ import { useEffect, useState, type ReactNode } from "react";
 import { desktop } from "../api/desktop";
 import { ErrorState } from "../components/ErrorState";
 import { Overview } from "./Overview";
+import { Items } from "./items/Items";
+import { openQuery, tableStoreKey } from "./items/store";
+import { Design } from "./design/DesignTab";
+import { StreamTab } from "./stream/StreamTab";
+import { Operations } from "./ops/Operations";
+import { ChangeLog } from "./change/ChangeLog";
 import { useDynamoTablePoll } from "./queries";
 import * as t from "./text";
 import type { DynamoTable } from "./types";
@@ -15,6 +21,8 @@ export interface DetailContext {
   table: DynamoTable;
   /** 이 탭이 보이는 탭인가(DynamoDB 탭이 보이고 이 상세 탭을 열어 둔 때) */
   active: boolean;
+  openItems: () => void;
+  onOpenLambda?: (functionArn: string) => void;
 }
 
 /**
@@ -22,7 +30,12 @@ export interface DetailContext {
  * 탭 이름은 `text.DETAIL_TAB_LABELS`에 이미 있다.
  */
 const DETAIL_TABS: { id: DetailTab; render: (ctx: DetailContext) => ReactNode }[] = [
-  { id: "overview", render: ({ profile, region, table }) => <Overview profile={profile} region={region} table={table} /> },
+  { id: "overview", render: ({ profile, region, table, openItems, active }) => <Overview profile={profile} region={region} table={table} active={active} onIndex={(index) => { openQuery(tableStoreKey(profile, region, table.name), { index }); openItems(); }} /> },
+  { id: "items", render: (ctx) => <Items {...ctx} /> },
+  { id: "design", render: (ctx) => <Design {...ctx} /> },
+  { id: "stream", render: (ctx) => <StreamTab {...ctx} /> },
+  { id: "ops", render: (ctx) => <Operations key={`${ctx.profile}:${ctx.region}:${ctx.table.name}`} {...ctx} /> },
+  { id: "log", render: (ctx) => <ChangeLog {...ctx} /> },
 ];
 
 interface Props {
@@ -73,7 +86,7 @@ export function TableDetail({ profile, region, active, table }: Props) {
       </div>
       {poll.isError && <ErrorState compact error={poll.error} profile={profile} onRetry={() => void poll.refetch()} />}
       <div className="ddb-detail-body">
-        {table.error ? <div className="empty ddb-read-error">{t.tableReadFailed(table.error)}</div> : current.render({ profile, region, table, active })}
+        {table.error ? <div className="empty ddb-read-error">{t.tableReadFailed(table.error)}</div> : current.render({ profile, region, table, active, openItems: () => setTab("items") })}
       </div>
     </section>
   );

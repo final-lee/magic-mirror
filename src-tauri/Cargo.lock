@@ -642,6 +642,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-dynamodbstreams"
+version = "1.120.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8288abfaafe8e4909682aebd7c17cd5e3d1ab7e0022b4c6c2137d0ca729f8068"
+dependencies = [
+ "arc-swap",
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-schema",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 1.5.0",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-ec2"
 version = "1.271.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -831,6 +856,31 @@ dependencies = [
  "aws-runtime",
  "aws-smithy-async",
  "aws-smithy-eventstream",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-schema",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 1.5.0",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
+name = "aws-sdk-pipes"
+version = "1.120.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c38780c29b1c1f70f4eb96f4de538bac74dff2ea3304a926b423c6a1fc4bc81"
+dependencies = [
+ "arc-swap",
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
  "aws-smithy-http",
  "aws-smithy-json",
  "aws-smithy-observability",
@@ -4427,6 +4477,7 @@ dependencies = [
  "aws-sdk-cloudwatchlogs",
  "aws-sdk-costexplorer",
  "aws-sdk-dynamodb",
+ "aws-sdk-dynamodbstreams",
  "aws-sdk-ec2",
  "aws-sdk-ecr",
  "aws-sdk-ecs",
@@ -4435,6 +4486,7 @@ dependencies = [
  "aws-sdk-elasticloadbalancingv2",
  "aws-sdk-iam",
  "aws-sdk-lambda",
+ "aws-sdk-pipes",
  "aws-sdk-rds",
  "aws-sdk-route53",
  "aws-sdk-s3",
