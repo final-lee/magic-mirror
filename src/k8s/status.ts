@@ -8,7 +8,7 @@ export type StatusTone = "ok" | "done" | "warn" | "bad" | "plain";
 const TONE_BY_WORD: Record<string, StatusTone> = {
   Running: "ok", Ready: "ok", Bound: "ok", Active: "ok", Available: "ok", True: "ok",
   Succeeded: "done", Completed: "done", Complete: "done",
-  Pending: "warn", ContainerCreating: "warn", PodInitializing: "warn", Terminating: "warn", Unknown: "warn", Released: "warn",
+  Pending: "warn", ContainerCreating: "warn", PodInitializing: "warn", Terminating: "warn", Unknown: "warn", Released: "warn", Waiting: "warn",
   SchedulingDisabled: "warn", NotReady: "warn", Unschedulable: "warn",
   Failed: "bad", Error: "bad", OOMKilled: "bad", Evicted: "bad", Lost: "bad", False: "bad", ContainerStatusUnknown: "bad",
   InvalidImageName: "bad", DeadlineExceeded: "bad", BackoffLimitExceeded: "bad",

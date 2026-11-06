@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { invoke } from "../api/invoke";
 import { DescribeView } from "./DescribeView";
@@ -10,16 +10,31 @@ vi.mock("../api/invoke", () => ({ invoke: vi.fn() }));
 const target = { profile: "p", region: "r", cluster: "c" };
 const objectRef = { kind: PODS, namespace: "demo", name: "web" };
 const view = { kind: PODS, row: { name: "web", namespace: "demo", values: {} }, conditions: [], containers: [], events: [] } as unknown as K8sObjectView;
+/** 정리한 보기의 키·값 한 줄: 키(dt) 옆 값(dd)의 글 */
+const valueOf = (key: string) => screen.getByText(key, { selector: "dt" }).nextElementSibling;
 
 it("shows the failure and fallback, then refreshes the real output", async () => {
   vi.mocked(invoke).mockRejectedValueOnce({ kind: "other", message: "kubectl 없음" }).mockResolvedValueOnce("Name: web\nStatus: Running");
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(<QueryClientProvider client={client}><DescribeView target={target} context="ctx" objectRef={objectRef} resourceVersion="1" ssoProfile="p" live view={view} onRefreshObject={vi.fn()} toolbar={document.body} /></QueryClientProvider>);
   expect(await screen.findByRole("alert")).toHaveTextContent("kubectl 없음");
-  expect(screen.getByText(/Name: web/)).toHaveTextContent("Kind: Pod");
+  expect(valueOf("Name")).toHaveTextContent("web");
+  expect(valueOf("Kind")).toHaveTextContent("Pod");
   fireEvent.click(screen.getByRole("button", { name: "다시 읽기" }));
-  expect(await screen.findByText(/Status: Running/)).toBeInTheDocument();
+  await vi.waitFor(() => expect(valueOf("Status")?.querySelector(".k8s-status.tone-ok")).toHaveTextContent("Running"));
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+it("원문 shows kubectl's text as is and 정리 goes back", async () => {
+  vi.mocked(invoke).mockReset().mockResolvedValue("Name: web\nLabels:  app=web\n         tier=front");
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><DescribeView target={target} context="ctx" objectRef={objectRef} resourceVersion="1" ssoProfile="p" live view={view} onRefreshObject={vi.fn()} toolbar={document.body} /></QueryClientProvider>);
+  await vi.waitFor(() => expect(screen.getByText("tier=front", { selector: ".desc-chip" })).toBeInTheDocument());
+  fireEvent.click(screen.getByRole("button", { name: "원문" }));
+  expect(screen.getByRole("button", { name: "원문" })).toHaveAttribute("aria-pressed", "true");
+  expect(document.querySelector("pre")!.textContent).toBe("Name: web\nLabels:  app=web\n         tier=front");
+  fireEvent.click(screen.getByRole("button", { name: "정리" }));
+  expect(document.querySelector("pre")).toBeNull();
 });
 
 
@@ -31,7 +46,7 @@ it("uses only masked Secret data and refreshes the object without invoking kubec
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(<QueryClientProvider client={client}><DescribeView target={target} context="ctx" objectRef={{ ...objectRef, kind: secret }} resourceVersion="1" ssoProfile="p" live view={secretView} onRefreshObject={refresh} toolbar={document.body} /></QueryClientProvider>);
   expect(screen.getByText(/Secret은 값을 가려서/)).toBeInTheDocument();
-  expect(screen.getByText(/password: 7 bytes/)).toBeInTheDocument();
+  expect(valueOf("password")).toHaveTextContent("7 bytes");
   expect(screen.queryByText(/sensitive-value/)).not.toBeInTheDocument();
   expect(invoke).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "다시 읽기" }));
@@ -52,7 +67,7 @@ it("coalesces version changes and renders refresh outside the tab body", async (
   rerender(component("3"));
   rerender(component("4"));
   expect(invoke).toHaveBeenCalledTimes(1);
-  fireEvent.click(toolbar.querySelector("button")!);
+  fireEvent.click(within(toolbar).getByRole("button", { name: "다시 읽기" }));
   await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
   unmount();
   toolbar.remove();

@@ -1321,6 +1321,28 @@ tbody tr.on .iam-badge { background: var(--neutral-alpha-26); color: var(--on-ac
 .k8s-log.nowrap .lj-row { white-space: nowrap; overflow-wrap: normal; }
 .k8s-log.nowrap .lj-detail { white-space: pre-wrap; }
 .k8s-wrap { word-break: break-all; }
+/* 상세 설명(kubectl describe 정리): 키·값 격자, 구역 제목, 컨테이너·볼륨 카드, 표 */
+.desc { font-size: 12px; padding-bottom: 12px; }
+.desc-kv { display: grid; grid-template-columns: minmax(130px, max-content) minmax(0, 1fr); gap: 5px 16px; margin: 0; }
+.desc-kv dt { color: var(--dim); max-width: 280px; overflow-wrap: anywhere; }
+.desc-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.desc-sect { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
+.desc-sect h4 { display: flex; align-items: baseline; gap: 10px; margin: 0 0 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--dim); }
+.desc-sub { font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text); }
+.desc-card { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 10px 12px; margin: 8px 0; }
+.desc-card-title { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; font-family: ui-monospace, Menlo, monospace; font-size: 13px; font-weight: 700; }
+.desc-nested { border-left: 2px solid var(--line); padding-left: 10px; margin: 8px 0; }
+.desc-nested-title { display: flex; align-items: baseline; gap: 10px; margin-bottom: 5px; color: var(--dim); font-weight: 600; }
+.desc-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.desc-chip { background: var(--hover-strong); border-radius: 4px; padding: 1px 6px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; overflow-wrap: anywhere; }
+.desc-lines { display: flex; flex-direction: column; gap: 3px; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
+.desc-text { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; margin: 2px 0; overflow-wrap: anywhere; }
+.desc-table-wrap { overflow-x: auto; margin: 4px 0; }
+.desc-table { font-size: 12px; }
+.desc-table td { white-space: nowrap; }
+.desc-table td:last-child { white-space: normal; min-width: 200px; }
+.desc-warning td { color: var(--red); }
+.desc-warning td:first-child { font-weight: 600; }
 .k8s-warn td { color: var(--orange); }
 /* 사용량이 요청·제한·할당 가능량의 90%를 넘은 비율 */
 .k8s-hot { color: var(--red); font-weight: 600; }
