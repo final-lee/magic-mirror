@@ -770,6 +770,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-eventbridge"
+version = "1.125.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8007157ab0aa1d5ade3b803bb1c0579304329daee6ff9d8e3f615112203b91bb"
+dependencies = [
+ "arc-swap",
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-schema",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 1.5.0",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-iam"
 version = "1.131.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -796,6 +821,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-kms"
+version = "1.127.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53abc4249368713fb509c99dd4b762e91b58015f5132c57ca5a40c4c7909c693"
+dependencies = [
+ "arc-swap",
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-schema",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 1.5.0",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-lambda"
 version = "1.154.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -806,6 +856,31 @@ dependencies = [
  "aws-runtime",
  "aws-smithy-async",
  "aws-smithy-eventstream",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-schema",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 1.5.0",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
+name = "aws-sdk-pipes"
+version = "1.120.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c38780c29b1c1f70f4eb96f4de538bac74dff2ea3304a926b423c6a1fc4bc81"
+dependencies = [
+ "arc-swap",
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
  "aws-smithy-http",
  "aws-smithy-json",
  "aws-smithy-observability",
@@ -4407,8 +4482,11 @@ dependencies = [
  "aws-sdk-eks",
  "aws-sdk-elasticache",
  "aws-sdk-elasticloadbalancingv2",
+ "aws-sdk-eventbridge",
  "aws-sdk-iam",
+ "aws-sdk-kms",
  "aws-sdk-lambda",
+ "aws-sdk-pipes",
  "aws-sdk-rds",
  "aws-sdk-route53",
  "aws-sdk-s3",
