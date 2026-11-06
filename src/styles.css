@@ -2585,6 +2585,6 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .argo-change-sheet label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 
 /* 앱 상세 맨 위 작업 줄 */
-.argo-bar-actions { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 6px 12px; border-bottom: 1px solid var(--border-input); }
+.argo-bar-actions { display: flex; flex-direction: column; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--border-input); }
 .argo-bar-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.argo-bar-label { font-size: 11px; margin-right: 2px; }
+.argo-bar-label { font-size: 11px; min-width: 48px; margin-right: 2px; }
