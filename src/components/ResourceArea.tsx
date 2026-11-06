@@ -13,6 +13,7 @@ import { OPEN_EKS_TAB } from "../k8s/text";
 import type { PgTarget } from "../pg/types";
 import { Breadcrumb } from "./Breadcrumb";
 import { DetailPanel } from "./DetailPanel";
+import { ResourceMetrics } from "./ResourceMetrics";
 import { ListFind, useListFind } from "./ListFind";
 import { ErrorState } from "./ErrorState";
 import { RawModal } from "./RawModal";
@@ -157,6 +158,9 @@ export function ResourceArea({ service, type, profile, region, account, onOpenBu
         >
           {eksCluster && selected && (
             <ClusterDetailSummary key={`${profile}|${region}|${selected.id}`} target={{ profile, region, cluster: selected.id }} />
+          )}
+          {selected && service.metricTypes?.includes(type.id) && (
+            <ResourceMetrics key={`${profile}|${region}|${selected.id}`} profile={profile} region={region} service={service} typeId={type.id} row={selected} />
           )}
         </DetailPanel>
       </section>

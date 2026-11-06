@@ -22,6 +22,39 @@ export interface ServiceInfo {
   name: string;
   global: boolean;
   types: ResourceType[];
+  /** 상세에 CloudWatch 지표를 붙이는 리소스 종류 */
+  metricTypes?: string[];
+}
+
+/** 상세 지표의 기간 */
+export type MetricRange = "1h" | "3h" | "12h" | "1d" | "3d" | "1w";
+export type MetricUnit = "percent" | "bytes" | "count" | "seconds" | "milliseconds" | "microseconds" | "bytesPerSecond" | "countPerSecond";
+export interface MetricSeries {
+  /** 선 이름(복제 그룹의 노드 ID). 선이 하나면 빈 글 */
+  label: string;
+  /** Unix ms, 오래된 것부터 */
+  times: number[];
+  values: number[];
+}
+export interface MetricChart {
+  metric: string;
+  stat: string;
+  unit: MetricUnit;
+  series: MetricSeries[];
+}
+/** 리소스 상세의 CloudWatch 지표(resource_metrics) */
+export interface ResourceMetrics {
+  namespace: string;
+  region: string;
+  charts: MetricChart[];
+  /** 점 사이 간격(초) */
+  period: number;
+  start: number;
+  end: number;
+  /** 하루 한 번 쌓이는 지표라 기간과 상관없이 최근 2주를 읽었다 */
+  daily: boolean;
+  /** 지표 대신 보이는 안내(클러스터 구성원 …) */
+  note: string | null;
 }
 
 export interface Field {

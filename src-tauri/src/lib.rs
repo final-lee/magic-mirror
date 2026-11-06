@@ -32,6 +32,7 @@ mod k8s_helm_commands;
 mod k8s_security_commands;
 mod k8s_terminal_commands;
 mod model;
+mod metrics;
 mod mouse_nav;
 mod pg;
 mod pg_commands;
@@ -144,6 +145,7 @@ pub fn run() {
             commands::get_account,
             commands::list_services,
             commands::list_resources,
+            commands::resource_metrics,
             commands::resource_index,
             commands::clear_resource_index,
             commands::sso_login,

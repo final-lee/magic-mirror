@@ -32,11 +32,14 @@ pub struct ResourceType {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ServiceInfo {
     pub id: &'static str,
     pub name: &'static str,
     pub global: bool,
     pub types: Vec<ResourceType>,
+    /// 상세에 CloudWatch 지표를 붙이는 리소스 종류(`metrics::catalog`)
+    pub metric_types: Vec<&'static str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
