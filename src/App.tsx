@@ -45,6 +45,9 @@ import { closeKv, refreshKv } from "./kv/queries";
 import { kvTabId } from "./kv/targets";
 import { tabTitle as kvTabTitle } from "./kv/text";
 import type { KvTarget } from "./kv/types";
+import { DynamoTab } from "./dynamo/DynamoTab";
+import { refreshDynamo } from "./dynamo/queries";
+import { tabTitle as dynamoTabTitle } from "./dynamo/text";
 import { getVersion } from "@tauri-apps/api/app";
 import { VpcMapTab } from "./vpcmap/VpcMapTab";
 import type { VpcHighlight } from "./vpcmap/types";
@@ -91,6 +94,9 @@ export default function App() {
   const k8sOpenNonce = useRef(0);
   // 대상(프로필·리전·종류·식별자)마다 탭 하나(ElastiCache의 Valkey·Redis OSS). 탭을 닫거나 프로필을 바꾸면 그 대상의 연결도 닫는다.
   const [kvTabs, setKvTabs] = useState<{ id: string; target: KvTarget }[]>([]);
+  // 리전마다 DynamoDB 탭 하나(id는 리전). focus는 리소스 목록에서 연 테이블로, nonce가 바뀔 때마다 그 테이블을 고른다. 프로필을 바꾸면 닫는다.
+  const [dynamoTabs, setDynamoTabs] = useState<{ id: string; profile: string; region: string; focus: { table: string; nonce: number } | null }[]>([]);
+  const dynamoNonce = useRef(0);
   // IAM 탭은 하나뿐이다(id "iam"). focus는 리소스 목록에서 넘어온 대상 ARN, nonce는 열 때마다 올라가 같은 대상도 다시 이동시킨다.
   const [iamTab, setIamTab] = useState<{ focus: string | null; nonce: number } | null>(null);
   const iamOverview = useIamOverview(iamTab ? profile : null);
@@ -149,7 +155,10 @@ export default function App() {
     // 보고 있는 Valkey·Redis 탭은 연결부터 다시 읽는다(보이지 않는 탭은 그대로 둔다)
     const kv = kvTabs.find((t) => t.id === activeTab);
     if (kv) void refreshKv(qc, kv.target);
-  }, [qc, profile, pgTabs, k8sTabs, kvTabs, activeTab]);
+    // 보고 있는 DynamoDB 탭은 테이블 목록을 새로 읽는다
+    const dynamo = dynamoTabs.find((t) => t.id === activeTab);
+    if (dynamo) void refreshDynamo(qc, dynamo.profile, dynamo.region);
+  }, [qc, profile, pgTabs, k8sTabs, kvTabs, dynamoTabs, activeTab]);
 
   // 하드 리셋: 모든 프로필·리전의 리소스 목록 캐시(메모리·디스크)를 버리고 보이는 목록을 처음부터 다시 읽는다
   const hardReset = useCallback(() => hardResetResourceCache(qc), [qc]);
@@ -222,6 +231,14 @@ export default function App() {
     setKvTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs : [...tabs, { id, target }]));
     setActiveTab(id);
   };
+  // table이 있으면 그 테이블을 고른다. 이미 열린 탭이면 그 탭으로 가서 고른다.
+  const openDynamo = (region: string, table: string | null) => {
+    if (!profile) return;
+    const id = `ddb:${region}`;
+    const focus = table ? { table, nonce: ++dynamoNonce.current } : null;
+    setDynamoTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs.map((t) => (t.id === id && focus ? { ...t, focus } : t)) : [...tabs, { id, profile, region, focus }]));
+    setActiveTab(id);
+  };
   const openIam = (focus: string | null = null) => {
     setIamTab((t) => ({ focus, nonce: (t?.nonce ?? 0) + 1 }));
     setActiveTab("iam");
@@ -257,6 +274,7 @@ export default function App() {
     const kv = kvTabs.find((t) => t.id === id);
     if (kv) void closeKv(qc, kv.target);
     setKvTabs((tabs) => tabs.filter((t) => t.id !== id));
+    setDynamoTabs((tabs) => tabs.filter((t) => t.id !== id));
     setVpcTabs((tabs) => tabs.filter((t) => t.id !== id));
     setExplorerTabs((tabs) => tabs.filter((t) => t.id !== id));
     setDiffTabs((tabs) => tabs.filter((t) => t.id !== id));
@@ -280,6 +298,7 @@ export default function App() {
     ...pgTabs.map((t) => ({ id: t.id, title: t.title, closable: true })),
     ...k8sTabs.map((t) => ({ id: t.id, title: tabTitle(t.target.cluster), closable: true })),
     ...kvTabs.map((t) => ({ id: t.id, title: kvTabTitle(t.target.id), closable: true })),
+    ...dynamoTabs.map((t) => ({ id: t.id, title: dynamoTabTitle(t.region), closable: true })),
     ...diffTabs.map((t) => ({ id: t.id, title: diffTitle(t.left, t.right), closable: true })),
   ];
   const diffTool: DiffTool = settings.diffTool ?? "filemerge";
@@ -303,9 +322,10 @@ export default function App() {
     setK8sTabs([]);
     kvTabs.forEach((t) => void closeKv(qc, t.target));
     setKvTabs([]);
+    setDynamoTabs([]);
     setIamTab(null);
     setCostTab(false);
-    if (activeTab.startsWith("s3:") || activeTab.startsWith("vpc:") || activeTab.startsWith("diff:") || activeTab.startsWith("pg:") || activeTab.startsWith("k8s:") || activeTab.startsWith("kv:") || activeTab === "iam" || activeTab === "cost") setActiveTab("resources");
+    if (activeTab.startsWith("s3:") || activeTab.startsWith("vpc:") || activeTab.startsWith("diff:") || activeTab.startsWith("pg:") || activeTab.startsWith("k8s:") || activeTab.startsWith("kv:") || activeTab.startsWith("ddb:") || activeTab === "iam" || activeTab === "cost") setActiveTab("resources");
     update({ lastProfile: name, lastRegion: nextRegion });
   };
 
@@ -397,6 +417,7 @@ export default function App() {
               onOpenPg={(target) => openPg(target, `🐘 ${target.id}`)}
               onOpenK8s={openK8s}
               onOpenKv={openKv}
+              onOpenDynamo={openDynamo}
               onRefresh={refresh}
               active={activeTab === "resources" && !tailscaleShown}
               focus={focus}
@@ -465,6 +486,11 @@ export default function App() {
         {kvTabs.map((t) => (
           <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
             <KvTab target={t.target} active={activeTab === t.id} />
+          </div>
+        ))}
+        {dynamoTabs.map((t) => (
+          <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
+            <DynamoTab profile={t.profile} region={t.region} active={activeTab === t.id} focus={t.focus} />
           </div>
         ))}
         {diffTabs.map((t) => (

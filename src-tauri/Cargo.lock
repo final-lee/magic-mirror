@@ -486,6 +486,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-applicationautoscaling"
+version = "1.125.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea18056e56fb7d0989baa96fe2fc6c4f7a908a150d651a7d9844cbcb35ab3412"
+dependencies = [
+ "arc-swap",
+ "aws-credential-types",
+ "aws-runtime",
+ "aws-smithy-async",
+ "aws-smithy-http",
+ "aws-smithy-json",
+ "aws-smithy-observability",
+ "aws-smithy-runtime",
+ "aws-smithy-runtime-api",
+ "aws-smithy-schema",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http 1.5.0",
+ "regex-lite",
+ "tracing",
+]
+
+[[package]]
 name = "aws-sdk-cloudfront"
 version = "1.139.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4396,6 +4421,7 @@ dependencies = [
  "aws-config",
  "aws-credential-types",
  "aws-sdk-accessanalyzer",
+ "aws-sdk-applicationautoscaling",
  "aws-sdk-cloudfront",
  "aws-sdk-cloudwatch",
  "aws-sdk-cloudwatchlogs",

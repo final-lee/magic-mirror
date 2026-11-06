@@ -36,6 +36,8 @@ interface Props {
   onOpenK8s?: (target: K8sTarget) => void;
   /** ElastiCache의 Valkey·Redis OSS 캐시를 열 때 키 탐색 탭으로 보낸다. Memcached면 부르지 않고 안내만 띄운다. */
   onOpenKv?: (target: KvTarget) => void;
+  /** DynamoDB 테이블을 열 때 그 리전의 DynamoDB 탭으로 보내고 그 테이블을 고른다. */
+  onOpenDynamo?: (region: string, table: string) => void;
   onRefresh: () => void;
   active: boolean;
   /** ⌘K에서 고른 리소스. nonce가 바뀔 때마다 그 행을 고르고 보이게 한다 */
@@ -53,7 +55,7 @@ const NOTICE_MS = 5000;
 /** ⌘K에서 고른 리소스가 다시 읽은 목록에 없을 때 */
 export const FOCUS_GONE = "찾던 리소스가 지금 목록에 없어요. 지워졌을 수 있어요";
 
-export function ResourceArea({ service, type, profile, region, account, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onOpenKv, onRefresh, active, focus = null }: Props) {
+export function ResourceArea({ service, type, profile, region, account, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onOpenKv, onOpenDynamo, onRefresh, active, focus = null }: Props) {
   const q = useResources(profile, region, service, type.id);
   // ⌘F: 이 목록 안에서만 찾는다(평소에는 찾기 줄이 없다)
   const listBox = useRef<HTMLElement>(null);
@@ -111,6 +113,8 @@ export function ResourceArea({ service, type, profile, region, account, onOpenBu
       const target = kvTargetOf(item, type.id);
       if (target) onOpenKv?.({ profile, region, ...target });
       else showNotice(NOT_KV);
+    } else if (service.id === "dynamodb" && type.id === "tables") {
+      onOpenDynamo?.(region, item.id);
     }
   };
 

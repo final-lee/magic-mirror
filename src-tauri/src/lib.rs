@@ -14,6 +14,8 @@ mod aws;
 mod commands;
 mod cost;
 mod cost_commands;
+mod dynamo;
+mod dynamo_commands;
 mod error;
 mod explorer;
 mod explorer_commands;
@@ -76,6 +78,7 @@ pub fn run() {
             app.manage(argowf::client::State::new(dir.join("settings.json")));
             app.manage(pg_commands::PgState::new(dir.join("db-changes.jsonl")));
             app.manage(kv_commands::KvState::new(dir.join("kv-bigkeys.json")));
+            app.manage(dynamo_commands::DynamoState::new(dir.join("dynamo-changes.jsonl")));
             app.manage(cost_commands::CostState::new(dir.join("cost-cache.json")));
             app.manage(resource_index::ResourceIndexState::new(dir.join("resource-index.json")));
             pg_commands::spawn_sweeper(app.handle().clone());
@@ -231,6 +234,9 @@ pub fn run() {
             kv_commands::kv_bull_flow,
             kv_commands::kv_bull_transitions,
             kv_commands::kv_bull_topology,
+            dynamo_commands::dynamo_overview,
+            dynamo_commands::dynamo_table,
+            dynamo_commands::dynamo_top_keys,
             k8s_access_commands::k8s_access,
             k8s_access_commands::k8s_access_matrix,
             k8s_access_commands::k8s_access_cell,
