@@ -44,6 +44,8 @@ interface Props {
   onOpenSqs?: (region: string, url: string) => void;
   /** SNS 주제를 열 때 주제 탭으로 보낸다. route가 있으면 그 탭 안에서 그 화면(구독 상세)을 연다. 다른 계정의 주제는 이 프로필로 읽지 않으니 부르지 않는다 */
   onOpenSns?: (target: SnsTopicRef, route?: SnsRoute) => void;
+  /** DynamoDB 테이블을 열 때 그 리전의 DynamoDB 탭으로 보내고 그 테이블을 고른다. */
+  onOpenDynamo?: (region: string, table: string) => void;
   onRefresh: () => void;
   active: boolean;
   /** ⌘K에서 고른 리소스. nonce가 바뀔 때마다 그 행을 고르고 보이게 한다 */
@@ -61,7 +63,7 @@ const NOTICE_MS = 5000;
 /** ⌘K에서 고른 리소스가 다시 읽은 목록에 없을 때 */
 export const FOCUS_GONE = "찾던 리소스가 지금 목록에 없어요. 지워졌을 수 있어요";
 
-export function ResourceArea({ service, type, profile, region, account, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onOpenKv, onOpenSqs, onOpenSns, onRefresh, active, focus = null }: Props) {
+export function ResourceArea({ service, type, profile, region, account, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onOpenKv, onOpenSqs, onOpenSns, onOpenDynamo, onRefresh, active, focus = null }: Props) {
   const q = useResources(profile, region, service, type.id);
   // ⌘F: 이 목록 안에서만 찾는다(평소에는 찾기 줄이 없다)
   const listBox = useRef<HTMLElement>(null);
@@ -128,6 +130,8 @@ export function ResourceArea({ service, type, profile, region, account, onOpenBu
       // 구독 행의 이름은 주제 이름이다. 구독 상세는 그 주제 탭 안에서 연다
       const topicArn = item.values.topicArn;
       if (topicArn) onOpenSns?.({ profile, region, topicArn, topicName: item.name }, snsSubscriptionRoute(item.id));
+    } else if (service.id === "dynamodb" && type.id === "tables") {
+      onOpenDynamo?.(region, item.id);
     }
   };
 

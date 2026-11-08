@@ -22,12 +22,14 @@ interface Props {
   /** SQS 큐를 열 때 그 리전의 SQS 탭으로 보내고 그 큐를 고른다 */
   onOpenSqs?: (region: string, url: string) => void;
   onOpenSns?: (target: SnsTopicRef, route?: SnsRoute) => void;
+  /** DynamoDB 테이블을 열 때 그 리전의 DynamoDB 탭으로 보내고 그 테이블을 고른다 */
+  onOpenDynamo?: (region: string, table: string) => void;
   onRefresh: () => void;
   active: boolean;
   focus?: ResourceFocus | null;
 }
 
-export function MainArea({ services, selection, profile, region, account, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onOpenKv, onOpenSqs, onOpenSns, onRefresh, active, focus = null }: Props) {
+export function MainArea({ services, selection, profile, region, account, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onOpenKv, onOpenSqs, onOpenSns, onOpenDynamo, onRefresh, active, focus = null }: Props) {
   const service = services.find((s) => s.id === selection?.service);
   const type = service?.types.find((t) => t.id === selection?.type);
   if (!profile || !service || !type) {
@@ -52,6 +54,7 @@ export function MainArea({ services, selection, profile, region, account, onOpen
       onOpenKv={onOpenKv}
       onOpenSqs={onOpenSqs}
       onOpenSns={onOpenSns}
+      onOpenDynamo={onOpenDynamo}
       onRefresh={onRefresh}
       active={active}
       focus={focus}

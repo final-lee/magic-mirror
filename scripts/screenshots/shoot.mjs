@@ -5,6 +5,7 @@ import { shootPg } from "./shoot-pg.mjs";
 import { shootKv } from "./shoot-kv.mjs";
 import { shootSqs } from "./shoot-sqs.mjs";
 import { shootSns } from "./shoot-sns.mjs";
+import { shootDynamo } from "./shoot-dynamo.mjs";
 // 사용: npm run dev 를 띄우고 `npm i --no-save playwright-core && node scripts/screenshots/shoot.mjs [폴더] [구역…]` (Google Chrome 필요)
 // 구역을 주면 그 구역만 찍는다(예: `node scripts/screenshots/shoot.mjs /tmp/shots k8s`). 구역마다 데모 페이지를 새로 연다.
 const OUT = process.argv[2] ?? "docs/screenshots";
@@ -79,7 +80,7 @@ async function shootCore(page, out) {
   await page.keyboard.press("Escape");
 }
 
-const SECTIONS = { core: shootCore, k8s: shootK8s, argocd: shootArgocd, argowf: shootArgowf, pg: shootPg, kv: shootKv, sqs: shootSqs, sns: shootSns };
+const SECTIONS = { core: shootCore, k8s: shootK8s, argocd: shootArgocd, argowf: shootArgowf, pg: shootPg, kv: shootKv, sqs: shootSqs, sns: shootSns, dynamo: shootDynamo };
 
 const browser = await chromium.launch({ channel: "chrome" });
 try {

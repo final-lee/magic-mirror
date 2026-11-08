@@ -14,6 +14,12 @@ mod aws;
 mod commands;
 mod cost;
 mod cost_commands;
+mod dynamo;
+mod dynamo_commands;
+mod dynamo_items_commands;
+mod dynamo_stream_commands;
+mod dynamo_change_commands;
+mod dynamo_ops_commands;
 mod error;
 mod explorer;
 mod explorer_commands;
@@ -80,6 +86,7 @@ pub fn run() {
             app.manage(argowf::client::State::new(dir.join("settings.json")));
             app.manage(pg_commands::PgState::new(dir.join("db-changes.jsonl")));
             app.manage(kv_commands::KvState::new(dir.join("kv-bigkeys.json")));
+            app.manage(dynamo_commands::DynamoState::new(dir.join("dynamo-changes.jsonl")));
             app.manage(cost_commands::CostState::new(dir.join("cost-cache.json")));
             app.manage(resource_index::ResourceIndexState::new(dir.join("resource-index.json")));
             pg_commands::spawn_sweeper(app.handle().clone());
@@ -266,6 +273,23 @@ pub fn run() {
             sqs_commands::sqs_move_tasks,
             sqs_commands::sqs_changes,
             sqs_commands::sqs_save_jsonl,
+            dynamo_commands::dynamo_overview,
+            dynamo_commands::dynamo_table,
+            dynamo_commands::dynamo_top_keys,
+            dynamo_items_commands::dynamo_read,
+            dynamo_items_commands::dynamo_export,
+            dynamo_items_commands::dynamo_export_path,
+            dynamo_stream_commands::dynamo_connections,
+            dynamo_stream_commands::dynamo_stream_start,
+            dynamo_stream_commands::dynamo_stream_poll,
+            dynamo_stream_commands::dynamo_stream_stop,
+            dynamo_change_commands::dynamo_preview,
+            dynamo_change_commands::dynamo_apply,
+            dynamo_change_commands::dynamo_changes,
+            dynamo_change_commands::dynamo_undo_preview,
+            dynamo_ops_commands::dynamo_backups,
+            dynamo_ops_commands::dynamo_exports,
+            dynamo_ops_commands::dynamo_buckets,
             k8s_access_commands::k8s_access,
             k8s_access_commands::k8s_access_matrix,
             k8s_access_commands::k8s_access_cell,
