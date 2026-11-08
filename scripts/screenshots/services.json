@@ -710,6 +710,31 @@
             "kind": "text"
           },
           {
+            "key": "in_flight",
+            "label": "In flight",
+            "kind": "text"
+          },
+          {
+            "key": "delayed",
+            "label": "Delayed",
+            "kind": "text"
+          },
+          {
+            "key": "dlq",
+            "label": "DLQ",
+            "kind": "text"
+          },
+          {
+            "key": "retention",
+            "label": "Retention",
+            "kind": "text"
+          },
+          {
+            "key": "encryption",
+            "label": "Encryption",
+            "kind": "text"
+          },
+          {
             "key": "url",
             "label": "URL",
             "kind": "mono"

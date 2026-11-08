@@ -4,13 +4,12 @@ use async_trait::async_trait;
 use aws_config::SdkConfig;
 use aws_sdk_sqs::types::QueueAttributeName as A;
 
-use super::util::{
-    degraded, dt_millis, last_segment, map_concurrent, region, settle, unknown_type, url_encode,
-    Capped,
-};
+use super::util::{degraded, dt_millis, last_segment, region, unknown_type, url_encode};
 use super::ResourceAdapter;
-use crate::error::{from_sdk, AppError};
+use crate::error::AppError;
 use crate::model::{col, ColumnKind::*, ListResult, Resource, ResourceType};
+use crate::sqs::read::{encryption_label, human_duration, list_queues, name_of_arn};
+use crate::sqs::SqsQueue;
 
 pub struct Sqs;
 
@@ -30,6 +29,11 @@ impl ResourceAdapter for Sqs {
                 col("name", "Name", Text),
                 col("type", "Type", Text),
                 col("messages", "Messages", Text),
+                col("in_flight", "In flight", Text),
+                col("delayed", "Delayed", Text),
+                col("dlq", "DLQ", Text),
+                col("retention", "Retention", Text),
+                col("encryption", "Encryption", Text),
                 col("url", "URL", Mono),
             ],
         }]
@@ -39,75 +43,45 @@ impl ResourceAdapter for Sqs {
         if type_id != "queues" {
             return Err(unknown_type(type_id));
         }
-        let client = aws_sdk_sqs::Client::new(cfg);
         let region = region(cfg);
-        let mut urls = Capped::new();
-        let mut pages = client.list_queues().into_paginator().send();
-        'pages: while let Some(page) = pages.next().await {
-            let page = page.map_err(|e| from_sdk(e, "sqs:ListQueues"))?;
-            for u in page.queue_urls() {
-                if !urls.push(u.clone()) {
-                    break 'pages;
-                }
-            }
-        }
-        let results = map_concurrent(urls.items.clone(), |url| {
-            let client = client.clone();
-            let region = region.clone();
-            async move {
-                client
-                    .get_queue_attributes()
-                    .queue_url(&url)
-                    .attribute_names(A::All)
-                    .send()
-                    .await
-                    .map(|res| {
-                        queue(
-                            &url,
-                            &res.attributes().cloned().unwrap_or_default(),
-                            &region,
-                        )
-                    })
-                    .map_err(|e| from_sdk(e, "sqs:GetQueueAttributes"))
-            }
-        })
-        .await;
-        let items = settle(results, |i, e| {
-            let url = &urls.items[i];
-            degraded(url, &last_segment(url, '/'), None, e)
-        })?;
+        let list = list_queues(cfg).await?;
+        let items = list
+            .items
+            .into_iter()
+            .map(|read| match read.failure {
+                Some(e) => degraded(&read.queue.url, &read.queue.name, None, &e),
+                None => resource(&read.queue, &read.attrs, &region),
+            })
+            .collect();
         Ok(ListResult {
             items,
-            truncated: urls.truncated,
+            truncated: list.truncated,
         })
     }
 }
 
+#[cfg(test)]
 fn queue(url: &str, attrs: &HashMap<A, String>, region: &str) -> Resource {
+    resource(&crate::sqs::read::parse_queue(url, attrs), attrs, region)
+}
+
+fn resource(q: &SqsQueue, attrs: &HashMap<A, String>, region: &str) -> Resource {
+    let url = &q.url;
     let name = last_segment(url, '/');
-    let get = |k: A| attrs.get(&k).cloned().unwrap_or_default();
-    let created = get(A::CreatedTimestamp)
-        .parse::<i64>()
-        .ok()
-        .map(|secs| secs * 1000);
     Resource::new(url, &name)
-        .arn(Some(get(A::QueueArn)).filter(|a| !a.is_empty()))
+        .arn(Some(q.arn.as_str()).filter(|a| !a.is_empty()))
         .value("name", &name)
-        .value(
-            "type",
-            if name.ends_with(".fifo") {
-                "FIFO"
-            } else {
-                "Standard"
-            },
-        )
-        .value("messages", get(A::ApproximateNumberOfMessages))
+        .value("type", if q.fifo { "FIFO" } else { "Standard" })
+        .value("messages", q.visible)
+        .value("in_flight", q.in_flight)
+        .value("delayed", q.delayed)
+        .value("dlq", q.redrive.as_ref().map(|r| name_of_arn(&r.dlq_arn)).unwrap_or_default())
+        .value("retention", human_duration(q.retention))
+        .value("encryption", encryption_label(q))
         .value("url", url)
-        .field("In flight", get(A::ApproximateNumberOfMessagesNotVisible))
-        .field("Visibility timeout (s)", get(A::VisibilityTimeout))
-        .field("Retention (s)", get(A::MessageRetentionPeriod))
-        .field("Redrive policy", get(A::RedrivePolicy))
-        .field("Created", dt_millis(created))
+        .field("Visibility timeout (s)", q.visibility_timeout)
+        .field("Redrive policy", attrs.get(&A::RedrivePolicy).cloned().unwrap_or_default())
+        .field("Created", dt_millis(q.created_at))
         .raw(attrs)
         .console(format!(
             "https://{region}.console.aws.amazon.com/sqs/v3/home?region={region}#/queues/{}",
@@ -150,5 +124,30 @@ mod tests {
         );
         assert_eq!(r.values["type"], "Standard");
         assert_eq!(r.arn, None);
+    }
+
+    #[test]
+    fn list_columns_come_from_the_same_attributes_as_the_workspace() {
+        let attrs = HashMap::from([
+            (A::QueueArn, "arn:aws:sqs:r:1:jobs".to_string()),
+            (A::ApproximateNumberOfMessages, "3".to_string()),
+            (A::ApproximateNumberOfMessagesNotVisible, "2".to_string()),
+            (A::ApproximateNumberOfMessagesDelayed, "1".to_string()),
+            (A::MessageRetentionPeriod, "129600".to_string()),
+            (A::KmsMasterKeyId, "alias/app".to_string()),
+            (A::SqsManagedSseEnabled, "false".to_string()),
+            (
+                A::RedrivePolicy,
+                r#"{"deadLetterTargetArn":"arn:aws:sqs:r:1:jobs-dlq","maxReceiveCount":5}"#.to_string(),
+            ),
+        ]);
+        let r = queue("https://sqs.r.amazonaws.com/1/jobs", &attrs, "r");
+        assert_eq!(r.values["in_flight"], "2");
+        assert_eq!(r.values["delayed"], "1");
+        assert_eq!(r.values["dlq"], "jobs-dlq");
+        assert_eq!(r.values["retention"], "1d 12h");
+        assert_eq!(r.values["encryption"], "KMS");
+        // 새 열과 겹치는 상세 필드는 없다
+        assert!(!r.fields.iter().any(|f| f.label == "In flight" || f.label == "Retention (s)"));
     }
 }
