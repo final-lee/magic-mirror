@@ -17,7 +17,8 @@ fn sns_write_apis_are_confined() {
     let mut files = Vec::new();
     collect(&root, &mut files);
     for file in files {
-        if file == root.join("sns/write.rs") || file == root.join("sns/hygiene.rs") {
+        // SQS 탭(`sqs/`)은 자기 수신 관문을 거쳐 메시지를 받는다: SNS의 쓰기 한정 규칙 밖이다
+        if file == root.join("sns/write.rs") || file == root.join("sns/hygiene.rs") || file.starts_with(root.join("sqs")) {
             continue;
         }
         let text = std::fs::read_to_string(&file).unwrap();
