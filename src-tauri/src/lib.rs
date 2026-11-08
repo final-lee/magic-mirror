@@ -46,6 +46,8 @@ mod resource_index;
 mod settings;
 mod sns;
 mod sns_commands;
+mod sqs;
+mod sqs_commands;
 mod tailscale;
 mod tailscale_commands;
 mod topology;

@@ -63,7 +63,6 @@ aws-sdk-sqs = "1"
 aws-sdk-sns = "1"
 # SQS 탭: 흐름(EventBridge 규칙·Pipes 생산자와 소비자)과 고객 관리 키 정책 읽기. 읽기 전용
 aws-sdk-eventbridge = "1"
-aws-sdk-pipes = "1"
 aws-sdk-kms = "1"
 aws-sdk-ecr = "1"
 aws-sdk-secretsmanager = "1"
