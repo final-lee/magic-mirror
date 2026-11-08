@@ -8,6 +8,7 @@ import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import App from "../../src/App";
 import "../../src/styles.css";
 import { installOverlayScrollbars } from "../../src/lib/overlayScrollbars";
+import type { Resource } from "../../src/api/types";
 import { iamMock } from "./iam";
 import { costMock } from "./cost";
 import { ARGOWF_DEMO_SERVER, argowfMock } from "./argowf";
@@ -16,6 +17,7 @@ import { argocdMock, argocdResources, argocdSettings } from "./argocd";
 import { kvMock, kvResources, kvSettings } from "./kv";
 import { pgMock, pgResources, pgSettings } from "./pg";
 import { sqsMock, sqsResources } from "./sqs";
+import { snsMock, snsResources } from "./sns";
 import services from "./services.json";
 
 const ACCOUNT = "123456789012";
@@ -34,7 +36,7 @@ function res(id: string, name: string, values: Record<string, string>, fields: [
   };
 }
 
-const RESOURCES: Record<string, ReturnType<typeof res>[]> = {
+const RESOURCES: Record<string, Resource[]> = {
   "ec2/instances": [
     res("i-0a1b2c3d4e5f60001", "web-1", { state: "running", type: "t3.medium", privateIp: "10.0.1.21", az: "ap-northeast-2a" }, [
       ["VPC", "vpc-0abc1234"],
@@ -89,7 +91,7 @@ const RESOURCES: Record<string, ReturnType<typeof res>[]> = {
 // 백엔드의 리소스 색인(⌘K) 흉내: list_resources가 읽은 목록의 검색용 사본. 다른 리전의 오래된 목록 하나를 미리 넣어 둔다.
 type Indexed = { profile: string; region: string; service: string; typeId: string; fetchedAt: number; truncated: boolean; items: unknown[] };
 const INDEX = new Map<string, Indexed>();
-function recordIndex(profile: string, region: string, service: string, typeId: string, items: ReturnType<typeof res>[], fetchedAt = Date.now()) {
+function recordIndex(profile: string, region: string, service: string, typeId: string, items: Resource[], fetchedAt = Date.now()) {
   const key = (services as { id: string; global: boolean }[]).find((s) => s.id === service)?.global ? "global" : region;
   INDEX.set(`${profile}|${key}|${service}|${typeId}`, {
     profile,
@@ -277,7 +279,7 @@ mockIPC(
         return services;
       case "get_settings":
         return {
-          enabledServices: ["ec2", "s3", "lambda", "rds", "elasticache", "ecs", "eks", "vpc", "iam", "dynamodb", "logs", "sqs", "secretsmanager"],
+          enabledServices: ["ec2", "s3", "lambda", "rds", "elasticache", "ecs", "eks", "vpc", "iam", "dynamodb", "logs", "sqs", "sns", "secretsmanager"],
           favorites: [{ service: "ec2", type: "instances" }, { service: "s3", type: "buckets" }],
           lastProfile: "prod",
           lastRegion: REGION,
@@ -293,7 +295,7 @@ mockIPC(
         return null;
       case "list_resources": {
         const key = `${a.service}/${a.typeId}`;
-        const extra = { ...k8sResources, ...argocdResources, ...pgResources, ...kvResources, ...sqsResources } as Record<string, ReturnType<typeof res>[]>;
+        const extra = { ...k8sResources, ...argocdResources, ...pgResources, ...kvResources, ...sqsResources, ...snsResources } as Record<string, Resource[]>;
         const items = a.region === "us-west-2" && a.service === "ec2" && a.typeId === "instances" ? WEST : (RESOURCES[key] ?? extra[key] ?? []);
         recordIndex(a.profile, a.region, a.service, a.typeId, items);
         return { items, truncated: false };
@@ -349,6 +351,7 @@ mockIPC(
       case "plugin:app|version":
         return "0.1.0";
       default:
+        if (cmd.startsWith("sns_")) return snsMock(cmd, a);
         if (cmd.startsWith("cost_")) return costMock(cmd, a);
         if (cmd.startsWith("argowf_")) return argowfMock(cmd, a);
         if (cmd.startsWith("iam_")) return iamMock(cmd, a) ?? null;

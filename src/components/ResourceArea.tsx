@@ -12,6 +12,9 @@ import { ClusterDetailSummary } from "../k8s/ClusterDetailSummary";
 import { OPEN_EKS_TAB } from "../k8s/text";
 import { OPEN_SQS_TAB } from "../sqs/text";
 import type { PgTarget } from "../pg/types";
+import { snsSubscriptionRoute, type SnsRoute } from "../sns/route";
+import { SubscribedTopics } from "../sns/SubscribedTopics";
+import type { SnsTopicRef } from "../sns/targets";
 import { Breadcrumb } from "./Breadcrumb";
 import { DetailPanel } from "./DetailPanel";
 import { ResourceMetrics } from "./ResourceMetrics";
@@ -39,6 +42,8 @@ interface Props {
   onOpenKv?: (target: KvTarget) => void;
   /** SQS 큐를 열 때 그 리전의 SQS 탭으로 보내고 그 큐를 고른다. */
   onOpenSqs?: (region: string, url: string) => void;
+  /** SNS 주제를 열 때 주제 탭으로 보낸다. route가 있으면 그 탭 안에서 그 화면(구독 상세)을 연다. 다른 계정의 주제는 이 프로필로 읽지 않으니 부르지 않는다 */
+  onOpenSns?: (target: SnsTopicRef, route?: SnsRoute) => void;
   onRefresh: () => void;
   active: boolean;
   /** ⌘K에서 고른 리소스. nonce가 바뀔 때마다 그 행을 고르고 보이게 한다 */
@@ -56,7 +61,7 @@ const NOTICE_MS = 5000;
 /** ⌘K에서 고른 리소스가 다시 읽은 목록에 없을 때 */
 export const FOCUS_GONE = "찾던 리소스가 지금 목록에 없어요. 지워졌을 수 있어요";
 
-export function ResourceArea({ service, type, profile, region, account, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onOpenKv, onOpenSqs, onRefresh, active, focus = null }: Props) {
+export function ResourceArea({ service, type, profile, region, account, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onOpenKv, onOpenSqs, onOpenSns, onRefresh, active, focus = null }: Props) {
   const q = useResources(profile, region, service, type.id);
   // ⌘F: 이 목록 안에서만 찾는다(평소에는 찾기 줄이 없다)
   const listBox = useRef<HTMLElement>(null);
@@ -117,6 +122,12 @@ export function ResourceArea({ service, type, profile, region, account, onOpenBu
       else showNotice(NOT_KV);
     } else if (sqsQueue) {
       onOpenSqs?.(region, item.id);
+    } else if (service.id === "sns" && type.id === "topics") {
+      onOpenSns?.({ profile, region, topicArn: item.arn ?? item.id, topicName: item.name });
+    } else if (service.id === "sns" && type.id === "subscriptions") {
+      // 구독 행의 이름은 주제 이름이다. 구독 상세는 그 주제 탭 안에서 연다
+      const topicArn = item.values.topicArn;
+      if (topicArn) onOpenSns?.({ profile, region, topicArn, topicName: item.name }, snsSubscriptionRoute(item.id));
     }
   };
 
@@ -167,6 +178,9 @@ export function ResourceArea({ service, type, profile, region, account, onOpenBu
         >
           {eksCluster && selected && (
             <ClusterDetailSummary key={`${profile}|${region}|${selected.id}`} target={{ profile, region, cluster: selected.id }} />
+          )}
+          {selected?.arn && ((service.id === "sqs" && type.id === "queues") || (service.id === "lambda" && type.id === "functions")) && (
+            <SubscribedTopics key={`${profile}|${region}|${selected.arn}`} profile={profile} region={region} account={account} endpointArn={selected.arn} onOpenSns={onOpenSns} />
           )}
           {selected && service.metricTypes?.includes(type.id) && (
             <ResourceMetrics key={`${profile}|${region}|${selected.id}`} profile={profile} region={region} service={service} typeId={type.id} row={selected} />

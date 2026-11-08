@@ -768,6 +768,15 @@
             "kind": "text"
           }
         ]
+      },
+      {
+        "id": "subscriptions",
+        "name": "Subscriptions",
+        "columns": [
+          { "key": "name", "label": "Topic", "kind": "text" },
+          { "key": "protocol", "label": "Protocol", "kind": "text" },
+          { "key": "endpoint", "label": "Endpoint", "kind": "text" }
+        ]
       }
     ]
   },

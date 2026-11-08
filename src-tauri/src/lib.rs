@@ -38,8 +38,8 @@ mod pg;
 mod pg_commands;
 mod resource_index;
 mod settings;
-mod sqs;
-mod sqs_commands;
+mod sns;
+mod sns_commands;
 mod tailscale;
 mod tailscale_commands;
 mod topology;
@@ -69,6 +69,7 @@ pub fn run() {
                 sso: Default::default(),
             });
             app.manage(explorer_commands::ExplorerState::default());
+            app.manage(sns::peek::PeekState::default());
             app.manage(iam_commands::IamState::new(dir.join("iam-changes.jsonl")));
             app.manage(k8s_commands::K8sState::new(dir.join("k8s-changes.jsonl")));
             app.manage(k8s_access_commands::AccessState::default());
@@ -88,6 +89,26 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            sns_commands::sns_topic,
+            sns_commands::sns_subscriptions_all,
+            sns_commands::sns_subscribed_topics,
+            sns_commands::sns_diagnose,
+            sns_commands::sns_publishers,
+            sns_commands::sns_topic_policy,
+            sns_commands::sns_check_public_access,
+            sns_commands::sns_account_overview,
+            sns_commands::sns_messaging,
+            sns_commands::sns_filter_test,
+            sns_commands::sns_plan,
+            sns_commands::sns_apply,
+            sns_commands::sns_changes,
+            sns_commands::sns_undo_plan,
+            sns_commands::sns_peek_eligibility,
+            sns_commands::sns_peek_start,
+            sns_commands::sns_peek_stop,
+            sns_commands::sns_validate_policy,
+            sns_commands::sns_check_policy_document,
+            sns_commands::sns_logging_roles,
             tailscale_commands::tailscale_node,
             tailscale_commands::tailscale_diagnose,
             tailscale_commands::tailscale_diagnostic_tool,
@@ -380,6 +401,7 @@ pub fn run() {
             // 앱을 끄면 열린 셸과 port-forward를 닫는다
             if let tauri::RunEvent::Exit = event {
                 tauri::async_runtime::block_on(app.state::<k8s_commands::K8sState>().close_streams());
+                tauri::async_runtime::block_on(app.state::<sns::peek::PeekState>().stop_all());
             }
         });
 }

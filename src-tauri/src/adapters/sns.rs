@@ -27,10 +27,24 @@ impl ResourceAdapter for Sns {
                 col("arn", "ARN", Mono),
                 col("subscriptions", "Subscriptions", Text),
             ],
+        }, ResourceType {
+            id: "subscriptions",
+            name: "Subscriptions",
+            columns: vec![
+                col("name", "Topic", Text),
+                col("protocol", "Protocol", Text),
+                col("endpoint", "Endpoint", Text),
+                col("state", "State", State),
+            ],
         }]
     }
 
     async fn list(&self, cfg: &SdkConfig, type_id: &str) -> Result<ListResult, AppError> {
+        if type_id == "subscriptions" {
+            let rows = crate::sns::fetch::subscriptions_all(cfg).await?;
+            let truncated = rows.len() > crate::model::MAX_ITEMS;
+            return Ok(ListResult { items: rows.into_iter().take(crate::model::MAX_ITEMS).map(subscription).collect(), truncated });
+        }
         if type_id != "topics" {
             return Err(unknown_type(type_id));
         }
@@ -79,6 +93,20 @@ impl ResourceAdapter for Sns {
     }
 }
 
+fn subscription(row: crate::sns::model::SnsSubscriptionRow) -> Resource {
+    let name = last_segment(&row.topic_arn, ':');
+    let id = row.key();
+    let masked = crate::sns::mask::endpoint(&row.protocol, &row.endpoint);
+    Resource::new(id, &name)
+        .arn(row.arn.as_deref())
+        .value("name", &name)
+        .value("topicArn", &row.topic_arn)
+        .value("protocol", &row.protocol)
+        .value("endpoint", masked)
+        .value("state", &row.state)
+        .field("Endpoint", &row.endpoint)
+}
+
 fn topic(arn: &str, attrs: &HashMap<String, String>, region: &str) -> Resource {
     let name = last_segment(arn, ':');
     let get = |k: &str| attrs.get(k).cloned().unwrap_or_default();
@@ -100,6 +128,20 @@ fn topic(arn: &str, attrs: &HashMap<String, String>, region: &str) -> Resource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subscription_row_masks_indexed_endpoint() {
+        let r = subscription(crate::sns::model::SnsSubscriptionRow {
+            arn: None, topic_arn: "arn:aws:sns:r:1:alerts".into(), protocol: "email".into(),
+            endpoint: "alice@example.com".into(), state: "pending".into(),
+        });
+        assert!(r.id.starts_with("arn:aws:sns:r:1:alerts#pending#"));
+        assert_eq!(r.id.len(), "arn:aws:sns:r:1:alerts#pending#".len() + 12);
+        assert!(!r.id.contains("alice@example.com"));
+        assert_eq!(r.values["endpoint"], "a***@example.com");
+        assert_eq!(r.values["topicArn"], "arn:aws:sns:r:1:alerts");
+        assert_eq!(r.fields[0].value, "alice@example.com");
+    }
 
     #[test]
     fn topic_from_attributes() {

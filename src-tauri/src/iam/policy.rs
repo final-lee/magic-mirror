@@ -39,6 +39,8 @@ pub struct Statement {
     pub resources: Resources,
     /// 신뢰 정책의 `Principal` 값(`"*"` 또는 `{"AWS": ...}` 같은 원본 JSON)
     pub principal: Option<Value>,
+    /// 원본 조건 JSON.
+    pub condition: Option<Value>,
     /// 조건이 하나라도 있으면 true
     pub conditional: bool,
     /// "<키> · <연산자> · <값, 값>" 줄, 정렬됨
@@ -143,6 +145,7 @@ fn statement_fields(index: usize, value: &Value) -> Result<Statement, String> {
         actions,
         resources,
         principal: obj.get("Principal").cloned(),
+        condition: obj.get("Condition").cloned(),
         // 비어 있는 Condition 블록은 아무것도 제한하지 않는다
         conditional: !conditions.is_empty(),
         conditions,
@@ -400,6 +403,7 @@ mod tests {
             actions,
             resources,
             principal: None,
+            condition: None,
             conditional: false,
             conditions: Vec::new(),
         }

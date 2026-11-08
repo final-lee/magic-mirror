@@ -11,6 +11,7 @@ A macOS desktop app for working with AWS and the Kubernetes, ArgoCD, Argo Workfl
 - **Operate** EKS clusters (Lens-style overview, live lists, logs, shell, port-forward, Helm, network and access views, security checks, previewed changes), ArgoCD applications, and Argo Workflows.
 - **Manage** RDS PostgreSQL roles and privileges over IAM authentication.
 - **Inspect** ElastiCache Valkey and Redis OSS caches like Medis — key tree, values, server stats — and see BullMQ queues drawn as charts.
+- **Trace** SNS topics end to end: who publishes, where messages go, why a delivery fails, and which subscribers a sample message reaches — and fix it with previewed, undoable changes.
 
 Everything is read-only until you ask for a change, and every change starts with a preview of exactly what will be sent.
 
@@ -20,7 +21,7 @@ Everything is read-only until you ask for a change, and every change starts with
 
 - [Features](#features)
   - [Resource browser](#resource-browser-read-only) · [VPC network diagram](#vpc-network-diagram) · [IAM workspace](#iam-workspace) · [Cost dashboard](#cost-dashboard)
-  - [EKS (Kubernetes)](#eks-kubernetes) · [ArgoCD](#argocd) · [Argo Workflows](#argo-workflows) · [Tailscale](#tailscale) · [PostgreSQL users (RDS)](#postgresql-users-rds) · [Valkey and Redis OSS (ElastiCache)](#valkey-and-redis-oss-elasticache) · [SQS](#sqs)
+  - [EKS (Kubernetes)](#eks-kubernetes) · [ArgoCD](#argocd) · [Argo Workflows](#argo-workflows) · [Tailscale](#tailscale) · [PostgreSQL users (RDS)](#postgresql-users-rds) · [Valkey and Redis OSS (ElastiCache)](#valkey-and-redis-oss-elasticache) · [SQS](#sqs) · [SNS](#sns)
   - [S3 explorer](#s3-explorer) · [File diff](#file-diff) · [Auto-update](#auto-update)
 - [What can change things](#what-can-change-things)
 - [Settings](#settings)
@@ -33,7 +34,7 @@ Everything is read-only until you ask for a change, and every change starts with
 
 ### Resource browser (read-only)
 
-- **17 services, 27 resource types**:
+- **17 services, 28 resource types**:
 
   | Service | Resource types |
   | --- | --- |
@@ -50,7 +51,7 @@ Everything is read-only until you ask for a change, and every change starts with
   | CloudWatch Logs | Log Groups |
   | CloudFront | Distributions |
   | SQS | Queues |
-  | SNS | Topics |
+  | SNS | Topics, Subscriptions |
   | ECR | Repositories |
   | Route 53 | Hosted Zones |
   | Secrets Manager | Secrets |
@@ -488,6 +489,31 @@ SQS has no way to read a message without side effects. A receive hides the messa
   - Results are shown per message. A message that was sent but couldn't be deleted because its hold ran out is flagged as a possible duplicate.
 - **큐 비우기…** purges any queue after you type its name. Any change to a queue whose name contains `prod` or `prd` also asks for the name.
 - **기록** lists the SQS changes made from the app for this queue, with message counts but never bodies.
+### SNS
+![SNS delivery diagnosis](docs/screenshots/sns-diagnosis.png)
+
+Double-click a row in **SNS → Topics** to open a `📣` tab for that topic (a row in **SNS → Subscriptions** opens its topic on that subscription). **📣 SNS 개요** in the sidebar's SNS section opens the account-wide view. Everything only reads until you press a button that says it changes something.
+
+- **개요**: encryption (and whether it is the AWS-managed `alias/aws/sns` key), FIFO settings, message archive, signature version, tracing, delivery status logging per protocol, the HTTP retry policy as a table, the data protection policy, and tags.
+- **구독**: protocol, endpoint (queues and functions by name, with account and region when they differ), state, the filter policy in one line (`event ∈ {order.created} · 속성 범위`), raw delivery, DLQ, and the diagnosis result, with protocol and state chips and ⌘F. A pending subscription says it can't be read until it is confirmed and that AWS deletes it after 3 days. The detail shows every attribute, the filter JSON, and a button to the queue or function in the resource browser.
+- **흐름 지도**: publishers → topic → subscriptions → endpoints → DLQs, with last-hour published, delivered and failed counts. Publishers come from CloudWatch alarms, EventBridge rules on every bus, RDS event subscriptions, and ElastiCache notifications (solid lines), and from the topic policy (dashed: allowed, not necessarily publishing). **더 찾기** also scans this region's S3 bucket notifications and Lambda async destinations, one call per bucket and function. Code that calls `Publish` directly can't be found without CloudTrail data events, and the map says so.
+- **배달 진단**: for each subscription, a ✓ / ! / ✗ / – checklist and a one-line conclusion: confirmed or pending, whether the queue or function still exists, whether the queue policy lets `sns.amazonaws.com` send from this topic (`aws:SourceArn`, `aws:SourceAccount`, `aws:SourceOwner`, wildcards, `IfExists`, explicit denies), whether a customer-managed key on the queue lets SNS encrypt (an `alias/aws/sqs` queue can't receive from SNS at all), the Lambda resource policy, the DLQ and its own policy and key, plain `http://`, a broken filter policy, and last-hour failures with the matching delivery status log lines. For the topic it flags an `alias/aws/sns` key with AWS-service publishers (their messages are rejected), a disabled key, and failures without delivery logging. Conditions the app can't evaluate are shown as `!` with the reason, never as fine.
+- **필터 시험**: enter message attributes (String, String.Array, Number, Binary) or a JSON body and see, for every subscription, 받음 / 걸러짐 / 필터 없음 with the first key that didn't match and why. It follows the documented operators (`prefix`, `suffix`, `equals-ignore-case`, `wildcard`, `anything-but`, `numeric`, `exists`, `cidr`, `$or`, nested body keys) and limits. AWS has no API for this, so the screen says it is the app's reading of the documentation. The last 10 samples per topic stay in memory.
+- **정책·점검**: the topic policy as sentences with who it opens the topic to (public, other accounts, AWS services, this account), Access Analyzer `ValidatePolicy` findings, who can publish and subscribe (with a jump to the IAM workspace's **Who can do this?** for this account's users and roles), and checks: public policy, other accounts that can subscribe or receive, service grants without `aws:SourceAccount`/`aws:SourceArn`, no encryption, `http://` endpoints, signature version 1, pending and orphaned subscriptions, SQS and Lambda subscriptions without a DLQ, and no delivery logging. **공개 접근 검사 실행 ($0.002)** runs Access Analyzer `CheckNoPublicAccess`, which AWS charges per call, so it only runs when you press it.
+- **큐 엿보기**: shows the messages sitting in the topic's DLQs and in subscribed queues that nobody consumes. A queue counts as unconsumed when no Lambda event source mapping reads it and it had no receives (`NumberOfMessagesReceived`, `NumberOfEmptyReceives`) in the last hour, not counting the app's own peeks. Queues with their own redrive policy, or whose consumers can't be checked, are refused with the reason, and a DLQ that someone seems to read asks for its name first. The app receives up to 100 messages with a 30-second visibility timeout, never deletes them, and makes them visible again as soon as you stop, leave the screen, or quit. SNS envelopes are unwrapped, and a DLQ message gets its delivery failure log lines when logging is on. Messages stay in memory only.
+- **변경 기록**: changes made to this topic, with undo.
+- **지표**: the topic's CloudWatch metrics, including filtered-out and DLQ redrive counts.
+
+![SNS flow map](docs/screenshots/sns-flow.png)
+
+The `📣 SNS` account view lists every topic with its last-24-hour published, delivered, failed and filtered counts (worst first), orphaned subscriptions (topic deleted or queue/function gone — AWS keeps them after a topic is deleted), pending subscriptions, all check results with a switch per check, account-level metrics, and read-only SMS (sandbox, numbers, spend, success rate) and mobile push (platform applications, endpoint and disabled-endpoint counts, certificate expiry) status. Phone numbers are masked.
+
+**Changing things.** Every change opens a preview with the exact API calls and bodies, the values before and after (policies as a line diff), how the diagnosis changes, and warnings. When you apply, the app reads AWS again and shows a fresh preview if anything changed. Unsubscribing, changing a filter or saving a topic policy on a topic with `prod` in its name, and any policy change that opens the topic to everyone or another account, need the topic name typed.
+
+- **고치기…** in the diagnosis adds the missing queue policy statement (Sid `magic-mirror-sns-<topic>`, limited to this topic with `aws:SourceArn`) or Lambda permission; **DLQ 붙이기…** / **DLQ 바꾸기…** sets the redrive policy and, if needed, the DLQ's policy. KMS key policies are never changed: the statement to add is shown with a copy button.
+- **구독 만들기…** (SQS, Lambda, HTTPS, email), adding the queue policy statement or Lambda permission only when missing; endpoints in other accounts get a plain subscribe and nothing in that account is touched. **해지…**, filter policy editing (the preview runs your recent filter samples against the old and new policy), raw delivery, HTTP delivery policies, the topic policy editor (with `ValidatePolicy` and the optional paid public-access check), delivery status logging with an existing role that trusts `sns.amazonaws.com` (roles are never created), and **시험 발행…** (FIFO group and deduplication IDs, attributes, per-protocol JSON).
+- For FIFO topics with an archive, **다시 보내기…** replays a time range to one subscription (an end time pauses the subscription afterwards; **이어 받기** resumes it) and shows the replay status, and the archive retention can be changed or turned off (which deletes the archive).
+- Every change is recorded in `sns-changes.jsonl`. Undo goes through the same preview: queue policy and Lambda changes remove only the app's own statement (or restore the one it replaced), and re-subscribing restores the saved attributes (an HTTPS endpoint has to confirm again). Published messages are recorded as MessageId, size, attribute names, and a SHA-256 of the body, never the body; email addresses and phone numbers are masked, and a change whose undo value contains one is recorded as not undoable. Replays and test publishes can't be undone.
 
 ### S3 explorer
 ![S3 explorer](docs/screenshots/explorer.png)
@@ -533,6 +559,7 @@ Everything else in the app only reads. These are the only places that write, and
 | Tailscale Services | VIP definitions and device approvals | API call preview; typed Service name for deletion | Previous definitions and approvals recorded for restoration |
 | Tailscale organization | Create or delete API-only tailnets | API call preview; typed name and `all` scope for deletion | Creation secrets shown once, never recorded; deletion is irreversible |
 | SQS tab | Receives (to read messages), resends, message deletes, DLQ move tasks and their cancellation, queue purges | Receiving only on DLQs and queues without consumers; preview of calls and effects; typed queue name for purges and for queues named `prod`/`prd`; the session and gates are checked again at apply | `sqs-changes.jsonl` (no message bodies); not undoable |
+| SNS tab | Subscriptions (create, unsubscribe, filter, raw delivery, DLQ, delivery policy), topic policy and delivery policy, delivery logging, archive, replay, test publish; the queue policy statement and Lambda permission a subscription needs; message visibility while peeking | API call and diff preview with diagnosis impact, re-read at apply, typed topic name for `prod` and for policy widening, queue name for a DLQ that seems consumed; KMS key policies are never changed | `sns-changes.jsonl`; most undoable, not replays or test publishes |
 | S3 explorer | Objects (upload, rename, delete, new folder) | Confirmation before overwrite and delete | — |
 
 ## Settings
@@ -573,7 +600,7 @@ Under `~/Library/Application Support/dev.finallee.magicmirror/`:
 
 | File | Contents | Kept |
 | --- | --- | --- |
-| `settings.json` | Enabled services and the services the app has already shown, favorites, the sidebar order you dragged, last profile and region, theme, diff tool, kubeconfig path, cache TTL, the explorer's local folder, PostgreSQL sign-in users, ElastiCache sign-in ways and users, DB numbers, and Bull prefixes, EKS contexts, bookmarks, lane widths, and security checks turned off; ArgoCD servers, kube contexts, ArgoCD namespace, notification settings, per-server views and filters; Argo Workflows servers and list filters; the Tailscale tailnet name | Until changed |
+| `settings.json` | Enabled services and the services the app has already shown, favorites, the sidebar order you dragged, last profile and region, theme, diff tool, kubeconfig path, cache TTL, the explorer's local folder, PostgreSQL sign-in users, ElastiCache sign-in ways and users, DB numbers, and Bull prefixes, EKS contexts, bookmarks, lane widths, and security checks turned off (EKS and SNS); ArgoCD servers, kube contexts, ArgoCD namespace, notification settings, per-server views and filters; Argo Workflows servers and list filters; the Tailscale tailnet name | Until changed |
 | `resource-index.json` | The ⌘K index: names, IDs, column values, tags. No raw JSON or detail fields. Readable only by you | 7 days; wiped by ⌘⇧R |
 | `cost-cache.json` | Cost Explorer answers and the monthly request counter | Answers for 6 hours |
 | `kv-bigkeys.json` | The last 🐘 큰 키 report per ElastiCache cache and DB number: key names, types, sizes, when it was made. No values | Until the next report for that cache and DB |
@@ -582,6 +609,7 @@ Under `~/Library/Application Support/dev.finallee.magicmirror/`:
 | `k8s-changes.jsonl` | EKS changes, and when shells and node shells opened and closed (never their input or output, never Secret values) | Until deleted |
 | `tailscale-changes.jsonl` | Tailscale changes and undo state | Until deleted |
 | `argocd-changes.jsonl` | ArgoCD changes applied from the app | Until deleted |
+| `sns-changes.jsonl` | SNS changes with undo state, and when queue peeks started and stopped with how many messages they received. Never message bodies (a test publish keeps its MessageId, size, attribute names and a body SHA-256); email addresses and phone numbers masked | Until deleted |
 | `argocd-events.jsonl` | ArgoCD stream events recorded while the app is running | 90 days |
 | `sqs-changes.jsonl` | SQS changes applied from the app: queue, change, API calls, result, and message counts (never message bodies) | Until deleted |
 
@@ -589,7 +617,7 @@ Under `~/Library/Application Support/dev.finallee.magicmirror/`:
 - The Tailscale API credential (OAuth client ID and secret, or API access token) lives only in the macOS keychain: service `magic-mirror.tailscale`, account = the tailnet name saved in `settings.json` (`tailscaleTailnet`). OAuth access tokens stay in memory.
 - AWS credentials are never stored by the app; it uses `~/.aws` and the AWS CLI's SSO cache.
 - Saved logs go to `~/Downloads`; files for external diff tools go to `$TMPDIR/magic-mirror-diff/` and are removed after an hour.
-- Metrics samples, Secret values you reveal, new PostgreSQL passwords, cache keys and values, and SQS message bodies are kept in memory only.
+- Metrics samples, Secret values you reveal, new PostgreSQL passwords, cache keys and values, SQS message bodies, SNS filter samples, and peeked SNS messages are kept in memory only.
 
 ## Install
 
@@ -679,6 +707,15 @@ A Korean install guide is in [docs/INSTALL.md](docs/INSTALL.md) and is attached 
 - IAM database authentication turned on for the cluster or instance.
 - A DB user that is a member of `rds_iam`. Reading works with any such user, though other users' session details also need `pg_read_all_stats`. Changing roles and privileges also needs `rds_superuser` or CREATEROLE (see [Changing roles and privileges](#changing-roles-and-privileges)), and the app says when the user you signed in as has neither.
 
+**SNS tab**
+
+- Reading the topic and subscriptions: `sns:GetTopicAttributes`, `sns:ListSubscriptionsByTopic`, `sns:GetSubscriptionAttributes`, `sns:ListSubscriptions`, `sns:ListTagsForResource`, `sns:GetDataProtectionPolicy`, `sqs:GetQueueUrl`, `sqs:GetQueueAttributes`, `lambda:GetFunctionConfiguration`, `lambda:GetPolicy`. Whatever is missing is reported for that item.
+- **배달 진단** also reads `kms:DescribeKey`, `kms:GetKeyPolicy`, `cloudwatch:GetMetricData`, and `logs:FilterLogEvents` on the topic's delivery status log groups (`sns/<region>/<account>/<topic>/Failure`).
+- **흐름 지도** reads `cloudwatch:DescribeAlarms`, `events:ListEventBuses`, `events:ListRuleNamesByTarget`, `rds:DescribeEventSubscriptions`, and `elasticache:DescribeCacheClusters`; **더 찾기** adds `s3:ListAllMyBuckets`, `s3:GetBucketNotification`, `lambda:ListFunctions`, and `lambda:ListFunctionEventInvokeConfigs`.
+- **정책·점검** and the account view read `access-analyzer:ValidatePolicy` (free), `sns:ListTopics`, `sqs:ListQueues`, `lambda:ListFunctions`, `cloudwatch:ListMetrics`, and `cloudwatch:GetMetricData` (4 metrics per topic, $0.01 per 1,000 metrics); the button-only public access check needs `access-analyzer:CheckNoPublicAccess` ($0.002 per call). SMS and push status read `sns:GetSMSSandboxAccountStatus`, `sns:ListSMSSandboxPhoneNumbers`, `sns:ListOriginationNumbers`, `sns:GetSMSAttributes`, `sns:ListPlatformApplications`, and `sns:ListEndpointsByPlatformApplication`.
+- **큐 엿보기** reads `sqs:ListDeadLetterSourceQueues` and `lambda:ListEventSourceMappings`, and uses `sqs:ReceiveMessage` and `sqs:ChangeMessageVisibility`.
+- Changes need the matching write actions: `sns:Subscribe`, `sns:Unsubscribe`, `sns:SetSubscriptionAttributes` (filter, raw delivery, DLQ, delivery policy, replay), `sns:SetTopicAttributes` (topic policy, delivery policy, logging, archive), `sns:Publish`, `sqs:SetQueueAttributes` (queue policy), and `lambda:AddPermission` / `lambda:RemovePermission`. Picking a logging role reads `iam:ListRoles` and `iam:GetRole`.
+
 ## Development
 
 | Part | Stack |
@@ -712,13 +749,14 @@ Tests that need real servers are `#[ignore]`d in a normal `cargo test` and run t
 | `scripts/pg-live-test.sh` | The PostgreSQL catalog reads and changes against PostgreSQL 14 and 16 containers on `127.0.0.1:55414` / `55416`, removed when it ends | Docker |
 | `scripts/kv-live-test.sh` | The Valkey/Redis tab against Valkey 8 containers: a plain server with every value type, BullMQ-, Bull 3-, and older Bull-shaped queues, a two-queue flow and an events stream, an AUTH and ACL server (password, no-password, and restricted users), a TLS server with a CA made for the run, and a three-shard cluster; removed when it ends | Docker, `openssl` |
 | `scripts/cost-live-test.sh <profile>` | The cost commands against a real account; about 3 Cost Explorer requests (≈ $0.03) | An AWS profile with Cost Explorer access |
+| `scripts/sns-live-test.sh <profile> [region]` | The SNS tab against a real account: creates a throwaway `mm-live-<seconds>` topic and three SQS queues, finds a subscription whose queue policy is missing, fixes it, attaches a DLQ, sets a filter and checks which of two test publishes arrives, judges peek eligibility, undoes the filter, reads the account view and policy, creates a subscription through the app and unsubscribes; then a FIFO topic with an archive whose message is replayed and whose archive is turned off. Everything it created is deleted at the end, even on failure | An AWS profile allowed to create and delete SNS topics and SQS queues |
 | `scripts/argocd-live-test.sh <argocd-url>` | The ArgoCD tab against a real server: reads and streams, then a throwaway `mm-live-<seconds>` application in project `default` that syncs [podinfo](https://github.com/stefanprodan/podinfo) into the in-cluster `mm-live-argocd` namespace, restarts and patches its Deployment, checks the stale and typed-name guards, and is cascade-deleted (the namespace may stay). With `ARGOCD_LIVE_KUBE_CONTEXT` set to the context ArgoCD runs in, it also reads the ArgoCD metrics through the service proxy and Pod usage from metrics-server | A token in `ARGOCD_LIVE_TOKEN` or saved by the app; rights to create and delete applications in `default` |
 | `scripts/sqs-live-test.sh <profile> <queue>` | The SQS tab against a real account (region `ap-northeast-2` unless `MM_SQS_REGION` is set). First, all read-only: the overview, the region flow, and, for `<queue>` (an existing queue with an EventBridge rule producer, a Lambda consumer, and a DLQ), its flow with and without IAM and the receive gate. Then a throwaway `mm-smoke-<date>-<random>` queue and its DLQ go through dead-lettering, receiving, edited resend, delete, release, a move task, and the purge guards, and are deleted at the end | An AWS profile allowed to create and delete SQS queues |
 
 ### Maintenance scripts
 
 - `node scripts/update-iam-catalog.mjs` regenerates `src-tauri/src/iam/catalog.json` (every IAM action and its access level) from the AWS Service Reference. Needs Node 20+ and internet access.
-- `scripts/screenshots/shoot.mjs` retakes every README screenshot from a demo page that runs the real frontend against mocked backend commands (`demo.tsx` plus one mock module per area: `iam.ts`, `cost.ts`, `k8s.ts`, `argocd.ts`, `argowf.ts`, `pg.ts`, `kv.ts`, `sqs.ts`). Run `npm run dev`, then `npm i --no-save playwright-core && node scripts/screenshots/shoot.mjs [out_dir] [section…]` (needs Google Chrome). Sections are `core`, `k8s`, `argocd`, `argowf`, `pg`, `kv`, and `sqs`; with none it takes them all.
+- `scripts/screenshots/shoot.mjs` retakes every README screenshot from a demo page that runs the real frontend against mocked backend commands (`demo.tsx` plus one mock module per area: `iam.ts`, `cost.ts`, `k8s.ts`, `argocd.ts`, `argowf.ts`, `pg.ts`, `kv.ts`, `sqs.ts`, `sns.ts`). Run `npm run dev`, then `npm i --no-save playwright-core && node scripts/screenshots/shoot.mjs [out_dir] [section…]` (needs Google Chrome). Sections are `core`, `k8s`, `argocd`, `argowf`, `pg`, `kv`, `sqs`, and `sns`; with none it takes them all.
 
 ### Project layout
 ```
@@ -738,6 +776,7 @@ src/                     React frontend
   kv/                    Valkey and Redis OSS tab, including the Bull screens
   sqs/                   SQS tab: queue list and health, flow and region map; messages/ (receiving and viewing), change/ (previews, redrive, purge, change log)
   tailscale/             Tailscale pane (this Mac, devices, users, routes, Services, DNS, policy, keys, logs, integrations, sharing, diagnosis, settings, connection, org) and connection checks in network error boxes
+  sns/                   SNS topic tab (overview, subscriptions, flow map, diagnosis, filter tester, policy, queue peek, change log), the 📣 SNS account tab, and the change dialog
 src-tauri/src/
   adapters/              per-service read-only adapters for the resource browser
   aws/                   profiles, SDK configs, SSO sign-in
@@ -755,6 +794,7 @@ src-tauri/src/
   kv/                    ElastiCache target and sign-in (IAM tokens, keychain), fred connection and topology, the read-only command allow-list, keys, values, server stats, Bull queues
   sqs/                   queue reads and CloudWatch activity, health checks, queue-policy parsing, producer/consumer flow, receive sessions and the receive gate, change previews and applies, sqs-changes.jsonl
   tailscale/             local node and peer shaping and connection diagnosis (only cli.rs starts the CLI); api.rs is the Tailscale API client with keychain credentials and OAuth token cache; devices, users, DNS, settings, services, integrations, org, policy (findings), keys, logs; changes.rs writes tailscale-changes.jsonl
+  sns/                   SNS topic snapshot, filter policy and resource policy evaluation, diagnosis, publisher discovery, policy checks, account view, SMS and push reads, change previews, undo and sns-changes.jsonl (change.rs), queue peeks (peek.rs); write.rs is the only place that calls SNS, SQS and Lambda write APIs
   jsonl.rs               the shared change-log file format
   mouse_nav.rs           macOS mouse back/forward buttons
 scripts/                 dev runner, release, live tests, IAM catalog updater, screenshots

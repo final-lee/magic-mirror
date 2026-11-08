@@ -31,6 +31,14 @@ pub struct K8sSecurityChecks {
     pub include_system: bool,
 }
 
+/// SNS 점검 설정: 끈 점검 항목. 비어 있으면 모든 항목을 켠다.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SnsChecks {
+    /// 끈 점검 항목의 id(`publicPolicy`, `httpEndpoint` …). 모든 주제에 같이 쓴다.
+    pub disabled: Vec<String>,
+}
+
 /// 사용자가 정의한 로컬 kubectl 플러그인.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -172,6 +180,7 @@ pub struct Settings {
     pub k8s_bookmarks: Vec<KindRef>,
     pub k8s_lane_widths: K8sLaneWidths,
     pub k8s_security_checks: K8sSecurityChecks,
+    pub sns_checks: SnsChecks,
     pub k8s_plugins: Vec<K8sPlugin>,
     /// ArgoCD 서버 목록. 토큰은 설정이 아니라 키체인에 저장한다.
     pub argocd_servers: Vec<ArgocdServer>,
@@ -207,6 +216,7 @@ struct RawSettings {
     k8s_bookmarks: Vec<KindRef>,
     k8s_lane_widths: K8sLaneWidths,
     k8s_security_checks: K8sSecurityChecks,
+    sns_checks: SnsChecks,
     k8s_plugins: Vec<K8sPlugin>,
     argocd_servers: Vec<ArgocdServer>,
     argocd_views: BTreeMap<String, ArgocdView>,
@@ -265,6 +275,7 @@ pub fn load(path: &Path, all_services: &[&str]) -> Settings {
                     k8s_bookmarks: raw.k8s_bookmarks,
                     k8s_lane_widths: raw.k8s_lane_widths,
                     k8s_security_checks: raw.k8s_security_checks,
+                    sns_checks: raw.sns_checks,
                     k8s_plugins: raw.k8s_plugins,
                     argocd_servers: raw.argocd_servers,
                     argocd_views: raw.argocd_views,
@@ -476,6 +487,20 @@ mod tests {
         // 예전 px 값(detail)은 읽지 않는다
         let old = load_text(r#"{"k8sLaneWidths":{"nav":200,"detail":640}}"#);
         assert_eq!(old.k8s_lane_widths, K8sLaneWidths { nav: Some(200), tree: None, detail_pct: None });
+    }
+
+    #[test]
+    fn sns_checks_default_all_on_and_roundtrip() {
+        let old = load_text(r#"{"k8sBookmarks":[]}"#);
+        assert_eq!(old.sns_checks, SnsChecks::default());
+        assert!(old.sns_checks.disabled.is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let s = Settings { sns_checks: SnsChecks { disabled: vec!["signatureV1".into(), "noDlq".into()] }, ..Default::default() };
+        save(&path, &s).unwrap();
+        assert_eq!(load(&path, &[]).sns_checks, s.sns_checks);
+        let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(json["snsChecks"]["disabled"][1], "noDlq");
     }
 
     #[test]

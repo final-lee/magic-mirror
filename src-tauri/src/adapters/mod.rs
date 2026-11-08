@@ -177,6 +177,7 @@ mod tests {
         assert_eq!(types("eks"), ["clusters", "node-groups"]);
         // ElastiCache의 클러스터 단위는 복제 그룹이고, Cache Clusters는 그 안의 노드다
         assert_eq!(types("elasticache"), ["replication-groups", "serverless-caches", "cache-clusters"]);
+        assert_eq!(types("sns"), ["topics", "subscriptions"]);
         assert_eq!(types("vpc"), ["vpcs", "subnets"]);
     }
 }
