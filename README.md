@@ -20,7 +20,7 @@ Everything is read-only until you ask for a change, and every change starts with
 
 - [Features](#features)
   - [Resource browser](#resource-browser-read-only) · [VPC network diagram](#vpc-network-diagram) · [IAM workspace](#iam-workspace) · [Cost dashboard](#cost-dashboard)
-  - [EKS (Kubernetes)](#eks-kubernetes) · [ArgoCD](#argocd) · [Argo Workflows](#argo-workflows) · [Tailscale](#tailscale) · [PostgreSQL users (RDS)](#postgresql-users-rds) · [Valkey and Redis OSS (ElastiCache)](#valkey-and-redis-oss-elasticache)
+  - [EKS (Kubernetes)](#eks-kubernetes) · [ArgoCD](#argocd) · [Argo Workflows](#argo-workflows) · [Tailscale](#tailscale) · [PostgreSQL users (RDS)](#postgresql-users-rds) · [Valkey and Redis OSS (ElastiCache)](#valkey-and-redis-oss-elasticache) · [SQS](#sqs)
   - [S3 explorer](#s3-explorer) · [File diff](#file-diff) · [Auto-update](#auto-update)
 - [What can change things](#what-can-change-things)
 - [Settings](#settings)
@@ -59,9 +59,9 @@ Everything is read-only until you ask for a change, and every change starts with
 - Uses the profiles in `~/.aws/config`, including SSO. Pick a profile and region and the list loads. The last profile and region are remembered.
 - **SSO sign-in**: when an SSO session has expired — when you pick the profile, when the app starts, or while you work — the app runs `aws sso login` for you. Approve it in the browser that opens and the lists reload. A banner shows the progress and lets you cancel. Profiles that share an SSO session sign in once, and role profiles sign in through their `source_profile`. The same sign-in starts when an EKS kubeconfig context or an Argo Workflows connection hits an expired session.
 - **Sidebar**: services in the official AWS Architecture icon set, with a count per resource type. Turn on only the services you use (Settings → 표시할 서비스), and pin resource types as favorites; favorites sit at the top. Under each service the resource types run from the largest unit down, clusters first (RDS: DB Clusters before DB Instances; ElastiCache: Replication Groups, Serverless Caches, then Cache Clusters, which are the groups' nodes). Drag favorites, services (by their name row), and the rows under a service to put them in your own order; the order is kept across restarts. **💰 비용** opens the cost tab, **Tailscale** shows Tailscale next to the sidebar (no extra tab), **IAM → 🔐 IAM 관리** the IAM workspace, and **EKS → 🐙 ArgoCD** / **⚙️ Argo Workflows** those tabs.
-- **Detail panel**: key fields, tags, raw JSON, a link to the AWS console, and ID copy (⌘C). It opens as an overlay over the list; click the selected row again or an empty spot to close it. An EKS cluster's detail also shows its usage summary. Double-clicking opens a workspace for some types: a bucket opens the S3 explorer, a VPC its diagram, an IAM user, role, or policy the IAM workspace, an EKS cluster the EKS tab, an RDS PostgreSQL cluster or instance the PostgreSQL tab, and a Valkey or Redis OSS cache the `⚡` tab.
+- **Detail panel**: key fields, tags, raw JSON, a link to the AWS console, and ID copy (⌘C). It opens as an overlay over the list; click the selected row again or an empty spot to close it. An EKS cluster's detail also shows its usage summary. Double-clicking opens a workspace for some types: a bucket opens the S3 explorer, a VPC its diagram, an IAM user, role, or policy the IAM workspace, an EKS cluster the EKS tab, an RDS PostgreSQL cluster or instance the PostgreSQL tab, a Valkey or Redis OSS cache the `⚡` tab, and an SQS queue the `📬 SQS` tab.
 - **CloudWatch metrics in the detail** of each service's largest unit: EC2 instances, S3 buckets (daily storage size and object count, last 2 weeks), Lambda functions, RDS DB clusters and stand-alone DB instances, ElastiCache replication groups (one line per member node), serverless caches and stand-alone cache clusters, ECS clusters, EKS clusters (control-plane metrics such as API requests, errors, latency, and pending pods), DynamoDB tables, log groups, CloudFront distributions, SQS queues, SNS topics, ECR repositories, and Route 53 hosted zones. Pick 1 h, 3 h (default), 12 h, 1 d, 3 d, or 1 w; each chart shows its latest value. A DB instance in a cluster or a node in a replication group points to the cluster's detail instead. CloudWatch charges per metric requested ($0.01 per 1,000), so the charts never reload on their own — only on **다시 읽기** or a new range. VPC, IAM, and Secrets Manager have no per-resource metrics.
-- **Fuzzy filter (⌘F)**: type letters in order, skipping any — `poa` finds `prod-orders-api`. Space-separated words must all match. In the resource list it looks at the name, ID, text columns, and tags (`team=pay`); matched letters are highlighted. While filtering, the best matches come first until you click a column header. The same filter works on the other tabs (IAM, PostgreSQL, ArgoCD, Kubernetes, S3 explorer).
+- **Fuzzy filter (⌘F)**: type letters in order, skipping any — `poa` finds `prod-orders-api`. Space-separated words must all match. In the resource list it looks at the name, ID, text columns, and tags (`team=pay`); matched letters are highlighted. While filtering, the best matches come first until you click a column header. The same filter works on the other tabs (IAM, PostgreSQL, ArgoCD, Kubernetes, SQS, S3 explorer).
 - **Find anything you've opened (⌘K)**: searches every list this profile has read, in every region, without calling AWS. Words can also match the service, type, or region (`west web`). Pick a result to jump to its region and type with the row selected. Results show how old the list is; lists past the cache TTL are marked and reload when opened.
 - **Caching**: lists stay cached while the app runs and reload in the background when you reopen one older than the cache TTL (Settings → 리소스 캐시: 5 min, 15 min, 1 h, 6 h, or unlimited; default 15 min). ⌘R refreshes what's on screen. **캐시 비우기** or ⌘⇧R drops every cached list for all profiles and regions, on disk too, and reloads what's on screen.
 - The ⌘K index is kept on disk for 7 days (`resource-index.json` in the app data folder, readable only by you). It holds only names, IDs, column values, and tags — never raw JSON or detail fields, which can contain secrets such as Lambda environment variables.
@@ -424,6 +424,71 @@ BullMQ and the older Bull keep each queue in plain keys (`<prefix>:<queue>:wait`
 
 ![Bull flow graph across queues](docs/screenshots/kv-bull-flow.png)
 
+### SQS
+![SQS queue overview](docs/screenshots/sqs-overview.png)
+
+Double-click a queue in **SQS → Queues**, or press **SQS 탭에서 열기** in its detail, to open the `📬 SQS` tab for that region with the queue selected. There is one tab per region. Switching profiles closes it.
+
+**Queues and health**
+
+- On the left are the region's queues, each with its DLQ indented below it. A DLQ shared by several queues stays at the top level and shows how many sources it has. Each row shows visible, in-flight and delayed counts and a health dot. **문제 있는 큐만** keeps the queues with a failure or warning, and ⌘F filters by name.
+- The list reloads every 30 seconds and the selected queue every 5 seconds, only while the tab is shown. CloudWatch activity for the whole region comes from one `GetMetricData` call: the oldest message's age, receives and empty receives over the last 15 minutes. That result is kept for 5 minutes, and **다시 읽기** or ⌘R reads it again.
+- **개요** shows the counts, the health findings, every attribute (redrive, encryption, FIFO options), tags, the queue policy, and the queue's CloudWatch charts. The checks are:
+  - a DLQ holding messages, shown on the DLQ and on its source;
+  - the oldest message at 50% or 80% of the retention period;
+  - messages waiting for 15 minutes with nothing receiving them (not counted on DLQs);
+  - a policy open to `*` without conditions;
+  - a Standard queue whose DLQ doesn't keep messages longer than the source (moved messages keep their original enqueue time);
+  - `maxReceiveCount` 1;
+  - no DLQ, short polling with many empty receives, and no encryption.
+- In the resource list, SQS queues also get In flight, Delayed, DLQ, Retention, and Encryption columns.
+
+**Flow**
+
+![Producers, queue and consumers](docs/screenshots/sqs-flow.png)
+
+- **흐름** puts producers on the left, consumers on the right, and the DLQ and source queues below:
+  - SNS subscriptions, including topics in other accounts, which are shown but never read;
+  - EventBridge rules that target the queue, on every event bus;
+  - EventBridge Pipes;
+  - S3 buckets that the queue policy names and whose notifications point at the queue;
+  - Lambda event source mappings, with each function's timeout.
+- The queue policy is broken into statements: who, what, conditions, source ARNs. Every producer is checked against it, and a subscription or rule the policy doesn't allow is a failure because its messages are dropped. Sources the policy allows but nothing connects are drawn faded as **허용만 됨**.
+- Flow checks:
+  - no enabled consumer;
+  - a visibility timeout shorter than six times a consuming function's timeout;
+  - a customer-managed KMS key whose policy doesn't let the SNS or EventBridge producer use it;
+  - the AWS-managed `alias/aws/sqs` key with a service producer.
+- **IAM으로 계산** reads the account's IAM, the same snapshot the IAM workspace uses, and adds the users and roles that can send or receive. A role used through an EKS Pod Identity association, or trusted through a cluster's OIDC provider (IRSA), is followed to its ServiceAccount.
+- Click a node to open its Lambda function or SNS topic in the resource list, its role in the IAM workspace, its cluster in the EKS tab, or another queue in this tab. Whatever can't be read is listed by section, and the rest is still drawn.
+- **목록 | 지도** switches to a map of the whole region: SNS subscriptions, Lambda event source mappings, Pipes, and DLQ links, colored by health.
+
+![Region flow map](docs/screenshots/sqs-map.png)
+
+**Messages**
+
+![Messages received from a DLQ](docs/screenshots/sqs-messages.png)
+
+SQS has no way to read a message without side effects. A receive hides the message from consumers for a while, adds one to its receive count (a message already at `maxReceiveCount` can move to the DLQ), and in a FIFO queue holds up its whole message group. So **메시지 받아 보기…** works only on a DLQ without an enabled consumer, or on a queue with no enabled event source mapping, no running Pipe, and no receives in the last 15 minutes. Otherwise the button is off and says why. The backend checks again before it receives.
+
+- Choose how many messages (1–500, default 50) and how long to hold them (10–600 s, default 60). A preview of the call and its effects comes first. A countdown shows the time left, and **놓아주기** makes the messages visible again right away. Leaving the queue or closing the tab lets them go too.
+- The table shows the sent time, group ID, receive count, size, and first line of each message, and ⌘F searches the bodies and attributes. A message's detail shows the body as a JSON tree or text, its system and message attributes, and **풀어 보기**, which unwraps SNS notifications, EventBridge events, S3 event records, base64, and gzip.
+- **이 필드로 묶기** counts messages by the value at a JSON path (`detail.reason`) and filters to one value. **JSONL 저장** writes the received messages to a file you choose.
+- Message bodies stay in memory only. They're never written to disk or to the change log.
+
+**DLQ redrive**
+
+![Redrive preview](docs/screenshots/sqs-redrive.png)
+
+- **전체 재처리…** on a DLQ starts an SQS message move task, either back to each message's original source queue or to a queue you pick, with an optional rate limit. The task's progress reloads every 5 seconds while it runs, and **이동 중단…** cancels it. Messages already moved stay where they went.
+- From the received messages:
+  - **다시 보내기…** sends the selected messages to a queue (by default their source), then deletes from the DLQ only the ones that were sent. FIFO messages keep their group ID and get a new deduplication ID.
+  - **수정 후 다시 보내기…** lets you edit the body first and previews the change.
+  - **삭제 N개…** deletes the selected messages.
+  - Results are shown per message. A message that was sent but couldn't be deleted because its hold ran out is flagged as a possible duplicate.
+- **큐 비우기…** purges any queue after you type its name. Any change to a queue whose name contains `prod` or `prd` also asks for the name.
+- **기록** lists the SQS changes made from the app for this queue, with message counts but never bodies.
+
 ### S3 explorer
 ![S3 explorer](docs/screenshots/explorer.png)
 
@@ -467,6 +532,7 @@ Everything else in the app only reads. These are the only places that write, and
 | Tailscale integrations | Webhooks, log streaming, posture integrations and OAuth apps | API call and body preview; typed ID for deletion | Reversible settings recorded with secret fields redacted |
 | Tailscale Services | VIP definitions and device approvals | API call preview; typed Service name for deletion | Previous definitions and approvals recorded for restoration |
 | Tailscale organization | Create or delete API-only tailnets | API call preview; typed name and `all` scope for deletion | Creation secrets shown once, never recorded; deletion is irreversible |
+| SQS tab | Receives (to read messages), resends, message deletes, DLQ move tasks and their cancellation, queue purges | Receiving only on DLQs and queues without consumers; preview of calls and effects; typed queue name for purges and for queues named `prod`/`prd`; the session and gates are checked again at apply | `sqs-changes.jsonl` (no message bodies); not undoable |
 | S3 explorer | Objects (upload, rename, delete, new folder) | Confirmation before overwrite and delete | — |
 
 ## Settings
@@ -517,12 +583,13 @@ Under `~/Library/Application Support/dev.finallee.magicmirror/`:
 | `tailscale-changes.jsonl` | Tailscale changes and undo state | Until deleted |
 | `argocd-changes.jsonl` | ArgoCD changes applied from the app | Until deleted |
 | `argocd-events.jsonl` | ArgoCD stream events recorded while the app is running | 90 days |
+| `sqs-changes.jsonl` | SQS changes applied from the app: queue, change, API calls, result, and message counts (never message bodies) | Until deleted |
 
 - ArgoCD and Argo Workflows API tokens and ElastiCache passwords you chose to remember live only in the macOS keychain (services `magic-mirror.argocd`, `magic-mirror.argo-workflows`, and `magic-mirror.elasticache`).
 - The Tailscale API credential (OAuth client ID and secret, or API access token) lives only in the macOS keychain: service `magic-mirror.tailscale`, account = the tailnet name saved in `settings.json` (`tailscaleTailnet`). OAuth access tokens stay in memory.
 - AWS credentials are never stored by the app; it uses `~/.aws` and the AWS CLI's SSO cache.
 - Saved logs go to `~/Downloads`; files for external diff tools go to `$TMPDIR/magic-mirror-diff/` and are removed after an hour.
-- Metrics samples, Secret values you reveal, new PostgreSQL passwords, and cache keys and values are kept in memory only.
+- Metrics samples, Secret values you reveal, new PostgreSQL passwords, cache keys and values, and SQS message bodies are kept in memory only.
 
 ## Install
 
@@ -590,6 +657,12 @@ A Korean install guide is in [docs/INSTALL.md](docs/INSTALL.md) and is attached 
 - IAM sign-in needs `elasticache:Connect` on the cache and the ElastiCache user, an IAM-enabled user in the cache's user group, Valkey 7.2+ or Redis OSS 7.0+, and TLS.
 - The user needs the read commands each screen uses (`SCAN`, `TYPE`, `PTTL`, the per-type reads, `INFO`, and for the server screens `SLOWLOG`/`COMMANDLOG`, `CLIENT LIST`, `MEMORY USAGE`); a missing one is named in the error.
 
+**SQS tab**
+
+- Reading: `sqs:ListQueues`, `GetQueueAttributes`, `ListQueueTags`, `ListDeadLetterSourceQueues`, `ListMessageMoveTasks`, and `cloudwatch:GetMetricData`.
+- The flow also reads `sns:ListSubscriptions`, `events:ListEventBuses`, `ListRuleNamesByTarget`, and `DescribeRule`, `pipes:ListPipes`, `lambda:ListEventSourceMappings` and `GetFunctionConfiguration`, `s3:GetBucketNotification`, and `kms:DescribeKey` and `GetKeyPolicy`. Whatever is missing is listed by section. **IAM으로 계산** needs the IAM workspace's read permissions. To find ServiceAccounts it also needs `eks:ListClusters` and `DescribeCluster`, plus `ListPodIdentityAssociations` and `DescribePodIdentityAssociation`.
+- Reading messages needs `sqs:ReceiveMessage` and `sqs:ChangeMessageVisibility`. Redrive and cleanup need `sqs:SendMessage`, `sqs:DeleteMessage`, `sqs:StartMessageMoveTask`, `sqs:CancelMessageMoveTask`, and `sqs:PurgeQueue`. Encrypted queues with a customer-managed key also need `kms:Decrypt` and `kms:GenerateDataKey` on that key.
+
 **Argo Workflows tab**
 
 - Network access to the Argo Server (for example over Tailscale). To sign in with a kubeconfig context, the server must run with `--auth-mode=client` and that identity needs RBAC on the Argo resources it reads or changes; events and IRSA roles also need `list events` and `get serviceaccounts` in those namespaces.
@@ -640,11 +713,12 @@ Tests that need real servers are `#[ignore]`d in a normal `cargo test` and run t
 | `scripts/kv-live-test.sh` | The Valkey/Redis tab against Valkey 8 containers: a plain server with every value type, BullMQ-, Bull 3-, and older Bull-shaped queues, a two-queue flow and an events stream, an AUTH and ACL server (password, no-password, and restricted users), a TLS server with a CA made for the run, and a three-shard cluster; removed when it ends | Docker, `openssl` |
 | `scripts/cost-live-test.sh <profile>` | The cost commands against a real account; about 3 Cost Explorer requests (≈ $0.03) | An AWS profile with Cost Explorer access |
 | `scripts/argocd-live-test.sh <argocd-url>` | The ArgoCD tab against a real server: reads and streams, then a throwaway `mm-live-<seconds>` application in project `default` that syncs [podinfo](https://github.com/stefanprodan/podinfo) into the in-cluster `mm-live-argocd` namespace, restarts and patches its Deployment, checks the stale and typed-name guards, and is cascade-deleted (the namespace may stay). With `ARGOCD_LIVE_KUBE_CONTEXT` set to the context ArgoCD runs in, it also reads the ArgoCD metrics through the service proxy and Pod usage from metrics-server | A token in `ARGOCD_LIVE_TOKEN` or saved by the app; rights to create and delete applications in `default` |
+| `scripts/sqs-live-test.sh <profile> <queue>` | The SQS tab against a real account (region `ap-northeast-2` unless `MM_SQS_REGION` is set). First, all read-only: the overview, the region flow, and, for `<queue>` (an existing queue with an EventBridge rule producer, a Lambda consumer, and a DLQ), its flow with and without IAM and the receive gate. Then a throwaway `mm-smoke-<date>-<random>` queue and its DLQ go through dead-lettering, receiving, edited resend, delete, release, a move task, and the purge guards, and are deleted at the end | An AWS profile allowed to create and delete SQS queues |
 
 ### Maintenance scripts
 
 - `node scripts/update-iam-catalog.mjs` regenerates `src-tauri/src/iam/catalog.json` (every IAM action and its access level) from the AWS Service Reference. Needs Node 20+ and internet access.
-- `scripts/screenshots/shoot.mjs` retakes every README screenshot from a demo page that runs the real frontend against mocked backend commands (`demo.tsx` plus one mock module per area: `iam.ts`, `cost.ts`, `k8s.ts`, `argocd.ts`, `argowf.ts`, `pg.ts`). Run `npm run dev`, then `npm i --no-save playwright-core && node scripts/screenshots/shoot.mjs [out_dir] [section…]` (needs Google Chrome). Sections are `core`, `k8s`, `argocd`, and `pg`; with none it takes them all.
+- `scripts/screenshots/shoot.mjs` retakes every README screenshot from a demo page that runs the real frontend against mocked backend commands (`demo.tsx` plus one mock module per area: `iam.ts`, `cost.ts`, `k8s.ts`, `argocd.ts`, `argowf.ts`, `pg.ts`, `kv.ts`, `sqs.ts`). Run `npm run dev`, then `npm i --no-save playwright-core && node scripts/screenshots/shoot.mjs [out_dir] [section…]` (needs Google Chrome). Sections are `core`, `k8s`, `argocd`, `argowf`, `pg`, `kv`, and `sqs`; with none it takes them all.
 
 ### Project layout
 ```
@@ -662,6 +736,7 @@ src/                     React frontend
   argowf/                Argo Workflows tab
   pg/                    PostgreSQL users tab
   kv/                    Valkey and Redis OSS tab, including the Bull screens
+  sqs/                   SQS tab: queue list and health, flow and region map; messages/ (receiving and viewing), change/ (previews, redrive, purge, change log)
   tailscale/             Tailscale pane (this Mac, devices, users, routes, Services, DNS, policy, keys, logs, integrations, sharing, diagnosis, settings, connection, org) and connection checks in network error boxes
 src-tauri/src/
   adapters/              per-service read-only adapters for the resource browser
@@ -678,6 +753,7 @@ src-tauri/src/
   argowf/                Argo Server client, kubeconfig-context and keychain auth, response shaping, cron next runs, log streams
   pg/                    PostgreSQL connection, read-only catalog snapshot, privilege evaluation, security checks, change previews and commits
   kv/                    ElastiCache target and sign-in (IAM tokens, keychain), fred connection and topology, the read-only command allow-list, keys, values, server stats, Bull queues
+  sqs/                   queue reads and CloudWatch activity, health checks, queue-policy parsing, producer/consumer flow, receive sessions and the receive gate, change previews and applies, sqs-changes.jsonl
   tailscale/             local node and peer shaping and connection diagnosis (only cli.rs starts the CLI); api.rs is the Tailscale API client with keychain credentials and OAuth token cache; devices, users, DNS, settings, services, integrations, org, policy (findings), keys, logs; changes.rs writes tailscale-changes.jsonl
   jsonl.rs               the shared change-log file format
   mouse_nav.rs           macOS mouse back/forward buttons

@@ -38,6 +38,8 @@ mod pg;
 mod pg_commands;
 mod resource_index;
 mod settings;
+mod sqs;
+mod sqs_commands;
 mod tailscale;
 mod tailscale_commands;
 mod topology;
@@ -70,6 +72,7 @@ pub fn run() {
             app.manage(iam_commands::IamState::new(dir.join("iam-changes.jsonl")));
             app.manage(k8s_commands::K8sState::new(dir.join("k8s-changes.jsonl")));
             app.manage(k8s_access_commands::AccessState::default());
+            app.manage(sqs_commands::SqsState::new(dir.join("sqs-changes.jsonl")));
             app.manage(argocd::ArgocdState::new(dir.clone()));
             app.manage(tailscale::TailscaleState::new(dir.join("tailscale-changes.jsonl")));
             app.manage(argocd::cluster::ArgoKube::default());
@@ -231,6 +234,17 @@ pub fn run() {
             kv_commands::kv_bull_flow,
             kv_commands::kv_bull_transitions,
             kv_commands::kv_bull_topology,
+            sqs_commands::sqs_overview,
+            sqs_commands::sqs_queue,
+            sqs_commands::sqs_flow,
+            sqs_commands::sqs_region_flow,
+            sqs_commands::sqs_peekable,
+            sqs_commands::sqs_preview,
+            sqs_commands::sqs_apply,
+            sqs_commands::sqs_release,
+            sqs_commands::sqs_move_tasks,
+            sqs_commands::sqs_changes,
+            sqs_commands::sqs_save_jsonl,
             k8s_access_commands::k8s_access,
             k8s_access_commands::k8s_access_matrix,
             k8s_access_commands::k8s_access_cell,

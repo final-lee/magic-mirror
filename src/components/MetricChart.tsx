@@ -18,7 +18,7 @@ export function formatMetric(value: number, unit: MetricUnit): string {
     case "countPerSecond":
       return `${compact(value)}/초`;
     case "seconds":
-      return value < 1 ? `${compact(value * 1000)}ms` : `${compact(value)}초`;
+      return value > 0 && value < 1 ? `${compact(value * 1000)}ms` : `${compact(value)}초`;
     case "milliseconds":
       return value < 1000 ? `${compact(value)}ms` : `${compact(value / 1000)}초`;
     case "microseconds":

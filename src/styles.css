@@ -2625,3 +2625,135 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .argo-bar-actions { display: flex; flex-direction: column; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--border-input); }
 .argo-bar-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .argo-bar-label { font-size: 11px; min-width: 48px; margin-right: 2px; }
+
+.sqs-msg-view, .sqs-change-log, .sqs-change-tasks { min-width: 0; }
+.sqs-msg-toolbar, .sqs-msg-form, .sqs-change-actions, .sqs-change-form, .sqs-msg-groups { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
+.sqs-msg-form, .sqs-change-form { padding: 10px; border: 1px solid var(--line); border-radius: 6px; }
+.sqs-msg-form label, .sqs-change-form label { display: flex; align-items: center; gap: 6px; }
+.sqs-msg-form input[type=number], .sqs-change-form input[type=number] { width: 100px; }
+.sqs-msg-form > div { flex-basis: 100%; }
+.sqs-msg-expired { opacity: .55; }
+.sqs-msg-table, .sqs-change-log { overflow: auto; }
+.sqs-msg-table table, .sqs-msg-detail table, .sqs-change-log table, .sqs-change-diff { width: 100%; border-collapse: collapse; text-align: left; }
+.sqs-msg-table th, .sqs-msg-table td, .sqs-msg-detail th, .sqs-msg-detail td, .sqs-change-log th, .sqs-change-log td, .sqs-change-diff th, .sqs-change-diff td { padding: 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.sqs-msg-table { max-height: 36vh; }
+.sqs-msg-table thead th { position: sticky; top: 0; background: var(--panel); cursor: default; }
+.sqs-msg-table tbody tr { cursor: pointer; }
+.sqs-msg-table tbody tr:hover td { background: var(--hover); }
+.sqs-msg-table tbody tr.selected td { background: var(--accent-soft); }
+/* 첫 줄 칸은 남는 너비를 채우고 길면 줄임표로 자른다 */
+.sqs-msg-table td:last-child { width: 100%; max-width: 0; }
+.sqs-msg-body { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; text-align: left; font-size: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.sqs-msg-results table { width: 100%; }
+.sqs-msg-results td { padding: 4px 6px; }
+.sqs-msg-results td:last-child { white-space: normal; max-width: none; overflow-wrap: anywhere; }
+.sqs-msg-detail { margin-top: 16px; }
+.sqs-msg-detail h3, .sqs-msg-view h3, .sqs-change-tasks h3 { margin: 12px 0 6px; font-size: 13px; overflow-wrap: anywhere; }
+.sqs-msg-detail h4 { margin: 14px 0 6px; font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; }
+.sqs-msg-detail th { width: 18em; color: var(--dim); font-weight: 500; white-space: nowrap; }
+.sqs-msg-detail pre, .sqs-change-diff pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; background: var(--code-bg); padding: 8px; }
+.sqs-change-diff { table-layout: fixed; }
+/* 전역 th·td는 한 줄·말줄임·위쪽 고정이다: 긴 ARN·본문이 잘리지 않고 줄바꿈되게 한다 */
+.sqs-msg-detail td, .sqs-change-log td, .sqs-change-diff td { white-space: normal; max-width: none; overflow-wrap: anywhere; }
+.sqs-msg-detail th, .sqs-change-log th, .sqs-change-diff th { position: static; cursor: default; }
+/* 전역 .btn은 줄 전체를 차지한다: 도구 줄·폼·작업 카드의 버튼은 글 너비만큼만 */
+.sqs-msg-toolbar .btn, .sqs-msg-form .btn, .sqs-msg-groups .btn, .sqs-change-form .btn, .sqs-change-task .btn { display: inline-block; width: auto; margin-top: 0; padding: 4px 12px; }
+.sqs-change-actions { position: relative; margin: 0; flex-wrap: nowrap; }
+.sqs-change-actions .sqs-change-form, .sqs-change-notice { position: absolute; z-index: 4; right: 0; top: 100%; width: max-content; max-width: min(600px, 80vw); background: var(--panel); box-shadow: 0 4px 16px var(--overlay); }
+.sqs-msg-toolbar .btn[aria-pressed="true"], .sqs-msg-groups .btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.sqs-change-task { padding: 8px 0 12px; border-bottom: 1px solid var(--line); }
+.sqs-change-task p { margin: 4px 0; }
+.sqs-change-task progress { display: block; width: min(100%, 400px); margin: 6px 0; }
+
+/* SQS 탭: 위쪽 줄, 왼쪽 큐 목록, 오른쪽 큐 상세 */
+.sqs-tab { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.sqs-top { flex: none; display: flex; align-items: center; gap: 12px; padding: 6px 14px; min-height: 40px; background: var(--tone-232325); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.sqs-top-problems { color: var(--red); font-weight: 600; }
+.sqs-top-end { margin-left: auto; }
+.sqs-body { flex: 1; min-height: 0; display: flex; }
+.sqs-map-body { flex-direction: column; overflow: auto; }
+.sqs-list { flex: none; width: 440px; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--side); }
+.sqs-list-tools { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.sqs-list-count { margin-left: auto; font-size: 11px; }
+.sqs-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border: 1px solid var(--border-strong); border-radius: 999px; background: none; color: var(--dim); font-size: 11px; cursor: pointer; }
+.sqs-chip[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.sqs-chip-n { color: var(--red); font-weight: 600; }
+.sqs-rows { flex: 1; min-height: 0; overflow: auto; outline: none; }
+.sqs-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) 48px 48px 36px; align-items: center; gap: 6px; padding: 5px 10px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.sqs-row-head { flex: none; padding-top: 3px; padding-bottom: 3px; color: var(--dim); font-size: 10px; background: var(--panel); }
+.sqs-rows .sqs-row { cursor: pointer; }
+.sqs-rows .sqs-row:hover { background: var(--hover); }
+.sqs-rows .sqs-row.selected { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.sqs-rows:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+.sqs-row.nested { padding-left: 28px; }
+.sqs-row .dot { margin-right: 0; }
+.sqs-row-name { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.sqs-row-title { overflow-wrap: anywhere; }
+.sqs-num { text-align: right; font-variant-numeric: tabular-nums; }
+.sqs-num.bad { color: var(--red); font-weight: 600; }
+.sqs-wrap { overflow-wrap: anywhere; }
+.sqs-detail { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.sqs-detail-empty { flex: 1; }
+.sqs-detail-head { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 14px 0; }
+.sqs-detail-head h3 { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.sqs-detail-end { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.sqs-detail-tabs { flex: none; display: flex; gap: 2px; padding: 6px 14px 0; border-bottom: 1px solid var(--line); }
+.sqs-detail-tab { padding: 5px 14px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--dim); font-size: 12px; cursor: pointer; }
+.sqs-detail-tab:hover { color: var(--text); }
+.sqs-detail-tab.on { color: var(--text); border-bottom-color: var(--accent); }
+.sqs-detail-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 14px 16px; }
+.sqs-detail-pane { min-width: 0; }
+
+/* SQS 개요 */
+.sqs-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; margin: 10px 0; }
+.sqs-stat { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.sqs-stat-label { color: var(--dim); font-size: 11px; }
+.sqs-stat-value { font-size: 18px; font-variant-numeric: tabular-nums; }
+.sqs-stat.bad { border-color: var(--red); background: var(--red-soft); }
+.sqs-stat.bad .sqs-stat-value { color: var(--red); }
+.sqs-findings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.sqs-finding { border: 1px solid var(--line); border-left-width: 3px; border-radius: 6px; background: var(--panel); }
+.sqs-finding.fail { border-left-color: var(--red); }
+.sqs-finding.warn { border-left-color: var(--yellow); }
+.sqs-finding.info { border-left-color: var(--dim); }
+.sqs-finding summary, .sqs-finding-row { display: flex; align-items: baseline; gap: 8px; padding: 6px 10px; cursor: default; }
+.sqs-finding summary { cursor: pointer; }
+.sqs-finding-icon { flex: none; width: 14px; text-align: center; }
+.sqs-finding.fail .sqs-finding-icon { color: var(--red); }
+.sqs-finding.warn .sqs-finding-icon { color: var(--yellow); }
+.sqs-finding.info .sqs-finding-icon { color: var(--dim); }
+.sqs-finding-detail { margin: 0; padding: 0 10px 8px 32px; color: var(--dim); }
+.sqs-attrs { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; font-size: 12px; }
+.sqs-attrs dt { color: var(--dim); }
+.sqs-attrs dd { margin: 0; min-width: 0; }
+.sqs-links { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.sqs-policy summary { cursor: pointer; color: var(--accent); }
+.sqs-policy pre { margin: 6px 0 0; padding: 8px; max-height: 320px; overflow: auto; background: var(--code-bg); border-radius: 6px; }
+.sqs-read-error { margin: 8px 0; border-radius: 6px; }
+
+/* SQS 흐름 */
+.sqs-flow-bar { display: flex; align-items: center; gap: 10px; margin: 10px 0 6px; flex-wrap: wrap; }
+.sqs-flow-bar-end { margin-left: auto; display: flex; gap: 8px; }
+.sqs-gaps { margin: 8px 0; border-radius: 6px; }
+.sqs-gaps ul { margin: 4px 0 0; padding-left: 18px; }
+.sqs-flow-grid { display: grid; grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr) 24px minmax(0, 1fr); align-items: start; gap: 8px; }
+.sqs-flow-arrow { align-self: center; text-align: center; color: var(--dim); font-size: 18px; }
+.sqs-flow-col { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.sqs-flow-empty { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+.sqs-flow-below { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; margin-top: 12px; }
+.sqs-node { padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--panel); display: flex; flex-direction: column; gap: 6px; }
+.sqs-node.denied { border-color: var(--red); background: var(--red-soft); }
+.sqs-node.cross { border-style: dashed; }
+.sqs-flow-queue.fail { border-color: var(--red); }
+.sqs-flow-queue.warn { border-color: var(--yellow); }
+.sqs-node-head { display: flex; align-items: flex-start; gap: 8px; }
+.sqs-node-icon { flex: none; width: 20px; text-align: center; }
+.sqs-node-title { display: flex; flex-direction: column; min-width: 0; }
+.sqs-node-chips, .sqs-node-tools { display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.sqs-node-detail { margin: 0; display: grid; gap: 4px; font-size: 11px; }
+.sqs-node-detail dt { color: var(--dim); }
+.sqs-node-detail dd { margin: 0; }
+.sqs-policy-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.sqs-policy-table th { position: static; cursor: default; text-align: left; color: var(--dim); font-weight: 600; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.sqs-policy-table td { vertical-align: top; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: normal; max-width: none; overflow-wrap: anywhere; }
+.sqs-map { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 8px 14px 12px; }

@@ -10,6 +10,7 @@ import { NOT_POSTGRES, pgTargetOf } from "../pg/targets";
 import type { K8sTarget } from "../k8s/types";
 import { ClusterDetailSummary } from "../k8s/ClusterDetailSummary";
 import { OPEN_EKS_TAB } from "../k8s/text";
+import { OPEN_SQS_TAB } from "../sqs/text";
 import type { PgTarget } from "../pg/types";
 import { Breadcrumb } from "./Breadcrumb";
 import { DetailPanel } from "./DetailPanel";
@@ -36,6 +37,8 @@ interface Props {
   onOpenK8s?: (target: K8sTarget) => void;
   /** ElastiCache의 Valkey·Redis OSS 캐시를 열 때 키 탐색 탭으로 보낸다. Memcached면 부르지 않고 안내만 띄운다. */
   onOpenKv?: (target: KvTarget) => void;
+  /** SQS 큐를 열 때 그 리전의 SQS 탭으로 보내고 그 큐를 고른다. */
+  onOpenSqs?: (region: string, url: string) => void;
   onRefresh: () => void;
   active: boolean;
   /** ⌘K에서 고른 리소스. nonce가 바뀔 때마다 그 행을 고르고 보이게 한다 */
@@ -53,7 +56,7 @@ const NOTICE_MS = 5000;
 /** ⌘K에서 고른 리소스가 다시 읽은 목록에 없을 때 */
 export const FOCUS_GONE = "찾던 리소스가 지금 목록에 없어요. 지워졌을 수 있어요";
 
-export function ResourceArea({ service, type, profile, region, account, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onOpenKv, onRefresh, active, focus = null }: Props) {
+export function ResourceArea({ service, type, profile, region, account, onOpenBucket, onOpenVpc, onOpenIam, onOpenPg, onOpenK8s, onOpenKv, onOpenSqs, onRefresh, active, focus = null }: Props) {
   const q = useResources(profile, region, service, type.id);
   // ⌘F: 이 목록 안에서만 찾는다(평소에는 찾기 줄이 없다)
   const listBox = useRef<HTMLElement>(null);
@@ -76,6 +79,7 @@ export function ResourceArea({ service, type, profile, region, account, onOpenBu
   const items = q.data?.items ?? [];
   const selected = items.find((r) => r.id === selectedId) ?? null;
   const eksCluster = service.id === "eks" && type.id === "clusters";
+  const sqsQueue = service.id === "sqs" && type.id === "queues";
   useCopyShortcut(active ? (selected?.id ?? null) : null);
 
   // 안내는 띄운 때부터 NOTICE_MS 뒤에 사라진다. 그 사이에 다시 띄우면 처음부터 센다.
@@ -111,6 +115,8 @@ export function ResourceArea({ service, type, profile, region, account, onOpenBu
       const target = kvTargetOf(item, type.id);
       if (target) onOpenKv?.({ profile, region, ...target });
       else showNotice(NOT_KV);
+    } else if (sqsQueue) {
+      onOpenSqs?.(region, item.id);
     }
   };
 
@@ -150,9 +156,12 @@ export function ResourceArea({ service, type, profile, region, account, onOpenBu
           detail={selected ? resourceDetail(selected, type, service) : null}
           onShowRaw={() => setShowRaw(true)}
           onClose={() => setSelectedId(null)}
-          actions={eksCluster && selected && (
-            <button className="btn small tone-nav" onClick={() => onOpenK8s?.({ profile, region, cluster: selected.id })}>
-              {OPEN_EKS_TAB}
+          actions={(eksCluster || sqsQueue) && selected && (
+            <button
+              className="btn small tone-nav"
+              onClick={() => (eksCluster ? onOpenK8s?.({ profile, region, cluster: selected.id }) : onOpenSqs?.(region, selected.id))}
+            >
+              {eksCluster ? OPEN_EKS_TAB : OPEN_SQS_TAB}
             </button>
           )}
         >

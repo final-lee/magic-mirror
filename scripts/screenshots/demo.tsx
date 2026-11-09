@@ -15,6 +15,7 @@ import { k8sMock, k8sResources, k8sSettings } from "./k8s";
 import { argocdMock, argocdResources, argocdSettings } from "./argocd";
 import { kvMock, kvResources, kvSettings } from "./kv";
 import { pgMock, pgResources, pgSettings } from "./pg";
+import { sqsMock, sqsResources } from "./sqs";
 import services from "./services.json";
 
 const ACCOUNT = "123456789012";
@@ -292,7 +293,7 @@ mockIPC(
         return null;
       case "list_resources": {
         const key = `${a.service}/${a.typeId}`;
-        const extra = { ...k8sResources, ...argocdResources, ...pgResources, ...kvResources } as Record<string, ReturnType<typeof res>[]>;
+        const extra = { ...k8sResources, ...argocdResources, ...pgResources, ...kvResources, ...sqsResources } as Record<string, ReturnType<typeof res>[]>;
         const items = a.region === "us-west-2" && a.service === "ec2" && a.typeId === "instances" ? WEST : (RESOURCES[key] ?? extra[key] ?? []);
         recordIndex(a.profile, a.region, a.service, a.typeId, items);
         return { items, truncated: false };
@@ -351,7 +352,7 @@ mockIPC(
         if (cmd.startsWith("cost_")) return costMock(cmd, a);
         if (cmd.startsWith("argowf_")) return argowfMock(cmd, a);
         if (cmd.startsWith("iam_")) return iamMock(cmd, a) ?? null;
-        for (const mock of [k8sMock, argocdMock, pgMock, kvMock]) {
+        for (const mock of [k8sMock, argocdMock, pgMock, kvMock, sqsMock]) {
           const answer = mock(cmd, a);
           if (answer !== undefined) return answer;
         }
