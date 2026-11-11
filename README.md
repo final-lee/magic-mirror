@@ -11,6 +11,8 @@ A macOS desktop app for working with AWS and the Kubernetes, ArgoCD, Argo Workfl
 - **Operate** EKS clusters (Lens-style overview, live lists, logs, shell, port-forward, Helm, network and access views, security checks, previewed changes), ArgoCD applications, and Argo Workflows.
 - **Manage** RDS PostgreSQL roles and privileges over IAM authentication.
 - **Inspect** ElastiCache Valkey and Redis OSS caches like Medis — key tree, values, server stats — and see BullMQ queues drawn as charts.
+- **Trace** SNS topics end to end: who publishes, where messages go, why a delivery fails, and which subscribers a sample message reaches — and fix it with previewed, undoable changes.
+- **Work with** DynamoDB tables — keys, indexes, health findings, items (Query, Scan, PartiQL SELECT), single-table design analysis, streams — and make previewed, undoable item and table changes.
 
 Everything is read-only until you ask for a change, and every change starts with a preview of exactly what will be sent.
 
@@ -20,7 +22,7 @@ Everything is read-only until you ask for a change, and every change starts with
 
 - [Features](#features)
   - [Resource browser](#resource-browser-read-only) · [VPC network diagram](#vpc-network-diagram) · [IAM workspace](#iam-workspace) · [Cost dashboard](#cost-dashboard)
-  - [EKS (Kubernetes)](#eks-kubernetes) · [ArgoCD](#argocd) · [Argo Workflows](#argo-workflows) · [Tailscale](#tailscale) · [PostgreSQL users (RDS)](#postgresql-users-rds) · [Valkey and Redis OSS (ElastiCache)](#valkey-and-redis-oss-elasticache) · [SQS](#sqs)
+  - [EKS (Kubernetes)](#eks-kubernetes) · [ArgoCD](#argocd) · [Argo Workflows](#argo-workflows) · [Tailscale](#tailscale) · [PostgreSQL users (RDS)](#postgresql-users-rds) · [Valkey and Redis OSS (ElastiCache)](#valkey-and-redis-oss-elasticache) · [SQS](#sqs) · [SNS](#sns) · [DynamoDB](#dynamodb)
   - [S3 explorer](#s3-explorer) · [File diff](#file-diff) · [Auto-update](#auto-update)
 - [What can change things](#what-can-change-things)
 - [Settings](#settings)
@@ -33,7 +35,7 @@ Everything is read-only until you ask for a change, and every change starts with
 
 ### Resource browser (read-only)
 
-- **17 services, 27 resource types**:
+- **17 services, 28 resource types**:
 
   | Service | Resource types |
   | --- | --- |
@@ -50,7 +52,7 @@ Everything is read-only until you ask for a change, and every change starts with
   | CloudWatch Logs | Log Groups |
   | CloudFront | Distributions |
   | SQS | Queues |
-  | SNS | Topics |
+  | SNS | Topics, Subscriptions |
   | ECR | Repositories |
   | Route 53 | Hosted Zones |
   | Secrets Manager | Secrets |
@@ -59,9 +61,9 @@ Everything is read-only until you ask for a change, and every change starts with
 - Uses the profiles in `~/.aws/config`, including SSO. Pick a profile and region and the list loads. The last profile and region are remembered.
 - **SSO sign-in**: when an SSO session has expired — when you pick the profile, when the app starts, or while you work — the app runs `aws sso login` for you. Approve it in the browser that opens and the lists reload. A banner shows the progress and lets you cancel. Profiles that share an SSO session sign in once, and role profiles sign in through their `source_profile`. The same sign-in starts when an EKS kubeconfig context or an Argo Workflows connection hits an expired session.
 - **Sidebar**: services in the official AWS Architecture icon set, with a count per resource type. Turn on only the services you use (Settings → 표시할 서비스), and pin resource types as favorites; favorites sit at the top. Under each service the resource types run from the largest unit down, clusters first (RDS: DB Clusters before DB Instances; ElastiCache: Replication Groups, Serverless Caches, then Cache Clusters, which are the groups' nodes). Drag favorites, services (by their name row), and the rows under a service to put them in your own order; the order is kept across restarts. **💰 비용** opens the cost tab, **Tailscale** shows Tailscale next to the sidebar (no extra tab), **IAM → 🔐 IAM 관리** the IAM workspace, and **EKS → 🐙 ArgoCD** / **⚙️ Argo Workflows** those tabs.
-- **Detail panel**: key fields, tags, raw JSON, a link to the AWS console, and ID copy (⌘C). It opens as an overlay over the list; click the selected row again or an empty spot to close it. An EKS cluster's detail also shows its usage summary. Double-clicking opens a workspace for some types: a bucket opens the S3 explorer, a VPC its diagram, an IAM user, role, or policy the IAM workspace, an EKS cluster the EKS tab, an RDS PostgreSQL cluster or instance the PostgreSQL tab, a Valkey or Redis OSS cache the `⚡` tab, and an SQS queue the `📬 SQS` tab.
+- **Detail panel**: key fields, tags, raw JSON, a link to the AWS console, and ID copy (⌘C). It opens as an overlay over the list; click the selected row again or an empty spot to close it. An EKS cluster's detail also shows its usage summary. Double-clicking opens a workspace for some types: a bucket opens the S3 explorer, a VPC its diagram, an IAM user, role, or policy the IAM workspace, an EKS cluster the EKS tab, an RDS PostgreSQL cluster or instance the PostgreSQL tab, a Valkey or Redis OSS cache the `⚡` tab, an SQS queue the `📬 SQS` tab, and a DynamoDB table the `🗄` tab.
 - **CloudWatch metrics in the detail** of each service's largest unit: EC2 instances, S3 buckets (daily storage size and object count, last 2 weeks), Lambda functions, RDS DB clusters and stand-alone DB instances, ElastiCache replication groups (one line per member node), serverless caches and stand-alone cache clusters, ECS clusters, EKS clusters (control-plane metrics such as API requests, errors, latency, and pending pods), DynamoDB tables, log groups, CloudFront distributions, SQS queues, SNS topics, ECR repositories, and Route 53 hosted zones. Pick 1 h, 3 h (default), 12 h, 1 d, 3 d, or 1 w; each chart shows its latest value. A DB instance in a cluster or a node in a replication group points to the cluster's detail instead. CloudWatch charges per metric requested ($0.01 per 1,000), so the charts never reload on their own — only on **다시 읽기** or a new range. VPC, IAM, and Secrets Manager have no per-resource metrics.
-- **Fuzzy filter (⌘F)**: type letters in order, skipping any — `poa` finds `prod-orders-api`. Space-separated words must all match. In the resource list it looks at the name, ID, text columns, and tags (`team=pay`); matched letters are highlighted. While filtering, the best matches come first until you click a column header. The same filter works on the other tabs (IAM, PostgreSQL, ArgoCD, Kubernetes, SQS, S3 explorer).
+- **Fuzzy filter (⌘F)**: type letters in order, skipping any — `poa` finds `prod-orders-api`. Space-separated words must all match. In the resource list it looks at the name, ID, text columns, and tags (`team=pay`); matched letters are highlighted. While filtering, the best matches come first until you click a column header. The same filter works on the other tabs (IAM, PostgreSQL, ArgoCD, Kubernetes, SQS, DynamoDB, S3 explorer).
 - **Find anything you've opened (⌘K)**: searches every list this profile has read, in every region, without calling AWS. Words can also match the service, type, or region (`west web`). Pick a result to jump to its region and type with the row selected. Results show how old the list is; lists past the cache TTL are marked and reload when opened.
 - **Caching**: lists stay cached while the app runs and reload in the background when you reopen one older than the cache TTL (Settings → 리소스 캐시: 5 min, 15 min, 1 h, 6 h, or unlimited; default 15 min). ⌘R refreshes what's on screen. **캐시 비우기** or ⌘⇧R drops every cached list for all profiles and regions, on disk too, and reloads what's on screen.
 - The ⌘K index is kept on disk for 7 days (`resource-index.json` in the app data folder, readable only by you). It holds only names, IDs, column values, and tags — never raw JSON or detail fields, which can contain secrets such as Lambda environment variables.
@@ -488,6 +490,116 @@ SQS has no way to read a message without side effects. A receive hides the messa
   - Results are shown per message. A message that was sent but couldn't be deleted because its hold ran out is flagged as a possible duplicate.
 - **큐 비우기…** purges any queue after you type its name. Any change to a queue whose name contains `prod` or `prd` also asks for the name.
 - **기록** lists the SQS changes made from the app for this queue, with message counts but never bodies.
+### SNS
+![SNS delivery diagnosis](docs/screenshots/sns-diagnosis.png)
+
+Double-click a row in **SNS → Topics** to open a `📣` tab for that topic (a row in **SNS → Subscriptions** opens its topic on that subscription). **📣 SNS 개요** in the sidebar's SNS section opens the account-wide view. Everything only reads until you press a button that says it changes something.
+
+- **개요**: encryption (and whether it is the AWS-managed `alias/aws/sns` key), FIFO settings, message archive, signature version, tracing, delivery status logging per protocol, the HTTP retry policy as a table, the data protection policy, and tags.
+- **구독**: protocol, endpoint (queues and functions by name, with account and region when they differ), state, the filter policy in one line (`event ∈ {order.created} · 속성 범위`), raw delivery, DLQ, and the diagnosis result, with protocol and state chips and ⌘F. A pending subscription says it can't be read until it is confirmed and that AWS deletes it after 3 days. The detail shows every attribute, the filter JSON, and a button to the queue or function in the resource browser.
+- **흐름 지도**: publishers → topic → subscriptions → endpoints → DLQs, with last-hour published, delivered and failed counts. Publishers come from CloudWatch alarms, EventBridge rules on every bus, RDS event subscriptions, and ElastiCache notifications (solid lines), and from the topic policy (dashed: allowed, not necessarily publishing). **더 찾기** also scans this region's S3 bucket notifications and Lambda async destinations, one call per bucket and function. Code that calls `Publish` directly can't be found without CloudTrail data events, and the map says so.
+- **배달 진단**: for each subscription, a ✓ / ! / ✗ / – checklist and a one-line conclusion: confirmed or pending, whether the queue or function still exists, whether the queue policy lets `sns.amazonaws.com` send from this topic (`aws:SourceArn`, `aws:SourceAccount`, `aws:SourceOwner`, wildcards, `IfExists`, explicit denies), whether a customer-managed key on the queue lets SNS encrypt (an `alias/aws/sqs` queue can't receive from SNS at all), the Lambda resource policy, the DLQ and its own policy and key, plain `http://`, a broken filter policy, and last-hour failures with the matching delivery status log lines. For the topic it flags an `alias/aws/sns` key with AWS-service publishers (their messages are rejected), a disabled key, and failures without delivery logging. Conditions the app can't evaluate are shown as `!` with the reason, never as fine.
+- **필터 시험**: enter message attributes (String, String.Array, Number, Binary) or a JSON body and see, for every subscription, 받음 / 걸러짐 / 필터 없음 with the first key that didn't match and why. It follows the documented operators (`prefix`, `suffix`, `equals-ignore-case`, `wildcard`, `anything-but`, `numeric`, `exists`, `cidr`, `$or`, nested body keys) and limits. AWS has no API for this, so the screen says it is the app's reading of the documentation. The last 10 samples per topic stay in memory.
+- **정책·점검**: the topic policy as sentences with who it opens the topic to (public, other accounts, AWS services, this account), Access Analyzer `ValidatePolicy` findings, who can publish and subscribe (with a jump to the IAM workspace's **Who can do this?** for this account's users and roles), and checks: public policy, other accounts that can subscribe or receive, service grants without `aws:SourceAccount`/`aws:SourceArn`, no encryption, `http://` endpoints, signature version 1, pending and orphaned subscriptions, SQS and Lambda subscriptions without a DLQ, and no delivery logging. **공개 접근 검사 실행 ($0.002)** runs Access Analyzer `CheckNoPublicAccess`, which AWS charges per call, so it only runs when you press it.
+- **큐 엿보기**: shows the messages sitting in the topic's DLQs and in subscribed queues that nobody consumes. A queue counts as unconsumed when no Lambda event source mapping reads it and it had no receives (`NumberOfMessagesReceived`, `NumberOfEmptyReceives`) in the last hour, not counting the app's own peeks. Queues with their own redrive policy, or whose consumers can't be checked, are refused with the reason, and a DLQ that someone seems to read asks for its name first. The app receives up to 100 messages with a 30-second visibility timeout, never deletes them, and makes them visible again as soon as you stop, leave the screen, or quit. SNS envelopes are unwrapped, and a DLQ message gets its delivery failure log lines when logging is on. Messages stay in memory only.
+- **변경 기록**: changes made to this topic, with undo.
+- **지표**: the topic's CloudWatch metrics, including filtered-out and DLQ redrive counts.
+
+![SNS flow map](docs/screenshots/sns-flow.png)
+
+The `📣 SNS` account view lists every topic with its last-24-hour published, delivered, failed and filtered counts (worst first), orphaned subscriptions (topic deleted or queue/function gone — AWS keeps them after a topic is deleted), pending subscriptions, all check results with a switch per check, account-level metrics, and read-only SMS (sandbox, numbers, spend, success rate) and mobile push (platform applications, endpoint and disabled-endpoint counts, certificate expiry) status. Phone numbers are masked.
+
+**Changing things.** Every change opens a preview with the exact API calls and bodies, the values before and after (policies as a line diff), how the diagnosis changes, and warnings. When you apply, the app reads AWS again and shows a fresh preview if anything changed. Unsubscribing, changing a filter or saving a topic policy on a topic with `prod` in its name, and any policy change that opens the topic to everyone or another account, need the topic name typed.
+
+- **고치기…** in the diagnosis adds the missing queue policy statement (Sid `magic-mirror-sns-<topic>`, limited to this topic with `aws:SourceArn`) or Lambda permission; **DLQ 붙이기…** / **DLQ 바꾸기…** sets the redrive policy and, if needed, the DLQ's policy. KMS key policies are never changed: the statement to add is shown with a copy button.
+- **구독 만들기…** (SQS, Lambda, HTTPS, email), adding the queue policy statement or Lambda permission only when missing; endpoints in other accounts get a plain subscribe and nothing in that account is touched. **해지…**, filter policy editing (the preview runs your recent filter samples against the old and new policy), raw delivery, HTTP delivery policies, the topic policy editor (with `ValidatePolicy` and the optional paid public-access check), delivery status logging with an existing role that trusts `sns.amazonaws.com` (roles are never created), and **시험 발행…** (FIFO group and deduplication IDs, attributes, per-protocol JSON).
+- For FIFO topics with an archive, **다시 보내기…** replays a time range to one subscription (an end time pauses the subscription afterwards; **이어 받기** resumes it) and shows the replay status, and the archive retention can be changed or turned off (which deletes the archive).
+- Every change is recorded in `sns-changes.jsonl`. Undo goes through the same preview: queue policy and Lambda changes remove only the app's own statement (or restore the one it replaced), and re-subscribing restores the saved attributes (an HTTPS endpoint has to confirm again). Published messages are recorded as MessageId, size, attribute names, and a SHA-256 of the body, never the body; email addresses and phone numbers are masked, and a change whose undo value contains one is recorded as not undoable. Replays and test publishes can't be undone.
+### DynamoDB
+![DynamoDB table overview](docs/screenshots/dynamo-overview.png)
+
+Double-click a table in **DynamoDB → Tables** to open a `🗄` tab for that profile and region with the table selected. There is one tab per region: double-clicking another table goes back to it, and switching profile closes it. The tab lists the region's tables on the left and shows the selected table on the right in six sub-tabs: **개요**, **아이템**, **설계**, **스트림**, **운영**, and **기록**. Everything reads only until you press a change button and confirm its preview. The resource list itself shows each table's PK, SK, number of GSIs, billing mode, class, stream view type, item count, and size.
+
+**Tables and overview**
+
+- **Table list**: name, billing (on-demand, or provisioned `R`/`W`), item count and size (DynamoDB updates these about every 6 hours, so they are approximate), badges for a stream and for global-table replicas, and a health dot. ⌘F filters by name; **문제 있는 테이블만** keeps the tables with a failure or warning, or that couldn't be read. The list reloads every 60 seconds while the tab is visible; the selected table is re-read every 10 seconds only while it or one of its indexes isn't `ACTIVE` (creating, backfilling, updating).
+- **개요**: the keys; the indexes (GSI and LSI keys, projection, status and backfill, capacity, size and count — click one to fill the Query builder with it); and the settings: capacity mode with auto scaling (min, max, target), table class, TTL attribute, PITR window, deletion protection, stream view type, encryption (DynamoDB-owned or KMS key), resource policy, global-table replicas, and Contributor Insights. Below come the health findings and the table's CloudWatch charts. With Contributor Insights on, **상위 키** lists the last hour's most accessed and most throttled keys (10 each, by partition key, and by partition plus sort key when those rules exist).
+- A missing permission never blanks the screen: what can't be read is skipped, the notice above the list names it, and the findings that need it are left out.
+
+| Finding | Level | When |
+| --- | --- | --- |
+| Throttled | Failure at 100 or more, otherwise warning | Read plus write throttle events on the table or a GSI in the last hour |
+| GSI backpressure | Failure | A GSI has write throttles; a lagging GSI throttles writes to the table too |
+| Index not active | Info | A GSI is creating, updating, deleting, or backfilling |
+| Under-provisioned | Warning | Peak use in the last 24 hours is 80% of provisioned capacity or more |
+| Over-provisioned | Info | Peak use is under 20% of provisioned capacity (or of the auto scaling minimum, if larger) |
+| No auto scaling | Warning | A provisioned table or GSI has no Application Auto Scaling target |
+| PITR off | Warning | Point-in-time recovery is off |
+| Deletion protection off | Info; warning if the name contains `prod` or `prd` | Deletion protection is off |
+| Replica unhealthy | Failure | A global-table replica isn't `ACTIVE` |
+| Replication lag | Warning | Average `ReplicationLatency` to a replica over the last hour is above 60 s |
+| Stream has no consumer | Info | The stream is on but no Lambda mapping, Pipe, or Kinesis destination reads it |
+| Mapping disabled | Warning | A Lambda event source mapping on the stream is disabled |
+| Iterator age | Warning from 5 minutes, failure from 12 hours | Worst `IteratorAge` of a consuming Lambda in the last 15 minutes; streams keep records for 24 hours |
+| No on-failure destination | Warning | A mapping has no failure destination and unlimited retries, so one bad record can block a shard for up to 24 hours |
+
+Each finding is one line that opens into an explanation; the last four rules come from the stream's connections and appear in **개요** and **스트림**. Metrics for the whole region are read in a few `GetMetricData` calls, not one per table.
+
+![DynamoDB health findings, CloudWatch charts, and top keys](docs/screenshots/dynamo-health.png)
+
+**아이템** — find and read items
+
+- Choosing a table reads nothing. The tab starts with a **첫 페이지 읽기** button; every read is one API call that returns at most one 1 MB page, and **다음 페이지** appends the next one. The app never reads on by itself.
+- **Query**: table or index, the partition key value (typed from the schema), a sort-key condition (`=`, `<`, `<=`, `>`, `>=`, `between`, `begins_with`), filter rows (`=`, `<>`, `<`, `<=`, `>`, `>=`, `between`, `begins_with`, `contains`, exists, not exists, `in`), a projection, sort direction, consistent read (not available on a GSI), and an optional page size. **Scan**: table or index, filters, projection, consistent read, with a reminder that filters run after the read and don't make it cheaper. **PartiQL**: `SELECT` only — any other statement is refused before it is sent — and a note that a `WHERE` without a key condition is a scan.
+- Expressions are built with placeholders (`#n0`, `:v0`); typed text is never pasted into an expression. **보낸 요청** shows exactly what is sent, as API parameters and as an AWS CLI command you can copy.
+- Each page shows `Count`, `ScannedCount`, and the read capacity it used, with a running total. The last 20 queries are kept in the tab, in memory, to run again.
+- **Results table**: key columns first (PK, SK, and the chosen index's keys), then the other attributes by how often they appear; every cell has a type badge, and maps and lists show as `{3}` and `[5]`. Fuzzy filter, column picker, and a detail overlay with a tree, **DynamoDB JSON** and plain JSON views, copy for a value, the key, or the whole item, the estimated size against the 400 KB limit, and, for the TTL attribute, when the item expires — or that it expired but hasn't been deleted yet.
+- Values keep their types: numbers stay as the exact strings DynamoDB returned, and sets and binary values are shown as such. The plain JSON view only changes how they are displayed, and keeps the type badge.
+- **내보내기…** saves the items read so far, through a save dialog, as DynamoDB JSONL, plain JSONL, or CSV (top-level attributes; maps and lists as JSON text).
+
+![Query on the items tab](docs/screenshots/dynamo-items.png)
+
+**설계** — single-table design, read back from a sample
+
+Single-table design packs several entity types into one table, told apart by key prefixes (`USER#u-1001` / `ORDER#2026-11-05#o-77310`). This tab reverse-engineers that from the items you've read in **아이템** plus **샘플 더 읽기**, which reads one more 1 MB Scan page each time you press it. It says how many items the report rests on and that rare entity types may be missing from a sample.
+
+- **Entities** are guessed from the key prefixes (a first piece in capitals and underscores before `#`, `|`, `:`, or `/`), or from a `type`, `entityType`, `_type`, `__typename`, or `_et` attribute when there is one. A table with neither shows as one entity with no prefix. Each entity shows its count and share, its key shapes (`ORDER#<date>#<id>`, with numbers, ISO dates, UUIDs, and ULIDs recognised, and constant segments such as `PROFILE` or `META` shown as they are), a table of its attributes with how often each appears and its types, and three example keys that open the item.
+- **Indexes and access patterns**: for the table and each index, one row per entity with the pattern written as key shapes (`PK = USER#<id>, SK begins_with ORDER#`), how many of the sampled items it covers, whether it is sparse (only some items carry its keys) or overloaded (several entities share it), and whether it reads a single item (the table's full key is fixed, such as `SK = PROFILE`) or several. Click one to fill the Query builder with a sample value.
+- **Diagnostics**, worded with counts and shares of the sample (`샘플 35개 중 27개(77%)에 TTL 속성이 없어요`): a TTL attribute that looks like milliseconds (TTL must be Unix seconds), items missing the TTL attribute, a TTL attribute that isn't a number (those items are never deleted), expired items that are still there, items over 100 KB (warning) or 350 KB (failure), one partition key making up 20% or more of the sample, an attribute with mixed types within an entity, and a `version`, `revision`, `_version`, or `ver` number attribute (which item edits use as a guard).
+
+![Single-table design: entities](docs/screenshots/dynamo-design.png)
+
+![Single-table design: indexes, access patterns, and diagnostics](docs/screenshots/dynamo-design-patterns.png)
+
+**Changing items**
+
+Item changes start from an item's detail or the results table and always open a preview first: the API calls, the before and after, and warnings. Every write is conditional, so a change made elsewhere since you read the item is never overwritten:
+
+- **편집**: a JSON editor, in DynamoDB JSON or (when the item has no sets, binary values, or numbers JSON can't hold exactly) plain JSON. Saving compares the edit with the item you read and sends only the changed attributes as an `UpdateItem` (`SET` and `REMOVE`). An attribute you change or remove must still hold the value you read, a new attribute must not exist yet, and a version attribute, when the table has one, must be unchanged. If the condition fails, the app says the item changed since you read it, re-reads it, and shows what differs.
+- Changing a key attribute moves the item: one `TransactWriteItems` puts the item at the new key (which must not exist) and deletes the old one (which must still match what you read), and the preview warns about it.
+- **새 아이템** starts from a template with the key attributes and sends a `PutItem` that fails if the key already exists, so it can't overwrite. **복제** opens that editor with the selected item and asks you to change the key.
+- **삭제** removes an item only if it still matches what you read, keeping the old image. To **delete several**, tick rows (up to 1,000): each item gets its own delete, 8 at a time, and a partial failure is listed item by item.
+- Table name typing: deleting two or more items, and any write on a table whose name contains `prod` or `prd`, ask you to type the table name.
+- **Undo** (**되돌리기…**, from the **기록** tab) goes through the same preview. A new item is deleted again, but only if it still equals what you put; an edit is reverted only if the item still has the edited values; a move runs backwards; a deletion puts the old image back unless the key has been taken since. The before-images that make this possible are kept in memory only, so after a restart those entries show as not undoable.
+
+**스트림** — connections and live records
+
+- **연결** draws what hangs off the table: the stream, the Lambda event source mappings that read it (state, batch size, starting position, parallelization, bisect on error, retries, maximum record age, failure destination, filters, and the recent iterator age), EventBridge Pipes, Kinesis streaming destinations, and global-table replicas with status, class, and last hour's replication latency. A Lambda node opens that function in the resource list. Replicas in other regions are shown, not read. Each connection that can't be read is named, and the rest still draw.
+- **실시간 레코드** reads the stream from **지금부터** (the default) or from **24시간 전부터** (everything still retained, which can be a lot). It polls every 2 seconds, only while the tab is visible, across up to 10 open shards, and follows a shard into its children when it closes. Each record shows its time, event (추가, 변경, 삭제), keys, and size; open one to compare the old and new image attribute by attribute, as far as the stream's view type includes them. Filter by text or event type, pause, or stop. Reading doesn't compete with your consumers for records, but the 5 reads per second per shard are shared with them, which is why it polls this slowly. The last 2,000 records are kept, in memory only.
+
+![Stream connections](docs/screenshots/dynamo-stream.png)
+
+![Live stream records with an image diff](docs/screenshots/dynamo-stream-live.png)
+
+**운영** — table settings
+
+Each of these opens a preview of the exact API call, warns about what it costs or breaks, and asks for the table name where noted below. The settings you can change: TTL (on or off, and the attribute; AWS allows another change only after an hour, and turning it on starts deleting items already expired — the app warns when the items you've read show millisecond or non-numeric TTL values), point-in-time recovery and its window, deletion protection, the stream (on or off, and its view type; a changed view type means turning it off and on, and turning it back on creates a new stream ARN that existing mappings and Pipes don't follow), table class, capacity mode and provisioned RCU and WCU for the table and its GSIs, and Contributor Insights (billed per rule).
+
+- **Backups**: create an on-demand backup, delete one (type the table name), or restore one into a new table. **특정 시점으로 복원** restores the table to a time you give (ISO 8601) or to the latest restorable time, also into a new table. The new table doesn't get auto scaling, TTL, tags, the stream, or PITR from the source, and the preview says so. Restores in progress are shown until the new table is `ACTIVE`.
+- **S3로 내보내기** exports the table (DynamoDB JSON or Amazon Ion; PITR must be on) into a bucket from your own account, with an optional time and prefix. The export list shows status, size, and location and refreshes every 10 seconds while one is running.
+- **기록** lists every change made to the table from the app, items and settings alike, with its result and a **되돌리기…** where one is possible. A setting goes back to the value the preview recorded, a new backup is deleted again, and turning a stream on is undone by turning it off. Restores, exports, backup deletion, and turning a stream off can't be undone.
+
+Creating or deleting tables and indexes, PartiQL writes, transaction editing, and importing from S3 aren't part of the app. The IAM actions it needs are listed under [What can change things](#what-can-change-things).
 
 ### S3 explorer
 ![S3 explorer](docs/screenshots/explorer.png)
@@ -516,6 +628,8 @@ Everything else in the app only reads. These are the only places that write, and
 | Where | What it can change | Guards | Log and undo |
 | --- | --- | --- | --- |
 | IAM workspace | Policy attachments, group members, inline policies, policy versions, access keys | Preview of API calls and permission impact, typed confirmation for risky changes, recheck at apply | `iam-changes.jsonl`, most undoable |
+| DynamoDB items | Create, edit (including moving to a new key), clone, delete, and bulk delete items | Preview of the API calls and the before/after; every write conditional on the item being as you read it; typed table name for deleting two or more items and for any write on a `prod`/`prd` table | `dynamo-changes.jsonl` (keys and attribute names, never values); undo of item changes only while the app stays open |
+| DynamoDB table settings | TTL, point-in-time recovery, deletion protection, stream, table class, capacity mode and provisioning, Contributor Insights, on-demand backups, restores into new tables, S3 exports | API call preview with warnings; typed table name for deleting a backup, turning off a stream that has consumers, and any change on a `prod`/`prd` table | `dynamo-changes.jsonl`, with undo for settings and new backups |
 | PostgreSQL tab | Roles, attributes, memberships, privileges, default privileges, passwords, sessions | **Change** switch, SQL preview, typed confirmation for risky changes, one transaction, recheck at apply | `db-changes.jsonl`, most undoable |
 | EKS tab | Workloads, CronJobs, Jobs, nodes, any object by YAML, RBAC bindings, EKS access entries, Helm releases, security fixes; shells and port-forwards | RBAC-aware buttons, dry-run preview (`helm --dry-run=server` for Helm), typed name for `kube-system` / `prod` and risky permission changes, stale-preview check | `k8s-changes.jsonl`, many undoable |
 | ArgoCD tab | Refresh, sync, terminate, rollback, resource actions/patch/delete, application create/edit/delete, ApplicationSet save/delete/retry, notification subscriptions | RBAC-aware controls, calls/diff/impact preview, typed name for production and destructive changes, stale-version check | `argocd-changes.jsonl` |
@@ -533,7 +647,10 @@ Everything else in the app only reads. These are the only places that write, and
 | Tailscale Services | VIP definitions and device approvals | API call preview; typed Service name for deletion | Previous definitions and approvals recorded for restoration |
 | Tailscale organization | Create or delete API-only tailnets | API call preview; typed name and `all` scope for deletion | Creation secrets shown once, never recorded; deletion is irreversible |
 | SQS tab | Receives (to read messages), resends, message deletes, DLQ move tasks and their cancellation, queue purges | Receiving only on DLQs and queues without consumers; preview of calls and effects; typed queue name for purges and for queues named `prod`/`prd`; the session and gates are checked again at apply | `sqs-changes.jsonl` (no message bodies); not undoable |
+| SNS tab | Subscriptions (create, unsubscribe, filter, raw delivery, DLQ, delivery policy), topic policy and delivery policy, delivery logging, archive, replay, test publish; the queue policy statement and Lambda permission a subscription needs; message visibility while peeking | API call and diff preview with diagnosis impact, re-read at apply, typed topic name for `prod` and for policy widening, queue name for a DLQ that seems consumed; KMS key policies are never changed | `sns-changes.jsonl`; most undoable, not replays or test publishes |
 | S3 explorer | Objects (upload, rename, delete, new folder) | Confirmation before overwrite and delete | — |
+
+DynamoDB needs these IAM actions. To read: `dynamodb:ListTables`, `DescribeTable`, `DescribeTimeToLive`, `DescribeContinuousBackups`, `DescribeContributorInsights`, `GetResourcePolicy`, `DescribeKinesisStreamingDestination`, `ListBackups`, `ListExports`, `DescribeExport`, `Query`, `Scan`, `PartiQLSelect`, `GetItem`, `DescribeStream`, `GetShardIterator`, and `GetRecords`; `application-autoscaling:DescribeScalableTargets` and `DescribeScalingPolicies`; `cloudwatch:GetMetricData` and `GetInsightRuleReport`; `lambda:ListEventSourceMappings`; `pipes:ListPipes`; and `s3:ListAllMyBuckets` (the export bucket list). To change: `dynamodb:PutItem`, `UpdateItem`, `DeleteItem` (moving an item to a new key is one transaction that needs `PutItem` and `DeleteItem`), `UpdateTimeToLive`, `UpdateContinuousBackups`, `UpdateTable`, `UpdateContributorInsights`, `CreateBackup`, `DeleteBackup`, `RestoreTableFromBackup`, `RestoreTableToPointInTime`, and `ExportTableToPointInTime`. A missing read permission only leaves that part of the DynamoDB tab out.
 
 ## Settings
 
@@ -556,7 +673,7 @@ Open with the ⚙ button in the toolbar.
 | ⌘K | Anywhere | Find any resource list you've opened |
 | ⌘R | Anywhere | Refresh what's on screen (on the cost tab, skip the cost cache) |
 | ⌘⇧R | Anywhere | Drop every cached list and reload |
-| ⌘C | Resource detail | Copy the ID |
+| ⌘C | Resource detail, DynamoDB tab | Copy the ID (a DynamoDB table's name) |
 | ↑ / ↓, Enter | Resource list, ⌘K | Move the selection, open it |
 | ⌘[ / ⌘], mouse back/forward | Tabs with history, S3 panes | Back / forward |
 | Tab | S3 explorer | Switch panes |
@@ -573,7 +690,7 @@ Under `~/Library/Application Support/dev.finallee.magicmirror/`:
 
 | File | Contents | Kept |
 | --- | --- | --- |
-| `settings.json` | Enabled services and the services the app has already shown, favorites, the sidebar order you dragged, last profile and region, theme, diff tool, kubeconfig path, cache TTL, the explorer's local folder, PostgreSQL sign-in users, ElastiCache sign-in ways and users, DB numbers, and Bull prefixes, EKS contexts, bookmarks, lane widths, and security checks turned off; ArgoCD servers, kube contexts, ArgoCD namespace, notification settings, per-server views and filters; Argo Workflows servers and list filters; the Tailscale tailnet name | Until changed |
+| `settings.json` | Enabled services and the services the app has already shown, favorites, the sidebar order you dragged, last profile and region, theme, diff tool, kubeconfig path, cache TTL, the explorer's local folder, PostgreSQL sign-in users, ElastiCache sign-in ways and users, DB numbers, and Bull prefixes, EKS contexts, bookmarks, lane widths, and security checks turned off (EKS and SNS); ArgoCD servers, kube contexts, ArgoCD namespace, notification settings, per-server views and filters; Argo Workflows servers and list filters; the Tailscale tailnet name | Until changed |
 | `resource-index.json` | The ⌘K index: names, IDs, column values, tags. No raw JSON or detail fields. Readable only by you | 7 days; wiped by ⌘⇧R |
 | `cost-cache.json` | Cost Explorer answers and the monthly request counter | Answers for 6 hours |
 | `kv-bigkeys.json` | The last 🐘 큰 키 report per ElastiCache cache and DB number: key names, types, sizes, when it was made. No values | Until the next report for that cache and DB |
@@ -582,14 +699,17 @@ Under `~/Library/Application Support/dev.finallee.magicmirror/`:
 | `k8s-changes.jsonl` | EKS changes, and when shells and node shells opened and closed (never their input or output, never Secret values) | Until deleted |
 | `tailscale-changes.jsonl` | Tailscale changes and undo state | Until deleted |
 | `argocd-changes.jsonl` | ArgoCD changes applied from the app | Until deleted |
+| `sns-changes.jsonl` | SNS changes with undo state, and when queue peeks started and stopped with how many messages they received. Never message bodies (a test publish keeps its MessageId, size, attribute names and a body SHA-256); email addresses and phone numbers masked | Until deleted |
+| `dynamo-changes.jsonl` | DynamoDB changes applied from the app: the API calls, the table and item keys, the attribute names that changed, the result, and undo state. Never item values | Until deleted |
 | `argocd-events.jsonl` | ArgoCD stream events recorded while the app is running | 90 days |
 | `sqs-changes.jsonl` | SQS changes applied from the app: queue, change, API calls, result, and message counts (never message bodies) | Until deleted |
 
 - ArgoCD and Argo Workflows API tokens and ElastiCache passwords you chose to remember live only in the macOS keychain (services `magic-mirror.argocd`, `magic-mirror.argo-workflows`, and `magic-mirror.elasticache`).
 - The Tailscale API credential (OAuth client ID and secret, or API access token) lives only in the macOS keychain: service `magic-mirror.tailscale`, account = the tailnet name saved in `settings.json` (`tailscaleTailnet`). OAuth access tokens stay in memory.
 - AWS credentials are never stored by the app; it uses `~/.aws` and the AWS CLI's SSO cache.
+- DynamoDB item values, stream records, and the before-images that item undo needs are kept in memory only; undoing an item change stops being possible when the app restarts. Item values reach disk only in an export file you save yourself with **내보내기…**.
 - Saved logs go to `~/Downloads`; files for external diff tools go to `$TMPDIR/magic-mirror-diff/` and are removed after an hour.
-- Metrics samples, Secret values you reveal, new PostgreSQL passwords, cache keys and values, and SQS message bodies are kept in memory only.
+- Metrics samples, Secret values you reveal, new PostgreSQL passwords, cache keys and values, SQS message bodies, SNS filter samples, and peeked SNS messages are kept in memory only.
 
 ## Install
 
@@ -679,6 +799,15 @@ A Korean install guide is in [docs/INSTALL.md](docs/INSTALL.md) and is attached 
 - IAM database authentication turned on for the cluster or instance.
 - A DB user that is a member of `rds_iam`. Reading works with any such user, though other users' session details also need `pg_read_all_stats`. Changing roles and privileges also needs `rds_superuser` or CREATEROLE (see [Changing roles and privileges](#changing-roles-and-privileges)), and the app says when the user you signed in as has neither.
 
+**SNS tab**
+
+- Reading the topic and subscriptions: `sns:GetTopicAttributes`, `sns:ListSubscriptionsByTopic`, `sns:GetSubscriptionAttributes`, `sns:ListSubscriptions`, `sns:ListTagsForResource`, `sns:GetDataProtectionPolicy`, `sqs:GetQueueUrl`, `sqs:GetQueueAttributes`, `lambda:GetFunctionConfiguration`, `lambda:GetPolicy`. Whatever is missing is reported for that item.
+- **배달 진단** also reads `kms:DescribeKey`, `kms:GetKeyPolicy`, `cloudwatch:GetMetricData`, and `logs:FilterLogEvents` on the topic's delivery status log groups (`sns/<region>/<account>/<topic>/Failure`).
+- **흐름 지도** reads `cloudwatch:DescribeAlarms`, `events:ListEventBuses`, `events:ListRuleNamesByTarget`, `rds:DescribeEventSubscriptions`, and `elasticache:DescribeCacheClusters`; **더 찾기** adds `s3:ListAllMyBuckets`, `s3:GetBucketNotification`, `lambda:ListFunctions`, and `lambda:ListFunctionEventInvokeConfigs`.
+- **정책·점검** and the account view read `access-analyzer:ValidatePolicy` (free), `sns:ListTopics`, `sqs:ListQueues`, `lambda:ListFunctions`, `cloudwatch:ListMetrics`, and `cloudwatch:GetMetricData` (4 metrics per topic, $0.01 per 1,000 metrics); the button-only public access check needs `access-analyzer:CheckNoPublicAccess` ($0.002 per call). SMS and push status read `sns:GetSMSSandboxAccountStatus`, `sns:ListSMSSandboxPhoneNumbers`, `sns:ListOriginationNumbers`, `sns:GetSMSAttributes`, `sns:ListPlatformApplications`, and `sns:ListEndpointsByPlatformApplication`.
+- **큐 엿보기** reads `sqs:ListDeadLetterSourceQueues` and `lambda:ListEventSourceMappings`, and uses `sqs:ReceiveMessage` and `sqs:ChangeMessageVisibility`.
+- Changes need the matching write actions: `sns:Subscribe`, `sns:Unsubscribe`, `sns:SetSubscriptionAttributes` (filter, raw delivery, DLQ, delivery policy, replay), `sns:SetTopicAttributes` (topic policy, delivery policy, logging, archive), `sns:Publish`, `sqs:SetQueueAttributes` (queue policy), and `lambda:AddPermission` / `lambda:RemovePermission`. Picking a logging role reads `iam:ListRoles` and `iam:GetRole`.
+
 ## Development
 
 | Part | Stack |
@@ -712,13 +841,14 @@ Tests that need real servers are `#[ignore]`d in a normal `cargo test` and run t
 | `scripts/pg-live-test.sh` | The PostgreSQL catalog reads and changes against PostgreSQL 14 and 16 containers on `127.0.0.1:55414` / `55416`, removed when it ends | Docker |
 | `scripts/kv-live-test.sh` | The Valkey/Redis tab against Valkey 8 containers: a plain server with every value type, BullMQ-, Bull 3-, and older Bull-shaped queues, a two-queue flow and an events stream, an AUTH and ACL server (password, no-password, and restricted users), a TLS server with a CA made for the run, and a three-shard cluster; removed when it ends | Docker, `openssl` |
 | `scripts/cost-live-test.sh <profile>` | The cost commands against a real account; about 3 Cost Explorer requests (≈ $0.03) | An AWS profile with Cost Explorer access |
+| `scripts/sns-live-test.sh <profile> [region]` | The SNS tab against a real account: creates a throwaway `mm-live-<seconds>` topic and three SQS queues, finds a subscription whose queue policy is missing, fixes it, attaches a DLQ, sets a filter and checks which of two test publishes arrives, judges peek eligibility, undoes the filter, reads the account view and policy, creates a subscription through the app and unsubscribes; then a FIFO topic with an archive whose message is replayed and whose archive is turned off. Everything it created is deleted at the end, even on failure | An AWS profile allowed to create and delete SNS topics and SQS queues |
 | `scripts/argocd-live-test.sh <argocd-url>` | The ArgoCD tab against a real server: reads and streams, then a throwaway `mm-live-<seconds>` application in project `default` that syncs [podinfo](https://github.com/stefanprodan/podinfo) into the in-cluster `mm-live-argocd` namespace, restarts and patches its Deployment, checks the stale and typed-name guards, and is cascade-deleted (the namespace may stay). With `ARGOCD_LIVE_KUBE_CONTEXT` set to the context ArgoCD runs in, it also reads the ArgoCD metrics through the service proxy and Pod usage from metrics-server | A token in `ARGOCD_LIVE_TOKEN` or saved by the app; rights to create and delete applications in `default` |
 | `scripts/sqs-live-test.sh <profile> <queue>` | The SQS tab against a real account (region `ap-northeast-2` unless `MM_SQS_REGION` is set). First, all read-only: the overview, the region flow, and, for `<queue>` (an existing queue with an EventBridge rule producer, a Lambda consumer, and a DLQ), its flow with and without IAM and the receive gate. Then a throwaway `mm-smoke-<date>-<random>` queue and its DLQ go through dead-lettering, receiving, edited resend, delete, release, a move task, and the purge guards, and are deleted at the end | An AWS profile allowed to create and delete SQS queues |
 
 ### Maintenance scripts
 
 - `node scripts/update-iam-catalog.mjs` regenerates `src-tauri/src/iam/catalog.json` (every IAM action and its access level) from the AWS Service Reference. Needs Node 20+ and internet access.
-- `scripts/screenshots/shoot.mjs` retakes every README screenshot from a demo page that runs the real frontend against mocked backend commands (`demo.tsx` plus one mock module per area: `iam.ts`, `cost.ts`, `k8s.ts`, `argocd.ts`, `argowf.ts`, `pg.ts`, `kv.ts`, `sqs.ts`). Run `npm run dev`, then `npm i --no-save playwright-core && node scripts/screenshots/shoot.mjs [out_dir] [section…]` (needs Google Chrome). Sections are `core`, `k8s`, `argocd`, `argowf`, `pg`, `kv`, and `sqs`; with none it takes them all.
+- `scripts/screenshots/shoot.mjs` retakes every README screenshot from a demo page that runs the real frontend against mocked backend commands (`demo.tsx` plus one mock module per area: `iam.ts`, `cost.ts`, `k8s.ts`, `argocd.ts`, `argowf.ts`, `pg.ts`, `kv.ts`, `sqs.ts`, `sns.ts`, `dynamo.ts`; `services.json` is the service and column list the demo shows). Run `npm run dev`, then `npm i --no-save playwright-core && node scripts/screenshots/shoot.mjs [out_dir] [section…]` (needs Google Chrome). Sections are `core`, `k8s`, `argocd`, `argowf`, `pg`, `kv`, `sqs`, `sns`, and `dynamo`; with none it takes them all.
 
 ### Project layout
 ```
@@ -737,7 +867,9 @@ src/                     React frontend
   pg/                    PostgreSQL users tab
   kv/                    Valkey and Redis OSS tab, including the Bull screens
   sqs/                   SQS tab: queue list and health, flow and region map; messages/ (receiving and viewing), change/ (previews, redrive, purge, change log)
+  dynamo/                DynamoDB tab: table list and overview, item explorer and editor, design analysis, stream and connections, table operations, change flow and log
   tailscale/             Tailscale pane (this Mac, devices, users, routes, Services, DNS, policy, keys, logs, integrations, sharing, diagnosis, settings, connection, org) and connection checks in network error boxes
+  sns/                   SNS topic tab (overview, subscriptions, flow map, diagnosis, filter tester, policy, queue peek, change log), the 📣 SNS account tab, and the change dialog
 src-tauri/src/
   adapters/              per-service read-only adapters for the resource browser
   aws/                   profiles, SDK configs, SSO sign-in
@@ -754,7 +886,9 @@ src-tauri/src/
   pg/                    PostgreSQL connection, read-only catalog snapshot, privilege evaluation, security checks, change previews and commits
   kv/                    ElastiCache target and sign-in (IAM tokens, keychain), fred connection and topology, the read-only command allow-list, keys, values, server stats, Bull queues
   sqs/                   queue reads and CloudWatch activity, health checks, queue-policy parsing, producer/consumer flow, receive sessions and the receive gate, change previews and applies, sqs-changes.jsonl
+  dynamo/                DynamoDB table and index reads, health findings, CloudWatch metrics, item reads (Query, Scan, PartiQL SELECT) and expression building, item writes, stream and connection reads, table operations, change previews and undo (the Tauri commands are `dynamo_*_commands.rs`)
   tailscale/             local node and peer shaping and connection diagnosis (only cli.rs starts the CLI); api.rs is the Tailscale API client with keychain credentials and OAuth token cache; devices, users, DNS, settings, services, integrations, org, policy (findings), keys, logs; changes.rs writes tailscale-changes.jsonl
+  sns/                   SNS topic snapshot, filter policy and resource policy evaluation, diagnosis, publisher discovery, policy checks, account view, SMS and push reads, change previews, undo and sns-changes.jsonl (change.rs), queue peeks (peek.rs); write.rs is the only place that calls SNS, SQS and Lambda write APIs
   jsonl.rs               the shared change-log file format
   mouse_nav.rs           macOS mouse back/forward buttons
 scripts/                 dev runner, release, live tests, IAM catalog updater, screenshots

@@ -81,12 +81,14 @@ fn all_scope_is_flagged_on_oauth_clients_and_federated_but_not_read_scopes_or_ap
     assert!(kinds(&found, "token").is_empty());
 }
 
+/// `list`는 실제 지금 시각으로 판정한다: 만료 시각도 지금 기준으로 잡아 날짜가 지나도 같은 결과가 나오게 한다
 fn key_list() -> serde_json::Value {
+    let at = |days: i64| (Utc::now() + Duration::days(days)).to_rfc3339();
     json!({"keys": [
-        {"id": "kAPI", "keyType": "api", "created": "2026-01-01T00:00:00Z", "expires": "2027-01-01T00:00:00Z", "scopes": ["all"], "description": "mine", "userId": "u1"},
-        {"id": "kLATE", "keyType": "auth", "created": "2026-01-01T00:00:00Z", "expires": "2026-12-31T00:00:00Z",
+        {"id": "kAPI", "keyType": "api", "created": "2026-01-01T00:00:00Z", "expires": at(365), "scopes": ["all"], "description": "mine", "userId": "u1"},
+        {"id": "kLATE", "keyType": "auth", "created": "2026-01-01T00:00:00Z", "expires": at(300),
          "capabilities": {"devices": {"create": {"reusable": true, "ephemeral": false, "preauthorized": true, "tags": ["tag:ci"]}}}, "description": "ci"},
-        {"id": "kSOON", "keyType": "auth", "created": "2026-01-01T00:00:00Z", "expires": "2026-11-10T00:00:00Z", "capabilities": {"devices": {"create": {}}}},
+        {"id": "kSOON", "keyType": "auth", "created": "2026-01-01T00:00:00Z", "expires": at(3), "capabilities": {"devices": {"create": {}}}},
         {"id": "kOAUTH", "keyType": "client", "created": "2026-01-01T00:00:00Z", "scopes": ["all"], "tags": ["tag:a"], "description": "ci client"},
     ]})
 }

@@ -16,6 +16,14 @@ export function formatDateTime(iso: string | null | undefined): string {
   return `${formatDay(iso)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** ISO 시각을 로컬 날짜와 시각(YYYY-MM-DD HH:mm:ss)으로. 레코드가 초 단위로 이어지는 화면에서 쓴다. 값이 없으면 빈 문자열, 파싱할 수 없으면 입력을 그대로 돌려준다. */
+export function formatDateTimeSeconds(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${formatDateTime(iso)}:${pad(d.getSeconds())}`;
+}
+
 const DAY_MS = 86_400_000;
 
 /** "오늘", "6일 전", "3개월 전", "2년 전" */

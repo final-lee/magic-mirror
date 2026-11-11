@@ -30,6 +30,8 @@ interface Props {
   active: boolean;
   /** 리소스 목록에서 넘어온 대상(사용자·역할·정책 ARN). nonce가 바뀔 때마다 그곳으로 이동한다 */
   focus: string | null;
+  /** 다른 워크스페이스가 열면서 요청한 화면(SNS 정책 화면의 '누가 할 수 있나' 검색 등). focus보다 먼저다 */
+  preset?: IamRoute | null;
   nonce: number;
 }
 
@@ -59,7 +61,7 @@ function listCount(ov: IamOverview, view: IamView): number | null {
 /** IAM은 적용한 뒤 반영되기까지 시간이 걸린다. 완료 안내마다 이 말을 붙인다 */
 const PROPAGATION_HINT = "반영까지 몇 초 걸릴 수 있어요";
 
-export function IamTab({ profile, active, focus, nonce }: Props) {
+export function IamTab({ profile, active, focus, preset = null, nonce }: Props) {
   const qc = useQueryClient();
   const overview = useIamOverview(profile);
   const ov = overview.data;
@@ -78,12 +80,15 @@ export function IamTab({ profile, active, focus, nonce }: Props) {
 
   // 대상이 지정돼 열렸으면(nonce가 새로 바뀜) 그 사용자·역할·정책으로 이동한다. 지정이 없으면 보던 자리를 지킨다.
   const appliedNonce = useRef<number | null>(null);
+  const [searchVersion, setSearchVersion] = useState(0);
   useLayoutEffect(() => {
     if (!ov || appliedNonce.current === nonce) return;
     appliedNonce.current = nonce;
-    const target = focus ? routeForFocus(ov, focus) : null;
-    if (target) navigate(target);
-  }, [ov, focus, nonce, navigate]);
+    if (preset?.view === "whoCan") setSearchVersion(nonce);
+    const target = preset ?? (focus ? routeForFocus(ov, focus) : null);
+    if (target?.view === "whoCan" && route.view === "whoCan") replace(() => target);
+    else if (target) navigate(target);
+  }, [ov, focus, preset, nonce, navigate, replace, route.view]);
 
   // ⌘[ / ⌘](tab.back / tab.forward)와 마우스 뒤로/앞으로 버튼: 보이는 탭에서만, 확인 창이 떠 있거나 글자를 입력하는 중이면 건드리지 않는다.
   const root = useRef<HTMLDivElement>(null);
@@ -186,7 +191,7 @@ export function IamTab({ profile, active, focus, nonce }: Props) {
   } else if (route.view === "findings") {
     body = <Findings profile={profile} overview={ov} onOpen={navigate} onFix={change.start} initialKind={route.tab} onViewState={remember} />;
   } else if (route.view === "whoCan") {
-    body = <WhoCan profile={profile} overview={ov} onOpen={navigate} initial={route.search} onViewState={remember} />;
+    body = <WhoCan key={searchVersion} profile={profile} overview={ov} onOpen={navigate} initial={route.search} onViewState={remember} />;
   } else {
     body = <ChangeLog profile={profile} accountId={ov.accountId} onStart={change.start} onStartBatch={batch.start} />;
   }

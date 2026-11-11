@@ -25,6 +25,12 @@ import { sampleBreakdown, sampleOverview as sampleCostOverview } from "./cost/fi
 import { BREAKDOWN_LABEL, COST_TITLE } from "./cost/text";
 import { ARGOWF_TITLE } from "./argowf/text";
 import { tailscaleApi } from "./tailscale/api";
+import { snsApi } from "./sns/api";
+import { QUEUE_ARN as SNS_QUEUE_ARN, QUEUE_URL as SNS_QUEUE_URL, sampleTopic as sampleSnsTopic, sqsSubscription, TOPIC_ARN as SNS_TOPIC_ARN } from "./sns/fixtures";
+import { snsKeys } from "./sns/queries";
+import { dynamoApi } from "./dynamo/api";
+import { table as dynamoTable } from "./dynamo/fixtures";
+import { streamApi } from "./dynamo/stream/api";
 
 vi.mock("./api/client", () => ({
   api: {
@@ -39,6 +45,7 @@ vi.mock("./api/client", () => ({
     ssoLoginCancel: vi.fn(),
     getSettings: vi.fn(),
     saveSettings: vi.fn(),
+    resourceMetrics: vi.fn(),
   },
 }));
 vi.mock("./explorer/api", () => ({
@@ -69,6 +76,7 @@ vi.mock("./pg/api", () => ({
 vi.mock("./kv/api", () => ({
   kvApi: { target: vi.fn(), open: vi.fn(), overview: vi.fn(), scan: vi.fn(), key: vi.fn(), slowlog: vi.fn(), clients: vi.fn(), bigkeys: vi.fn(), bigkeysStop: vi.fn(), bigkeysReport: vi.fn(async () => null), close: vi.fn(async () => null), forgetPassword: vi.fn(), bullQueues: vi.fn(), bullQueueSummaries: vi.fn(), bullQueue: vi.fn(), bullJobs: vi.fn(), bullJob: vi.fn(), bullFlow: vi.fn(), bullTransitions: vi.fn(), bullTopology: vi.fn() },
 }));
+vi.mock("./sns/api", () => ({ snsApi: { topic: vi.fn(), subscriptionsAll: vi.fn(), subscribedTopics: vi.fn() } }));
 // 터미널(xterm)은 k8s/PodTerminal.test에서 본다
 vi.mock("./k8s/PodTerminal", () => ({ PodTerminal: () => null }));
 vi.mock("./k8s/api", () => ({
@@ -83,6 +91,8 @@ vi.mock("./argocd/api", () => ({
 }));
 vi.mock("./cost/api", () => ({ costApi: { overview: vi.fn(), breakdown: vi.fn(), tagKeys: vi.fn(), usage: vi.fn() } }));
 vi.mock("./tailscale/api", () => ({ tailscaleApi: { node: vi.fn(), diagnose: vi.fn(), acceptRoutes: vi.fn() } }));
+vi.mock("./dynamo/api", () => ({ dynamoApi: { overview: vi.fn(), table: vi.fn(), topKeys: vi.fn() } }));
+vi.mock("./dynamo/stream/api", () => ({ streamApi: { connections: vi.fn(), start: vi.fn(), poll: vi.fn(), stop: vi.fn() } }));
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: vi.fn(async () => () => {}) }),
 }));
@@ -1076,6 +1086,134 @@ describe("⚡ Valkey·Redis 탭", () => {
   });
 });
 
+describe("📣 SNS 주제 탭", () => {
+  const snsService = {
+    id: "sns",
+    name: "SNS",
+    global: false,
+    types: [
+      { id: "topics", name: "Topics", columns: [{ key: "name", label: "Name", kind: "text" as const }] },
+      { id: "subscriptions", name: "Subscriptions", columns: [{ key: "name", label: "Topic", kind: "text" as const }, { key: "protocol", label: "Protocol", kind: "text" as const }] },
+    ],
+  };
+  const sqsService = { id: "sqs", name: "SQS", global: false, types: [{ id: "queues", name: "Queues", columns: [{ key: "name", label: "Name", kind: "text" as const }] }] };
+  const snsTabs = () => screen.queryAllByRole("tab", { name: /📣/ });
+  const closeButtonOf = (tab: HTMLElement) => within(tab.parentElement as HTMLElement).getByRole("button", { name: /닫기/ });
+  const headline = "FIFO · KMS(alias/orders) · 구독 4 (대기 1)";
+  const cmdR = () => fireEvent.keyDown(window, { key: "r", metaKey: true });
+
+  beforeEach(() => {
+    vi.mocked(snsApi.topic).mockResolvedValue(sampleSnsTopic());
+    vi.mocked(snsApi.subscribedTopics).mockResolvedValue([]);
+    m.listServices.mockResolvedValue([...sampleServices, snsService, sqsService]);
+    m.getSettings.mockResolvedValue({ enabledServices: ["ec2", "sns", "sqs"], favorites: [], lastProfile: "prod", lastRegion: null });
+    m.listResources.mockImplementation(async (_p, _r, service, typeId) => ({
+      items:
+        service === "sqs"
+          ? [makeResource(SNS_QUEUE_URL, { name: "orders-queue.fifo" }, { arn: SNS_QUEUE_ARN })]
+          : typeId === "topics"
+            ? [makeResource(SNS_TOPIC_ARN, { name: "orders-events.fifo" }, { arn: SNS_TOPIC_ARN })]
+            : [makeResource(sqsSubscription.key, { name: "orders-events.fifo", topicArn: SNS_TOPIC_ARN, protocol: "sqs", endpoint: SNS_QUEUE_ARN }, { arn: sqsSubscription.key })],
+      truncated: false,
+    }));
+  });
+
+  const showType = async (service: string, type: string, row: string) => {
+    const view = renderWithClient(<App />);
+    fireEvent.click(await screen.findByText(service));
+    fireEvent.click(screen.getByText(type));
+    await screen.findByText(row);
+    return view;
+  };
+
+  test("double-clicking a topic opens an active 📣 tab titled with its name and reads the snapshot", async () => {
+    await showType("SNS", "Topics", "orders-events.fifo");
+    fireEvent.doubleClick(screen.getByText("orders-events.fifo"));
+    const tab = await screen.findByRole("tab", { name: "📣 orders-events.fifo" });
+    expect(tab).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByText(headline)).toBeInTheDocument();
+    expect(snsApi.topic).toHaveBeenCalledWith("prod", "ap-northeast-2", SNS_TOPIC_ARN);
+  });
+
+  test("opening the same topic again keeps one tab and activates it", async () => {
+    await showType("SNS", "Topics", "orders-events.fifo");
+    fireEvent.doubleClick(screen.getByText("orders-events.fifo"));
+    await screen.findByText(headline);
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    expect(screen.getByRole("tab", { name: "📣 orders-events.fifo" })).toHaveAttribute("aria-selected", "false");
+    fireEvent.doubleClick(within(screen.getByRole("table")).getByText("orders-events.fifo"));
+    expect(snsTabs()).toHaveLength(1);
+    expect(screen.getByRole("tab", { name: "📣 orders-events.fifo" })).toHaveAttribute("aria-selected", "true");
+    expect(snsApi.topic).toHaveBeenCalledTimes(1);
+  });
+
+  test("double-clicking a subscription opens its topic's tab on that subscription, and does so again on an open tab", async () => {
+    await showType("SNS", "Subscriptions", "sqs");
+    fireEvent.doubleClick(screen.getByText("sqs"));
+    expect(await screen.findByRole("tab", { name: "📣 orders-events.fifo" })).toHaveAttribute("aria-selected", "true");
+    const detail = await screen.findByRole("region", { name: "구독 상세" });
+    expect(within(detail).getByText("orders-queue.fifo")).toBeInTheDocument();
+    // 탭 안에서 다른 화면으로 옮겨 둔 뒤 같은 구독 행을 다시 열면 구독 상세로 돌아온다
+    fireEvent.click(within(screen.getByRole("navigation", { name: "SNS 메뉴" })).getByRole("button", { name: "개요" }));
+    expect(screen.getByRole("region", { name: "주제 개요" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    fireEvent.doubleClick(screen.getByText("sqs"));
+    expect(await screen.findByRole("region", { name: "구독 상세" })).toBeInTheDocument();
+    expect(snsTabs()).toHaveLength(1);
+  });
+
+  test("the endpoint button of a subscription goes to that queue's row in the resource browser", async () => {
+    await showType("SNS", "Subscriptions", "sqs");
+    fireEvent.doubleClick(screen.getByText("sqs"));
+    fireEvent.click(await screen.findByRole("button", { name: "SQS 큐 열기" }));
+    expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
+    const panel = await screen.findByRole("complementary", { name: "상세" });
+    expect(within(panel).getByText("orders-queue.fifo")).toBeInTheDocument();
+  });
+
+  test("closing the tab drops its snapshot and returns to the resources tab", async () => {
+    const { qc } = await showType("SNS", "Topics", "orders-events.fifo");
+    fireEvent.doubleClick(screen.getByText("orders-events.fifo"));
+    const tab = await screen.findByRole("tab", { name: "📣 orders-events.fifo" });
+    await screen.findByText(headline);
+    expect(qc.getQueryData(snsKeys.topic("prod", "ap-northeast-2", SNS_TOPIC_ARN))).toBeDefined();
+    fireEvent.click(closeButtonOf(tab));
+    expect(snsTabs()).toHaveLength(0);
+    expect(qc.getQueryData(snsKeys.topic("prod", "ap-northeast-2", SNS_TOPIC_ARN))).toBeUndefined();
+    expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("changing the profile closes the 📣 tabs, even from the resources tab", async () => {
+    await showType("SNS", "Topics", "orders-events.fifo");
+    fireEvent.doubleClick(screen.getByText("orders-events.fifo"));
+    await screen.findByText(headline);
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "프로필" }), { target: { value: "dev" } });
+    expect(snsTabs()).toHaveLength(0);
+    expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("changing the region keeps the tab", async () => {
+    await showType("SNS", "Topics", "orders-events.fifo");
+    fireEvent.doubleClick(screen.getByText("orders-events.fifo"));
+    await screen.findByText(headline);
+    fireEvent.change(screen.getByRole("combobox", { name: "리전" }), { target: { value: "us-east-1" } });
+    expect(snsTabs()).toHaveLength(1);
+  });
+
+  test("⌘R with the 📣 tab showing reads its snapshot again, and not while the resources tab shows", async () => {
+    await showType("SNS", "Topics", "orders-events.fifo");
+    fireEvent.doubleClick(screen.getByText("orders-events.fifo"));
+    await screen.findByText(headline);
+    cmdR();
+    await waitFor(() => expect(snsApi.topic).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("tab", { name: "리소스" }));
+    cmdR();
+    await act(async () => {});
+    expect(snsApi.topic).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("EKS 탭", () => {
   const target = (cluster: string) => ({ profile: "prod", region: "ap-northeast-2", cluster });
   const k8sTabs = () => screen.queryAllByRole("tab", { name: /☸️/ });
@@ -1405,5 +1543,50 @@ describe("⌘K 리소스 찾기와 캐시 비우기", () => {
     expect(ttl).toHaveValue("15");
     fireEvent.change(ttl, { target: { value: "0" } });
     await waitFor(() => expect(m.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ resourceCacheTtlMinutes: 0 })));
+  });
+});
+
+describe("🗄 DynamoDB 스트림 탭에서 Lambda 함수로", () => {
+  const FUNCTION_ARN = "arn:aws:lambda:ap-northeast-2:123456789012:function:order-worker:live";
+  const stream = { arn: "arn:aws:dynamodb:ap-northeast-2:123456789012:table/orders/stream/1", viewType: "NEW_AND_OLD_IMAGES" };
+  const dynamoService = { id: "dynamodb", name: "DynamoDB", global: false, types: [{ id: "tables", name: "Tables", columns: [{ key: "name", label: "Name", kind: "text" as const }] }] };
+  const lambdaService = { id: "lambda", name: "Lambda", global: false, types: [{ id: "functions", name: "Functions", columns: [{ key: "name", label: "Function name", kind: "text" as const }] }] };
+  const orders = dynamoTable("orders", { stream });
+
+  beforeEach(() => {
+    m.listServices.mockResolvedValue([...sampleServices, dynamoService, lambdaService]);
+    m.getSettings.mockResolvedValue({ enabledServices: ["ec2", "dynamodb", "lambda"], favorites: [], lastProfile: "prod", lastRegion: null });
+    m.listResources.mockImplementation(async (_p, _r, service) => ({
+      items: service === "lambda" ? [makeResource("billing-api", { name: "billing-api" }), makeResource("order-worker", { name: "order-worker" })] : [makeResource("orders", { name: "orders" })],
+      truncated: false,
+    }));
+    m.resourceMetrics.mockReturnValue(new Promise(() => {}));
+    vi.mocked(dynamoApi.overview).mockResolvedValue({ tables: [orders], truncated: false, gaps: [] });
+    vi.mocked(streamApi.connections).mockResolvedValue({
+      stream,
+      esms: [{ id: "m1", function: FUNCTION_ARN, state: "Enabled", batchSize: 100, startingPosition: null, parallelization: null, bisect: null, retries: 3, maxAge: null, failureDestination: null, filters: [], iteratorAgeMs: null }],
+      pipes: [],
+      kinesis: [],
+      replicas: [],
+      gaps: [],
+      findings: [],
+    });
+  });
+
+  test("the ESM node's jump button goes to the resources tab and selects that function in this region's Lambda list", async () => {
+    renderWithClient(<App />);
+    fireEvent.click(await screen.findByText("DynamoDB"));
+    fireEvent.click(screen.getByText("Tables"));
+    fireEvent.doubleClick(await screen.findByText("orders"));
+    fireEvent.click(await screen.findByRole("option", { name: /orders/ }));
+    fireEvent.click(await screen.findByRole("tab", { name: "스트림" }));
+    expect(screen.getByRole("tab", { name: /DynamoDB · ap-northeast-2/ })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Lambda 상세 열기" }));
+
+    expect(screen.getByRole("tab", { name: "리소스" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(within(screen.getByTestId("resource-table")).getByText("order-worker").closest("tr")).toHaveAttribute("aria-selected", "true"));
+    expect(within(screen.getByTestId("resource-table")).getByText("billing-api").closest("tr")).not.toHaveAttribute("aria-selected", "true");
+    expect(m.listResources).toHaveBeenCalledWith("prod", "ap-northeast-2", "lambda", "functions");
   });
 });

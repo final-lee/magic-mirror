@@ -186,6 +186,12 @@ const SNS: &[MetricDef] = &[
     m("NumberOfMessagesPublished", "Sum", Count),
     m("NumberOfNotificationsDelivered", "Sum", Count),
     m("NumberOfNotificationsFailed", "Sum", Count),
+    m("NumberOfNotificationsFilteredOut", "Sum", Count),
+    m("NumberOfNotificationsFilteredOut-InvalidAttributes", "Sum", Count),
+    m("NumberOfNotificationsFilteredOut-InvalidMessageBody", "Sum", Count),
+    m("NumberOfNotificationsFilteredOut-NoMessageAttributes", "Sum", Count),
+    m("NumberOfNotificationsRedrivenToDlq", "Sum", Count),
+    m("NumberOfNotificationsFailedToRedriveToDlq", "Sum", Count),
     m("PublishSize", "Average", Bytes),
 ];
 

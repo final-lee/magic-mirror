@@ -4,6 +4,7 @@ import type { Favorite, ResourceType, ServiceInfo } from "../api/types";
 import { ARGOCD_TITLE } from "../argocd/text";
 import { ARGOWF_TITLE } from "../argowf/text";
 import { COST_NAV, COST_TITLE } from "../cost/text";
+import { ACCOUNT_OPEN } from "../sns/accessText";
 import { ordered, savedAfterMove, useReorder, type Reorder } from "../lib/useReorder";
 import tailscaleMark from "../assets/tailscale.svg";
 import { ServiceBadge } from "./ServiceBadge";
@@ -26,6 +27,8 @@ interface Props {
   onFavoritesChange: (favorites: Favorite[]) => void;
   /** IAM 작업 공간 탭을 연다. 주면 IAM 서비스 아래 첫 항목으로 "IAM 관리"가 보인다. */
   onOpenIam?: () => void;
+  /** 📣 SNS 계정 개요 탭을 연다. 주면 SNS 서비스 아래 첫 항목으로 "📣 SNS 개요"가 보인다. */
+  onOpenSnsAccount?: () => void;
   /** 💰 비용 탭을 연다. 주면 서비스 묶음 위에 "💰 비용" 줄이 보인다. */
   onOpenCost?: () => void;
   /** Tailscale을 리소스 탭의 오른쪽 칸에 연다. 주면 💰 비용 아래에 "Tailscale" 줄이 보인다. */
@@ -52,7 +55,7 @@ const favKey = (f: Favorite) => `${f.service}/${f.type}`;
 export function Sidebar({
   services, profile, region, selection, favorites, onSelect, onToggleFavorite,
   serviceOrder, typeOrder, onServiceOrderChange, onTypeOrderChange, onFavoritesChange,
-  onOpenIam, onOpenCost, onOpenTailscale, tailscaleActive = false, onOpenArgocd, onOpenArgoWorkflows,
+  onOpenIam, onOpenSnsAccount, onOpenCost, onOpenTailscale, tailscaleActive = false, onOpenArgocd, onOpenArgoWorkflows,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(selection ? [selection.service] : []));
 
@@ -110,6 +113,7 @@ export function Sidebar({
       node: <TypeRow label={t.name} service={svc} type={t} fetch selected={isSelected(svc, t)} {...rowProps} />,
     }));
     if (svc.id === "iam" && onOpenIam) return [shortcut("@iam", "iam-open", "🔐 IAM 관리", onOpenIam), ...types];
+    if (svc.id === "sns" && onOpenSnsAccount) return [shortcut("@sns", "sns-open", ACCOUNT_OPEN, onOpenSnsAccount), ...types];
     if (svc.id === "eks") {
       // 클러스터·노드 그룹이 먼저고, 클러스터 위에서 도는 도구는 그 뒤에 둔다
       const tools: Entry[] = [];

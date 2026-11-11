@@ -48,6 +48,17 @@ import type { KvTarget } from "./kv/types";
 import { SqsTab, type SqsExternalJump } from "./sqs/SqsTab";
 import { refreshSqs } from "./sqs/queries";
 import { tabTitle as sqsTabTitle } from "./sqs/text";
+import { SnsTab } from "./sns/SnsTab";
+import { forgetSns, forgetSnsAccount, refreshSns, refreshSnsAccount, snsKeys } from "./sns/queries";
+import type { SnsRoute } from "./sns/route";
+import { AccountTab } from "./sns/AccountTab";
+import { ACCOUNT_TITLE } from "./sns/accessText";
+import { SNS_ACCOUNT_TAB, snsTabId, snsTabTitle, type SnsOpen, type SnsTopicRef } from "./sns/targets";
+import type { IamRoute } from "./iam/route";
+import { DynamoTab } from "./dynamo/DynamoTab";
+import { refreshDynamo } from "./dynamo/queries";
+import { lambdaFunctionName } from "./dynamo/stream/connections";
+import { tabTitle as dynamoTabTitle } from "./dynamo/text";
 import { getVersion } from "@tauri-apps/api/app";
 import { VpcMapTab } from "./vpcmap/VpcMapTab";
 import type { VpcHighlight } from "./vpcmap/types";
@@ -97,8 +108,16 @@ export default function App() {
   // 리전마다 SQS 탭 하나(id는 리전). focus는 리소스 목록에서 연 큐로, nonce가 바뀔 때마다 그 큐를 고른다. 프로필을 바꾸면 닫는다.
   const [sqsTabs, setSqsTabs] = useState<{ id: string; profile: string; region: string; focus: { url: string; nonce: number } | null }[]>([]);
   const sqsNonce = useRef(0);
+  // 주제마다 탭 하나(id는 프로필·리전·주제 ARN). open은 다른 화면(구독 행 더블클릭)이 탭 안의 화면을 부탁할 때만 있다. 읽기만 해서 닫을 연결은 없고, 닫거나 프로필을 바꾸면 읽어 둔 스냅샷만 버린다.
+  const [snsTabs, setSnsTabs] = useState<{ id: string; target: SnsTopicRef; open?: SnsOpen }[]>([]);
+  const snsOpenNonce = useRef(0);
+  // SNS 계정 개요 탭도 하나뿐이다(id "sns-account"). 열 때 고른 리전을 기억한다. 프로필을 바꾸면 닫는다.
+  const [snsAccountTab, setSnsAccountTab] = useState<{ region: string } | null>(null);
+  // 리전마다 DynamoDB 탭 하나(id는 리전). focus는 리소스 목록에서 연 테이블로, nonce가 바뀔 때마다 그 테이블을 고른다. 프로필을 바꾸면 닫는다.
+  const [dynamoTabs, setDynamoTabs] = useState<{ id: string; profile: string; region: string; focus: { table: string; nonce: number } | null }[]>([]);
+  const dynamoNonce = useRef(0);
   // IAM 탭은 하나뿐이다(id "iam"). focus는 리소스 목록에서 넘어온 대상 ARN, nonce는 열 때마다 올라가 같은 대상도 다시 이동시킨다.
-  const [iamTab, setIamTab] = useState<{ focus: string | null; nonce: number } | null>(null);
+  const [iamTab, setIamTab] = useState<{ focus: string | null; preset: IamRoute | null; nonce: number } | null>(null);
   const iamOverview = useIamOverview(iamTab ? profile : null);
   // 비용 탭도 프로필마다 하나다(id "cost"). 리전과 상관없다.
   const [costTab, setCostTab] = useState(false);
@@ -158,7 +177,16 @@ export default function App() {
     // 보고 있는 SQS 탭은 목록을 CloudWatch 활동까지 새로 읽는다
     const sqs = sqsTabs.find((t) => t.id === activeTab);
     if (sqs) void refreshSqs(qc, sqs.profile, sqs.region);
-  }, [qc, profile, pgTabs, k8sTabs, kvTabs, sqsTabs, activeTab]);
+    // 보고 있는 SNS 주제 탭은 스냅샷을 다시 읽는다. SQS 큐·Lambda 함수 상세의 `이 리소스를 구독한 주제`도 계정의 구독 목록이라 함께 다시 읽는다
+    const sns = snsTabs.find((t) => t.id === activeTab);
+    if (sns) void refreshSns(qc, sns.target);
+    void qc.invalidateQueries({ queryKey: snsKeys.subscribedAll(profile) });
+    // 보고 있는 SNS 계정 개요 탭은 지표 읽기(GetMetricData)에 돈이 들어서 이 탭을 보고 있을 때만 다시 읽는다
+    if (activeTab === SNS_ACCOUNT_TAB && snsAccountTab) void refreshSnsAccount(qc, profile, snsAccountTab.region);
+    // 보고 있는 DynamoDB 탭은 테이블 목록을 새로 읽는다
+    const dynamo = dynamoTabs.find((t) => t.id === activeTab);
+    if (dynamo) void refreshDynamo(qc, dynamo.profile, dynamo.region);
+  }, [qc, profile, pgTabs, k8sTabs, kvTabs, sqsTabs, snsTabs, snsAccountTab, dynamoTabs, activeTab]);
 
   // 하드 리셋: 모든 프로필·리전의 리소스 목록 캐시(메모리·디스크)를 버리고 보이는 목록을 처음부터 다시 읽는다
   const hardReset = useCallback(() => hardResetResourceCache(qc), [qc]);
@@ -239,8 +267,29 @@ export default function App() {
     setSqsTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs.map((t) => (t.id === id && focus ? { ...t, focus } : t)) : [...tabs, { id, profile, region, focus }]));
     setActiveTab(id);
   };
-  const openIam = (focus: string | null = null) => {
-    setIamTab((t) => ({ focus, nonce: (t?.nonce ?? 0) + 1 }));
+  // route가 있으면 그 탭 안에서 그 화면을 연다(이미 열린 탭이면 화면만 옮긴다)
+  const openSns = (target: SnsTopicRef, route?: SnsRoute) => {
+    const id = snsTabId(target);
+    const open = route ? { route, nonce: ++snsOpenNonce.current } : undefined;
+    setSnsTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs.map((t) => (t.id === id && open ? { ...t, open } : t)) : [...tabs, { id, target, open }]));
+    setActiveTab(id);
+  };
+  // 계정 개요 탭은 하나뿐이다. 지금 고른 리전의 것을 연다(다른 리전에서 다시 열면 그 리전으로 바뀐다).
+  const openSnsAccount = () => {
+    setSnsAccountTab({ region });
+    setActiveTab(SNS_ACCOUNT_TAB);
+  };
+  // table이 있으면 그 테이블을 고른다. 이미 열린 탭이면 그 탭으로 가서 고른다.
+  const openDynamo = (region: string, table: string | null) => {
+    if (!profile) return;
+    const id = `ddb:${region}`;
+    const focus = table ? { table, nonce: ++dynamoNonce.current } : null;
+    setDynamoTabs((tabs) => (tabs.some((t) => t.id === id) ? tabs.map((t) => (t.id === id && focus ? { ...t, focus } : t)) : [...tabs, { id, profile, region, focus }]));
+    setActiveTab(id);
+  };
+  // preset은 IAM 탭 안에서 바로 갈 화면(SNS 정책 화면의 '누가 할 수 있나' 검색 등). focus보다 먼저다.
+  const openIam = (focus: string | null = null, preset: IamRoute | null = null) => {
+    setIamTab((t) => ({ focus, preset, nonce: (t?.nonce ?? 0) + 1 }));
     setActiveTab("iam");
   };
   const openCost = () => {
@@ -265,6 +314,10 @@ export default function App() {
     if (id === "argocd") setArgocdTab(false);
     if (id === "argowf") setArgowfTab(false);
     if (id === "cost") setCostTab(false);
+    if (id === SNS_ACCOUNT_TAB) {
+      if (snsAccountTab && profile) forgetSnsAccount(qc, profile, snsAccountTab.region);
+      setSnsAccountTab(null);
+    }
     const pg = pgTabs.find((t) => t.id === id);
     if (pg) void closePg(qc, pg.target);
     setPgTabs((tabs) => tabs.filter((t) => t.id !== id));
@@ -275,6 +328,10 @@ export default function App() {
     if (kv) void closeKv(qc, kv.target);
     setKvTabs((tabs) => tabs.filter((t) => t.id !== id));
     setSqsTabs((tabs) => tabs.filter((t) => t.id !== id));
+    const sns = snsTabs.find((t) => t.id === id);
+    if (sns) forgetSns(qc, sns.target);
+    setSnsTabs((tabs) => tabs.filter((t) => t.id !== id));
+    setDynamoTabs((tabs) => tabs.filter((t) => t.id !== id));
     setVpcTabs((tabs) => tabs.filter((t) => t.id !== id));
     setExplorerTabs((tabs) => tabs.filter((t) => t.id !== id));
     setDiffTabs((tabs) => tabs.filter((t) => t.id !== id));
@@ -299,6 +356,9 @@ export default function App() {
     ...k8sTabs.map((t) => ({ id: t.id, title: tabTitle(t.target.cluster), closable: true })),
     ...kvTabs.map((t) => ({ id: t.id, title: kvTabTitle(t.target.id), closable: true })),
     ...sqsTabs.map((t) => ({ id: t.id, title: sqsTabTitle(t.region), closable: true })),
+    ...snsTabs.map((t) => ({ id: t.id, title: snsTabTitle(t.target.topicName), closable: true })),
+    ...(snsAccountTab ? [{ id: SNS_ACCOUNT_TAB, title: ACCOUNT_TITLE, closable: true }] : []),
+    ...dynamoTabs.map((t) => ({ id: t.id, title: dynamoTabTitle(t.region), closable: true })),
     ...diffTabs.map((t) => ({ id: t.id, title: diffTitle(t.left, t.right), closable: true })),
   ];
   const diffTool: DiffTool = settings.diffTool ?? "filemerge";
@@ -323,9 +383,14 @@ export default function App() {
     kvTabs.forEach((t) => void closeKv(qc, t.target));
     setKvTabs([]);
     setSqsTabs([]);
+    snsTabs.forEach((t) => forgetSns(qc, t.target));
+    setSnsTabs([]);
+    setDynamoTabs([]);
     setIamTab(null);
     setCostTab(false);
-    if (activeTab.startsWith("s3:") || activeTab.startsWith("vpc:") || activeTab.startsWith("diff:") || activeTab.startsWith("pg:") || activeTab.startsWith("k8s:") || activeTab.startsWith("kv:") || activeTab.startsWith("sqs:") || activeTab === "iam" || activeTab === "cost") setActiveTab("resources");
+    if (snsAccountTab && profile) forgetSnsAccount(qc, profile, snsAccountTab.region);
+    setSnsAccountTab(null);
+    if (activeTab.startsWith("s3:") || activeTab.startsWith("vpc:") || activeTab.startsWith("diff:") || activeTab.startsWith("pg:") || activeTab.startsWith("k8s:") || activeTab.startsWith("kv:") || activeTab.startsWith("sqs:") || activeTab.startsWith("sns:") || activeTab.startsWith("ddb:") || activeTab === SNS_ACCOUNT_TAB || activeTab === "iam" || activeTab === "cost") setActiveTab("resources");
     update({ lastProfile: name, lastRegion: nextRegion });
   };
 
@@ -357,6 +422,10 @@ export default function App() {
     if (jump.kind === "resource") pickResource({ region, service: jump.service, type: jump.type, id: jump.id });
     else if (jump.kind === "eks") openK8s({ profile: tabProfile, region, cluster: jump.cluster });
     else openIam(jump.arn);
+  };
+  // DynamoDB 스트림 탭의 Lambda 노드에서 그 함수로 간다: ⌘K 선택과 같게, 이 리전의 Lambda 함수 목록에서 그 함수 행을 고른다. 리소스 id는 함수 이름이다
+  const openLambda = (lambdaRegion: string, functionArn: string) => {
+    pickResource({ region: lambdaRegion, service: "lambda", type: "functions", id: lambdaFunctionName(functionArn) });
   };
 
   // ⌘K에서 고른 ArgoCD 앱·리소스로 간다: ArgoCD 탭(닫혀 있으면 열고), 그 서버, 그 앱과 리소스
@@ -404,6 +473,7 @@ export default function App() {
             onTypeOrderChange={(service, keys) => update({ sidebarTypeOrder: { ...settings.sidebarTypeOrder, [service]: keys } })}
             onFavoritesChange={(favorites) => update({ favorites })}
             onOpenIam={() => openIam()}
+            onOpenSnsAccount={openSnsAccount}
             onOpenCost={openCost}
             onOpenTailscale={openTailscale}
             tailscaleActive={tailscaleShown}
@@ -425,6 +495,8 @@ export default function App() {
               onOpenK8s={openK8s}
               onOpenKv={openKv}
               onOpenSqs={openSqs}
+              onOpenSns={openSns}
+              onOpenDynamo={openDynamo}
               onRefresh={refresh}
               active={activeTab === "resources" && !tailscaleShown}
               focus={focus}
@@ -438,7 +510,7 @@ export default function App() {
         </div>
         {profile && iamTab && (
           <div className="tabpane" hidden={activeTab !== "iam"}>
-            <IamTab profile={profile} active={activeTab === "iam"} focus={iamTab.focus} nonce={iamTab.nonce} />
+            <IamTab profile={profile} active={activeTab === "iam"} focus={iamTab.focus} preset={iamTab.preset} nonce={iamTab.nonce} />
           </div>
         )}
         {profile && costTab && (
@@ -498,6 +570,21 @@ export default function App() {
         {sqsTabs.map((t) => (
           <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
             <SqsTab profile={t.profile} region={t.region} active={activeTab === t.id} focus={t.focus} onJump={(jump) => jumpFromSqs(t.region, t.profile, jump)} />
+          </div>
+        ))}
+        {snsTabs.map((t) => (
+          <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
+            <SnsTab target={t.target} active={activeTab === t.id} open={t.open} onOpenResource={pickResource} onOpenIam={openIam} />
+          </div>
+        ))}
+        {profile && snsAccountTab && (
+          <div className="tabpane" hidden={activeTab !== SNS_ACCOUNT_TAB}>
+            <AccountTab key={`${profile}:${snsAccountTab.region}`} profile={profile} region={snsAccountTab.region} onOpenTopic={openSns} />
+          </div>
+        )}
+        {dynamoTabs.map((t) => (
+          <div key={t.id} className="tabpane" hidden={activeTab !== t.id}>
+            <DynamoTab profile={t.profile} region={t.region} active={activeTab === t.id} focus={t.focus} onOpenLambda={(functionArn) => openLambda(t.region, functionArn)} />
           </div>
         ))}
         {diffTabs.map((t) => (

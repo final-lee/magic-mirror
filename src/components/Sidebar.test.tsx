@@ -222,3 +222,30 @@ describe("dragging rows in the first column", () => {
     expect(onFavoritesChange).toHaveBeenCalledWith([favorites[2], favorites[1], favorites[0]]);
   });
 });
+
+describe("SNS 개요 entry", () => {
+  const sns = { id: "sns", name: "SNS", global: false, types: [{ id: "topics", name: "Topics", columns: [{ key: "name", label: "Name", kind: "text" as const }] }] };
+
+  test("is the first row under an expanded SNS group and opens the account tab", () => {
+    const onOpenSnsAccount = vi.fn();
+    renderWithClient(<Sidebar {...base} services={[sns]} onOpenSnsAccount={onOpenSnsAccount} />);
+    expect(screen.queryByText("📣 SNS 개요")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("SNS"));
+    const entry = screen.getByText("📣 SNS 개요");
+    expect(entry.compareDocumentPosition(screen.getByText("Topics")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(entry);
+    expect(onOpenSnsAccount).toHaveBeenCalledTimes(1);
+  });
+
+  test("other services do not get it, and it is not shown without a handler", () => {
+    renderWithClient(<Sidebar {...base} services={[...sampleServices, sns]} onOpenSnsAccount={vi.fn()} />);
+    fireEvent.click(screen.getByText("EC2"));
+    expect(screen.queryByText("📣 SNS 개요")).not.toBeInTheDocument();
+  });
+
+  test("is not shown when the app gives no handler", () => {
+    renderWithClient(<Sidebar {...base} services={[sns]} />);
+    fireEvent.click(screen.getByText("SNS"));
+    expect(screen.queryByText("📣 SNS 개요")).not.toBeInTheDocument();
+  });
+});
