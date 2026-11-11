@@ -7,19 +7,20 @@ import type { SnsTopicRef } from "./targets";
 import type { DeliveryLogging, SnsTopic } from "./types";
 import { useSnsChange } from "./useSnsChange";
 
-/** 프로토콜 하나의 배달 상태 로깅 설정 창 */
-export function LoggingEdit({ target, logging }: { target: SnsTopicRef; logging: DeliveryLogging }) {
+/** 프로토콜을 골라 배달 상태 로깅 설정 */
+export function LoggingEdit({ target, logging }: { target: SnsTopicRef; logging: DeliveryLogging[] }) {
   const [form, setForm] = useState(false);
   const { start, dialog } = useSnsChange(target);
   return (
     <>
-      <button type="button" className={`btn small ${changeTone({ kind: "deliveryLogging" })}`} aria-label={`${logging.protocol} 배달 상태 로깅 설정…`} onClick={() => setForm(true)}>
+      <button type="button" className={`btn small ${changeTone({ kind: "deliveryLogging" })}`} disabled={logging.length === 0} title={logging.length === 0 ? "로깅 정보를 읽지 못했어요" : undefined} onClick={() => setForm(true)}>
         로깅 설정…
       </button>
-      {form && (
+      {form && logging.length > 0 && (
         <LoggingForm
           target={target}
-          logging={logging}
+          logging={logging[0]}
+          protocols={logging}
           onClose={() => setForm(false)}
           onPreview={(request) => {
             setForm(false);

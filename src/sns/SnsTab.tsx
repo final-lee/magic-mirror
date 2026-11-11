@@ -53,6 +53,7 @@ export function SnsTab({ target, active, open, onOpenResource, onOpenIam }: Prop
   const root = useRef<HTMLDivElement>(null);
   useHistoryKeys(root, active, back, forward);
   const [showRaw, setShowRaw] = useState(false);
+  const [showPartial, setShowPartial] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const { start: startChange, dialog: changeDialog } = useSnsChange(target);
 
@@ -152,7 +153,9 @@ export function SnsTab({ target, active, open, onOpenResource, onOpenIam }: Prop
       {topic && q.isError && <ErrorState compact error={q.error} profile={target.profile} onRetry={reread} />}
       {topic && topic.errors.length > 0 && (
         <div className="sns-partial dim" role="status" aria-label={t.PARTIAL_LABEL}>
-          {`${t.PARTIAL(topic.errors.length)}: ${[...new Set(topic.errors.map(errorMessage))].join(" · ")}`}
+          <span>{t.PARTIAL(topic.errors.length)}</span>{" "}
+          <button type="button" className="btn small tone-secondary" aria-expanded={showPartial} onClick={() => setShowPartial((open) => !open)}>{showPartial ? "접기" : "자세히"}</button>
+          {showPartial && <ul className="sns-partial-errors">{topic.errors.map((error, index) => <li key={index}>{errorMessage(error)}</li>)}</ul>}
         </div>
       )}
       <div className="sns-main">{content}</div>

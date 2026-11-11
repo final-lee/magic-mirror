@@ -442,7 +442,9 @@ Double-click a row in **SNS → Topics** to open a `📣` tab for that topic (a 
 
 ![SNS flow map](docs/screenshots/sns-flow.png)
 
-The `📣 SNS` account view lists every topic with its last-24-hour published, delivered, failed and filtered counts (worst first), orphaned subscriptions (topic deleted or queue/function gone — AWS keeps them after a topic is deleted), pending subscriptions, all check results with a switch per check, account-level metrics, and read-only SMS (sandbox, numbers, spend, success rate) and mobile push (platform applications, endpoint and disabled-endpoint counts, certificate expiry) status. Phone numbers are masked.
+![SNS account view](docs/screenshots/sns-account.png)
+
+The `📣 SNS` account view has four screens. **개요** shows totals for the last 24 hours and every topic with a delivered / failed / filtered bar, sortable, worst first; a row opens the topic. **점검** groups every finding by check with counts per level, and **점검 항목…** turns checks on and off for all topics. **정리할 구독** lists orphaned subscriptions (topic deleted or queue/function gone — AWS keeps them after a topic is deleted) and pending ones. **SMS·푸시** shows read-only SMS (sandbox, numbers, spend, success rate) and mobile push (platform applications, endpoint and disabled-endpoint counts, certificate expiry) status. Phone numbers are masked.
 
 **Changing things.** Every change opens a preview with the exact API calls and bodies, the values before and after (policies as a line diff), how the diagnosis changes, and warnings. When you apply, the app reads AWS again and shows a fresh preview if anything changed. Unsubscribing, changing a filter or saving a topic policy on a topic with `prod` in its name, and any policy change that opens the topic to everyone or another account, need the topic name typed.
 

@@ -12,7 +12,7 @@ export async function shootSns(page, out) {
     const nav = page.getByRole('navigation', { name: 'SNS 메뉴' });
     await nav.waitFor();
     const shot = async (name) => {
-      if (readme && name !== 'diagnosis' && name !== 'flow') return;
+      if (readme && !['diagnosis', 'flow', 'account'].includes(name)) return;
       await page.waitForTimeout(450);
       await page.screenshot({ path: `${out}/sns-${name}${readme ? '' : `-${theme}`}.png` });
     };
@@ -48,7 +48,19 @@ export async function shootSns(page, out) {
     await page.getByRole('dialog').getByRole('button', { name: '취소' }).click();
     await page.getByRole('tab', { name: '리소스', exact: true }).click();
     await page.locator('.side .sns-open').click();
+    const accountNav = page.getByRole('navigation', { name: 'SNS 계정 메뉴' });
+    await accountNav.waitFor();
     await page.locator('.sns-tab:visible').getByRole('button', { name: 'orders-events.fifo', exact: true }).first().waitFor();
     await shot('account');
+    await accountNav.getByRole('button', { name: /^점검/ }).click();
+    await shot('account-checks');
+    await page.getByRole('button', { name: '점검 항목…' }).click();
+    await page.getByRole('dialog', { name: '점검 항목' }).waitFor();
+    await shot('account-checks-sheet');
+    await page.keyboard.press('Escape');
+    await accountNav.getByRole('button', { name: /^정리할 구독/ }).click();
+    await shot('account-cleanup');
+    await accountNav.getByRole('button', { name: /^SMS·푸시/ }).click();
+    await shot('account-messaging');
   }
 }

@@ -1,32 +1,39 @@
-import { archiveSentences, dataProtectionSentence, encryptionSentence, fifoSentences, httpPolicyLabel, loggingSentence, signatureSentence, tracingSentence } from "./text";
+import { archiveValues, dataProtectionSentence, encryptionValue, fifoValues, httpPolicyLabel, kindValue, loggingSentence, signatureValue, subscriptionValue, tracingValue } from "./text";
 import { sampleOverview, sampleTopic } from "./fixtures";
 
-test("encryption: none, AWS managed, customer managed (alias or key ARN)", () => {
+test("kind and subscription counts", () => {
+  expect(kindValue(true)).toEqual({ value: "FIFO", note: "순서를 지키고 중복을 걸러 내요" });
+  expect(kindValue(false)).toEqual({ value: "표준", note: "순서·중복을 보장하지 않아요" });
+  expect(subscriptionValue(4, 1, 0)).toBe("확인됨 4 · 대기 1 · 해지됨 0");
+});
+
+test("encryption: none, AWS managed, customer managed", () => {
   const withKey = (kmsKey: string | null, awsManagedKey = false) => sampleTopic({ overview: { ...sampleOverview, kmsKey, awsManagedKey } });
-  expect(encryptionSentence(withKey(null))).toBe("저장된 메시지를 암호화하지 않아요(서버 측 암호화 꺼짐)");
-  expect(encryptionSentence(withKey("alias/aws/sns", true))).toContain("AWS 관리 키(alias/aws/sns)로 암호화해요");
-  expect(encryptionSentence(withKey("arn:aws:kms:ap-northeast-2:123456789012:alias/orders"))).toBe("고객 관리 키 alias/orders로 암호화해요");
+  expect(encryptionValue(withKey(null))).toEqual({ value: "꺼짐", note: "저장된 메시지를 암호화하지 않아요" });
+  expect(encryptionValue(withKey("alias/aws/sns", true))).toEqual({ value: "alias/aws/sns · AWS 관리 키", note: "CloudWatch 경보·EventBridge 같은 서비스가 이 주제에 발행하지 못해요", warn: true });
+  expect(encryptionValue(withKey("arn:aws:kms:ap-northeast-2:123456789012:alias/orders"))).toEqual({ value: "alias/orders · 고객 관리 키" });
 });
 
 test("FIFO: deduplication and throughput scope", () => {
   const topic = (over: Partial<typeof sampleOverview>) => sampleTopic({ overview: { ...sampleOverview, ...over } });
-  expect(fifoSentences(topic({ contentBasedDeduplication: false, fifoThroughputScope: "Topic" }))).toEqual(["내용 기반 중복 제거가 꺼져 있어요: 발행할 때 중복 제거 ID를 줘야 해요", "주제 전체에 처리량 한도를 걸어요"]);
-  expect(fifoSentences(topic({ fifoThroughputScope: null }))[1]).toBe("처리량 범위는 기본값이에요");
-  expect(fifoSentences(topic({ fifoThroughputScope: "Future" }))[1]).toBe("처리량 범위는 Future예요");
+  expect(fifoValues(topic({ contentBasedDeduplication: false, fifoThroughputScope: "Topic" }))).toEqual([{ value: "꺼짐", note: "발행할 때 중복 제거 ID가 필요해요" }, { value: "주제 전체" }]);
+  expect(fifoValues(topic({ fifoThroughputScope: "MessageGroup" }))[1]).toEqual({ value: "메시지 그룹마다", note: "높은 처리량 모드" });
+  expect(fifoValues(topic({ fifoThroughputScope: null }))[1]).toEqual({ value: "기본(주제 전체)" });
+  expect(fifoValues(topic({ fifoThroughputScope: "Future" }))[1]).toEqual({ value: "Future" });
 });
 
 test("archive: off, or retention with its start", () => {
-  expect(archiveSentences(sampleTopic({ overview: { ...sampleOverview, archiveRetentionDays: null } }))).toEqual(["메시지 아카이브가 꺼져 있어요"]);
-  expect(archiveSentences(sampleTopic({ overview: { ...sampleOverview, beginningArchiveTime: null } }))).toEqual(["발행한 메시지를 30일 동안 보관해요"]);
-  expect(archiveSentences(sampleTopic())).toHaveLength(2);
+  expect(archiveValues(sampleTopic({ overview: { ...sampleOverview, archiveRetentionDays: null, beginningArchiveTime: null } }))).toEqual(["꺼짐", null]);
+  expect(archiveValues(sampleTopic({ overview: { ...sampleOverview, beginningArchiveTime: null } }))).toEqual(["30일", null]);
+  expect(archiveValues(sampleTopic())[1]).toBeTruthy();
 });
 
 test("signature and tracing", () => {
-  expect(signatureSentence(1)).toBe("서명 버전은 1이에요(SHA1)");
-  expect(signatureSentence(2)).toBe("서명 버전은 2이에요(SHA256)");
-  expect(tracingSentence("Active")).toBe("X-Ray 추적이 켜져 있어요(Active)");
-  expect(tracingSentence("PassThrough")).toContain("켜지 않았어요");
-  expect(tracingSentence(null)).toContain("켜지 않았어요");
+  expect(signatureValue(1)).toEqual({ value: "버전 1 · SHA1", note: "버전 2(SHA256)를 권장해요" });
+  expect(signatureValue(2)).toEqual({ value: "버전 2 · SHA256" });
+  expect(tracingValue("Active")).toEqual({ value: "켜짐" });
+  expect(tracingValue("PassThrough")).toEqual({ value: "꺼짐", note: "들어온 추적 헤더는 그대로 전달해요" });
+  expect(tracingValue(null).value).toBe("꺼짐");
 });
 
 test("delivery logging per protocol", () => {

@@ -42,7 +42,7 @@ export function Flow({ topic, target, onOpen }: { topic: SnsTopic; target: SnsTo
   const graph = flowGraph(topic, data?.publishers ?? []);
   const edgeOf = new Map(graph.edges.map(e => [e.id, e]));
   const nodeOf = new Map(graph.nodes.map(n => [n.id, n]));
-  return <section className="center sns-screen" aria-label="흐름 지도">
+  return <section className="center sns-screen sns-workspace" aria-label="흐름 지도">
     <h2>흐름 지도</h2>
     <p>실선: 설정상 발행 · 점선: 정책상 발행할 수 있음. 지표는 지난 1시간 주제 전체 합계예요.
       {diagnosis.data?.metrics && ` 발행 ${diagnosis.data.metrics.published ?? "–"} · 배달 ${diagnosis.data.metrics.delivered ?? "–"} · 실패 ${diagnosis.data.metrics.failed ?? "–"}`}
