@@ -181,13 +181,13 @@ export function ResourceArea({ service, type, profile, region, account, onOpenBu
           )}
         >
           {eksCluster && selected && (
-            <ClusterDetailSummary key={`${profile}|${region}|${selected.id}`} target={{ profile, region, cluster: selected.id }} />
+            <ClusterDetailSummary key={`eks|${profile}|${region}|${selected.id}`} target={{ profile, region, cluster: selected.id }} />
           )}
           {selected?.arn && ((service.id === "sqs" && type.id === "queues") || (service.id === "lambda" && type.id === "functions")) && (
-            <SubscribedTopics key={`${profile}|${region}|${selected.arn}`} profile={profile} region={region} account={account} endpointArn={selected.arn} onOpenSns={onOpenSns} />
+            <SubscribedTopics key={`sns|${profile}|${region}|${selected.arn}`} profile={profile} region={region} account={account} endpointArn={selected.arn} onOpenSns={onOpenSns} />
           )}
           {selected && service.metricTypes?.includes(type.id) && (
-            <ResourceMetrics key={`${profile}|${region}|${selected.id}`} profile={profile} region={region} service={service} typeId={type.id} row={selected} />
+            <ResourceMetrics key={`metrics|${profile}|${region}|${selected.id}`} profile={profile} region={region} service={service} typeId={type.id} row={selected} />
           )}
         </DetailPanel>
       </section>
