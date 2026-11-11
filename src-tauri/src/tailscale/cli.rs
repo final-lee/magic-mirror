@@ -16,8 +16,16 @@ pub async fn locate() -> Option<PathBuf> {
         .map(|s| Path::new(s).join("tailscale")).find(|p| executable(p))
 }
 
-async fn run(path: &Path, args: &[&str], seconds: u64, allow_failure: bool) -> Result<String, String> {
+/// Tailscale CLI 프로세스. 앱 번들의 `Tailscale`은 GUI와 CLI를 겸하는 바이너리라, 터미널 흔적(`TERM`·`SHLVL`)이 없는
+/// 환경(Finder로 띄운 이 앱)에서 부르면 GUI로 뜨려다 stdout에 안내문을 찍고 0으로 끝난다. `TAILSCALE_BE_CLI`가 CLI로 고정한다.
+fn cli(path: &Path) -> Command {
     let mut command = Command::new(path);
+    command.env("TAILSCALE_BE_CLI", "1");
+    command
+}
+
+async fn run(path: &Path, args: &[&str], seconds: u64, allow_failure: bool) -> Result<String, String> {
+    let mut command = cli(path);
     command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     let output = tokio::time::timeout(Duration::from_secs(seconds), command.output()).await
         .map_err(|_| "Tailscale 명령이 시간 안에 끝나지 않았어요".to_string())?
@@ -247,7 +255,7 @@ pub fn service_restore_args(service: &str) -> Vec<String> {
 
 pub async fn restore_service(path: &Path, service: &str, config: &str) -> Result<(), String> {
     let args = service_restore_args(service);
-    let mut command = Command::new(path);
+    let mut command = cli(path);
     command.args(&args)
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     let mut child = command.spawn().map_err(|e| format!("Tailscale을 실행하지 못했어요: {e}"))?;
