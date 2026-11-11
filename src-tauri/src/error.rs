@@ -73,10 +73,21 @@ pub fn classify(code: Option<&str>, chain: &str, action: &str) -> AppError {
     {
         return AppError::SsoExpired;
     }
-    if lower.contains("dispatch failure") || lower.contains("timeout") || lower.contains("timed out") || lower.contains("connection") || lower.contains("dns") {
+    // 서비스가 답한 오류(코드가 있음)는 네트워크 오류가 아니다. 응답 헤더의 "connection: keep-alive" 같은 글자에 속지 않게 코드가 없을 때만 본다
+    if code.is_none()
+        && (lower.contains("dispatch failure") || lower.contains("timeout") || lower.contains("timed out") || lower.contains("connection") || lower.contains("dns"))
+    {
         return AppError::Network { message: chain.to_string() };
     }
     AppError::Other { message: chain.to_string() }
+}
+
+/// 서비스가 답한 오류의 한 줄: `작업: 메시지 (코드)`. 응답 전체(헤더·본문 Debug)는 화면에 싣지 않는다
+fn service_message(action: &str, code: &str, message: Option<&str>) -> String {
+    match message.filter(|m| !m.is_empty()) {
+        Some(m) => format!("{action}: {m} ({code})"),
+        None => format!("{action}: {code}"),
+    }
 }
 
 pub fn from_sdk<E, R>(err: SdkError<E, R>, action: &str) -> AppError
@@ -86,7 +97,10 @@ where
 {
     let code = err.code().map(str::to_owned);
     let chain = format!("{}", DisplayErrorContext(&err));
-    classify(code.as_deref(), &chain, action)
+    match (classify(code.as_deref(), &chain, action), code.as_deref()) {
+        (AppError::Other { .. }, Some(code)) => AppError::Other { message: service_message(action, code, err.message()) },
+        (other, _) => other,
+    }
 }
 
 #[cfg(test)]
@@ -168,6 +182,26 @@ pub(crate) mod tests {
             classify(Some("ValidationException"), "ValidationException: bad input", "x"),
             AppError::Other { message: "ValidationException: bad input".into() }
         );
+    }
+
+    #[test]
+    fn a_service_error_whose_raw_response_mentions_connection_is_not_a_network_error() {
+        // 실제 SNS 응답(FIFO 주제의 GetDataProtectionPolicy): 헤더에 "connection": "keep-alive"가 있다
+        let chain = "service error: unhandled error (InvalidAction): Error { code: \"InvalidAction\", message: \"Operation (GetDataProtectionPolicy) \
+            is not supported on FIFO topics\" } (raw: Response { status: StatusCode(400), headers: {\"content-type\": \"text/xml\", \
+            \"connection\": \"keep-alive\"} })";
+        assert!(matches!(classify(Some("InvalidAction"), chain, "sns:GetDataProtectionPolicy"), AppError::Other { .. }));
+        // 코드가 없으면 예전처럼 연결 문제로 본다
+        assert!(matches!(classify(None, "io error: connection reset by peer", "x"), AppError::Network { .. }));
+    }
+
+    #[test]
+    fn service_errors_are_one_line() {
+        assert_eq!(
+            service_message("sns:GetDataProtectionPolicy", "InvalidAction", Some("Operation (GetDataProtectionPolicy) is not supported on FIFO topics")),
+            "sns:GetDataProtectionPolicy: Operation (GetDataProtectionPolicy) is not supported on FIFO topics (InvalidAction)"
+        );
+        assert_eq!(service_message("sqs:GetQueueUrl", "QueueDoesNotExist", None), "sqs:GetQueueUrl: QueueDoesNotExist");
     }
 
     #[test]

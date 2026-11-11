@@ -15,7 +15,7 @@ vi.mock("../api/desktop", () => ({ desktop: { copy: vi.fn(async () => {}), openU
 const m = vi.mocked(snsApi);
 const settings = (disabled?: string[]): Settings => ({ enabledServices: ["sns"], favorites: [], lastProfile: "personal", lastRegion: REGION, ...(disabled ? { snsChecks: { disabled } } : {}) });
 const section = (name: string) => within(screen.getByRole("region", { name }));
-const findings = () => within(screen.getByRole("list", { name: "점검 결과" })).getAllByRole("listitem").filter((li) => li.matches(".sns-finding"));
+const findings = () => Array.from(screen.getByRole("region", { name: "점검" }).querySelectorAll<HTMLElement>(".fx-items[data-check]"));
 
 function setup(onOpenIam = vi.fn()) {
   renderWithClient(<Policy target={snsTarget} onOpenIam={onOpenIam} />);

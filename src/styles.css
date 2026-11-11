@@ -2764,6 +2764,7 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .sns-ident-name { font-size: 14px; font-weight: 600; }
 .sns-top-end { margin-left: auto; display: flex; align-items: center; gap: 10px; flex: none; }
 .sns-partial { padding: 4px 14px; font-size: 11px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.sns-partial-errors { margin: 6px 0 2px; padding-left: 18px; line-height: 1.6; }
 .sns-main { flex: 1; display: flex; min-width: 0; min-height: 0; }
 .sns-pane { flex: 1; min-height: 0; overflow: auto; padding: 12px 16px; user-select: text; }
 .sns-pane-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
@@ -2771,6 +2772,21 @@ tbody tr.on .dim, tbody tr.on .link { color: var(--neutral-alpha-b3); }
 .sns-ident { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
 .sns-section { margin-bottom: 4px; }
 .sns-heading { margin: 16px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }
+.sns-section-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 16px 0 6px; }
+.sns-section-head .sns-heading { margin: 0; }
+.sns-values { margin: 0; font-size: 12px; line-height: 1.5; }
+.sns-values > div { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 12px; padding: 3px 0; }
+.sns-values dt { color: var(--dim); }
+.sns-values dd { margin: 0; overflow-wrap: anywhere; }
+.sns-value-warning { color: var(--yellow); }
+.sns-tag-list { display: flex; gap: 6px; flex-wrap: wrap; }
+.sns-screen.sns-workspace { padding: 12px 16px; overflow: auto; }
+.sns-workspace > h2, .sns-pane-head > h2 { margin: 0 0 8px; font-size: 14px; }
+.sns-workspace > p, .sns-pane > p.dim { margin: 4px 0 12px; font-size: 12px; line-height: 1.5; }
+.sns-workspace .toolbar { margin: 8px 0; }
+.sns-workspace > table { margin-top: 12px; }
+.sns-workspace > .kvg { margin: 12px 0; }
+@media (max-width: 600px) { .sns-values > div { grid-template-columns: 110px minmax(0, 1fr); } }
 .sns-sentences { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .sns-note { margin: 4px 0 8px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .sns-error { color: var(--red); }
@@ -3018,3 +3034,19 @@ details[open] > summary.ddb-attr-row .ddb-attr-name::before { content: "▾ "; }
 .ddb-change-log article > header { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
 .ddb-change-log article p { margin: 2px 0 6px; font-size: 12px; }
 .ddb-change-log time { margin: 0; color: var(--dim); font-variant-numeric: tabular-nums; }
+
+/* SNS 계정 작업 공간 */
+.sns-account-pane > * { flex-shrink: 0; }
+.sns-account-action { margin-left: auto; }
+.sns-account-pane .sec-card { cursor: default; }
+.sns-account-pane .sec-summary { margin-bottom: 16px; }
+.sns-account-pane .kv-cards + .sns-subheading { margin-top: 20px; }
+.sheet .sec-checks { grid-template-columns: minmax(0, 1fr); max-height: 55vh; }
+.sheet .sec-check { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 8px; }
+.sns-account-table { overflow: auto; max-height: 55vh; }
+.sns-pane .sns-account-table th { top: 0; }
+.sns-delivery { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.sns-delivery-bar { display: inline-flex; width: 80px; height: 6px; overflow: hidden; border-radius: 3px; background: var(--neutral-alpha-12); flex: none; }
+.sns-delivery-bar .delivered { background: var(--green); }
+.sns-delivery-bar .failed { background: var(--red); }
+.sns-delivery-bar .filtered { background: var(--yellow); }

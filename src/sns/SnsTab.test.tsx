@@ -45,8 +45,8 @@ describe("header and overview", () => {
     m.topic.mockResolvedValue(sampleTopic({ fifo: false, overview: { ...sampleTopic().overview, fifo: false, kmsKey: null, pendingCount: 0, archiveRetentionDays: null } }));
     setup();
     expect(await screen.findByText("표준 · 암호화 안 됨 · 구독 3")).toBeInTheDocument();
-    expect(screen.getByText("표준 주제예요. 순서와 중복 제거를 보장하지 않아요")).toBeInTheDocument();
-    expect(screen.getByText("저장된 메시지를 암호화하지 않아요(서버 측 암호화 꺼짐)")).toBeInTheDocument();
+    expect(section("기본").getByText("순서·중복을 보장하지 않아요")).toBeInTheDocument();
+    expect(screen.getByText("저장된 메시지를 암호화하지 않아요")).toBeInTheDocument();
     // FIFO·아카이브 문장은 FIFO 주제에만 있다
     expect(screen.queryByRole("region", { name: "FIFO" })).toBeNull();
     expect(screen.queryByRole("region", { name: "아카이브" })).toBeNull();
@@ -55,30 +55,34 @@ describe("header and overview", () => {
   test("the overview writes the attributes out as sentences", async () => {
     setup();
     await loaded();
-    expect(section("암호화").getByText("고객 관리 키 alias/orders로 암호화해요")).toBeInTheDocument();
-    expect(section("FIFO").getByText(/내용 기반 중복 제거가 켜져 있어요/)).toBeInTheDocument();
-    expect(section("FIFO").getByText("메시지 그룹마다 처리량 한도를 걸어요(높은 처리량 모드)")).toBeInTheDocument();
-    expect(section("아카이브").getByText("발행한 메시지를 30일 동안 보관해요")).toBeInTheDocument();
-    expect(section("아카이브").getByText(/^보관은 .*부터 시작됐어요$/)).toBeInTheDocument();
-    expect(section("서명·추적").getByText("서명 버전은 1이에요(SHA1)")).toBeInTheDocument();
-    expect(section("서명·추적").getByText("X-Ray 추적이 켜져 있어요(Active)")).toBeInTheDocument();
-    expect(section("기본").getByText("구독은 확인됨 3개, 확인 대기 1개, 해지됨 0개예요")).toBeInTheDocument();
+    expect(section("암호화").getByText("alias/orders · 고객 관리 키")).toBeInTheDocument();
+    expect(section("FIFO").getByText("본문이 같으면 5분 안에 한 번만 받아요")).toBeInTheDocument();
+    expect(section("FIFO").getByText("높은 처리량 모드")).toBeInTheDocument();
+    expect(section("아카이브").getByText("30일")).toBeInTheDocument();
+    expect(section("아카이브").getByText(/2026-10-01/)).toBeInTheDocument();
+    expect(section("서명·추적").getByText("버전 2(SHA256)를 권장해요")).toBeInTheDocument();
+    expect(section("기본").getByText("확인됨 3 · 대기 1 · 해지됨 0")).toBeInTheDocument();
   });
 
   test("an AWS managed key comes with the note that service publishers cannot use it", async () => {
     m.topic.mockResolvedValue(sampleTopic({ overview: { ...sampleTopic().overview, kmsKey: "alias/aws/sns", awsManagedKey: true } }));
     setup();
     expect(await screen.findByText("FIFO · KMS(alias/aws/sns) · 구독 4 (대기 1)")).toBeInTheDocument();
-    expect(section("암호화").getByText(/AWS 관리 키\(alias\/aws\/sns\)로 암호화해요.*서비스 발행자가 이 주제에 발행하지 못해요/)).toBeInTheDocument();
+    expect(section("암호화").getByText("CloudWatch 경보·EventBridge 같은 서비스가 이 주제에 발행하지 못해요")).toHaveClass("sns-value-warning");
   });
 
   test("delivery status logging is written per protocol, on or off", async () => {
     setup();
     await loaded();
     const logging = section("배달 상태 로깅");
-    expect(logging.getByText("켜짐 · 성공 로그 표본 25%(역할 sns-feedback) · 실패 로그 전부(역할 sns-failure)")).toBeInTheDocument();
-    expect(logging.getAllByText("꺼짐")).toHaveLength(4);
-    expect(logging.getByRole("button", { name: "SQS 배달 상태 로깅 설정…" })).toHaveClass("tone-primary");
+    expect(logging.getByText("sns-feedback")).toBeInTheDocument();
+    expect(logging.getByText("sns-failure")).toBeInTheDocument();
+    expect(logging.getByText("25%")).toBeInTheDocument();
+    expect(logging.getAllByRole("button", { name: "로깅 설정…" })).toHaveLength(1);
+    fireEvent.click(logging.getByRole("button", { name: "로깅 설정…" }));
+    expect(screen.getByLabelText("프로토콜")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("프로토콜"), { target: { value: "SQS" } });
+    expect(screen.getByLabelText("성공 로그 표본 비율(%)")).toHaveValue(25);
     expect(logging.getByText("모바일 푸시")).toBeInTheDocument();
   });
 
@@ -94,7 +98,7 @@ describe("header and overview", () => {
   test("the data protection policy is absent, or present with its statement names", async () => {
     setup();
     await loaded();
-    expect(section("데이터 보호 정책").getByText("데이터 보호 정책이 없어요")).toBeInTheDocument();
+    expect(section("데이터 보호 정책").getByText("FIFO 주제는 데이터 보호 정책을 쓸 수 없어요")).toBeInTheDocument();
   });
 
   test("a data protection policy shows its name and statement ids", async () => {
@@ -240,7 +244,7 @@ describe("subscription detail", () => {
     expect(json.querySelector(".sns-json-key")).toHaveTextContent('"event_type"');
     expect(json.querySelector(".sns-json-str")).toHaveTextContent('"order.created"');
     expect(json).toHaveTextContent('"prefix": "order.p"');
-    expect(detail.getByText("orders-dlq", { selector: "li" })).toBeInTheDocument();
+    expect(detail.getByText("orders-dlq", { selector: "dd" })).toBeInTheDocument();
     expect(detail.getByText(DLQ_ARN)).toBeInTheDocument();
     expect(detail.getByText("Raw 전달이 켜져 있어요: SNS 봉투 없이 본문을 그대로 보내요")).toBeInTheDocument();
     expect(detail.getByText("SQS 큐 · FIFO · KMS(alias/aws/sqs)")).toBeInTheDocument();
@@ -410,7 +414,14 @@ describe("errors and refreshing", () => {
     setup();
     await loaded();
     const note = screen.getByRole("status", { name: "읽지 못한 항목" });
-    expect(note).toHaveTextContent("일부 정보를 읽지 못했어요 (3건): 권한 없음 (sns:ListTagsForResource) · 요청이 너무 많아요. 잠시 후 다시 시도하세요");
+    expect(note).toHaveTextContent("일부 정보를 읽지 못했어요 (3건)");
+    expect(note).not.toHaveTextContent("권한 없음");
+    fireEvent.click(within(note).getByRole("button", { name: "자세히" }));
+    expect(within(note).getAllByRole("listitem")).toHaveLength(3);
+    expect(note).toHaveTextContent("권한 없음 (sns:ListTagsForResource)");
+    expect(note).toHaveTextContent("요청이 너무 많아요. 잠시 후 다시 시도하세요");
+    fireEvent.click(within(note).getByRole("button", { name: "접기" }));
+    expect(note).not.toHaveTextContent("권한 없음");
     expect(screen.getByRole("region", { name: "주제 개요" })).toBeInTheDocument();
   });
 

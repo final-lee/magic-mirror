@@ -193,22 +193,27 @@ pub async fn topic(
             HashMap::new()
         }
     };
-    let data_protection_policy = match client
-        .get_data_protection_policy()
-        .resource_arn(arn)
-        .send()
-        .await
-    {
-        Ok(out) => out
-            .data_protection_policy()
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned),
-        Err(e) => {
-            errors.push(from_sdk(e, "sns:GetDataProtectionPolicy"));
-            None
+    let overview = TopicOverview::from_attributes(&attrs);
+    // FIFO 주제는 데이터 보호 정책을 지원하지 않는다(GetDataProtectionPolicy가 InvalidAction으로 거절한다)
+    let data_protection_policy = if overview.fifo {
+        None
+    } else {
+        match client
+            .get_data_protection_policy()
+            .resource_arn(arn)
+            .send()
+            .await
+        {
+            Ok(out) => out
+                .data_protection_policy()
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned),
+            Err(e) => {
+                errors.push(from_sdk(e, "sns:GetDataProtectionPolicy"));
+                None
+            }
         }
     };
-    let overview = TopicOverview::from_attributes(&attrs);
     Ok(SnsTopic {
         arn: arn.into(),
         name: parts[5].into(),

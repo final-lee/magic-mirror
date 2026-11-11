@@ -434,7 +434,10 @@ async fn fifo_replay_against_a_real_account() {
             dlq_arn: None,
         })
         .await;
-        let sub = only_subscription(&live.snapshot(&topic).await).key.clone();
+        let snapshot = live.snapshot(&topic).await;
+        // FIFO 주제에는 데이터 보호 정책 API가 없다: 부르지 않으므로 읽기 오류가 없어야 한다
+        assert!(snapshot.errors.is_empty(), "FIFO 주제 읽기 오류: {:?}", snapshot.errors);
+        let sub = only_subscription(&snapshot).key.clone();
         // 아카이브 시작 시각이 정해질 때까지 조금 기다린 뒤 발행한다
         tokio::time::sleep(Duration::from_secs(5)).await;
         let start = (chrono::Utc::now() - chrono::Duration::seconds(2))

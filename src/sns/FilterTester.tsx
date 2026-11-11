@@ -22,7 +22,7 @@ export function FilterTester({ topic, tabId }: { topic: SnsTopic; tabId: string 
       setResults(await snsApi.filterTest(topic.subscriptions.map(s => ({ key: s.key, policy: s.attributes.FilterPolicy ?? (s.filter ? JSON.stringify(s.filter.policy) : null), scope: s.filter?.scope ?? (s.attributes.FilterPolicyScope === "MessageBody" ? "MessageBody" : "MessageAttributes") })), current));
     } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); }
   };
-  return <section className="center sns-screen" aria-label="필터 시험">
+  return <section className="center sns-screen sns-workspace" aria-label="필터 시험">
     <h2>필터 시험</h2>
     <p>앱이 문서대로 판정한 결과예요. 실제 확인은 시험 발행 후 소비자 없는 구독 큐를 엿보세요.</p>
     <div className="toolbar">
@@ -39,6 +39,6 @@ export function FilterTester({ topic, tabId }: { topic: SnsTopic; tabId: string 
       {(recent.get(tabId)?.length ?? 0) > 0 && <label>최근 표본 <select aria-label="최근 표본" defaultValue="" onChange={e => { const selected = recent.get(tabId)?.[Number(e.target.value)]; if (selected) { setSample(selected); setMode(selected.body === null ? "attributes" : "body"); } }}><option value="" disabled>선택</option>{recent.get(tabId)?.map((s, i) => <option key={i} value={i}>{s.body ?? s.attributes.map(a => `${a.name}=${a.value}`).join(", ")}</option>)}</select></label>}
     </div>
     {error && <p role="alert">{error}</p>}
-    {results && <table><thead><tr><th>구독</th><th>결과</th><th>이유</th></tr></thead><tbody>{topic.subscriptions.map(sub => { const result = results.find(r => r.key === sub.key); return <tr key={sub.key}><td>{endpointLabel(sub, topic).name}</td><td>{!result?.verdict ? "판정 불가" : !sub.attributes.FilterPolicy && !sub.filter ? "필터 없음(받음)" : result.verdict.matched ? "받음" : "걸러짐"}</td><td>{result?.errors.map((e, i) => <div key={i}>{e.path && `${e.path}: `}{e.message}</div>)}{result?.verdict?.key && `${result.verdict.key}: `}{result?.verdict?.reason}</td></tr>; })}</tbody></table>}
+    {results && <table className="sns-table"><thead><tr><th>구독</th><th>결과</th><th>이유</th></tr></thead><tbody>{topic.subscriptions.map(sub => { const result = results.find(r => r.key === sub.key); return <tr key={sub.key}><td>{endpointLabel(sub, topic).name}</td><td>{!result?.verdict ? "판정 불가" : !sub.attributes.FilterPolicy && !sub.filter ? "필터 없음(받음)" : result.verdict.matched ? "받음" : "걸러짐"}</td><td>{result?.errors.map((e, i) => <div key={i}>{e.path && `${e.path}: `}{e.message}</div>)}{result?.verdict?.key && `${result.verdict.key}: `}{result?.verdict?.reason}</td></tr>; })}</tbody></table>}
   </section>;
 }
