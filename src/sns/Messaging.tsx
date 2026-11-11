@@ -10,42 +10,37 @@ function Sms({ sms }: { sms: SnsMessaging["sms"] }) {
   return (
     <section className="sns-section" aria-label={t.SECTION_SMS}>
       <h4 className="sns-heading">{t.SECTION_SMS}</h4>
-      <ul className="sns-sentences">
-        <li>{sms.sandbox === null ? t.SANDBOX_UNKNOWN : sms.sandbox ? t.SANDBOX_ON : t.SANDBOX_OFF}</li>
-        <li>
-          {t.MONTH_SPENT}: <b>{sms.monthSpentUsd === null ? t.NO_VALUE : t.usd(sms.monthSpentUsd)}</b> · {t.SUCCESS_RATE}: <b>{sms.successRate === null ? t.NO_VALUE : t.percent(sms.successRate)}</b>
-        </li>
-      </ul>
+      <div className="kv-cards">
+        <div className="kv-card" role="group" aria-label="샌드박스 여부">
+          <h4>샌드박스 여부</h4>
+          <div className="kv-card-value">{sms.sandbox === null ? "모름" : sms.sandbox ? "샌드박스" : "운영"}</div>
+          <div className="kv-card-sub dim">{sms.sandbox === null ? t.SANDBOX_UNKNOWN : sms.sandbox ? t.SANDBOX_ON : t.SANDBOX_OFF}</div>
+        </div>
+        {[
+          [t.MONTH_SPENT, sms.monthSpentUsd === null ? t.NO_VALUE : t.usd(sms.monthSpentUsd)],
+          [t.SUCCESS_RATE, sms.successRate === null ? t.NO_VALUE : t.percent(sms.successRate)],
+          ["발신 번호 수", t.count(sms.originationNumbers.length)],
+        ].map(([title, value]) => <div className="kv-card" role="group" aria-label={title} key={title}><h4>{title}</h4><div className="kv-card-value">{value}</div></div>)}
+      </div>
 
       {sms.sandboxNumbers.length > 0 && (
         <>
           <h5 className="sns-subheading">
             {t.SANDBOX_NUMBERS} <span className="dim">· {t.SANDBOX_NUMBERS_NOTE}</span>
           </h5>
-          <ul className="sns-subscribed-list" aria-label={t.SANDBOX_NUMBERS}>
-            {sms.sandboxNumbers.map((n, i) => (
-              <li key={`${n.phone}-${i}`}>
-                <span className="mono">{n.phone}</span>
-                <span className="sns-state">{n.status}</span>
-              </li>
-            ))}
-          </ul>
+          <table className="sns-table" aria-label={t.SANDBOX_NUMBERS}><thead><tr><th className="nosort">번호</th><th className="nosort">상태</th></tr></thead><tbody>
+            {sms.sandboxNumbers.map((n, i) => <tr key={`${n.phone}-${i}`}><td className="mono">{n.phone}</td><td>{n.status}</td></tr>)}
+          </tbody></table>
         </>
       )}
 
       <h5 className="sns-subheading">{t.ORIGINATION_NUMBERS}</h5>
       {sms.originationNumbers.length === 0 ? (
-        <p className="sns-note dim">{t.ORIGINATION_EMPTY}</p>
+        <p className="empty small">{t.ORIGINATION_EMPTY}</p>
       ) : (
-        <ul className="sns-subscribed-list" aria-label={t.ORIGINATION_NUMBERS}>
-          {sms.originationNumbers.map((n) => (
-            <li key={n.phoneNumber}>
-              <span className="mono">{n.phoneNumber}</span>
-              <span className="sns-state">{n.status}</span>
-              <span className="dim">{[n.country, n.routeType, n.capabilities.join("/")].filter(Boolean).join(" · ")}</span>
-            </li>
-          ))}
-        </ul>
+        <table className="sns-table" aria-label={t.ORIGINATION_NUMBERS}><thead><tr><th className="nosort">번호</th><th className="nosort">상태</th><th className="nosort">국가</th><th className="nosort">경로</th><th className="nosort">기능</th></tr></thead><tbody>
+          {sms.originationNumbers.map((n) => <tr key={n.phoneNumber}><td className="mono">{n.phoneNumber}</td><td>{n.status}</td><td>{n.country ?? "–"}</td><td>{n.routeType ?? "–"}</td><td>{n.capabilities.join("/") || "–"}</td></tr>)}
+        </tbody></table>
       )}
 
       <h5 className="sns-subheading">{t.SMS_ATTRIBUTES}</h5>

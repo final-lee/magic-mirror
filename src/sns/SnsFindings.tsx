@@ -1,32 +1,24 @@
-import type { SnsFinding } from "./types";
+import type { SnsCheckInfo, SnsFinding } from "./types";
 import * as t from "./accessText";
 
-/** 점검 결과 목록(주제 탭 정책 화면, 계정 개요 공용). onOpenTopic이 있으면 주제 이름이 그 주제 탭으로 가는 링크다 */
-export function FindingsList({ findings, onOpenTopic }: { findings: SnsFinding[]; onOpenTopic?: (finding: SnsFinding) => void }) {
+/** 계정과 주제의 점검을 항목별로 묶는다. */
+export function FindingsList({ findings, onOpenTopic, checks = [] }: { findings: SnsFinding[]; onOpenTopic?: (finding: SnsFinding) => void; checks?: SnsCheckInfo[] }) {
   if (findings.length === 0) return <p className="sns-note dim">{t.FINDINGS_EMPTY}</p>;
-  return (
-    <ul className="sns-findings" aria-label={t.FINDINGS_LABEL}>
-      {findings.map((f) => (
-        <li key={`${f.topicArn}|${f.check}`} className="sns-finding" data-check={f.check}>
-          <div className="sns-finding-head">
-            <span className={`sns-level ${f.level}`}>{t.LEVEL_LABEL[f.level]}</span>
-            {onOpenTopic && (
-              <button type="button" className="link mono" title={t.OPEN_TOPIC(f.topicName)} onClick={() => onOpenTopic(f)}>
-                {f.topicName}
-              </button>
-            )}
-            <span>{f.summary}</span>
-          </div>
-          {f.detail && <p className="sns-note dim">{f.detail}</p>}
-          {f.items.length > 0 && (
-            <ul className="sns-finding-items mono" aria-label={t.FINDING_ITEMS}>
-              {f.items.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          )}
-        </li>
-      ))}
-    </ul>
-  );
+  const groups = new Map<string, SnsFinding[]>();
+  for (const finding of [...findings].sort(t.byLevel)) groups.set(finding.check, [...(groups.get(finding.check) ?? []), finding]);
+  return <div aria-label={t.FINDINGS_LABEL}>
+    {[...groups].map(([id, items]) => {
+      const first = items[0];
+      const title = checks.find((c) => c.id === id)?.title ?? first.summary;
+      return <div className="fx-items pg-fx" key={id} data-check={id}>
+        <h3 className="fx-items-title">{title} <span className={`sns-level ${first.level}`}>{t.LEVEL_LABEL[first.level]}</span> <span className="dim">{items.length}건</span></h3>
+        <table aria-label={title}><thead><tr>{onOpenTopic && <th scope="col" className="nosort">대상 주제</th>}<th scope="col" className="nosort">내용</th></tr></thead>
+          <tbody>{items.map((f) => <tr key={`${f.topicArn}|${f.check}`}>
+            {onOpenTopic && <td><button type="button" className="link mono" title={t.OPEN_TOPIC(f.topicName)} onClick={() => onOpenTopic(f)}>{f.topicName}</button></td>}
+            <td>{f.summary === title && !onOpenTopic ? null : f.summary}{f.detail && <div className="dim">{f.detail}</div>}{f.items.map((item) => <div key={item} className="dim mono">{item}</div>)}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>;
+    })}
+  </div>;
 }

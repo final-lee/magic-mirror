@@ -103,12 +103,12 @@ export function SubscriptionDetail({ topic, subscriptionKey, onBack, onOpenResou
       {snsTarget && <ReplayControls topic={topic} sub={sub} target={snsTarget} />}
 
       <Section title={t.SECTION_ENDPOINT}>
-        <ul className="sns-sentences">
-          <li className="mono">{sub.endpoint}</li>
-          {targetSentence(sub) && <li>{targetSentence(sub)}</li>}
-          {target?.error && <li className="sns-error">{`${t.TARGET_ERROR}: ${errorMessage(target.error)}`}</li>}
-          {target?.kind === "sqs" && target.kmsKey && <li className="dim mono">{target.kmsKey}</li>}
-        </ul>
+        <dl className="sns-values">
+          <div><dt>주소</dt><dd className="mono">{sub.endpoint}</dd></div>
+          {targetSentence(sub) && <div><dt>유형</dt><dd>{targetSentence(sub)}</dd></div>}
+          {target?.error && <div><dt>읽기 오류</dt><dd className="sns-error">{`${t.TARGET_ERROR}: ${errorMessage(target.error)}`}</dd></div>}
+          {target?.kind === "sqs" && target.kmsKey && <div><dt>KMS 키</dt><dd className="mono">{target.kmsKey}</dd></div>}
+        </dl>
       </Section>
 
       {hasAttributes && (
@@ -135,10 +135,10 @@ export function SubscriptionDetail({ topic, subscriptionKey, onBack, onOpenResou
             {sub.dlqArn === null ? (
               <p className="sns-note">{t.DLQ_SENTENCE_NONE}</p>
             ) : (
-              <ul className="sns-sentences">
-                <li className="mono">{dlq}</li>
-                <li className="dim mono">{sub.dlqArn}</li>
-              </ul>
+              <dl className="sns-values">
+                <div><dt>큐</dt><dd className="mono">{dlq}</dd></div>
+                <div><dt>ARN</dt><dd className="mono">{sub.dlqArn}</dd></div>
+              </dl>
             )}
             {snsTarget && <DlqReplacement target={snsTarget} topic={topic} sub={sub} />}
           </Section>

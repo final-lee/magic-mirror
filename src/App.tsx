@@ -579,7 +579,7 @@ export default function App() {
         ))}
         {profile && snsAccountTab && (
           <div className="tabpane" hidden={activeTab !== SNS_ACCOUNT_TAB}>
-            <AccountTab key={`${profile}:${snsAccountTab.region}`} profile={profile} region={snsAccountTab.region} onOpenTopic={openSns} />
+            <AccountTab key={`${profile}:${snsAccountTab.region}`} profile={profile} region={snsAccountTab.region} active={activeTab === SNS_ACCOUNT_TAB} onOpenTopic={openSns} />
           </div>
         )}
         {dynamoTabs.map((t) => (

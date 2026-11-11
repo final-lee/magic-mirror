@@ -31,44 +31,47 @@ export const NO_TAGS = "태그가 없어요";
 export const HTTP_POLICY_EMPTY = "배달 정책을 읽지 못했어요";
 export const HTTP_POLICY_COLS = { item: "항목", value: "값" } as const;
 
-export const kindSentence = (fifo: boolean) => (fifo ? "FIFO 주제예요. 메시지 순서를 지키고 중복을 걸러 내요" : "표준 주제예요. 순서와 중복 제거를 보장하지 않아요");
-export const subscriptionCounts = (confirmed: number, pending: number, deleted: number) =>
-  `구독은 확인됨 ${confirmed}개, 확인 대기 ${pending}개, 해지됨 ${deleted}개예요`;
-export const displayNameSentence = (name: string) => `표시 이름(DisplayName)은 ${name}이에요. SMS·이메일 발신자 이름으로 쓰여요`;
+export interface OverviewValue { value: string; note?: string; warn?: boolean }
 
-export function encryptionSentence(topic: SnsTopic): string {
+export function kindValue(fifo: boolean): OverviewValue {
+  return fifo ? { value: "FIFO", note: "순서를 지키고 중복을 걸러 내요" } : { value: "표준", note: "순서·중복을 보장하지 않아요" };
+}
+
+export function subscriptionValue(confirmed: number, pending: number, deleted: number): string {
+  return `확인됨 ${confirmed} · 대기 ${pending} · 해지됨 ${deleted}`;
+}
+
+export function encryptionValue(topic: SnsTopic): OverviewValue {
   const o = topic.overview;
-  if (!o.kmsKey) return "저장된 메시지를 암호화하지 않아요(서버 측 암호화 꺼짐)";
+  if (!o.kmsKey) return { value: "꺼짐", note: "저장된 메시지를 암호화하지 않아요" };
   const key = kmsLabel(o.kmsKey);
-  if (o.awsManagedKey) {
-    return `AWS 관리 키(${key})로 암호화해요. 이 키는 키 정책을 바꿀 수 없어서 CloudWatch 경보·EventBridge 같은 서비스 발행자가 이 주제에 발행하지 못해요`;
-  }
-  return `고객 관리 키 ${key}로 암호화해요`;
+  return o.awsManagedKey
+    ? { value: `${key} · AWS 관리 키`, note: "CloudWatch 경보·EventBridge 같은 서비스가 이 주제에 발행하지 못해요", warn: true }
+    : { value: `${key} · 고객 관리 키` };
 }
 
-const THROUGHPUT_SCOPE: Record<string, string> = { Topic: "주제 전체에 처리량 한도를 걸어요", MessageGroup: "메시지 그룹마다 처리량 한도를 걸어요(높은 처리량 모드)" };
-
-export function fifoSentences(topic: SnsTopic): string[] {
+export function fifoValues(topic: SnsTopic): [OverviewValue, OverviewValue] {
   const o = topic.overview;
+  const dedup = o.contentBasedDeduplication
+    ? { value: "켜짐", note: "본문이 같으면 5분 안에 한 번만 받아요" }
+    : { value: "꺼짐", note: "발행할 때 중복 제거 ID가 필요해요" };
   const scope = o.fifoThroughputScope;
-  return [
-    o.contentBasedDeduplication ? "내용 기반 중복 제거가 켜져 있어요: 본문이 같으면 5분 안에는 한 번만 받아요" : "내용 기반 중복 제거가 꺼져 있어요: 발행할 때 중복 제거 ID를 줘야 해요",
-    scope ? (THROUGHPUT_SCOPE[scope] ?? `처리량 범위는 ${scope}예요`) : "처리량 범위는 기본값이에요",
-  ];
+  const throughput = scope === "MessageGroup" ? { value: "메시지 그룹마다", note: "높은 처리량 모드" }
+    : { value: scope === "Topic" ? "주제 전체" : scope ?? "기본(주제 전체)" };
+  return [dedup, throughput];
 }
 
-export function archiveSentences(topic: SnsTopic): string[] {
+export function archiveValues(topic: SnsTopic): [string, string | null] {
   const o = topic.overview;
-  if (o.archiveRetentionDays === null) return ["메시지 아카이브가 꺼져 있어요"];
-  return [`발행한 메시지를 ${o.archiveRetentionDays}일 동안 보관해요`, ...(o.beginningArchiveTime ? [`보관은 ${formatDate(o.beginningArchiveTime)}부터 시작됐어요`] : [])];
+  return [o.archiveRetentionDays === null ? "꺼짐" : `${o.archiveRetentionDays}일`, o.beginningArchiveTime ? formatDate(o.beginningArchiveTime) : null];
 }
 
-export function signatureSentence(version: number): string {
-  return `서명 버전은 ${version}이에요(${version === 2 ? "SHA256" : "SHA1"})`;
+export function signatureValue(version: number): OverviewValue {
+  return { value: `버전 ${version} · ${version === 2 ? "SHA256" : "SHA1"}`, ...(version === 1 ? { note: "버전 2(SHA256)를 권장해요" } : {}) };
 }
 
-export function tracingSentence(tracing: string | null): string {
-  return tracing === "Active" ? "X-Ray 추적이 켜져 있어요(Active)" : "X-Ray 추적을 켜지 않았어요(들어온 추적 헤더는 그대로 전달해요)";
+export function tracingValue(tracing: string | null): OverviewValue {
+  return tracing === "Active" ? { value: "켜짐" } : { value: "꺼짐", note: "들어온 추적 헤더는 그대로 전달해요" };
 }
 
 const PROTOCOL_NAME: Record<string, string> = { Lambda: "Lambda", SQS: "SQS", HTTP: "HTTP(S)", Application: "모바일 푸시", Firehose: "Firehose" };
@@ -124,6 +127,7 @@ export function dataProtectionInfo(policy: string): { name: string | null; state
 }
 
 export const DATA_PROTECTION_NONE = "데이터 보호 정책이 없어요";
+export const DATA_PROTECTION_FIFO = "FIFO 주제는 데이터 보호 정책을 쓸 수 없어요";
 export function dataProtectionSentence(policy: string): string {
   const { name, statements } = dataProtectionInfo(policy);
   const head = `데이터 보호 정책이 있어요${name ? `(${name})` : ""}`;
